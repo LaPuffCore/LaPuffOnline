@@ -95,7 +95,7 @@ export default function EmojiPicker({ value, onChange }) {
         onClick={() => setOpen(v => !v)}
         className={`w-14 h-14 rounded-2xl border-3 border-black bg-white text-2xl hover:scale-105 transition-transform shadow-[3px_3px_0px_black] flex items-center justify-center ${open ? 'ring-2 ring-[#7C3AED]' : ''}`}
       >
-        {value || '😊'}
+        {value || '🔍'}
       </button>
       {open && (
         <div className="absolute z-50 top-16 left-0 bg-white border-3 border-black rounded-3xl shadow-[6px_6px_0px_black] w-80 overflow-hidden">
