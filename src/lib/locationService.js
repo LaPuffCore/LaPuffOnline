@@ -1,3 +1,4 @@
+// @ts-nocheck
 // Location service — PING ONLY (no continuous tracking)
 // Location is only accessed when:
 //   A. User clicks the location / center button on the map
@@ -25,6 +26,7 @@ function getCached() {
   try { return JSON.parse(localStorage.getItem(LOC_CACHE_KEY)); } catch { return null; }
 }
 
+/** @param {any} loc */
 function cache(loc) {
   localStorage.setItem(LOC_CACHE_KEY, JSON.stringify({ ...loc, cachedAt: Date.now() }));
 }
@@ -81,13 +83,16 @@ export async function pingNYCLocation() {
   return { ...loc, inNYC };
 }
 
-// Check if user has a valid NYC ping in the last 24 hours
+/**
+ * Check if user has a valid NYC ping in the last 24 hours
+ * Returns 'participant' if verified in NYC, otherwise 'orbiter'
+ */
 export function getNYCParticipantStatus() {
   try {
     const data = JSON.parse(localStorage.getItem(NYC_24H_KEY));
-    if (!data) return 'spectator';
-    return (Date.now() - data.timestamp) < 24 * 3600 * 1000 ? 'participant' : 'spectator';
-  } catch { return 'spectator'; }
+    if (!data) return 'orbiter';
+    return (Date.now() - data.timestamp) < 24 * 3600 * 1000 ? 'participant' : 'orbiter';
+  } catch { return 'orbiter'; }
 }
 
 export function getLastLocation() {

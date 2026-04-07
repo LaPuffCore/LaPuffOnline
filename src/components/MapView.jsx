@@ -446,7 +446,7 @@ export default function MapView({ events }) {
               <span className="text-yellow-400 text-xl">⚠️</span>
               <div>
                 <p className="text-yellow-200 font-black text-sm">You are not in NYC</p>
-                <p className="text-yellow-400/70 text-xs mt-0.5">You are in spectator mode. You can view but not contribute points.</p>
+                <p className="text-yellow-400/70 text-xs mt-0.5">You are in Orbiter mode. You can view but not contribute points.</p>
               </div>
             </div>
           )}
