@@ -8,29 +8,61 @@ function MiniMap({ lat, lng, address, city }) {
   const mapsQuery = lat && lng ? `${lat},${lng}` : encodeURIComponent(`${address || ''} ${city || 'New York'} NY`);
   const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${mapsQuery}`;
 
-  let embedSrc = null;
+  // Convert lat/lng to OSM tile x/y at zoom 15
+  const zoom = 15;
+  let tileUrl = null;
+  let pinLeft = '50%';
+  let pinTop = '50%';
+
   if (lat && lng) {
-    const delta = 0.008;
-    const bbox = `${lng - delta},${lat - delta},${lng + delta},${lat + delta}`;
-    embedSrc = `https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik&marker=${lat},${lng}`;
+    const latRad = (lat * Math.PI) / 180;
+    const n = Math.pow(2, zoom);
+    const xTile = Math.floor(((lng + 180) / 360) * n);
+    const yTile = Math.floor(((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n);
+
+    // Use a 3x3 grid of tiles centered on the location tile for a wider view
+    const tiles = [];
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        tiles.push({ x: xTile + dx, y: yTile + dy, dx, dy });
+      }
+    }
+
+    // Fractional position of pin within center tile
+    const xFrac = ((lng + 180) / 360) * n - xTile;
+    const yFrac = ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n - yTile;
+    pinLeft = `${((1 + xFrac) / 3) * 100}%`;
+    pinTop = `${((1 + yFrac) / 3) * 100}%`;
+
+    tileUrl = { xTile, yTile, zoom, tiles };
   }
 
   return (
     <a href={mapsUrl} target="_blank" rel="noopener noreferrer" className="group block relative w-full h-full rounded-2xl overflow-hidden border-2 border-black cursor-pointer hover:border-blue-500 transition-all shadow-[4px_4px_0px_black] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none">
-      <div className="h-24 md:h-full min-h-[100px] bg-gray-200 relative">
-        {embedSrc ? (
+      <div className="h-24 md:h-full min-h-[100px] bg-gray-200 relative overflow-hidden">
+        {tileUrl ? (
           <>
-            <div className="absolute inset-0 z-10" />
-            <iframe
-              src={embedSrc}
-              title="Event location map"
-              className="w-full h-full border-0 grayscale group-hover:grayscale-0 transition-all pointer-events-none"
-              loading="lazy"
-              sandbox="allow-scripts allow-same-origin"
-            />
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20">
-              <span className="text-2xl drop-shadow-[0_2px_4px_rgba(0,0,0,0.6)]">📍</span>
+            {/* 3x3 tile grid */}
+            <div className="absolute inset-0 grid" style={{ gridTemplateColumns: 'repeat(3, 33.333%)', gridTemplateRows: 'repeat(3, 33.333%)' }}>
+              {tileUrl.tiles.map(({ x, y, dx, dy }) => (
+                <img
+                  key={`${dx},${dy}`}
+                  src={`https://tile.openstreetmap.org/${tileUrl.zoom}/${x}/${y}.png`}
+                  alt=""
+                  className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all"
+                  crossOrigin="anonymous"
+                />
+              ))}
             </div>
+            {/* Pin centered on exact location */}
+            <div
+              className="absolute pointer-events-none z-10 -translate-x-1/2 -translate-y-full"
+              style={{ left: pinLeft, top: pinTop }}
+            >
+              <span className="text-2xl drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]">📍</span>
+            </div>
+            {/* Subtle vignette overlay */}
+            <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-black/20 pointer-events-none z-10" />
           </>
         ) : (
           <div className="w-full h-full flex flex-col items-center justify-center bg-gray-100 gap-1">
