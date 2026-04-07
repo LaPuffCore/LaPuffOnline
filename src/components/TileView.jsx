@@ -509,23 +509,24 @@ export default function TileView({ events }) {
         )}
       </div>
 
-      {/* Count */}
-      <div className="px-4 pt-3 pb-1">
+      {/* Count - Mobile: Increased padding top slightly to fix cramped text */}
+      <div className={`px-4 pb-1 ${isMobile ? 'pt-5' : 'pt-3'}`}>
         <p className="text-xs font-black text-gray-500">
           {showArchive ? '🕰️ PAST' : '📅 UPCOMING'} · {filtered.length} events
         </p>
       </div>
 
-      {/* Grid */}
+      {/* Grid - Mobile: Horizontal spacing cut in half (gap-4 -> gap-2) */}
       {filtered.length === 0 ? (
         <div className="text-center py-16">
           <div className="text-6xl mb-4">🎪</div>
           <p className="text-xl font-black">No events found!</p>
         </div>
       ) : (
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 px-4 pb-4">
+        <div className={`grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 ${isMobile ? 'gap-2 px-3 pb-4' : 'gap-4 px-4 pb-4'}`}>
           {displayed.map(event => (
-            <div key={event.id} className={`${isMobile ? 'scale-[0.85] -m-2 origin-top mb-1' : ''}`}>
+            /* Tile Container: scale[0.92] + negative margins expands width to fill gap while staying centered */
+            <div key={event.id} className={`${isMobile ? 'scale-[0.92] -mx-1 -my-2 origin-center' : ''}`}>
                <EventTile
                 event={event}
                 onClick={() => setSelectedEvent(event)}
