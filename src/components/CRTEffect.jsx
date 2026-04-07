@@ -41,21 +41,27 @@ export default function CRTEffect({ active = true }) {
   return (
     <div className="absolute inset-0 pointer-events-none overflow-hidden" style={{ zIndex: 20 }}>
       
-      {/* TUNED WHITE STATIC LAYER 
-          - opacity-[0.2] is the 50% reduction from the previous "overpowering" version
-          - filter contrast adjusted to 200% for a cleaner look
-          - mix-blend-mode: screen ensures only the white noise specs are visible over the red
+      {/* 1. GHOST STATIC LAYER (Half again)
+          Extremely subtle shimmer. The 'hue-rotate' adds a tiny chromatic hint.
       */}
       <div 
-        className="absolute inset-0 opacity-[0.2]" 
+        className="absolute inset-0 opacity-[0.05]" 
         style={{
-          backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E")`,
-          filter: 'contrast(200%) brightness(130%)',
+          backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 250 250' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.95' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E")`,
+          filter: 'contrast(150%) brightness(120%)',
           mixBlendMode: 'screen',
-          animation: 'vhs-flicker 0.08s steps(2) infinite',
-          backgroundSize: '150px 150px'
+          animation: 'vhs-flicker 0.15s steps(2) infinite',
+          backgroundSize: '300px 300px'
         }} 
       />
+
+      {/* 2. APERTURE GRILLE (Vertical Cross-Hatching)
+          This provides the physical "screen" texture you mentioned.
+      */}
+      <div className="absolute inset-0 opacity-[0.04]" style={{
+        backgroundImage: 'linear-gradient(90deg, rgba(255,255,255,0) 50%, rgba(255,255,255,0.2) 50%)',
+        backgroundSize: '4px 100%',
+      }} />
 
       {/* Horizontal scanlines */}
       <div className="absolute inset-0" style={{
@@ -96,12 +102,9 @@ export default function CRTEffect({ active = true }) {
 
       <style jsx>{`
         @keyframes vhs-flicker {
-          0% { background-position: 0 0; }
-          20% { background-position: 5% 10%; }
-          40% { background-position: -10% 5%; }
-          60% { background-position: 15% -5%; }
-          80% { background-position: -5% -15%; }
-          100% { background-position: 10% 5%; }
+          0% { background-position: 0 0; filter: hue-rotate(0deg) contrast(150%); }
+          50% { background-position: 5% 5%; filter: hue-rotate(90deg) contrast(160%); }
+          100% { background-position: -2% 10%; filter: hue-rotate(0deg) contrast(150%); }
         }
       `}</style>
     </div>
