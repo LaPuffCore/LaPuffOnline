@@ -5,33 +5,50 @@ import { TAG_COLORS } from '../lib/tagColors';
 import { getUserTZOffset, utcToLocal, TIMEZONES } from '../lib/timezones';
 
 function MiniMap({ lat, lng, address, city }) {
-  const mapsQuery = lat && lng ? `${lat},${lng}` : encodeURIComponent(`${address || ''} ${city || 'New York'} NY`);
+  const mapsQuery = lat && lng
+    ? `${lat},${lng}`
+    : encodeURIComponent(`${address || ''} ${city || 'New York'} NY`);
   const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${mapsQuery}`;
 
-  // Using a cleaner static tile provider for the preview
-  const mapPreviewUrl = lat && lng 
-    ? `https://static-maps.yandex.ru/1.x/?lang=en_US&ll=${lng},${lat}&z=14&l=map&size=450,200`
-    : null;
+  let embedSrc = null;
+  if (lat && lng) {
+    const delta = 0.008;
+    const bbox = `${lng - delta},${lat - delta},${lng + delta},${lat + delta}`;
+    embedSrc = `https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik&marker=${lat},${lng}`;
+  }
 
   return (
-    <a href={mapsUrl} target="_blank" rel="noopener noreferrer"
-      className="group block relative w-full h-full rounded-2xl overflow-hidden border-2 border-black cursor-pointer hover:border-blue-500 transition-all shadow-[4px_4px_0px_black] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none">
+    
+      href={mapsUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="group block relative w-full h-full rounded-2xl overflow-hidden border-2 border-black cursor-pointer hover:border-blue-500 transition-all shadow-[4px_4px_0px_black] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none"
+    >
       <div className="h-24 md:h-full min-h-[100px] bg-gray-200 relative">
-        {mapPreviewUrl ? (
+        {embedSrc ? (
           <>
-            <img 
-              src={mapPreviewUrl} 
-              alt="Map Preview" className="w-full h-full object-cover grayscale hover:grayscale-0 transition-all" 
+            <div className="absolute inset-0 z-10" />
+            <iframe
+              src={embedSrc}
+              title="Event location map"
+              className="w-full h-full border-0 grayscale group-hover:grayscale-0 transition-all pointer-events-none"
+              loading="lazy"
+              sandbox="allow-scripts allow-same-origin"
             />
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-               <span className="text-2xl drop-shadow-[0_2px_2px_rgba(255,255,255,0.8)]">📍</span>
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20">
+              <span className="text-2xl drop-shadow-[0_2px_4px_rgba(0,0,0,0.6)]">📍</span>
             </div>
           </>
         ) : (
-          <div className="w-full h-full flex items-center justify-center bg-gray-100 text-4xl">📍</div>
+          <div className="w-full h-full flex flex-col items-center justify-center bg-gray-100 gap-1">
+            <span className="text-3xl">📍</span>
+            <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest text-center px-2">
+              {address || city || 'View on Maps'}
+            </span>
+          </div>
         )}
       </div>
-      
+
       <div className="absolute bottom-0 left-0 right-0 bg-white border-t-2 border-black p-2 flex items-center justify-between gap-2">
         <div className="truncate">
           <p className="text-[8px] font-black uppercase text-gray-400 leading-none mb-0.5">Location</p>
@@ -97,7 +114,6 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-start justify-center p-4 overflow-y-auto" onClick={onClose}>
       
-      {/* Side Navigation */}
       {onPrev && (
         <button onClick={(e) => { e.stopPropagation(); onPrev(); }} className="fixed left-4 top-1/2 -translate-y-1/2 z-[60] w-12 h-20 bg-white/10 hover:bg-white/20 text-white hidden md:flex items-center justify-center rounded-2xl transition-all group">
           <span className="text-4xl font-light group-hover:-translate-x-1 transition-transform">＜</span>
@@ -117,7 +133,6 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
       >
         <button onClick={onClose} className="absolute top-4 right-4 z-20 w-10 h-10 bg-black text-white rounded-full font-black hover:bg-red-500 flex items-center justify-center shadow-[4px_4px_0px_#333] transition-all active:translate-x-0.5 active:translate-y-0.5 active:shadow-none">✕</button>
 
-        {/* Media Header - Corrected Cropping */}
         <div className="relative h-64 md:h-80 bg-gray-100 border-b-4 border-black">
           {showImage ? (
             <div className="w-full h-full overflow-hidden">
@@ -139,7 +154,6 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
         </div>
 
         <div className="p-6 md:p-10">
-          {/* Header Layout */}
           <div className="flex flex-col gap-4 mb-8">
             <div className="flex justify-between items-start gap-4">
               <div className="flex-1">
@@ -154,7 +168,6 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
                 </div>
               </div>
 
-              {/* Fav Star - Top Right Mobile/Web */}
               <div className="flex flex-col items-center gap-1">
                 <button onClick={handleFav} className={`w-12 h-12 md:w-16 md:h-16 rounded-2xl border-4 border-black flex items-center justify-center text-2xl md:text-4xl shadow-[4px_4px_0px_black] transition-all active:translate-x-0.5 active:translate-y-0.5 active:shadow-none ${fav ? 'bg-yellow-400' : 'bg-white'}`}>
                   {fav ? '⭐' : '☆'}
@@ -166,7 +179,6 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
             </div>
           </div>
 
-          {/* Point 1 & 5: Horizontally stacked boxes on Web */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
             <div className="bg-gray-50 border-2 border-black rounded-2xl p-4 flex items-center gap-4 shadow-[4px_4px_0px_black] min-h-[100px] md:min-h-[120px]">
               <span className="text-3xl md:text-4xl">📅</span>

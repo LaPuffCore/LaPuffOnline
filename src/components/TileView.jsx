@@ -270,7 +270,7 @@ export default function TileView({ events }) {
   return (
     <div className="w-full sm:scale-100 scale-[0.98] origin-top transition-transform">
       {/* Filter bar */}
-      <div className="bg-white border-b-3 border-black sticky top-0 z-30 px-4 py-3 md:space-y-2.5 space-y-1.5 rounded-b-[24px] shadow-md">
+      <div className="bg-white border-b-3 border-black sticky top-0 z-30 px-4 py-3 md:space-y-2.5 space-y-2 rounded-b-[24px] shadow-md">
 
         {/* ROW 1: Search + archive toggle */}
         <div className="flex gap-2">
@@ -291,9 +291,9 @@ export default function TileView({ events }) {
           </button>
         </div>
 
-        {/* ROW 2: Timespan + Favs */}
+        {/* ROW 2: Timespan */}
         <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
-          <span className="text-xs font-black whitespace-nowrap text-gray-400">📅</span>
+          <span className="text-xs font-black whitespace-nowrap text-gray-400 uppercase tracking-tighter">Date</span>
           {TIMESPAN_OPTIONS.map((opt, i) => (
             <button
               key={opt.label}
@@ -304,27 +304,29 @@ export default function TileView({ events }) {
               {opt.label}
             </button>
           ))}
-          <button
-            onClick={() => { setFavOnly(v => !v); resetPage(); }}
-            className={`ml-auto px-3 py-1 rounded-xl text-xs font-black border-2 border-black flex items-center gap-1 transition-colors whitespace-nowrap ${favOnly ? 'bg-[#7C3AED] text-white border-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
-          >
-            ⭐ Favs
-          </button>
         </div>
 
-        {/* ROW 3: Source mode */}
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-xs font-black text-gray-400">Source:</span>
-          {SOURCE_MODES.map(s => (
+        {/* ROW 3: Source mode + Favorites (Consolidated for better scaling) */}
+        <div className="flex items-center gap-2 w-full">
+          <div className="flex items-center gap-1.5 flex-1 overflow-x-auto no-scrollbar">
+            <span className="text-xs font-black text-gray-400 uppercase tracking-tighter mr-1">Source</span>
+            {SOURCE_MODES.map(s => (
+              <button
+                key={s.key}
+                onClick={() => { setSourceMode(s.key); resetPage(); }}
+                title={s.title}
+                className={`px-2.5 py-1 rounded-xl text-xs font-black border-2 border-black transition-colors flex-1 text-center whitespace-nowrap ${sourceMode === s.key ? 'bg-[#7C3AED] text-white border-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
+              >
+                {s.label}
+              </button>
+            ))}
             <button
-              key={s.key}
-              onClick={() => { setSourceMode(s.key); resetPage(); }}
-              title={s.title}
-              className={`px-2.5 py-1 rounded-xl text-xs font-black border-2 border-black transition-colors ${sourceMode === s.key ? 'bg-[#7C3AED] text-white border-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
+              onClick={() => { setFavOnly(v => !v); resetPage(); }}
+              className={`px-3 py-1 rounded-xl text-xs font-black border-2 border-black flex items-center justify-center gap-1 transition-colors whitespace-nowrap flex-1 ${favOnly ? 'bg-[#7C3AED] text-white border-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
             >
-              {s.label}
+              ⭐ {isMobile ? 'Favs' : 'Favorites'}
             </button>
-          ))}
+          </div>
         </div>
 
         {/* ROW 4: RSVP + Tag filter */}
