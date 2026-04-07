@@ -40,10 +40,12 @@ export default function CRTEffect({ active = true }) {
 
   return (
     <div className="absolute inset-0 pointer-events-none overflow-hidden" style={{ zIndex: 20 }}>
-      {/* Background VHS Static / Grain Layer */}
-      <div className="absolute inset-0 opacity-[0.035]" style={{
-        backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E")`,
-        animation: 'vhs-static 0.2s infinite steps(4)',
+      {/* Background Heavy VHS Static - Large Particles & High Contrast */}
+      <div className="absolute inset-0 opacity-[0.08]" style={{
+        backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.45' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E")`,
+        filter: 'contrast(150%) brightness(120%)',
+        animation: 'vhs-static 0.15s infinite steps(2)',
+        backgroundSize: '300px 300px', // Forces the pattern to scale up for larger "grains"
       }} />
 
       {/* Horizontal scanlines */}
@@ -85,11 +87,12 @@ export default function CRTEffect({ active = true }) {
 
       <style jsx>{`
         @keyframes vhs-static {
-          0% { transform: translate(0,0) }
-          25% { transform: translate(-1%, -1%) }
-          50% { transform: translate(1%, 1%) }
-          75% { transform: translate(-1%, 1%) }
-          100% { transform: translate(0,0) }
+          0% { transform: translate(0,0) scale(1) }
+          20% { transform: translate(-2%, 1%) scale(1.05) }
+          40% { transform: translate(-1%, -2%) scale(1) }
+          60% { transform: translate(2%, 2%) scale(1.05) }
+          80% { transform: translate(1%, -1%) scale(1) }
+          100% { transform: translate(0,0) scale(1) }
         }
       `}</style>
     </div>
