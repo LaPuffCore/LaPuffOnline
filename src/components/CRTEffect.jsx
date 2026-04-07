@@ -40,13 +40,19 @@ export default function CRTEffect({ active = true }) {
 
   return (
     <div className="absolute inset-0 pointer-events-none overflow-hidden" style={{ zIndex: 20 }}>
-      {/* Background Heavy VHS Static - Large Particles & High Contrast */}
-      <div className="absolute inset-0 opacity-[0.08]" style={{
-        backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.45' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E")`,
-        filter: 'contrast(150%) brightness(120%)',
-        animation: 'vhs-static 0.15s infinite steps(2)',
-        backgroundSize: '300px 300px', // Forces the pattern to scale up for larger "grains"
-      }} />
+      {/* NEW WHITE STATIC LAYER 
+          Placed first to sit behind everything. 
+          Uses background-position shifts to simulate "flicker" without screen shaking.
+      */}
+      <div 
+        className="absolute inset-0 opacity-[0.12]" 
+        style={{
+          backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 250 250' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E")`,
+          mixBlendMode: 'screen',
+          animation: 'vhs-flicker 0.1s steps(2) infinite',
+          backgroundSize: '200px 200px'
+        }} 
+      />
 
       {/* Horizontal scanlines */}
       <div className="absolute inset-0" style={{
@@ -86,13 +92,12 @@ export default function CRTEffect({ active = true }) {
       }} />
 
       <style jsx>{`
-        @keyframes vhs-static {
-          0% { transform: translate(0,0) scale(1) }
-          20% { transform: translate(-2%, 1%) scale(1.05) }
-          40% { transform: translate(-1%, -2%) scale(1) }
-          60% { transform: translate(2%, 2%) scale(1.05) }
-          80% { transform: translate(1%, -1%) scale(1) }
-          100% { transform: translate(0,0) scale(1) }
+        @keyframes vhs-flicker {
+          0% { background-position: 0 0; }
+          25% { background-position: 10% 5%; }
+          50% { background-position: -5% 10%; }
+          75% { background-position: 15% -10%; }
+          100% { background-position: 0 0; }
         }
       `}</style>
     </div>
