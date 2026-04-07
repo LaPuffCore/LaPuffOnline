@@ -291,7 +291,7 @@ export default function TileView({ events }) {
           </button>
         </div>
 
-        {/* ROW 2: Timespan + Favorites (Fav button horizontal on Web only) */}
+        {/* ROW 2: Timespan + Favorites */}
         <div className="flex items-center justify-between gap-2 overflow-x-auto no-scrollbar pb-1">
           <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
             <span className="text-xs font-black whitespace-nowrap text-gray-400 uppercase tracking-tighter">Date</span>
@@ -509,14 +509,14 @@ export default function TileView({ events }) {
         )}
       </div>
 
-      {/* Count - Mobile: Increased padding top slightly to fix cramped text */}
+      {/* Count */}
       <div className={`px-4 pb-1 ${isMobile ? 'pt-5' : 'pt-3'}`}>
         <p className="text-xs font-black text-gray-500">
           {showArchive ? '🕰️ PAST' : '📅 UPCOMING'} · {filtered.length} events
         </p>
       </div>
 
-      {/* Grid - Mobile: Horizontal spacing cut in half (gap-4 -> gap-2) */}
+      {/* Grid */}
       {filtered.length === 0 ? (
         <div className="text-center py-16">
           <div className="text-6xl mb-4">🎪</div>
@@ -525,7 +525,6 @@ export default function TileView({ events }) {
       ) : (
         <div className={`grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 ${isMobile ? 'gap-2 px-3 pb-4' : 'gap-4 px-4 pb-4'}`}>
           {displayed.map(event => (
-            /* Tile Container: scale[0.92] + negative margins expands width to fill gap while staying centered */
             <div key={event.id} className={`${isMobile ? 'scale-[0.92] -mx-1 -my-2 origin-center' : ''}`}>
                <EventTile
                 event={event}
@@ -536,24 +535,24 @@ export default function TileView({ events }) {
               />
               <style jsx global>{`
                 ${isMobile ? `
-                  .tile-title {
-                    display: -webkit-box;
-                    -webkit-line-clamp: 2;
-                    -webkit-box-orient: vertical;
-                    overflow: hidden;
-                    text-overflow: ellipsis;
-                    line-height: 1.1;
-                    margin-bottom: 2px;
-                    font-size: 0.85rem;
+                  /* Select the primary name/title text within the tile */
+                  .tile-title, 
+                  .event-tile h3, 
+                  .event-tile .text-sm.font-black,
+                  .event-tile [class*="text-"][class*="font-black"] {
+                    display: -webkit-box !important;
+                    -webkit-line-clamp: 2 !important;
+                    -webkit-box-orient: vertical !important;
+                    overflow: hidden !important;
+                    text-overflow: ellipsis !important;
+                    word-break: break-word !important;
+                    line-height: 1.2 !important;
+                    max-height: 2.4em !important; /* Strictly enforces 2 lines of space */
+                    margin-bottom: 2px !important;
                   }
                   .tile-info {
                     font-size: 0.7rem;
                     line-height: 1;
-                    display: -webkit-box;
-                    -webkit-line-clamp: 2;
-                    -webkit-box-orient: vertical;
-                    overflow: hidden;
-                    text-overflow: ellipsis;
                   }
                 ` : ''}
               `}</style>

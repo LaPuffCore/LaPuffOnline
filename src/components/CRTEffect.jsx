@@ -40,6 +40,12 @@ export default function CRTEffect({ active = true }) {
 
   return (
     <div className="absolute inset-0 pointer-events-none overflow-hidden" style={{ zIndex: 20 }}>
+      {/* Background VHS Static / Grain Layer */}
+      <div className="absolute inset-0 opacity-[0.035]" style={{
+        backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E")`,
+        animation: 'vhs-static 0.2s infinite steps(4)',
+      }} />
+
       {/* Horizontal scanlines */}
       <div className="absolute inset-0" style={{
         backgroundImage: 'repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,0,0,0.055) 3px, rgba(0,0,0,0.055) 4px)',
@@ -76,6 +82,16 @@ export default function CRTEffect({ active = true }) {
       <div className="absolute inset-0" style={{
         background: 'radial-gradient(ellipse at center, transparent 48%, rgba(0,0,0,0.3) 100%)',
       }} />
+
+      <style jsx>{`
+        @keyframes vhs-static {
+          0% { transform: translate(0,0) }
+          25% { transform: translate(-1%, -1%) }
+          50% { transform: translate(1%, 1%) }
+          75% { transform: translate(-1%, 1%) }
+          100% { transform: translate(0,0) }
+        }
+      `}</style>
     </div>
   );
 }
