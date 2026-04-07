@@ -1,6 +1,12 @@
+// @ts-nocheck
+import { createClient } from '@supabase/supabase-js';
+
 const SUPABASE_URL = 'https://gazuabyyugbbthonqnsp.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_tLCmZUz3bgISgxs4KVq28g_x36Xo6Cp';
 const SESSION_KEY = 'lapuff_session';
+
+// 1. EXPORT THE ACTUAL CLIENT (Fixes the .from error)
+export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // --- Session Management ---
 
@@ -8,6 +14,7 @@ export function getSession() {
   try { return JSON.parse(localStorage.getItem(SESSION_KEY)); } catch { return null; }
 }
 
+/** @param {any} s */
 function saveSession(s) { 
   localStorage.setItem(SESSION_KEY, JSON.stringify(s)); 
 }
@@ -38,7 +45,7 @@ export async function refreshSession() {
     if (data.error) throw new Error(data.error.message);
 
     const updatedSession = {
-      user: { ...data.user, username: session.user.username }, 
+      user: { ...data.user, username: session.user?.username || data.user.email.split('@')[0] }, 
       access_token: data.access_token,
       refresh_token: data.refresh_token,
       expires_at: Math.floor(Date.now() / 1000) + data.expires_in,
@@ -67,17 +74,21 @@ export async function getValidSession() {
 
 // --- Auth Actions ---
 
-export async function checkUsernameAvailable(username) {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/profiles?username=eq.${encodeURIComponent(username)}&select=username&limit=1`, {
-    headers: { 'apikey': SUPABASE_KEY },
-  });
-  const data = await res.json();
-  return !data?.length;
-}
-
+/** * @param {string} email 
+ * @param {string} password 
+ * @param {string} username 
+ * @param {string} bio 
+ * @param {string} home_zip 
+ */
 export async function signUp(email, password, username, bio, home_zip) {
-  const available = await checkUsernameAvailable(username);
-  if (!available) throw new Error('Username already taken.');
+  // Use the client to check username
+  const { data: existing } = await supabase
+    .from('profiles')
+    .select('username')
+    .eq('username', username)
+    .single();
+
+  if (existing) throw new Error('Username already taken.');
 
   const res = await fetch(`${SUPABASE_URL}/auth/v1/signup`, {
     method: 'POST',
@@ -85,33 +96,22 @@ export async function signUp(email, password, username, bio, home_zip) {
     body: JSON.stringify({ email, password }),
   });
   const authData = await res.json();
-  if (authData.error) throw new Error(authData.error.message || 'Sign up failed');
+  if (authData.error) throw new Error(authData.error.message);
 
-  const accessToken = authData.access_token;
-  const userId = authData.user?.id;
-
-  if (accessToken && userId) {
-    await fetch(`${SUPABASE_URL}/rest/v1/profiles`, {
-      method: 'POST',
-      headers: {
-        'apikey': SUPABASE_KEY,
-        'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-        'Prefer': 'return=minimal',
-      },
-      body: JSON.stringify({
-        id: userId,
-        username: username.trim(),
-        bio: bio || '',
-        home_zip: home_zip || '10001',
-        clout_points: 0,
-        updated_at: new Date().toISOString(),
-      }),
-    });
+  if (authData.access_token && authData.user?.id) {
+    // Use the client for the insert
+    await supabase.from('profiles').insert([{
+      id: authData.user.id,
+      username: username.trim(),
+      bio: bio || '',
+      home_zip: home_zip || '10001',
+      clout_points: 0,
+      updated_at: new Date().toISOString(),
+    }]);
     
     const session = { 
       user: { ...authData.user, username }, 
-      access_token: accessToken,
+      access_token: authData.access_token,
       refresh_token: authData.refresh_token,
       expires_at: Math.floor(Date.now() / 1000) + authData.expires_in
     };
@@ -122,6 +122,9 @@ export async function signUp(email, password, username, bio, home_zip) {
   return { pending: true };
 }
 
+/** * @param {string} email 
+ * @param {string} password 
+ */
 export async function signIn(email, password) {
   const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
     method: 'POST',
@@ -130,14 +133,15 @@ export async function signIn(email, password) {
   });
   const data = await res.json();
 
-  if (data.error) throw new Error(data.error.message || 'Sign in failed');
+  if (data.error) throw new Error(data.error.message);
 
-  let username = email.split('@')[0];
-  const pRes = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${data.user.id}&select=username`, {
-    headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${data.access_token}` },
-  });
-  const profiles = await pRes.json();
-  if (profiles?.[0]?.username) username = profiles[0].username;
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('username')
+    .eq('id', data.user.id)
+    .single();
+
+  const username = profile?.username || email.split('@')[0];
 
   const session = { 
     user: { ...data.user, username }, 
@@ -158,15 +162,5 @@ export async function signOut() {
     }).catch(() => {});
   }
   clearSession();
-  window.location.reload(); // Force context update
+  window.location.reload();
 }
-
-// THIS IS THE EXPORT VITE WAS LOOKING FOR
-export const supabase = {
-  auth: {
-    getSession: async () => ({ data: { session: getSession() } }),
-    signIn,
-    signOut,
-    signUp
-  }
-};

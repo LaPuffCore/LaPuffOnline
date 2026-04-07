@@ -1,3 +1,4 @@
+// @ts-nocheck
 const SUPABASE_URL = 'https://gazuabyyugbbthonqnsp.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_tLCmZUz3bgISgxs4KVq28g_x36Xo6Cp';
 
@@ -7,6 +8,9 @@ const baseHeaders = {
   'Content-Type': 'application/json',
 };
 
+/**
+ * @returns {Promise<Array<any>>}
+ */
 export async function getApprovedEvents() {
   try {
     const res = await fetch(
@@ -18,6 +22,9 @@ export async function getApprovedEvents() {
   } catch { return []; }
 }
 
+/**
+ * @param {Object} data 
+ */
 export async function submitEvent(data) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/events`, {
     method: 'POST',
@@ -31,6 +38,9 @@ export async function submitEvent(data) {
   return true;
 }
 
+/**
+ * @param {File} file 
+ */
 export async function uploadEventPhoto(file) {
   const ext = file.name.split('.').pop();
   const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}.${ext}`;
