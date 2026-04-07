@@ -1,12 +1,12 @@
-import { Toaster } from "@/components/ui/toaster"
+import { Toaster } from "./components/ui/toaster" // Fixed @ alias
 import { useState, useEffect } from 'react';
 import { getApprovedEvents } from './lib/supabase';
 import { SAMPLE_EVENTS } from './lib/sampleEvents';
 import { QueryClientProvider } from '@tanstack/react-query'
-import { queryClientInstance } from '@/lib/query-client'
+import { queryClientInstance } from './lib/query-client' // Fixed @ alias
 import { BrowserRouter as Router, Route, Routes } from 'react-router-dom';
 import PageNotFound from './lib/PageNotFound';
-import { AuthProvider, useAuth } from '@/lib/AuthContext';
+import { AuthProvider, useAuth } from './lib/AuthContext'; // Fixed @ alias
 // Add page imports here
 import Home from './pages/Home';
 import FavoritesPage from './pages/FavoritesPage';
@@ -47,8 +47,6 @@ const AuthenticatedApp = () => {
     );
   }
 
-  // Render the main app
-  // Note: You can wrap AppWithEvents in a ProtectedRoute here if you want to force login
   return <AppWithEvents />;
 };
 
@@ -56,7 +54,8 @@ function App() {
   return (
     <AuthProvider>
       <QueryClientProvider client={queryClientInstance}>
-        <Router>
+        {/* IMPORTANT: Added basename so Router knows it lives in a subfolder */}
+        <Router basename="/LaPuffOnline">
           <AuthenticatedApp />
         </Router>
         <Toaster />
