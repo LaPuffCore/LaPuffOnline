@@ -1,19 +1,18 @@
-import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+import path from 'path' // You might need to run 'npm install @types/node' if this errors
 
-// https://vite.dev/config/
 export default defineConfig({
-  // Set the base path to match your GitHub repository name
   base: '/LaPuffOnline/',
-  
-  logLevel: 'error', // Suppress warnings, only show errors
-  
-  plugins: [
-    react(),
-  ],
-  
-  // Optional: Ensures your build output matches what GitHub Actions expects
+  logLevel: 'error',
+  plugins: [react()],
+  resolve: {
+    alias: {
+      // This tells Vite that "@" means the "src" folder
+      "@": path.resolve(__dirname, "./src"),
+    },
+  },
   build: {
     outDir: 'dist',
   }
-});
+})
