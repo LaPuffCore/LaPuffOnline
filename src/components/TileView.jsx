@@ -31,10 +31,10 @@ const MAX_EMOJI_FILTERS = 5;
 const PAGE_SIZE = 12;
 
 const ALL_TAGS = [
-  'music','jazz','art','food','brunch','market','sports','workshop','lecture',
-  'family','kids','outdoor','free','nightlife','culture','fashion','film',
-  'dance','books','reading','poetry','comedy','nature','party','charity',
-  'tech','wellness','theater','social','activism',
+  'music', 'jazz', 'art', 'food', 'brunch', 'market', 'sports', 'workshop', 'lecture',
+  'family', 'kids', 'outdoor', 'free', 'nightlife', 'culture', 'fashion', 'film',
+  'dance', 'books', 'reading', 'poetry', 'comedy', 'nature', 'party', 'charity',
+  'tech', 'wellness', 'theater', 'social', 'activism',
 ];
 
 const SEARCH_RELATIONS = {
@@ -121,7 +121,7 @@ export default function TileView({ events }) {
   const [timespanIdx, setTimespanIdx] = useState(4);
   const [showArchive, setShowArchive] = useState(false);
   const [borough, setBorough] = useState('All');
-  const [emojiFilters, setEmojiFilters] = useState([]); 
+  const [emojiFilters, setEmojiFilters] = useState([]);
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const [favOnly, setFavOnly] = useState(false);
   const [rsvpOnly, setRsvpOnly] = useState(false);
@@ -291,41 +291,55 @@ export default function TileView({ events }) {
           </button>
         </div>
 
-        {/* ROW 2: Timespan */}
-        <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
-          <span className="text-xs font-black whitespace-nowrap text-gray-400 uppercase tracking-tighter">Date</span>
-          {TIMESPAN_OPTIONS.map((opt, i) => (
+        {/* ROW 2: Timespan + Favorites (Fav button horizontal on Web only) */}
+        <div className="flex items-center justify-between gap-2 overflow-x-auto no-scrollbar pb-1">
+          <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
+            <span className="text-xs font-black whitespace-nowrap text-gray-400 uppercase tracking-tighter">Date</span>
+            {TIMESPAN_OPTIONS.map((opt, i) => (
+              <button
+                key={opt.label}
+                onClick={() => { setTimespanIdx(i); resetPage(); }}
+                disabled={showArchive}
+                className={`px-3 py-1 rounded-xl text-xs font-black border-2 border-black whitespace-nowrap transition-colors ${timespanIdx === i && !showArchive ? 'bg-[#7C3AED] text-white border-[#7C3AED]' : 'bg-white hover:bg-violet-50 disabled:opacity-40'}`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+
+          {!isMobile && (
             <button
-              key={opt.label}
-              onClick={() => { setTimespanIdx(i); resetPage(); }}
-              disabled={showArchive}
-              className={`px-3 py-1 rounded-xl text-xs font-black border-2 border-black whitespace-nowrap transition-colors ${timespanIdx === i && !showArchive ? 'bg-[#7C3AED] text-white border-[#7C3AED]' : 'bg-white hover:bg-violet-50 disabled:opacity-40'}`}
+              onClick={() => { setFavOnly(v => !v); resetPage(); }}
+              className={`px-3 py-1 rounded-xl text-xs font-black border-2 border-black flex items-center justify-center gap-1 transition-colors whitespace-nowrap ${favOnly ? 'bg-[#7C3AED] text-white border-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
             >
-              {opt.label}
+              ⭐ Favorites
             </button>
-          ))}
+          )}
         </div>
 
-        {/* ROW 3: Source mode + Favorites (Consolidated for better scaling) */}
+        {/* ROW 3: Source mode (+ Mobile-only Favorites) */}
         <div className="flex items-center gap-2 w-full">
-          <div className="flex items-center gap-1.5 flex-1 overflow-x-auto no-scrollbar">
+          <div className={`flex items-center gap-1.5 ${isMobile ? 'flex-1' : ''} overflow-x-auto no-scrollbar`}>
             <span className="text-xs font-black text-gray-400 uppercase tracking-tighter mr-1">Source</span>
             {SOURCE_MODES.map(s => (
               <button
                 key={s.key}
                 onClick={() => { setSourceMode(s.key); resetPage(); }}
                 title={s.title}
-                className={`px-2.5 py-1 rounded-xl text-xs font-black border-2 border-black transition-colors flex-1 text-center whitespace-nowrap ${sourceMode === s.key ? 'bg-[#7C3AED] text-white border-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
+                className={`px-2.5 py-1 rounded-xl text-xs font-black border-2 border-black transition-colors ${isMobile ? 'flex-1 text-center' : ''} whitespace-nowrap ${sourceMode === s.key ? 'bg-[#7C3AED] text-white border-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
               >
                 {s.label}
               </button>
             ))}
-            <button
-              onClick={() => { setFavOnly(v => !v); resetPage(); }}
-              className={`px-3 py-1 rounded-xl text-xs font-black border-2 border-black flex items-center justify-center gap-1 transition-colors whitespace-nowrap flex-1 ${favOnly ? 'bg-[#7C3AED] text-white border-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
-            >
-              ⭐ {isMobile ? 'Favs' : 'Favorites'}
-            </button>
+            
+            {isMobile && (
+              <button
+                onClick={() => { setFavOnly(v => !v); resetPage(); }}
+                className={`px-3 py-1 rounded-xl text-xs font-black border-2 border-black flex items-center justify-center gap-1 transition-colors whitespace-nowrap flex-1 ${favOnly ? 'bg-[#7C3AED] text-white border-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
+              >
+                ⭐ Favs
+              </button>
+            )}
           </div>
         </div>
 
@@ -446,14 +460,14 @@ export default function TileView({ events }) {
                 .filter(e => !emojiFilters.includes(e))
                 .slice(0, Math.max(0, (isMobile ? 7 : 8) - emojiFilters.length))
                 .map(em => (
-                <button
-                  key={em}
-                  onClick={() => { toggleEmojiFilter(em); }}
-                  className="w-8 h-8 rounded-xl border-2 border-black text-lg flex items-center justify-center bg-white hover:bg-violet-50 transition-colors"
-                >
-                  {em}
-                </button>
-              ))}
+                  <button
+                    key={em}
+                    onClick={() => { toggleEmojiFilter(em); }}
+                    className="w-8 h-8 rounded-xl border-2 border-black text-lg flex items-center justify-center bg-white hover:bg-violet-50 transition-colors"
+                  >
+                    {em}
+                  </button>
+                ))}
 
               {emojiFilters.length < MAX_EMOJI_FILTERS && (
                 <div ref={emojiPickerRef} className="relative">
@@ -511,13 +525,32 @@ export default function TileView({ events }) {
       ) : (
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 px-4 pb-4">
           {displayed.map(event => (
-            <EventTile 
-              key={event.id} 
-              event={event} 
-              onClick={() => setSelectedEvent(event)} 
-              onTagClick={addTagFilter} 
-              isMobile={isMobile}
-            />
+            <div key={event.id} className={`${isMobile ? 'scale-[0.85] -m-2 origin-top mb-1' : ''}`}>
+               <EventTile
+                event={event}
+                onClick={() => setSelectedEvent(event)}
+                onTagClick={addTagFilter}
+                isMobile={isMobile}
+                className={isMobile ? 'text-xs p-2 leading-tight' : ''}
+              />
+              <style jsx global>{`
+                ${isMobile ? `
+                  .tile-title {
+                    display: -webkit-box;
+                    -webkit-line-clamp: 2;
+                    -webkit-box-orient: vertical;
+                    overflow: hidden;
+                    line-height: 1.1;
+                    margin-bottom: 2px;
+                    font-size: 0.85rem;
+                  }
+                  .tile-info {
+                    font-size: 0.7rem;
+                    line-height: 1;
+                  }
+                ` : ''}
+              `}</style>
+            </div>
           ))}
         </div>
       )}
