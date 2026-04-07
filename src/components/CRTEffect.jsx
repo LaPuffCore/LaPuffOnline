@@ -41,31 +41,33 @@ export default function CRTEffect({ active = true }) {
   return (
     <div className="absolute inset-0 pointer-events-none overflow-hidden" style={{ zIndex: 20 }}>
       
-      {/* 1. GHOST STATIC LAYER (Half again)
-          Extremely subtle shimmer. The 'hue-rotate' adds a tiny chromatic hint.
+      {/* 1. TUNED STATIC LAYER
+          Increased to 0.08 for a visible but controlled simmer.
       */}
       <div 
-        className="absolute inset-0 opacity-[0.05]" 
+        className="absolute inset-0 opacity-[0.08]" 
         style={{
           backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 250 250' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.95' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E")`,
-          filter: 'contrast(150%) brightness(120%)',
+          filter: 'contrast(160%) brightness(120%)',
           mixBlendMode: 'screen',
-          animation: 'vhs-flicker 0.15s steps(2) infinite',
-          backgroundSize: '300px 300px'
+          animation: 'vhs-flicker 0.12s steps(2) infinite',
+          backgroundSize: '250px 250px'
         }} 
       />
 
-      {/* 2. APERTURE GRILLE (Vertical Cross-Hatching)
-          This provides the physical "screen" texture you mentioned.
+      {/* 2. ENLARGED APERTURE GRILLE (Vertical Lattices)
+          Increased width from 4px to 8px for a chunkier, more visible vertical mesh.
       */}
-      <div className="absolute inset-0 opacity-[0.04]" style={{
-        backgroundImage: 'linear-gradient(90deg, rgba(255,255,255,0) 50%, rgba(255,255,255,0.2) 50%)',
-        backgroundSize: '4px 100%',
+      <div className="absolute inset-0 opacity-[0.05]" style={{
+        backgroundImage: 'linear-gradient(90deg, rgba(255,255,255,0) 50%, rgba(255,255,255,0.15) 50%)',
+        backgroundSize: '8px 100%',
       }} />
 
-      {/* Horizontal scanlines */}
+      {/* 3. HORIZONTAL SCANLINES
+          Slightly widened the gap to match the larger vertical lattice.
+      */}
       <div className="absolute inset-0" style={{
-        backgroundImage: 'repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,0,0,0.055) 3px, rgba(0,0,0,0.055) 4px)',
+        backgroundImage: 'repeating-linear-gradient(0deg, transparent, transparent 4px, rgba(0,0,0,0.07) 4px, rgba(0,0,0,0.07) 6px)',
       }} />
 
       {/* Chromatic aberration edges */}
@@ -102,9 +104,9 @@ export default function CRTEffect({ active = true }) {
 
       <style jsx>{`
         @keyframes vhs-flicker {
-          0% { background-position: 0 0; filter: hue-rotate(0deg) contrast(150%); }
-          50% { background-position: 5% 5%; filter: hue-rotate(90deg) contrast(160%); }
-          100% { background-position: -2% 10%; filter: hue-rotate(0deg) contrast(150%); }
+          0% { background-position: 0 0; filter: hue-rotate(0deg); }
+          50% { background-position: 2% 8%; filter: hue-rotate(45deg); }
+          100% { background-position: -1% 4%; filter: hue-rotate(0deg); }
         }
       `}</style>
     </div>
