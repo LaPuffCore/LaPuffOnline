@@ -541,6 +541,7 @@ export default function TileView({ events }) {
                     -webkit-line-clamp: 2;
                     -webkit-box-orient: vertical;
                     overflow: hidden;
+                    text-overflow: ellipsis;
                     line-height: 1.1;
                     margin-bottom: 2px;
                     font-size: 0.85rem;
@@ -548,6 +549,11 @@ export default function TileView({ events }) {
                   .tile-info {
                     font-size: 0.7rem;
                     line-height: 1;
+                    display: -webkit-box;
+                    -webkit-line-clamp: 2;
+                    -webkit-box-orient: vertical;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
                   }
                 ` : ''}
               `}</style>

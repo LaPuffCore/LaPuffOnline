@@ -8,62 +8,19 @@ function MiniMap({ lat, lng, address, city }) {
   const mapsQuery = lat && lng ? `${lat},${lng}` : encodeURIComponent(`${address || ''} ${city || 'New York'} NY`);
   const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${mapsQuery}`;
 
-  // Convert lat/lng to OSM tile x/y at zoom 15
-  const zoom = 15;
-  let tileUrl = null;
-  let pinLeft = '50%';
-  let pinTop = '50%';
-
-  if (lat && lng) {
-    const latRad = (lat * Math.PI) / 180;
-    const n = Math.pow(2, zoom);
-    const xTile = Math.floor(((lng + 180) / 360) * n);
-    const yTile = Math.floor(((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n);
-
-    // Use a 3x3 grid of tiles centered on the location tile for a wider view
-    const tiles = [];
-    for (let dy = -1; dy <= 1; dy++) {
-      for (let dx = -1; dx <= 1; dx++) {
-        tiles.push({ x: xTile + dx, y: yTile + dy, dx, dy });
-      }
-    }
-
-    // Fractional position of pin within center tile
-    const xFrac = ((lng + 180) / 360) * n - xTile;
-    const yFrac = ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n - yTile;
-    pinLeft = `${((1 + xFrac) / 3) * 100}%`;
-    pinTop = `${((1 + yFrac) / 3) * 100}%`;
-
-    tileUrl = { xTile, yTile, zoom, tiles };
-  }
+  const staticMapUrl = lat && lng
+    ? `https://staticmap.openstreetmap.de/staticmap.php?center=${lat},${lng}&zoom=15&size=400x160&markers=${lat},${lng},red-pushpin`
+    : null;
 
   return (
     <a href={mapsUrl} target="_blank" rel="noopener noreferrer" className="group block relative w-full h-full rounded-2xl overflow-hidden border-2 border-black cursor-pointer hover:border-blue-500 transition-all shadow-[4px_4px_0px_black] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none">
       <div className="h-24 md:h-full min-h-[100px] bg-gray-200 relative overflow-hidden">
-        {tileUrl ? (
-          <>
-            {/* 3x3 tile grid */}
-            <div className="absolute inset-0 grid" style={{ gridTemplateColumns: 'repeat(3, 33.333%)', gridTemplateRows: 'repeat(3, 33.333%)' }}>
-              {tileUrl.tiles.map(({ x, y, dx, dy }) => (
-                <img
-                  key={`${dx},${dy}`}
-                  src={`https://tile.openstreetmap.org/${tileUrl.zoom}/${x}/${y}.png`}
-                  alt=""
-                  className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all"
-                  crossOrigin="anonymous"
-                />
-              ))}
-            </div>
-            {/* Pin centered on exact location */}
-            <div
-              className="absolute pointer-events-none z-10 -translate-x-1/2 -translate-y-full"
-              style={{ left: pinLeft, top: pinTop }}
-            >
-              <span className="text-2xl drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]">📍</span>
-            </div>
-            {/* Subtle vignette overlay */}
-            <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-black/20 pointer-events-none z-10" />
-          </>
+        {staticMapUrl ? (
+          <img
+            src={staticMapUrl}
+            alt="Map"
+            className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all"
+          />
         ) : (
           <div className="w-full h-full flex flex-col items-center justify-center bg-gray-100 gap-1">
             <span className="text-3xl">📍</span>
@@ -181,7 +138,7 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
           <div className="flex flex-col gap-4 mb-8">
             <div className="flex justify-between items-start gap-4">
               <div className="flex-1">
-                <h2 className="text-2xl md:text-4xl font-black leading-tight mb-1 line-clamp-2 uppercase italic">{event.event_name}</h2>
+                <h2 className="text-2xl md:text-4xl font-black leading-tight mb-1 line-clamp-3 md:line-clamp-2 uppercase italic">{event.event_name}</h2>
                 <div className="flex items-center gap-2 md:gap-3">
                   <span className="md:hidden text-lg">{event.representative_emoji || '🎉'}</span>
                   {event.name && (
