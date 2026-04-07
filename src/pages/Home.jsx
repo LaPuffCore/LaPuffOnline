@@ -6,30 +6,28 @@ import MapView from '../components/MapView';
 import HamburgerMenu from '../components/HamburgerMenu';
 import AuthModal from '../components/AuthModal';
 import ParticipantDot from '../components/ParticipantDot';
-// Updated imports to include the "Smart" session logic
+import Leaderboard from '../components/Leaderboard'; 
 import { getValidSession, signOut } from '../lib/supabaseAuth';
 
 export default function Home({ events = [] }) {
   const [view, setView] = useState('tiles');
   const [showForm, setShowForm] = useState(false);
   const [showAuth, setShowAuth] = useState(false);
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
   const [user, setUser] = useState(null);
   const [showUserMenu, setShowUserMenu] = useState(false);
+  
   const isMap = view === 'map';
 
-  // Improved Auth Logic: Triggers a silent refresh on mount if needed
   useEffect(() => {
     async function initAuth() {
       const session = await getValidSession();
-      if (session?.user) {
-        setUser(session.user);
-      }
+      if (session?.user) setUser(session.user);
     }
     initAuth();
   }, []);
 
   function handleAuthSuccess() {
-    // Re-run the valid session check to get the latest user data
     getValidSession().then(session => {
       if (session) setUser(session.user);
       setShowAuth(false);
@@ -60,36 +58,34 @@ export default function Home({ events = [] }) {
               <ParticipantDot />
             </div>
 
-            {/* View toggle + Leaderboard Link */}
+            {/* View Toggles (Restored Original Logic) */}
             <div className="bg-gray-100 border-3 border-black rounded-2xl p-1 flex shadow-[3px_3px_0px_black]">
-              <button onClick={() => setView('tiles')}
-                className={`px-4 py-2 rounded-xl text-sm font-black transition-all ${view === 'tiles' ? 'bg-[#7C3AED] text-white shadow-[2px_2px_0px_#333]' : 'hover:bg-gray-200'}`}>
+              <button onClick={() => { setView('tiles'); setShowLeaderboard(false); }}
+                className={`px-4 py-2 rounded-xl text-sm font-black transition-all ${view === 'tiles' && !showLeaderboard ? 'bg-[#7C3AED] text-white shadow-[2px_2px_0px_#333]' : 'hover:bg-gray-200'}`}>
                 🎴 Tiles
               </button>
-              <button onClick={() => setView('map')}
-                className={`px-4 py-2 rounded-xl text-sm font-black transition-all ${view === 'map' ? 'bg-[#7C3AED] text-white shadow-[2px_2px_0px_#333]' : 'hover:bg-gray-200'}`}>
+              <button onClick={() => { setView('map'); setShowLeaderboard(false); }}
+                className={`px-4 py-2 rounded-xl text-sm font-black transition-all ${view === 'map' && !showLeaderboard ? 'bg-[#7C3AED] text-white shadow-[2px_2px_0px_#333]' : 'hover:bg-gray-200'}`}>
                 🗺️ Map
               </button>
-              <Link to="/leaderboard" 
-                className="px-4 py-2 rounded-xl text-sm font-black hover:bg-gray-200 transition-all flex items-center gap-1">
+              {/* Leaderboard button added without removing others */}
+              <button onClick={() => setShowLeaderboard(true)} 
+                className={`px-4 py-2 rounded-xl text-sm font-black transition-all flex items-center gap-1 ${showLeaderboard ? 'bg-violet-600 text-white shadow-[2px_2px_0px_#333]' : 'hover:bg-gray-200'}`}>
                 🏆 Top
-              </Link>
+              </button>
             </div>
 
-            {/* Actions */}
+            {/* Actions & User Menu */}
             <div className="flex items-center gap-2">
               <button onClick={() => setShowForm(true)}
                 className="hidden md:block bg-[#7C3AED] text-white font-black px-5 py-2.5 rounded-full text-sm hover:bg-[#6D28D9] transition-all shadow-[3px_3px_0px_#333] hover:scale-105 whitespace-nowrap">
                 + Submit Event
               </button>
 
-              {/* Auth button */}
               {user ? (
                 <div className="relative">
-                  <button
-                    onClick={() => setShowUserMenu(v => !v)}
-                    className="flex items-center gap-2 bg-white border-3 border-[#7C3AED] rounded-full px-4 py-2 font-black text-sm text-[#7C3AED] hover:bg-violet-50 transition-colors shadow-[3px_3px_0px_#333]"
-                  >
+                  <button onClick={() => setShowUserMenu(v => !v)}
+                    className="flex items-center gap-2 bg-white border-3 border-[#7C3AED] rounded-full px-4 py-2 font-black text-sm text-[#7C3AED] hover:bg-violet-50 transition-colors shadow-[3px_3px_0px_#333]">
                     💜 {user.username || user.email?.split('@')[0]}
                   </button>
                   {showUserMenu && (
@@ -111,6 +107,7 @@ export default function Home({ events = [] }) {
                 </button>
               )}
 
+              {/* CALENDAR is inside HamburgerMenu - kept intact */}
               <HamburgerMenu events={events} />
             </div>
           </div>
@@ -118,17 +115,32 @@ export default function Home({ events = [] }) {
       </header>
 
       {/* Content Area */}
-      {isMap ? (
-        <div className="flex-1 relative overflow-hidden" style={{ minHeight: 0 }}>
-          <MapView events={events} />
-        </div>
-      ) : (
-        <main className="flex-1 overflow-y-auto">
-          <div className="max-w-7xl mx-auto w-full">
-            <TileView events={events} />
+      <div className="flex-1 relative overflow-hidden">
+        {isMap ? (
+           <div className="h-full w-full">
+             <MapView events={events} />
+           </div>
+        ) : (
+          <main className="h-full overflow-y-auto">
+            <div className="max-w-7xl mx-auto w-full">
+              <TileView events={events} />
+            </div>
+          </main>
+        )}
+
+        {/* Leaderboard Overlay */}
+        {showLeaderboard && (
+          <div className="absolute inset-0 z-40 bg-white/60 backdrop-blur-sm flex items-center justify-center p-4">
+             <div className="relative w-full max-w-md animate-in fade-in zoom-in duration-200">
+               <button onClick={() => setShowLeaderboard(false)}
+                 className="absolute -top-12 right-0 bg-black text-white px-4 py-2 rounded-full font-black text-xs shadow-[3px_3px_0px_#7C3AED]">
+                 CLOSE [X]
+               </button>
+               <Leaderboard />
+             </div>
           </div>
-        </main>
-      )}
+        )}
+      </div>
 
       {/* Modals */}
       {showForm && <EventSubmitForm onClose={() => setShowForm(false)} />}
