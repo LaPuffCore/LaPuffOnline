@@ -5,9 +5,7 @@ import { TAG_COLORS } from '../lib/tagColors';
 import { getUserTZOffset, utcToLocal, TIMEZONES } from '../lib/timezones';
 
 function MiniMap({ lat, lng, address, city }) {
-  const mapsQuery = lat && lng
-    ? `${lat},${lng}`
-    : encodeURIComponent(`${address || ''} ${city || 'New York'} NY`);
+  const mapsQuery = lat && lng ? `${lat},${lng}` : encodeURIComponent(`${address || ''} ${city || 'New York'} NY`);
   const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${mapsQuery}`;
 
   let embedSrc = null;
@@ -18,12 +16,7 @@ function MiniMap({ lat, lng, address, city }) {
   }
 
   return (
-    
-      href={mapsUrl}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="group block relative w-full h-full rounded-2xl overflow-hidden border-2 border-black cursor-pointer hover:border-blue-500 transition-all shadow-[4px_4px_0px_black] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none"
-    >
+    <a href={mapsUrl} target="_blank" rel="noopener noreferrer" className="group block relative w-full h-full rounded-2xl overflow-hidden border-2 border-black cursor-pointer hover:border-blue-500 transition-all shadow-[4px_4px_0px_black] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none">
       <div className="h-24 md:h-full min-h-[100px] bg-gray-200 relative">
         {embedSrc ? (
           <>
@@ -48,7 +41,6 @@ function MiniMap({ lat, lng, address, city }) {
           </div>
         )}
       </div>
-
       <div className="absolute bottom-0 left-0 right-0 bg-white border-t-2 border-black p-2 flex items-center justify-between gap-2">
         <div className="truncate">
           <p className="text-[8px] font-black uppercase text-gray-400 leading-none mb-0.5">Location</p>
@@ -68,7 +60,7 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
   const [trend, setTrend] = useState('neutral');
   const [photoIdx, setPhotoIdx] = useState(0);
   const [imgError, setImgError] = useState(false);
-  
+
   const tags = generateAutoTags(event);
   const tzOffset = getUserTZOffset();
   const tzLabel = (TIMEZONES.find(t => t.offset === tzOffset) || TIMEZONES[0]).label;
@@ -81,10 +73,10 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
     setFav(isFavorite(event.id));
     setFavCount(getFavoriteCount(event.id));
     setTrend(getFavTrend(event.id));
-    
+
     document.body.style.overflow = 'hidden';
-    const onKey = e => { 
-      if (e.key === 'Escape') onClose(); 
+    const onKey = e => {
+      if (e.key === 'Escape') onClose();
       if (e.key === 'ArrowRight' && onNext) onNext();
       if (e.key === 'ArrowLeft' && onPrev) onPrev();
     };
@@ -101,7 +93,7 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
   };
 
   const displayTime = event.event_time_utc ? utcToLocal(event.event_time_utc, tzOffset) : '';
-  const displayDate = event.event_date 
+  const displayDate = event.event_date
     ? new Date(event.event_date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
     : '';
 
@@ -113,13 +105,13 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-start justify-center p-4 overflow-y-auto" onClick={onClose}>
-      
+
       {onPrev && (
         <button onClick={(e) => { e.stopPropagation(); onPrev(); }} className="fixed left-4 top-1/2 -translate-y-1/2 z-[60] w-12 h-20 bg-white/10 hover:bg-white/20 text-white hidden md:flex items-center justify-center rounded-2xl transition-all group">
           <span className="text-4xl font-light group-hover:-translate-x-1 transition-transform">＜</span>
         </button>
       )}
-      
+
       {onNext && (
         <button onClick={(e) => { e.stopPropagation(); onNext(); }} className="fixed right-4 top-1/2 -translate-y-1/2 z-[60] w-12 h-20 bg-white/10 hover:bg-white/20 text-white hidden md:flex items-center justify-center rounded-2xl transition-all group">
           <span className="text-4xl font-light group-hover:translate-x-1 transition-transform">＞</span>
@@ -140,7 +132,7 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
               {event.photos.length > 1 && (
                 <div className="absolute bottom-4 left-0 right-0 flex justify-center gap-2">
                   {event.photos.map((_, i) => (
-                    <button key={i} onClick={() => setPhotoIdx(i)} 
+                    <button key={i} onClick={() => setPhotoIdx(i)}
                       className={`w-2.5 h-2.5 rounded-full border-2 border-black transition-all ${i === photoIdx ? 'bg-white w-5' : 'bg-white/40'}`} />
                   ))}
                 </div>
@@ -159,12 +151,12 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
               <div className="flex-1">
                 <h2 className="text-2xl md:text-4xl font-black leading-tight mb-1 line-clamp-2 uppercase italic">{event.event_name}</h2>
                 <div className="flex items-center gap-2 md:gap-3">
-                   <span className="md:hidden text-lg">{event.representative_emoji || '🎉'}</span>
-                   {event.name && (
-                     <p className="text-[10px] md:text-xs text-gray-400 font-black uppercase tracking-tighter">
-                       Hosted by {event.name}
-                     </p>
-                   )}
+                  <span className="md:hidden text-lg">{event.representative_emoji || '🎉'}</span>
+                  {event.name && (
+                    <p className="text-[10px] md:text-xs text-gray-400 font-black uppercase tracking-tighter">
+                      Hosted by {event.name}
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -190,11 +182,11 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
 
             <div className="h-[100px] md:h-[120px]">
               {!event.location_data?.rsvp_link ? (
-                <MiniMap 
-                  lat={event.location_data?.lat} 
-                  lng={event.location_data?.lng} 
-                  address={event.location_data?.address} 
-                  city={event.location_data?.city} 
+                <MiniMap
+                  lat={event.location_data?.lat}
+                  lng={event.location_data?.lng}
+                  address={event.location_data?.address}
+                  city={event.location_data?.city}
                 />
               ) : (
                 <div className="bg-blue-50 border-2 border-black rounded-2xl p-4 shadow-[4px_4px_0px_black] h-full flex flex-col justify-center">
