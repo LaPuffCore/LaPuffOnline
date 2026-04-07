@@ -8,7 +8,7 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
-      // This tells Vite that "@" means the "src" folder
+      // This tells Vite that "@" means the "src" folder okay
       "@": path.resolve(__dirname, "./src"),
     },
   },
