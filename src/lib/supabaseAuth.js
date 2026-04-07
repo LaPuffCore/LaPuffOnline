@@ -20,10 +20,6 @@ export function getCurrentUser() {
   return getSession()?.user || null; 
 }
 
-/**
- * Refreshes the access token using the refresh_token.
- * This prevents the user from being logged out mid-session.
- */
 export async function refreshSession() {
   const session = getSession();
   if (!session?.refresh_token) {
@@ -57,10 +53,6 @@ export async function refreshSession() {
   }
 }
 
-/**
- * Gets a valid session. If the token is expired or expiring in < 5 mins, 
- * it triggers a refresh automatically.
- */
 export async function getValidSession() {
   const session = getSession();
   if (!session) return null;
@@ -99,7 +91,7 @@ export async function signUp(email, password, username, bio, home_zip) {
   const userId = authData.user?.id;
 
   if (accessToken && userId) {
-    const profileRes = await fetch(`${SUPABASE_URL}/rest/v1/profiles`, {
+    await fetch(`${SUPABASE_URL}/rest/v1/profiles`, {
       method: 'POST',
       headers: {
         'apikey': SUPABASE_KEY,
@@ -117,18 +109,16 @@ export async function signUp(email, password, username, bio, home_zip) {
       }),
     });
     
-    saveSession({ 
+    const session = { 
       user: { ...authData.user, username }, 
       access_token: accessToken,
       refresh_token: authData.refresh_token,
       expires_at: Math.floor(Date.now() / 1000) + authData.expires_in
-    });
+    };
+    saveSession(session);
     return { user: authData.user, username };
   }
 
-  localStorage.setItem('lapuff_pending_profile', JSON.stringify({
-    username: username.trim(), bio: bio || '', home_zip: home_zip || '10001',
-  }));
   return { pending: true };
 }
 
@@ -140,54 +130,22 @@ export async function signIn(email, password) {
   });
   const data = await res.json();
 
-  if (data.error) {
-    const msg = data.error?.message || '';
-    if (msg.toLowerCase().includes('email not confirmed')) {
-      throw new Error('Please confirm your email before logging in.');
-    }
-    throw new Error(msg || 'Sign in failed');
-  }
+  if (data.error) throw new Error(data.error.message || 'Sign in failed');
 
   let username = email.split('@')[0];
-  try {
-    const pRes = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${data.user.id}&select=username`, {
-      headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${data.access_token}` },
-    });
-    const profiles = await pRes.json();
-    if (profiles?.[0]?.username) {
-      username = profiles[0].username;
-    } else {
-      const pending = JSON.parse(localStorage.getItem('lapuff_pending_profile') || '{}');
-      if (pending.username) {
-        await fetch(`${SUPABASE_URL}/rest/v1/profiles`, {
-          method: 'POST',
-          headers: {
-            'apikey': SUPABASE_KEY,
-            'Authorization': `Bearer ${data.access_token}`,
-            'Content-Type': 'application/json',
-            'Prefer': 'return=minimal',
-          },
-          body: JSON.stringify({
-            id: data.user.id,
-            username: pending.username,
-            bio: pending.bio || '',
-            home_zip: pending.home_zip || '10001',
-            clout_points: 0,
-            updated_at: new Date().toISOString(),
-          }),
-        });
-        username = pending.username;
-        localStorage.removeItem('lapuff_pending_profile');
-      }
-    }
-  } catch {}
+  const pRes = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${data.user.id}&select=username`, {
+    headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${data.access_token}` },
+  });
+  const profiles = await pRes.json();
+  if (profiles?.[0]?.username) username = profiles[0].username;
 
-  saveSession({ 
+  const session = { 
     user: { ...data.user, username }, 
     access_token: data.access_token,
     refresh_token: data.refresh_token,
     expires_at: Math.floor(Date.now() / 1000) + data.expires_in
-  });
+  };
+  saveSession(session);
   return { user: data.user, username };
 }
 
@@ -200,29 +158,15 @@ export async function signOut() {
     }).catch(() => {});
   }
   clearSession();
+  window.location.reload(); // Force context update
 }
 
-// --- Clout / Points ---
-
-export async function addClout(amount) {
-  const session = await getValidSession(); // Automatically refreshes if needed
-  if (!session?.access_token) throw new Error('Log in to earn clout!');
-  
-  const userId = session.user.id;
-  const pRes = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${userId}&select=clout_points`, {
-    headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${session.access_token}` },
-  });
-  const profiles = await pRes.json();
-  const current = profiles?.[0]?.clout_points || 0;
-  
-  await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${userId}`, {
-    method: 'PATCH',
-    headers: {
-      'apikey': SUPABASE_KEY,
-      'Authorization': `Bearer ${session.access_token}`,
-      'Content-Type': 'application/json',
-      'Prefer': 'return=minimal',
-    },
-    body: JSON.stringify({ clout_points: current + amount, updated_at: new Date().toISOString() }),
-  });
-}
+// THIS IS THE EXPORT VITE WAS LOOKING FOR
+export const supabase = {
+  auth: {
+    getSession: async () => ({ data: { session: getSession() } }),
+    signIn,
+    signOut,
+    signUp
+  }
+};

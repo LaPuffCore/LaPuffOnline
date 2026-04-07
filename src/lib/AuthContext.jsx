@@ -1,7 +1,6 @@
 import { createContext, useContext, useState, useEffect } from 'react';
-import { supabase } from './supabaseAuth'; // Using your existing supabaseAuth.js
+import { getSession, signOut, signIn, signUp } from './supabaseAuth';
 
-// 1. Initialize the Context
 const AuthContext = createContext();
 
 export const AuthProvider = ({ children }) => {
@@ -9,36 +8,28 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Initial check
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
-      setLoading(false);
-    });
-
-    // Listen for login/logout events
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-      setLoading(false);
-    });
-
-    return () => subscription.unsubscribe();
+    // Initial check on load
+    const session = getSession();
+    if (session) {
+      setUser(session.user);
+    }
+    setLoading(false);
   }, []);
 
-  const loginWithGoogle = () => supabase.auth.signInWithOAuth({ provider: 'google' });
-  const logout = () => supabase.auth.signOut();
+  const logout = async () => {
+    await signOut();
+    setUser(null);
+  };
 
   return (
-    <AuthContext.Provider value={{ user, loading, loginWithGoogle, logout }}>
+    <AuthContext.Provider value={{ user, loading, signIn, signUp, logout }}>
       {!loading && children}
     </AuthContext.Provider>
   );
 };
 
-// 2. EXPORT THE HOOK (The fix for your build error)
 export const useAuth = () => {
   const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
+  if (!context) throw new Error('useAuth must be used within an AuthProvider');
   return context;
 };
