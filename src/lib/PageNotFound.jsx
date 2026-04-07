@@ -1,10 +1,11 @@
 import { useLocation, useNavigate } from 'react-router-dom';
-import { useAuth } from '@/context/AuthContext'; // Using your new clean Auth
+// Fixed path: AuthContext is in the same folder (src/lib)
+import { useAuth } from './AuthContext'; 
 
 export default function PageNotFound() {
     const location = useLocation();
     const navigate = useNavigate();
-    const { user } = useAuth(); // Check your own Supabase user if needed
+    const { user } = useAuth(); 
     const pageName = location.pathname.substring(1);
 
     return (
@@ -21,12 +22,12 @@ export default function PageNotFound() {
                             Page Not Found
                         </h2>
                         <p className="text-slate-600 leading-relaxed">
-                            The page <span className="font-medium text-slate-700">"{pageName}"</span> does not exist.
+                            The page <span className="font-medium text-slate-700">"{pageName || 'this path'}"</span> does not exist.
                         </p>
                     </div>
 
-                    {/* Optional: Only show for you during development */}
-                    {user?.email === 'your-email@example.com' && (
+                    {/* Developer context for your NYC creative/tech workspace */}
+                    {user && (
                         <div className="mt-8 p-4 bg-amber-50 rounded-lg border border-amber-100 text-left">
                             <p className="text-sm font-medium text-amber-800">Dev Note</p>
                             <p className="text-sm text-amber-700">
@@ -38,7 +39,7 @@ export default function PageNotFound() {
                     <div className="pt-6">
                         <button 
                             onClick={() => navigate('/')} 
-                            className="inline-flex items-center px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
+                            className="inline-flex items-center px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors shadow-sm"
                         >
                             Go Home
                         </button>
