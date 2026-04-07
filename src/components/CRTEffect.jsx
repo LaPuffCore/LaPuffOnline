@@ -41,16 +41,16 @@ export default function CRTEffect({ active = true }) {
   return (
     <div className="absolute inset-0 pointer-events-none overflow-hidden" style={{ zIndex: 20 }}>
       
-      {/* STARK WHITE STATIC LAYER 
-          - opacity-[0.4] makes it very visible
-          - contrast(300%) forces the noise to be pure black/white
-          - mix-blend-mode: screen hides the black and keeps the white "snow"
+      {/* TUNED WHITE STATIC LAYER 
+          - opacity-[0.2] is the 50% reduction from the previous "overpowering" version
+          - filter contrast adjusted to 200% for a cleaner look
+          - mix-blend-mode: screen ensures only the white noise specs are visible over the red
       */}
       <div 
-        className="absolute inset-0 opacity-[0.4]" 
+        className="absolute inset-0 opacity-[0.2]" 
         style={{
           backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E")`,
-          filter: 'contrast(300%) brightness(150%)',
+          filter: 'contrast(200%) brightness(130%)',
           mixBlendMode: 'screen',
           animation: 'vhs-flicker 0.08s steps(2) infinite',
           backgroundSize: '150px 150px'
