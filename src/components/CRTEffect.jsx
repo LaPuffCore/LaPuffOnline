@@ -21,7 +21,30 @@ export default function CRTEffect({ active = true }) {
   return (
     <div className="absolute inset-0 pointer-events-none overflow-hidden" style={{ zIndex: 20 }}>
       
-      {/* 1. NOISE SIMMER (Grain) */}
+      {/* THE LENS DISTORTION ENGINE 
+          This replicates the 'Lens Distortion' and 'Curvature' settings 
+          seen in professional video software.
+      */}
+      <svg className="absolute w-0 h-0">
+        <defs>
+          <filter id="crt-lens-warp" x="-20%" y="-20%" width="140%" height="140%">
+            {/* Creates a displacement map based on a spherical gradient */}
+            <feImage 
+              href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='100'%3E%3Cdefs%3E%3CradialGradient id='g'%3E%3Cstop offset='0%25' stop-color='%23808080'/%3E%3Cstop offset='100%25' stop-color='%23000000'/%3E%3C/radialGradient%3E%3C/defs%3E%3Crect width='100' height='100' fill='url(%23g)'/%3E%3C/svg%3E" 
+              result="warpMap" 
+            />
+            <feDisplacementMap 
+              in="SourceGraphic" 
+              in2="warpMap" 
+              scale="50" 
+              xChannelSelector="R" 
+              yChannelSelector="G" 
+            />
+          </filter>
+        </defs>
+      </svg>
+
+      {/* 1. NOISE SIMMER (The "Grain") */}
       <div 
         className="absolute inset-0 opacity-[0.07]" 
         style={{
@@ -32,42 +55,41 @@ export default function CRTEffect({ active = true }) {
         }} 
       />
 
-      {/* 2. THE UNIFIED SPHERICAL LATTICE 
-          Both Horizontal and Vertical are exactly the same size and intensity.
-          The 'perspective' and 'rotateX' stack forces the grid to bulge at the viewer.
+      {/* 2. THE WARPED LATTICE MESH
+          This container is processed by the SVG warp filter.
+          The lines are set to your 'best version' specs for visibility.
       */}
-      <div className="absolute inset-[-10%] opacity-[0.18]" style={{
-        backgroundImage: `
-          linear-gradient(90deg, rgba(255,255,255,0.22) 1px, transparent 1px, rgba(0,0,0,0.5) 2px, transparent 2px),
-          linear-gradient(0deg, rgba(255,255,255,0.22) 1px, transparent 1px, rgba(0,0,0,0.5) 2px, transparent 2px)
-        `,
-        backgroundSize: '32px 32px',
-        // Creating the physical bulge through 3D distortion
-        transform: 'perspective(1000px) rotateX(4deg) rotateY(-1deg) scale(1.15)',
-        maskImage: 'radial-gradient(circle at center, black 20%, rgba(0,0,0,0.8) 60%, transparent 95%)',
-        WebkitMaskImage: 'radial-gradient(circle at center, black 20%, rgba(0,0,0,0.8) 60%, transparent 95%)',
-      }} />
+      <div className="absolute inset-0" style={{ filter: 'url(#crt-lens-warp)' }}>
+        <div className="absolute inset-[-10%] opacity-[0.15]" style={{
+          backgroundImage: `
+            linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px, rgba(0,0,0,0.4) 2px, transparent 2px),
+            linear-gradient(0deg, #000 0px, #000 2px, transparent 2px, transparent 4px)
+          `,
+          backgroundSize: '32px 100%, 100% 4px',
+          transform: 'scale(1.1)', // Prevents the warp from pulling the edges in
+        }} />
+      </div>
 
-      {/* 3. CHROMA FRINGE 
-          Fixed to viewport to maintain the lens feel as you move the map.
+      {/* 3. CHROMA FRINGE (Lens Prism FX)
+          Matches the 'Horizontal/Vertical Prism FX' seen in software.
       */}
       <div className="absolute inset-0" style={{
-        background: 'linear-gradient(90deg, rgba(255,0,0,0.06) 0%, transparent 15%, transparent 85%, rgba(0,255,255,0.06) 100%)',
+        background: 'linear-gradient(90deg, rgba(255,0,0,0.05) 0%, transparent 15%, transparent 85%, rgba(0,255,255,0.05) 100%)',
       }} />
 
-      {/* 4. THE MOVING SCANLINE (Data Wash) */}
+      {/* 4. DATA WASH LINE */}
       <div
         ref={washRef}
         className="absolute left-0 right-0 z-10"
         style={{
           height: '10%',
-          background: 'linear-gradient(180deg, transparent 0%, rgba(255,255,255,0.04) 50%, transparent 100%)',
+          background: 'linear-gradient(180deg, transparent 0%, rgba(255,255,255,0.03) 50%, transparent 100%)',
         }}
       />
 
-      {/* Heavy Physical Vignette */}
+      {/* Heavy Vignette to define the tube edges */}
       <div className="absolute inset-0" style={{
-        background: 'radial-gradient(circle at center, transparent 30%, rgba(0,0,0,0.4) 75%, rgba(0,0,0,0.8) 100%)',
+        background: 'radial-gradient(circle, transparent 35%, rgba(0,0,0,0.5) 100%)',
       }} />
 
       <style jsx>{`
