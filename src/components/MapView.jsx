@@ -8,7 +8,7 @@ import CRTEffect from './CRTEffect';
 import { getZipColonists } from '../lib/pointsSystem';
 import { pingNYCLocation, getLastLocation } from '../lib/locationService';
 
-const GEOJSON_URL = '/data/MODZCTA_2010_WGS1984.geo.json';
+const GEOJSON_URL = './data/MODZCTA_2010_WGS1984.geo.json';
 
 const TIMESPAN_STEPS = [
   { label: '1d', days: 1 }, { label: '7d', days: 7 }, { label: '30d', days: 30 },
