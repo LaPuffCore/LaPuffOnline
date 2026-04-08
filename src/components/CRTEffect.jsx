@@ -24,13 +24,13 @@ export default function CRTEffect({ active = true, limitMobile = false }) {
   if (!active) return null;
 
   return (
-    /* FIX 1: Z-POSITION
-      Changed from 'fixed z-9999' to 'absolute z-1'.
-      This places it behind the map container (z-2) but above the background.
-    */
-    <div className="absolute inset-0 pointer-events-none overflow-hidden" style={{ zIndex: 1 }}>
+    /* PLACEMENT: zIndex 1 sits behind MapView's zIndex 2 map container */
+    <div 
+      className="absolute inset-0 pointer-events-none overflow-hidden" 
+      style={{ zIndex: 1 }}
+    >
       
-      {/* 1. CALMED NOISE GRAIN */}
+      {/* 1. NOISE GRAIN */}
       <div 
         className="absolute inset-0 opacity-[0.04]" 
         style={{
@@ -41,7 +41,7 @@ export default function CRTEffect({ active = true, limitMobile = false }) {
         }} 
       />
 
-      {/* 2. BALANCED LATTICE MESH */}
+      {/* 2. LATTICE MESH (Shadow Mask) */}
       <div className="absolute inset-0 opacity-[0.12]">
         <div className="absolute inset-0" style={{
           backgroundImage: `
@@ -67,10 +67,7 @@ export default function CRTEffect({ active = true, limitMobile = false }) {
         }}
       />
 
-      {/* FIX 2: VIGNETTE ISSUE
-         Added transition and opacity check for limitMobile.
-         On mobile, the vignette drops to 35% opacity to avoid blocking UI.
-      */}
+      {/* 5. VIGNETTE FIX (Mobile aware) */}
       <div 
         className="absolute inset-0 transition-opacity duration-500" 
         style={{
