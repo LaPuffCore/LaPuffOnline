@@ -16,7 +16,6 @@ const TIMESPAN_STEPS = [
   { label: '3mo', days: 90 }, { label: '6mo', days: 180 },
 ];
 
-// Fill colors slightly muted so the bright neon outline always reads brighter
 const HEAT_COLORS = {
   cold:   '#00ccdd',
   cool:   '#00dd66',
@@ -25,11 +24,9 @@ const HEAT_COLORS = {
   hot:    '#cc0d00',
 };
 
-// Full-saturation neon for outlines — always visually dominant over fills
 const OUTLINE_COLOR = '#ff2200';
 const OUTLINE_GLOW  = '#ff0000';
 
-// Tonal shades per tier (legacy, kept for compatibility)
 const HEAT_TONES = {
   cold:   ['#003344', '#006688', '#00ccdd'],
   cool:   ['#003311', '#007733', '#00dd66'],
@@ -38,8 +35,7 @@ const HEAT_TONES = {
   hot:    ['#440400', '#880800', '#cc0d00'],
 };
 
-// FIX REAL3D: 5 wide-range shades per heatmap tier for building cluster coloring.
-// Neighbors get different shades (via featureId % 5). Range is light→dark for differentiation.
+// FIX 1 & 2: Building shade arrays and outline tone arrays for clear rendering
 const HEAT_BUILDING_TONES = {
   cold:   ['#001824', '#003d5c', '#007a8c', '#00b8c8', '#a0eeff'],
   cool:   ['#001408', '#003d1c', '#007a38', '#00b854', '#a0ffb8'],
@@ -47,6 +43,17 @@ const HEAT_BUILDING_TONES = {
   orange: ['#1a0500', '#4d1200', '#8c3300', '#c86000', '#ff9040'],
   hot:    ['#1a0000', '#4d0000', '#8c0000', '#c80000', '#ff4040'],
 };
+
+const HEAT_OUTLINE_TONES = {
+  cold:   '#008899',
+  cool:   '#009944',
+  warm:   '#b89000',
+  orange: '#b84d00',
+  hot:    '#990000',
+};
+
+const STANDARD_BUILDING_TONES = ['#280606', '#3d0a0a', '#1f0505', '#4f0d0d', '#140303'];
+const STANDARD_OUTLINE_TONE = '#ff2200';
 
 function tierColor(tier) {
   if (tier >= 4) return HEAT_COLORS.hot;
@@ -289,12 +296,9 @@ function normalizeFeatureGeometry(feature) {
   return null;
 }
 
-// FIX 3D PIXELIZATION: More aggressive width scaling so outlines remain visible
-// when zoomed out. The extra width creates natural overlap-bleed at low zoom.
 function getZoomAwareOutlineWidth(map, baseMeters = 14) {
   if (!map || typeof map.getZoom !== 'function') return baseMeters;
   const zoom = map.getZoom();
-  // Slightly more aggressive ramp — each zoom step below 13 adds 4.5m of ring width
   const extra = Math.max(0, 13 - zoom) * 4.5;
   return baseMeters + extra;
 }
@@ -398,7 +402,6 @@ function satelliteMapStyle() {
   return { version: 8, sources: { sat: { type: 'raster', tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'], tileSize: 256, maxzoom: 19 } }, layers: [{ id: 'sat', type: 'raster', source: 'sat' }] };
 }
 
-// FIX REAL3D: Point-in-polygon (ray casting) for building→zip spatial assignment
 function pointInRing(px, py, ring) {
   let inside = false;
   for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
@@ -411,7 +414,6 @@ function pointInRing(px, py, ring) {
   return inside;
 }
 
-// Centroid of first ring (fast approximation for placement)
 function getGeomCentroid(geometry) {
   const ring = geometry.type === 'MultiPolygon'
     ? geometry.coordinates[0][0]
@@ -422,7 +424,6 @@ function getGeomCentroid(geometry) {
   return [sx / ring.length, sy / ring.length];
 }
 
-// Find which zcta tier a point falls in (returns 0 if not found / special)
 function findTierForPoint([px, py], features, tiers) {
   for (let i = 0; i < features.length; i++) {
     if (features[i].properties._special) continue;
@@ -432,13 +433,12 @@ function findTierForPoint([px, py], features, tiers) {
       if (pointInRing(px, py, poly[0])) return Math.max(0, tiers[i]);
     }
   }
-  return 0;
+  return -1; // -1 denotes outside NYC mapped zones
 }
 
 const MEDALS = ['🥇', '🥈', '🥉'];
 const PAGE_SIZE = 6;
 
-// ── Paginated list section ─────────────────────────────────────────────
 function PaginatedSection({ items, renderItem, emptyMsg, headerLabel, headerColor = 'text-white/30' }) {
   const [page, setPage] = useState(0);
   const totalPages = Math.ceil(items.length / PAGE_SIZE);
@@ -463,7 +463,6 @@ function PaginatedSection({ items, renderItem, emptyMsg, headerLabel, headerColo
   );
 }
 
-// ── ZipHologram desktop ───────────────────────────────────────────────────────
 function ZipHologram({ feature, color, onClose }) {
   const canvasRef = useRef(null);
   const animRef   = useRef(null);
@@ -533,7 +532,6 @@ function ZipHologram({ feature, color, onClose }) {
   );
 }
 
-// ── ZipHologramMobile — constrained to top 50% of MapView container ─────
 function ZipHologramMobile({ feature, color, onClose }) {
   const canvasRef = useRef(null);
   const animRef   = useRef(null);
@@ -592,25 +590,21 @@ function ZipHologramMobile({ feature, color, onClose }) {
   );
 }
 
-// ── Main component ────────────────────────────────────────────────────────────
-export default function MapView({ events }) {
-  const containerRef    = useRef(null);
-  const mapContainerRef = useRef(null);
+export default function MapView({ events = [] }) {
+  const mapContainer    = useRef(null);
   const mapRef          = useRef(null);
   const hoveredIdRef    = useRef(null);
   const locationMarkerRef = useRef(null);
+  
   const heatmapRef      = useRef(false);
   const threeDRef       = useRef(false);
-  const tiersRef        = useRef([]);
-  const geoDataRef      = useRef(null);
-  const layerHandlersRef = useRef({ handleZctaHover: null, handleZctaLeave: null, handleZctaClick: null });
-  // FIX ADDITIVE STATE: refs for satellite and real3D for use in async callbacks
   const real3DRef       = useRef(false);
   const satelliteRef    = useRef(false);
-  // FIX REAL3D: store computed withHeat GeoJSON for zoom-based outline re-generation
+  const geoDataRef      = useRef(null);
+  const tiersRef        = useRef([]);
   const withHeatRef     = useRef(null);
-  // FIX REAL3D: cleanup handle for building tier assignment event listeners
   const buildingAssignCleanupRef = useRef(null);
+  const layerHandlersRef = useRef({ handleZctaHover: null, handleZctaLeave: null, handleZctaClick: null });
 
   const [timespanIdx,   setTimespanIdx]   = useState(4);
   const [heatmap,       setHeatmap]       = useState(false);
@@ -629,14 +623,12 @@ export default function MapView({ events }) {
   const [sideEvents,    setSideEvents]    = useState([]);
   const [sideColonists, setSideColonists] = useState([]);
   const [selectedEvent, setSelectedEvent] = useState(null);
-  const [userLocation,  setUserLocation]  = useState(getLastLocation());
+  const [userLocation,  setUserLocation]  = useState(null);
   const [notInNYC,      setNotInNYC]      = useState(false);
   const [locLoading,    setLocLoading]    = useState(false);
   const [holoFeature,   setHoloFeature]   = useState(null);
   const [holoColor,     setHoloColor]     = useState(HEAT_COLORS.cold);
   const [isMobile,      setIsMobile]      = useState(false);
-  // FIX ADDITIVE STATE: bump this after style swap so the main heatmap effect
-  // re-runs and re-applies all paint properties to the freshly added layers.
   const [styleVersion,  setStyleVersion]  = useState(0);
 
   heatmapRef.current   = heatmap;
@@ -649,10 +641,10 @@ export default function MapView({ events }) {
     const check = () => setIsMobile(window.innerWidth < 768);
     check();
     window.addEventListener('resize', check);
+    getLastLocation().then(loc => loc && setUserLocation(loc));
     return () => window.removeEventListener('resize', check);
   }, []);
 
-  // GeoJSON
   useEffect(() => {
     fetch(GEOJSON_URL).then(r => r.json()).then(data => {
       const features = data.features.map((f, i) => {
@@ -665,17 +657,16 @@ export default function MapView({ events }) {
     });
   }, []);
 
-  // Map init — make canvas background transparent so CRT can show on edges
   useEffect(() => {
-    if (!mapContainerRef.current || mapRef.current) return;
+    if (!mapContainer.current || mapRef.current) return;
     const map = new maplibregl.Map({
-      container: mapContainerRef.current,
+      container: mapContainer.current,
       style: darkMapStyle(),
-      center: [-73.94, 40.71],
-      zoom: 10.5,
-      minZoom: 9,
-      maxZoom: 16,
-      maxBounds: [[-75.5, 40.0], [-72.5, 41.5]],
+      center: [-73.96, 40.73],
+      zoom: isMobile ? 10 : 11,
+      pitch: 0,
+      antialias: true,
+      maxBounds: [[-74.4, 40.4], [-73.6, 41.0]],
       attributionControl: false,
     });
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
@@ -685,14 +676,12 @@ export default function MapView({ events }) {
       setMapReady(true);
     });
     return () => { map.remove(); mapRef.current = null; };
-  }, []);
+  }, [isMobile]);
 
-  // ── Layer setup ────────────────────────────────────────────────────────────
   function addLayers(map, data, sat) {
     if (!map || !data || map.getSource('zcta')) return;
     map.addSource('zcta', { type: 'geojson', data, generateId: false });
 
-    // Extrusion base — fully opaque, blocks everything below
     map.addLayer({
       id: 'zcta-extrude', type: 'fill-extrusion', source: 'zcta',
       paint: {
@@ -703,7 +692,6 @@ export default function MapView({ events }) {
       },
     });
 
-    // Flat fill — slightly transparent dark red to differentiate regions from bg without solid fill
     map.addLayer({
       id: 'zcta-fill', type: 'fill', source: 'zcta',
       paint: {
@@ -712,20 +700,17 @@ export default function MapView({ events }) {
       },
     });
 
-    // Hover — electric purple
     map.addLayer({
       id: 'zcta-hover', type: 'fill', source: 'zcta',
       paint: { 'fill-color': '#7C3AED', 'fill-opacity': ['case', ['boolean', ['feature-state', 'hovered'], false], 0.5, 0] },
     });
 
-    // Safe zone outline — toggled off when 3D is on
     map.addLayer({
       id: 'zcta-safe-line', type: 'line', source: 'zcta',
       filter: ['==', ['get', '_special'], true],
       paint: { 'line-color': '#000000', 'line-width': 2, 'line-opacity': 1 },
     });
 
-    // Ground boundary glows (non-special)
     map.addLayer({
       id: 'zcta-line-glow2', type: 'line', source: 'zcta',
       filter: ['!=', ['get', '_special'], true],
@@ -763,7 +748,6 @@ export default function MapView({ events }) {
       },
     });
 
-    // Events — store handlers in ref for conditional management based on 3D state
     const handleZctaHover = e => {
       if (!e.features.length) return;
       const f = e.features[0];
@@ -814,11 +798,9 @@ export default function MapView({ events }) {
     addLayers(map, geoData, satellite);
   }, [mapReady, geoData]);
 
-  // Manage hover layer based on 3D state — switch from fill to extrude when 3D is on
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady || !map.getLayer('zcta-fill')) return;
-    
     const { handleZctaHover, handleZctaLeave, handleZctaClick } = layerHandlersRef.current;
     if (!handleZctaHover) return;
 
@@ -826,7 +808,6 @@ export default function MapView({ events }) {
       map.off('mousemove', 'zcta-fill', handleZctaHover);
       map.off('mouseleave', 'zcta-fill', handleZctaLeave);
       map.off('click', 'zcta-fill', handleZctaClick);
-      
       map.on('mousemove', 'zcta-extrude', handleZctaHover);
       map.on('mouseleave', 'zcta-extrude', handleZctaLeave);
       map.on('click', 'zcta-extrude', handleZctaClick);
@@ -834,16 +815,12 @@ export default function MapView({ events }) {
       map.off('mousemove', 'zcta-extrude', handleZctaHover);
       map.off('mouseleave', 'zcta-extrude', handleZctaLeave);
       map.off('click', 'zcta-extrude', handleZctaClick);
-      
       map.on('mousemove', 'zcta-fill', handleZctaHover);
       map.on('mouseleave', 'zcta-fill', handleZctaLeave);
       map.on('click', 'zcta-fill', handleZctaClick);
     }
   }, [threeD, mapReady]);
 
-  // ── Main heatmap + 3D update ──────────────────────────────────────────────
-  // FIX ADDITIVE STATE: added `styleVersion` and `real3D` to deps so this re-runs
-  // after satellite style swap (which increments styleVersion) and after real3D changes.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady || !geoData || !map.getLayer('zcta-fill')) return;
@@ -862,7 +839,6 @@ export default function MapView({ events }) {
       }),
     };
     if (map.getSource('zcta')) map.getSource('zcta').setData(withHeat);
-    // FIX REAL3D: store so zoom listener can regenerate outline width without full recompute
     withHeatRef.current = withHeat;
     if (map.getSource('zcta-outline')) map.getSource('zcta-outline').setData(createOutlineGeoJSON(withHeat, getZoomAwareOutlineWidth(map)));
 
@@ -871,48 +847,31 @@ export default function MapView({ events }) {
       ['step', ['get', '_tier'], HEAT_COLORS.cold, 1, HEAT_COLORS.cool, 2, HEAT_COLORS.warm, 3, HEAT_COLORS.orange, 4, HEAT_COLORS.hot],
     ];
 
-    // Wrap color expression with hover state check for 3D mode
-    const withHoverColor = (baseExpr) => {
-      return ['case', ['boolean', ['feature-state', 'hovered'], false], '#7C3AED', baseExpr];
-    };
-
-    // Height expressions — heatmap 3D
+    const withHoverColor = (baseExpr) => ['case', ['boolean', ['feature-state', 'hovered'], false], '#7C3AED', baseExpr];
     const extrudeH = ['case', ['boolean', ['get', '_special'], false], 30, ['step', ['get', '_tier'], 30, 1, 200, 2, 700, 3, 1600, 4, 2800]];
-    // Flat 3D
-    const flatH    = ['case', ['boolean', ['get', '_special'], false], 30, 400];
-
-    // FIX 3D PIXELIZATION: in 3D mode keep ground-level lines visible at low zoom
-    // so outlines remain readable when zoomed out (natural overlap-bleed approach).
-    // These fade to 0 as zoom increases so they don't interfere with the 3D view up close.
+    const flatH = ['case', ['boolean', ['get', '_special'], false], 30, 400];
     const zoomBasedLineOpacity = ['interpolate', ['linear'], ['zoom'], 9.5, 0.4, 11, 0.18, 12.5, 0];
 
     if (heatmap) {
       map.setPaintProperty('zcta-fill', 'fill-color', heatColorExpr);
-      // FIX ADDITIVE STATE: heatmap fill — 0 when 3D is on (extrusion takes over),
-      // semi-transparent when satellite on, solid otherwise.
       map.setPaintProperty('zcta-fill', 'fill-opacity', threeD ? 0 : (satellite ? 0.5 : 0.9));
 
       if (threeD) {
         map.setPaintProperty('zcta-safe-line', 'line-opacity', 0);
-
         const extrudeColorExpr = [
           'case', ['boolean', ['get', '_special'], false], '#111111',
           ['step', ['get', '_tier'], HEAT_COLORS.cold, 1, HEAT_COLORS.cool, 2, HEAT_COLORS.warm, 3, HEAT_COLORS.orange, 4, HEAT_COLORS.hot],
         ];
-        // FIX SATELLITE: 3D+heatmap extrusion stays solid (1.0) even when satellite is on
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-color', withHoverColor(extrudeColorExpr));
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-height', extrudeH);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-base', 0);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', 1.0);
-
-        // FIX 3D PIXELIZATION: hide solid lines but keep them faintly visible at low zoom
         map.setPaintProperty('zcta-line',       'line-opacity', zoomBasedLineOpacity);
         map.setPaintProperty('zcta-line-glow',  'line-opacity', zoomBasedLineOpacity);
         map.setPaintProperty('zcta-line-glow2', 'line-opacity', zoomBasedLineOpacity);
       } else {
         map.setPaintProperty('zcta-safe-line', 'line-opacity', 1);
-        map.setPaintProperty('zcta-extrude', 'fill-extrusion-color',
-          ['case', ['boolean', ['get', '_special'], false], '#222222', '#1a0505']);
+        map.setPaintProperty('zcta-extrude', 'fill-extrusion-color', ['case', ['boolean', ['get', '_special'], false], '#222222', '#1a0505']);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-height', 0);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', 0);
         map.setPaintProperty('zcta-line',      'line-opacity', 1);
@@ -920,29 +879,22 @@ export default function MapView({ events }) {
         map.setPaintProperty('zcta-line-glow2','line-opacity', satellite ? 0.25 : 0.35);
       }
     } else {
-      // No heatmap — use dark red theme
       map.setPaintProperty('zcta-fill', 'fill-color', ['case', ['boolean', ['get', '_special'], false], '#ffffff', '#1a0505']);
-      // FIX ADDITIVE STATE / 3D ARTIFACTING: zero opacity in 3D so the flat fill
-      // doesn't appear as stray 2D surfaces beneath or through extrusions.
       map.setPaintProperty('zcta-fill', 'fill-opacity', threeD ? 0 : (satellite ? 0.38 : 0.55));
 
       if (threeD) {
         map.setPaintProperty('zcta-safe-line', 'line-opacity', 0);
-        // FIX SATELLITE: 3D no-heatmap extrusion is semi-transparent when satellite is on
         const flatColorExpr = ['case', ['boolean', ['get', '_special'], false], '#111111', '#3a0505'];
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-color', withHoverColor(flatColorExpr));
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-height', flatH);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-base', 0);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', satellite ? 0.9 : 1.0);
-
-        // FIX 3D PIXELIZATION: same zoom-based ground line fade
         map.setPaintProperty('zcta-line',       'line-opacity', zoomBasedLineOpacity);
         map.setPaintProperty('zcta-line-glow',  'line-opacity', zoomBasedLineOpacity);
         map.setPaintProperty('zcta-line-glow2', 'line-opacity', zoomBasedLineOpacity);
       } else {
         map.setPaintProperty('zcta-safe-line', 'line-opacity', 1);
-        map.setPaintProperty('zcta-extrude', 'fill-extrusion-color', 
-          ['case', ['boolean', ['get', '_special'], false], '#222222', '#1a0505']);
+        map.setPaintProperty('zcta-extrude', 'fill-extrusion-color', ['case', ['boolean', ['get', '_special'], false], '#222222', '#1a0505']);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-height', 0);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', 0);
         map.setPaintProperty('zcta-line',      'line-opacity', 1);
@@ -951,7 +903,6 @@ export default function MapView({ events }) {
       }
     }
 
-    // Hover fill: only in 2D modes (3D hover is handled via extrusion color)
     map.setPaintProperty('zcta-hover', 'fill-opacity', threeD ? 0 : ['case', ['boolean', ['feature-state', 'hovered'], false], 0.5, 0]);
 
     if (map.getSource('zcta-outline')) {
@@ -968,15 +919,12 @@ export default function MapView({ events }) {
     }
   }, [heatmap, threeD, real3D, timespanIdx, events, geoData, mapReady, satellite, adjacency, styleVersion]);
 
-  // 3D pitch
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
     map.easeTo({ pitch: threeD ? 48 : 0, bearing: threeD ? -17 : 0, duration: 700 });
   }, [threeD, mapReady]);
 
-  // FIX 3D PIXELIZATION: re-generate outline ring width on zoom so it stays visible.
-  // Uses withHeatRef so it doesn't need to recompute tiers/zip data.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
@@ -990,10 +938,6 @@ export default function MapView({ events }) {
     return () => map.off('zoom', onZoom);
   }, [mapReady]);
 
-  // FIX ADDITIVE STATE: Satellite is additive — does NOT touch heatmap/3D/real3D state.
-  // After style swap, re-adds zcta layers and real3D layers if active.
-  // styleVersion increment triggers the main heatmap effect to re-apply all paint
-  // properties to the freshly created layers, restoring all active combos.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
@@ -1003,111 +947,166 @@ export default function MapView({ events }) {
       if (!currentGeoData || map.getSource('zcta')) return;
       addLayers(map, currentGeoData, satelliteRef.current);
       if (real3DRef.current) applyReal3DLayers(map, heatmapRef.current);
-      // This triggers the main heatmap+3D useEffect to re-run and restore all styles
       setStyleVersion(v => v + 1);
     });
   }, [satellite]);
 
-  // FIX REAL3D: Building color expression using feature-state (tier+shadeIdx) for
-  // heatmap mode, or deterministic ID-based red shades for non-heatmap mode.
-  // In heatmap mode: tier comes from spatial assignment (zip region lookup),
-  // shadeIdx = featureId % 5 for cluster differentiation.
+  // FIX 1 & 2: Building colors using ID clustering and fast defaults to prevent light blue flicker
   function buildingColorExprByState(isHeatmap) {
+    const buildingIdx = ['%', ['to-number', ['id'], 0], 5];
+    const getShade = (tones) => ['at', buildingIdx, ['literal', tones]];
+
     if (!isHeatmap) {
-      // 5 distinct dark-red shades so neighboring buildings are visually different
-      return ['case',
-        ['==', ['%', ['to-number', ['id'], 0], 5], 0], '#0d0202',
-        ['==', ['%', ['to-number', ['id'], 0], 5], 1], '#280606',
-        ['==', ['%', ['to-number', ['id'], 0], 5], 2], '#0a0101',
-        ['==', ['%', ['to-number', ['id'], 0], 5], 3], '#3d0a0a',
-        '#1f0505',
+      return [
+        'case',
+        ['==', ['feature-state', 'tier'], -1], 'rgba(0,0,0,0)', // Hides buildings outside NYC (NJ)
+        ['==', ['typeof', ['feature-state', 'tier']], 'null'], '#1a0505', // Instant load color before spatial join
+        getShade(STANDARD_BUILDING_TONES) // Default Standard Red shades
       ];
     }
 
-    // Heatmap: nested case — outer=tier from feature-state, inner=shade index from feature-state
-    const shades = (tones) => ['case',
-      ['==', ['feature-state', 'shadeIdx'], 0], tones[0],
-      ['==', ['feature-state', 'shadeIdx'], 1], tones[1],
-      ['==', ['feature-state', 'shadeIdx'], 2], tones[2],
-      ['==', ['feature-state', 'shadeIdx'], 3], tones[3],
-      tones[4],
-    ];
-
-    return ['case',
-      ['==', ['feature-state', 'tier'], 4], shades(HEAT_BUILDING_TONES.hot),
-      ['==', ['feature-state', 'tier'], 3], shades(HEAT_BUILDING_TONES.orange),
-      ['==', ['feature-state', 'tier'], 2], shades(HEAT_BUILDING_TONES.warm),
-      ['==', ['feature-state', 'tier'], 1], shades(HEAT_BUILDING_TONES.cool),
-      shades(HEAT_BUILDING_TONES.cold),
+    return [
+      'case',
+      ['==', ['feature-state', 'tier'], -1], 'rgba(0,0,0,0)', // Hides outside NYC
+      ['==', ['typeof', ['feature-state', 'tier']], 'null'], '#1a0505', // Instant load color before spatial join
+      ['match', ['feature-state', 'tier'],
+        4, getShade(HEAT_BUILDING_TONES.hot),
+        3, getShade(HEAT_BUILDING_TONES.orange),
+        2, getShade(HEAT_BUILDING_TONES.warm),
+        1, getShade(HEAT_BUILDING_TONES.cool),
+        0, getShade(HEAT_BUILDING_TONES.cold),
+        '#1a0505'
+      ]
     ];
   }
 
-  // FIX REAL3D: Spatial assignment — queries rendered buildings, does point-in-polygon
-  // against zcta features to get the region tier, then sets feature-state on each building.
-  // shadeIdx = featureId % 5 ensures neighboring buildings (different OSM IDs) get
-  // different shades of the same hue for visibility without needing outlines.
+  function outlineColorExprByState(isHeatmap) {
+    if (!isHeatmap) {
+      return [
+        'case',
+        ['==', ['feature-state', 'tier'], -1], 'rgba(0,0,0,0)',
+        ['==', ['typeof', ['feature-state', 'tier']], 'null'], 'rgba(0,0,0,0)',
+        STANDARD_OUTLINE_TONE
+      ];
+    }
+    return [
+      'case',
+      ['==', ['feature-state', 'tier'], -1], 'rgba(0,0,0,0)',
+      ['==', ['typeof', ['feature-state', 'tier']], 'null'], 'rgba(0,0,0,0)',
+      ['match', ['feature-state', 'tier'],
+        4, HEAT_OUTLINE_TONES.hot,
+        3, HEAT_OUTLINE_TONES.orange,
+        2, HEAT_OUTLINE_TONES.warm,
+        1, HEAT_OUTLINE_TONES.cool,
+        0, HEAT_OUTLINE_TONES.cold,
+        'rgba(0,0,0,0)'
+      ]
+    ];
+  }
+
+  // Optimized spatial check
   function assignBuildingTiersToMap(map) {
-    if (!map || !map.getLayer('real3d-buildings')) return;
+    if (!map) return;
+    const layersToQuery = [];
+    if (map.getLayer('real3d-3d')) layersToQuery.push('real3d-3d');
+    if (map.getLayer('real3d-baseplates')) layersToQuery.push('real3d-baseplates');
+    if (layersToQuery.length === 0) return;
+
     const features = geoDataRef.current?.features;
     const tiers = tiersRef.current;
     if (!features || !tiers.length) return;
+
     try {
-      const buildings = map.queryRenderedFeatures(undefined, { layers: ['real3d-buildings'] });
+      const buildings = map.queryRenderedFeatures(undefined, { layers: layersToQuery });
       buildings.forEach(b => {
         if (b.id == null) return;
+        // Skip expensive point-in-ring if already assigned, except when switching modes it'll naturally retain state
+        if (b.state && b.state.tier !== undefined) return;
+
         const centroid = getGeomCentroid(b.geometry);
         const tier = findTierForPoint(centroid, features, tiers);
-        const shadeIdx = Math.abs(Number(b.id) || 0) % 5;
         map.setFeatureState(
           { source: 'openmaptiles', sourceLayer: 'building', id: b.id },
-          { tier, shadeIdx }
+          { tier }
         );
       });
     } catch (e) { /* ignore mid-render errors */ }
   }
 
   function applyReal3DLayers(map, isHeatmap) {
-    // Clean up any previous building assignment listeners
     if (buildingAssignCleanupRef.current) {
       buildingAssignCleanupRef.current();
       buildingAssignCleanupRef.current = null;
     }
 
-    ['real3d-buildings', 'real3d-buildings-outline'].forEach(id => { if (map.getLayer(id)) map.removeLayer(id); });
+    ['real3d-buildings', 'real3d-baseplates', 'real3d-outlines', 'real3d-3d'].forEach(id => { 
+      if (map.getLayer(id)) map.removeLayer(id); 
+    });
+
     if (!map.getSource('openmaptiles')) {
       try {
         map.addSource('openmaptiles', { type: 'vector', url: `https://api.maptiler.com/tiles/v3/tiles.json?key=${MAPTILER_KEY}` });
       } catch (err) { console.warn('Real3D source add failed:', err); return; }
     }
+
     try {
+      // FIX 2: Strict Zoom Filtering
+      // Baseplates and outlines show only from 14.5 to 16.2
       map.addLayer({
-        id: 'real3d-buildings', type: 'fill-extrusion', source: 'openmaptiles', 'source-layer': 'building', minzoom: 12,
+        id: 'real3d-baseplates',
+        source: 'openmaptiles', 'source-layer': 'building',
+        type: 'fill-extrusion',
+        minzoom: 14.5, maxzoom: 16.2,
         paint: {
+          'fill-extrusion-height': 0.1,
+          'fill-extrusion-base': 0,
           'fill-extrusion-color': buildingColorExprByState(isHeatmap),
-          'fill-extrusion-height': ['coalesce', ['get', 'render_height'], ['get', 'height'], 5],
-          'fill-extrusion-base':   ['coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0],
-          'fill-extrusion-opacity': 1.0,
-          'fill-extrusion-vertical-gradient': true,
-        },
+          'fill-extrusion-opacity': satelliteRef.current ? 0.8 : 1.0
+        }
       });
-      // FIX REAL3D BOTTOM OUTLINE: Do NOT add the outline layer for full 3D blocks.
-      // The outline (minzoom 14) only appears when buildings are fully 3D extruded,
-      // which is exactly when we want NO outline — cluster colors provide distinction.
-      // For baseplate phase (zoom 12-14), the footprint fill provides enough boundary.
+
+      map.addLayer({
+        id: 'real3d-outlines',
+        source: 'openmaptiles', 'source-layer': 'building',
+        type: 'line',
+        minzoom: 14.5, maxzoom: 16.2,
+        paint: {
+          'line-color': outlineColorExprByState(isHeatmap),
+          'line-width': 1.5,
+          'line-opacity': satelliteRef.current ? 0.6 : 0.9
+        }
+      });
+
+      // 3D Extrusions take over seamlessly at 16.2. 
+      // Baseplate and outlines automatically un-render. Z-fighting offset applied.
+      map.addLayer({
+        id: 'real3d-3d',
+        source: 'openmaptiles', 'source-layer': 'building',
+        type: 'fill-extrusion',
+        minzoom: 16.2,
+        paint: {
+          'fill-extrusion-height': ['coalesce', ['get', 'render_height'], ['get', 'height'], 5],
+          'fill-extrusion-base': ['+', ['coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0], 0.1],
+          'fill-extrusion-color': buildingColorExprByState(isHeatmap),
+          'fill-extrusion-opacity': satelliteRef.current ? 0.8 : 1.0
+        }
+      });
 
       map.easeTo({ pitch: 55, bearing: -17, duration: 700 });
 
-      if (isHeatmap) {
-        // Assign zip tiers to building feature-states for heatmap color inheritance
-        const assignFn = () => assignBuildingTiersToMap(map);
-        setTimeout(assignFn, 500);
-        map.on('moveend', assignFn);
-        map.on('zoomend', assignFn);
-        buildingAssignCleanupRef.current = () => {
-          map.off('moveend', assignFn);
-          map.off('zoomend', assignFn);
-        };
-      }
+      // Run spatial assignment immediately and continuously
+      const assignFn = () => assignBuildingTiersToMap(map);
+      setTimeout(assignFn, 100);
+      map.on('moveend', assignFn);
+      map.on('zoomend', assignFn);
+      map.on('idle', assignFn);
+      
+      buildingAssignCleanupRef.current = () => {
+        map.off('moveend', assignFn);
+        map.off('zoomend', assignFn);
+        map.off('idle', assignFn);
+      };
+
     } catch (err) { console.warn('Real3D layer add failed:', err); }
   }
 
@@ -1115,7 +1114,7 @@ export default function MapView({ events }) {
     const map = mapRef.current;
     if (!map || !mapReady) return;
     if (!real3D) {
-      ['real3d-buildings', 'real3d-buildings-outline'].forEach(id => { if (map.getLayer(id)) map.removeLayer(id); });
+      ['real3d-baseplates', 'real3d-outlines', 'real3d-3d'].forEach(id => { if (map.getLayer(id)) map.removeLayer(id); });
       if (buildingAssignCleanupRef.current) { buildingAssignCleanupRef.current(); buildingAssignCleanupRef.current = null; }
       if (!threeD) map.easeTo({ pitch: 0, bearing: 0, duration: 700 });
       return;
@@ -1123,29 +1122,17 @@ export default function MapView({ events }) {
     applyReal3DLayers(map, heatmapRef.current);
   }, [real3D, mapReady]);
 
-  // FIX REAL3D HEATMAP: refresh building color expression + spatial assignment when heatmap changes
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !mapReady || !real3D || !map.getLayer('real3d-buildings')) return;
-    map.setPaintProperty('real3d-buildings', 'fill-extrusion-color', buildingColorExprByState(heatmap));
-    if (heatmap) {
-      // Re-assign tiers with new heatmap state; set up move/zoom listeners
-      if (buildingAssignCleanupRef.current) { buildingAssignCleanupRef.current(); buildingAssignCleanupRef.current = null; }
-      const assignFn = () => assignBuildingTiersToMap(map);
-      setTimeout(assignFn, 300);
-      map.on('moveend', assignFn);
-      map.on('zoomend', assignFn);
-      buildingAssignCleanupRef.current = () => { map.off('moveend', assignFn); map.off('zoomend', assignFn); };
-    } else {
-      // Heatmap turned off — clear listeners, ID-based expression needs no state
-      if (buildingAssignCleanupRef.current) { buildingAssignCleanupRef.current(); buildingAssignCleanupRef.current = null; }
-    }
+    if (!map || !mapReady || !real3D) return;
+    if (map.getLayer('real3d-baseplates')) map.setPaintProperty('real3d-baseplates', 'fill-extrusion-color', buildingColorExprByState(heatmap));
+    if (map.getLayer('real3d-3d')) map.setPaintProperty('real3d-3d', 'fill-extrusion-color', buildingColorExprByState(heatmap));
+    if (map.getLayer('real3d-outlines')) map.setPaintProperty('real3d-outlines', 'line-color', outlineColorExprByState(heatmap));
   }, [heatmap, real3D, mapReady]);
 
   const handleThreeDToggle = () => { setThreeD(v => { if (!v) setReal3D(false); return !v; }); };
   const handleReal3DToggle = () => { setReal3D(v => { if (!v) setThreeD(false); return !v; }); };
 
-  // Location orb
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
@@ -1199,17 +1186,35 @@ export default function MapView({ events }) {
   const sideLabel = sideZip   === 'SAFEZONE' ? 'Safe Zone' : sideZip   ? `ZIP ${sideZip}`   : '';
 
   return (
-    // Outer div is the positioning root for everything
     <div ref={containerRef} className="absolute inset-0 overflow-hidden" style={{ background: '#0d0000' }}>
 
-      {/* FIX CRT: Wrap CRTEffect at z-index 20 so it renders ABOVE the map canvas
-          (z:2) as a visible overlay on all views and combos, while remaining below
-          popups (z:30+). pointer-events-none ensures it never blocks interaction. */}
+      {/* FIX ZOOM BTNS: CSS overrides applied directly to ensure it has breathing room and is clickable over the map */}
+      <style>{`
+        .maplibregl-ctrl-bottom-right {
+          bottom: 40px !important;
+          right: 20px !important;
+          z-index: 50 !important;
+          pointer-events: auto !important;
+        }
+        .maplibregl-ctrl-group {
+          background: rgba(0,0,0,0.85) !important;
+          border: 1px solid rgba(255,255,255,0.2) !important;
+          border-radius: 12px !important;
+          overflow: hidden !important;
+        }
+        .maplibregl-ctrl-icon {
+          filter: invert(1) brightness(0.8);
+        }
+        .maplibregl-ctrl-group button {
+          width: 34px !important;
+          height: 34px !important;
+        }
+      `}</style>
+
       <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 20 }}>
         <CRTEffect active={true} limitMobile={isMobile} />
       </div>
 
-      {/* Map canvas at z-index 2 */}
       <div
         ref={mapContainerRef}
         className="absolute inset-0 w-full h-full"
@@ -1220,7 +1225,6 @@ export default function MapView({ events }) {
 
       {entered && (
         <>
-          {/* Controls */}
           <div className="absolute top-3 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-2">
             <div className="flex items-center gap-1 bg-black/80 backdrop-blur border border-white/20 rounded-2xl px-3 py-1.5">
               <span className="text-white text-xs font-black mr-1">📅</span>
@@ -1251,9 +1255,8 @@ export default function MapView({ events }) {
             </div>
           </div>
 
-          {/* Center-to-location */}
           <button onClick={handleCenterLocation} disabled={locLoading}
-            className="absolute bottom-24 right-4 z-30 w-11 h-11 bg-black/80 border border-white/30 rounded-xl flex items-center justify-center hover:bg-[#7C3AED]/80 hover:border-[#7C3AED] transition-all shadow-lg">
+            className="absolute bottom-24 right-4 z-30 w-11 h-11 bg-black/80 border border-white/30 rounded-xl flex items-center justify-center hover:bg-[#7C3AED]/80 hover:border-[#7C3AED] transition-all shadow-lg pointer-events-auto">
             {locLoading
               ? <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
               : <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>
@@ -1270,7 +1273,6 @@ export default function MapView({ events }) {
             </div>
           )}
 
-          {/* Hover tooltip */}
           {hoveredZip && tooltipPos && (
             <div className="absolute z-30 pointer-events-none"
               style={{ left: Math.min(tooltipPos.x + 12, window.innerWidth - 220), top: Math.max(tooltipPos.y - 10, 70), width: 210 }}>
@@ -1296,7 +1298,6 @@ export default function MapView({ events }) {
             </div>
           )}
 
-          {/* ── DESKTOP side panel ── */}
           {sideZip && !isMobile && (
             <div className="absolute right-0 top-0 bottom-0 z-50 flex flex-col overflow-hidden"
               style={{ width: 400, background: 'rgba(3,0,10,0.82)', backdropFilter: 'blur(16px)', borderLeft: '1px solid rgba(180,0,0,0.3)' }}>
@@ -1372,7 +1373,6 @@ export default function MapView({ events }) {
             </div>
           )}
 
-          {/* ── MOBILE: hologram top 50%, side panel bottom 50% ── */}
           {holoFeature && isMobile && (
             <ZipHologramMobile feature={holoFeature} color={holoColor} onClose={() => setHoloFeature(null)} />
           )}
@@ -1439,7 +1439,6 @@ export default function MapView({ events }) {
             </div>
           )}
 
-          {/* Desktop hologram */}
           {holoFeature && !isMobile && (
             <ZipHologram feature={holoFeature} color={holoColor} onClose={() => setHoloFeature(null)} />
           )}
