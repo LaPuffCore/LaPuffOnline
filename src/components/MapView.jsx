@@ -207,7 +207,10 @@ function normalizeRing(ring) {
   const closed = closeRing(ring);
   const deduped = dedupeRing(closed);
   if (deduped.length < 4) return null;
-  return closeRing(simplifyRing(deduped));
+  const simplified = closeRing(simplifyRing(deduped));
+  // Enforce minimum 8 points after all normalization (prevents outline artifacts)
+  if (simplified.length < 8) return null;
+  return simplified;
 }
 
 function normalizePolygonCoords(coords) {
@@ -239,7 +242,8 @@ function normalizeFeatureGeometry(feature) {
 function getZoomAwareOutlineWidth(map, baseMeters = 18) {
   if (!map || typeof map.getZoom !== 'function') return baseMeters;
   const zoom = map.getZoom();
-  const extra = Math.max(0, 14 - zoom) * 2.5;
+  // Aggressive scaling to handle zoom-out pixelation: extra width grows exponentially as zooming out
+  const extra = Math.max(0, 14 - zoom) * 5.5;
   return baseMeters + extra;
 }
 
@@ -302,8 +306,8 @@ function offsetRing(outerRing, widthMeters) {
   const outerGeo = closeRing(outer).map(coord => metersToLngLat(coord, refLat));
   const innerGeo = closeRing(inner.reverse()).map(coord => metersToLngLat(coord, refLat));
 
-  // Ensure both rings are valid simple polygons with at least 4 points
-  if (outerGeo.length < 4 || innerGeo.length < 4) return null;
+  // Enforce minimum 8 points for both rings to prevent artifacts and degenerate geometry
+  if (outerGeo.length < 8 || innerGeo.length < 8) return null;
 
   return [outerGeo, innerGeo];
 }
@@ -759,6 +763,11 @@ export default function MapView({ events }) {
       ['step', ['get', '_tier'], HEAT_COLORS.cold, 1, HEAT_COLORS.cool, 2, HEAT_COLORS.warm, 3, HEAT_COLORS.orange, 4, HEAT_COLORS.hot],
     ];
 
+    // Helper: wrap color expression with hover state check for 3D mode
+    const withHoverColor = (baseExpr) => {
+      return ['case', ['boolean', ['feature-state', 'hovered'], false], '#7C3AED', ...baseExpr];
+    };
+
     // Height expressions — heatmap 3D
     const extrudeH = ['case', ['boolean', ['get', '_special'], false], 30, ['step', ['get', '_tier'], 30, 1, 200, 2, 700, 3, 1600, 4, 2800]];
     // Flat 3D
@@ -773,10 +782,11 @@ export default function MapView({ events }) {
         // FIX #3: safe zone outlines hidden — they'd bleed through 3D blocks
         map.setPaintProperty('zcta-safe-line', 'line-opacity', 0);
 
-        map.setPaintProperty('zcta-extrude', 'fill-extrusion-color', [
+        const extrudeColorExpr = [
           'case', ['boolean', ['get', '_special'], false], '#111111',
           ['step', ['get', '_tier'], HEAT_COLORS.cold, 1, HEAT_COLORS.cool, 2, HEAT_COLORS.warm, 3, HEAT_COLORS.orange, 4, HEAT_COLORS.hot],
-        ]);
+        ];
+        map.setPaintProperty('zcta-extrude', 'fill-extrusion-color', withHoverColor(extrudeColorExpr));
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-height', extrudeH);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-base', 0);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', 1.0);
@@ -787,6 +797,9 @@ export default function MapView({ events }) {
         map.setPaintProperty('zcta-line-glow2','line-opacity', 0);
       } else {
         map.setPaintProperty('zcta-safe-line', 'line-opacity', 1);
+        // In 2D mode, extrude is invisible, reset color to non-hover version
+        map.setPaintProperty('zcta-extrude', 'fill-extrusion-color',
+          ['case', ['boolean', ['get', '_special'], false], '#222222', '#1a0505']);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-height', 0);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', 0);
         map.setPaintProperty('zcta-line',      'line-opacity', 1);
@@ -801,8 +814,8 @@ export default function MapView({ events }) {
       if (threeD) {
         // FIX #3: safe zone outlines hidden in 3D
         map.setPaintProperty('zcta-safe-line', 'line-opacity', 0);
-        map.setPaintProperty('zcta-extrude', 'fill-extrusion-color',
-          ['case', ['boolean', ['get', '_special'], false], '#111111', '#3a0505']);
+        const flatColorExpr = ['case', ['boolean', ['get', '_special'], false], '#111111', '#3a0505'];
+        map.setPaintProperty('zcta-extrude', 'fill-extrusion-color', withHoverColor(flatColorExpr));
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-height', flatH);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-base', 0);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', satellite ? 0.9 : 1.0);
@@ -811,6 +824,9 @@ export default function MapView({ events }) {
         map.setPaintProperty('zcta-line-glow2','line-opacity', 0);
       } else {
         map.setPaintProperty('zcta-safe-line', 'line-opacity', 1);
+        // In 2D mode, extrude is invisible, reset color to non-hover version
+        map.setPaintProperty('zcta-extrude', 'fill-extrusion-color', 
+          ['case', ['boolean', ['get', '_special'], false], '#222222', '#1a0505']);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-height', 0);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', 0);
         map.setPaintProperty('zcta-line',      'line-opacity', 1);
