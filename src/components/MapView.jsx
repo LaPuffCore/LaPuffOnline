@@ -738,24 +738,14 @@ export default function MapView({ events }) {
       paint: { 'line-color': OUTLINE_COLOR, 'line-width': 0.5, 'line-opacity': 1 },
     });
 
-    map.addSource('zcta-outline', { type: 'geojson', data: { type: 'FeatureCollection', features: [] }, generateId: false });
     map.addLayer({
-      id: 'zcta-outline', type: 'fill-extrusion', source: 'zcta-outline',
+      id: 'zcta-extrude-cap', type: 'fill-extrusion', source: 'zcta',
+      filter: ['!=', ['get', '_special'], true],
       paint: {
         'fill-extrusion-color': OUTLINE_COLOR,
         'fill-extrusion-height': 0,
         'fill-extrusion-base': 0,
         'fill-extrusion-opacity': 0,
-        'fill-extrusion-vertical-gradient': false,
-      },
-    });
-    map.addLayer({
-      id: 'zcta-outline-line', type: 'line', source: 'zcta-outline',
-      paint: {
-        'line-color': OUTLINE_COLOR,
-        'line-width': 1.5,
-        'line-opacity': 0,
-        'line-blur': 0.5,
       },
     });
     map.addSource('zcta-outline-outer', { type: 'geojson', data: { type: 'FeatureCollection', features: [] }, generateId: false });
@@ -892,7 +882,6 @@ export default function MapView({ events }) {
       }),
     };
     if (map.getSource('zcta')) map.getSource('zcta').setData(withHeat);
-    if (map.getSource('zcta-outline')) map.getSource('zcta-outline').setData(createOutlineGeoJSON(withHeat, getZoomAwareOutlineWidth(map), map.getZoom()));
     if (map.getSource('zcta-outline-outer')) map.getSource('zcta-outline-outer').setData(createOutlineOuterRingGeoJSON(withHeat, getZoomAwareOutlineWidth(map), map.getZoom()));
 
     const heatColorExpr = [
@@ -978,20 +967,26 @@ export default function MapView({ events }) {
 
     map.setPaintProperty('zcta-hover', 'fill-opacity', threeD ? 0 : ['case', ['boolean', ['feature-state', 'hovered'], false], 0.5, 0]);
 
-    if (map.getSource('zcta-outline')) {
-      map.setPaintProperty('zcta-outline', 'fill-extrusion-opacity', threeD ? 1.0 : 0);
-      map.setPaintProperty('zcta-outline-line', 'line-opacity', 0);
+    if (map.getLayer('zcta-extrude-cap')) {
+      map.setPaintProperty('zcta-extrude-cap', 'fill-extrusion-opacity', threeD ? 1.0 : 0);
+      if (threeD) {
+        const capBase = heatmap ? extrudeH : flatH;
+        const capHeight = heatmap
+          ? ['case', ['boolean', ['get', '_special'], false], 50, ['step', ['get', '_tier'], 50, 1, 220, 2, 720, 3, 1620, 4, 2820]]
+          : ['case', ['boolean', ['get', '_special'], false], 50, 420];
+        map.setPaintProperty('zcta-extrude-cap', 'fill-extrusion-color', outlineTopColor);
+        map.setPaintProperty('zcta-extrude-cap', 'fill-extrusion-base', capBase);
+        map.setPaintProperty('zcta-extrude-cap', 'fill-extrusion-height', ['+', capBase, capHeight]);
+      } else {
+        map.setPaintProperty('zcta-extrude-cap', 'fill-extrusion-base', 0);
+        map.setPaintProperty('zcta-extrude-cap', 'fill-extrusion-height', 0);
+      }
+    }
+
+    if (map.getSource('zcta-outline-outer')) {
       map.setPaintProperty('zcta-outline-outer-glow2', 'line-opacity', threeD ? 0.14 : 0);
       map.setPaintProperty('zcta-outline-outer-glow', 'line-opacity', threeD ? 0.35 : 0);
       map.setPaintProperty('zcta-outline-outer-line', 'line-opacity', threeD ? 1 : 0);
-      if (threeD) {
-        map.setPaintProperty('zcta-outline', 'fill-extrusion-color', outlineTopColor);
-        map.setPaintProperty('zcta-outline', 'fill-extrusion-base', heatmap ? extrudeH : flatH);
-        map.setPaintProperty('zcta-outline', 'fill-extrusion-height', ['+', heatmap ? extrudeH : flatH, ['interpolate', ['linear'], ['zoom'], 9, 32, 16, 8]]);
-      } else {
-        map.setPaintProperty('zcta-outline', 'fill-extrusion-base', 0);
-        map.setPaintProperty('zcta-outline', 'fill-extrusion-height', 0);
-      }
     }
   }, [heatmap, threeD, timespanIdx, events, geoData, mapReady, satellite, adjacency]);
 
@@ -1401,6 +1396,7 @@ export default function MapView({ events }) {
       )}
 
       {selectedEvent && <EventDetailPopup event={selectedEvent} onClose={() => setSelectedEvent(null)} />}
+      <CRTEffect active={true} limitMobile={isMobile} />
     </div>
   );
 }
