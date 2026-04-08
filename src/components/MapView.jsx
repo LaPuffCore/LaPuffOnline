@@ -197,6 +197,50 @@ function simplifyRing(ring) {
   return simplified.length >= 4 ? simplified : ring;
 }
 
+function subdivideRing(ring, minPoints = 8) {
+  const closed = closeRing(ring);
+  const baseCount = closed.length - 1;
+  if (baseCount >= minPoints) return closed;
+  const segments = baseCount;
+  const insertCount = Math.max(1, Math.ceil((minPoints - baseCount) / segments));
+  const subdivided = [];
+  for (let i = 0; i < segments; i += 1) {
+    const current = closed[i];
+    const next = closed[i + 1];
+    subdivided.push(current);
+    for (let step = 1; step <= insertCount; step += 1) {
+      const t = step / (insertCount + 1);
+      subdivided.push([
+        current[0] + (next[0] - current[0]) * t,
+        current[1] + (next[1] - current[1]) * t,
+      ]);
+    }
+  }
+  return closeRing(subdivided);
+}
+
+function smoothRing(ring, passes = 1) {
+  let current = closeRing(ring).slice(0, -1);
+  for (let pass = 0; pass < passes; pass += 1) {
+    if (current.length < 3) break;
+    const next = [];
+    for (let i = 0; i < current.length; i += 1) {
+      const p = current[i];
+      const q = current[(i + 1) % current.length];
+      next.push([
+        p[0] * 0.75 + q[0] * 0.25,
+        p[1] * 0.75 + q[1] * 0.25,
+      ]);
+      next.push([
+        p[0] * 0.25 + q[0] * 0.75,
+        p[1] * 0.25 + q[1] * 0.75,
+      ]);
+    }
+    current = next;
+  }
+  return closeRing(current);
+}
+
 function closeRing(ring) {
   return ring.length === 0 || (ring[0][0] === ring[ring.length - 1][0] && ring[0][1] === ring[ring.length - 1][1])
     ? ring
@@ -207,10 +251,7 @@ function normalizeRing(ring) {
   const closed = closeRing(ring);
   const deduped = dedupeRing(closed);
   if (deduped.length < 4) return null;
-  const simplified = closeRing(simplifyRing(deduped));
-  // Enforce minimum 8 points after all normalization (prevents outline artifacts)
-  if (simplified.length < 8) return null;
-  return simplified;
+  return closeRing(simplifyRing(deduped));
 }
 
 function normalizePolygonCoords(coords) {
@@ -251,10 +292,14 @@ function offsetRing(outerRing, widthMeters) {
   const normalized = normalizeRing(outerRing);
   if (!normalized || normalized.length < 4) return null;
   // Remove closing point if present for offset calculation
-  const ring = normalized[0][0] === normalized[normalized.length - 1][0] && normalized[0][1] === normalized[normalized.length - 1][1]
+  let ring = normalized[0][0] === normalized[normalized.length - 1][0] && normalized[0][1] === normalized[normalized.length - 1][1]
     ? normalized.slice(0, -1)
     : normalized;
   if (ring.length < 3) return null;
+
+  ring = subdivideRing(ring, 10);
+  const smoothPasses = Math.min(2, Math.max(1, Math.floor(widthMeters / 24)));
+  ring = smoothRing(ring, smoothPasses);
 
   const refLat = ring.reduce((sum, [, lat]) => sum + lat, 0) / ring.length;
   const pts = ring.map(coord => lngLatToMeters(coord, refLat));
@@ -834,6 +879,8 @@ export default function MapView({ events }) {
         map.setPaintProperty('zcta-line-glow2','line-opacity', satellite ? 0.25 : 0.35);
       }
     }
+
+    map.setPaintProperty('zcta-hover', 'fill-opacity', threeD ? 0 : ['case', ['boolean', ['feature-state', 'hovered'], false], 0.5, 0]);
 
     if (map.getSource('zcta-outline')) {
       map.setPaintProperty('zcta-outline', 'fill-extrusion-opacity', threeD ? 1 : 0);
