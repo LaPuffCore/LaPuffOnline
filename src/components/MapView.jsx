@@ -123,6 +123,52 @@ function computeTiers(features, zipMap, maxCount, adjacency) {
   return tiers;
 }
 
+function geographicalDistanceMeters([lng1, lat1], [lng2, lat2]) {
+  const latRad = ((lat1 + lat2) / 2) * Math.PI / 180;
+  const metersPerDegLat = 111132;
+  const metersPerDegLng = 111320 * Math.cos(latRad);
+  const dx = (lng2 - lng1) * metersPerDegLng;
+  const dy = (lat2 - lat1) * metersPerDegLat;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+function polygonCentroid(ring) {
+  let x = 0, y = 0, count = 0;
+  ring.forEach(([lng, lat]) => { x += lng; y += lat; count += 1; });
+  return count === 0 ? [0, 0] : [x / count, y / count];
+}
+
+function scaleRingToCentroid(ring, centroid, scale) {
+  return ring.map(([lng, lat]) => [centroid[0] + (lng - centroid[0]) * scale, centroid[1] + (lat - centroid[1]) * scale]);
+}
+
+function makeOutlinePolygon(outerRing, widthMeters) {
+  const centroid = polygonCentroid(outerRing);
+  const avgRadius = outerRing.reduce((sum, coord) => sum + geographicalDistanceMeters(centroid, coord), 0) / Math.max(outerRing.length, 1);
+  const scale = avgRadius > widthMeters * 2 ? Math.max(0.5, 1 - widthMeters / avgRadius) : 0.75;
+  return [outerRing, scaleRingToCentroid(outerRing, centroid, scale)];
+}
+
+function createOutlineGeoJSON(sourceGeoJSON, widthMeters = 18) {
+  return {
+    type: 'FeatureCollection',
+    features: sourceGeoJSON.features.map(feature => {
+      const geom = feature.geometry;
+      let outlineGeometry = null;
+      if (geom.type === 'Polygon') {
+        outlineGeometry = { type: 'Polygon', coordinates: makeOutlinePolygon(geom.coordinates[0], widthMeters) };
+      } else if (geom.type === 'MultiPolygon') {
+        outlineGeometry = {
+          type: 'MultiPolygon',
+          coordinates: geom.coordinates.map(polygon => makeOutlinePolygon(polygon[0], widthMeters)),
+        };
+      }
+      if (!outlineGeometry) return null;
+      return { ...feature, geometry: outlineGeometry };
+    }).filter(Boolean),
+  };
+}
+
 function darkMapStyle() {
   return { version: 8, glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf', sources: {}, layers: [{ id: 'bg', type: 'background', paint: { 'background-color': '#0d0000' } }] };
 }
@@ -429,10 +475,9 @@ export default function MapView({ events }) {
       paint: { 'line-color': OUTLINE_COLOR, 'line-width': 0.5, 'line-opacity': 1 },
     });
 
-    // Top cap extrusion — a thin shell above each 3D block to make boundaries visible.
+    map.addSource('zcta-outline', { type: 'geojson', data: { type: 'FeatureCollection', features: [] }, generateId: false });
     map.addLayer({
-      id: 'zcta-top-cap', type: 'fill-extrusion', source: 'zcta',
-      filter: ['!=', ['get', '_special'], true],
+      id: 'zcta-outline', type: 'fill-extrusion', source: 'zcta-outline',
       paint: {
         'fill-extrusion-color': OUTLINE_COLOR,
         'fill-extrusion-height': 0,
@@ -504,6 +549,7 @@ export default function MapView({ events }) {
       }),
     };
     if (map.getSource('zcta')) map.getSource('zcta').setData(withHeat);
+    if (map.getSource('zcta-outline')) map.getSource('zcta-outline').setData(createOutlineGeoJSON(withHeat, 18));
 
     const heatColorExpr = [
       'case', ['boolean', ['get', '_special'], false], '#ffffff',
@@ -570,19 +616,16 @@ export default function MapView({ events }) {
       }
     }
 
-    map.setPaintProperty('zcta-top-cap', 'fill-extrusion-opacity', threeD ? 1 : 0);
-    if (threeD) {
-      map.setPaintProperty('zcta-top-cap', 'fill-extrusion-color', OUTLINE_COLOR);
-      if (heatmap) {
-        map.setPaintProperty('zcta-top-cap', 'fill-extrusion-base', extrudeH);
-        map.setPaintProperty('zcta-top-cap', 'fill-extrusion-height', ['+', extrudeH, 18]);
+    if (map.getSource('zcta-outline')) {
+      map.setPaintProperty('zcta-outline', 'fill-extrusion-opacity', threeD ? 1 : 0);
+      if (threeD) {
+        map.setPaintProperty('zcta-outline', 'fill-extrusion-color', OUTLINE_COLOR);
+        map.setPaintProperty('zcta-outline', 'fill-extrusion-base', heatmap ? extrudeH : flatH);
+        map.setPaintProperty('zcta-outline', 'fill-extrusion-height', ['+', heatmap ? extrudeH : flatH, 18]);
       } else {
-        map.setPaintProperty('zcta-top-cap', 'fill-extrusion-base', flatH);
-        map.setPaintProperty('zcta-top-cap', 'fill-extrusion-height', ['+', flatH, 18]);
+        map.setPaintProperty('zcta-outline', 'fill-extrusion-base', 0);
+        map.setPaintProperty('zcta-outline', 'fill-extrusion-height', 0);
       }
-    } else {
-      map.setPaintProperty('zcta-top-cap', 'fill-extrusion-base', 0);
-      map.setPaintProperty('zcta-top-cap', 'fill-extrusion-height', 0);
     }
   }, [heatmap, threeD, timespanIdx, events, geoData, mapReady, satellite, adjacency]);
 
