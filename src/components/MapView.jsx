@@ -893,11 +893,9 @@ export default function MapView({ events }) {
 
     if (map.getSource('zcta-outline')) {
       map.setPaintProperty('zcta-outline', 'fill-extrusion-opacity', threeD ? 0.98 : 0);
-      map.setPaintProperty('zcta-outline-line', 'line-opacity', threeD ? 1 : 0);
+      map.setPaintProperty('zcta-outline-line', 'line-opacity', threeD ? 0 : 0);
       if (threeD) {
-        const outlineTopColor = heatmap
-          ? ['case', ['boolean', ['get', '_special'], false], '#111111', ['step', ['get', '_tier'], HEAT_COLORS.cold, 1, HEAT_COLORS.cool, 2, HEAT_COLORS.warm, 3, HEAT_COLORS.orange, 4, HEAT_COLORS.hot]]
-          : ['case', ['boolean', ['get', '_special'], false], '#111111', '#3a0505'];
+        const outlineTopColor = OUTLINE_COLOR;
         map.setPaintProperty('zcta-outline', 'fill-extrusion-color', outlineTopColor);
         map.setPaintProperty('zcta-outline', 'fill-extrusion-base', heatmap ? extrudeH : flatH);
         map.setPaintProperty('zcta-outline', 'fill-extrusion-height', ['+', heatmap ? extrudeH : flatH, 18]);
