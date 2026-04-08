@@ -429,24 +429,18 @@ export default function MapView({ events }) {
       paint: { 'line-color': OUTLINE_COLOR, 'line-width': 0.5, 'line-opacity': 1 },
     });
 
-    // Top outline — floating crisp outline at the top of each extrusion block.
-    const topOutlineWidths = ['interpolate', ['linear'], ['zoom'], 9, 1.1, 10, 1.4, 11, 1.8, 12, 2.3, 13, 2.8, 14, 3.4, 15, 4.0];
-    for (let tier = 0; tier <= 4; tier++) {
-      map.addLayer({
-        id: `zcta-top-outline-${tier}`,
-        type: 'line', source: 'zcta',
-        filter: ['all', ['!=', ['get', '_special'], true], ['==', ['get', '_tier'], tier]],
-        layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: {
-          'line-color': OUTLINE_COLOR,
-          'line-width': topOutlineWidths,
-          'line-opacity': 0,
-          'line-blur': 0,
-          'line-translate': [0, 0],
-          'line-translate-anchor': 'viewport',
-        },
-      });
-    }
+    // Top cap extrusion — a thin shell above each 3D block to make boundaries visible.
+    map.addLayer({
+      id: 'zcta-top-cap', type: 'fill-extrusion', source: 'zcta',
+      filter: ['!=', ['get', '_special'], true],
+      paint: {
+        'fill-extrusion-color': OUTLINE_COLOR,
+        'fill-extrusion-height': 0,
+        'fill-extrusion-base': 0,
+        'fill-extrusion-opacity': 0,
+        'fill-extrusion-vertical-gradient': false,
+      },
+    });
 
     // Events
     map.on('mousemove', 'zcta-fill', e => {
@@ -576,47 +570,23 @@ export default function MapView({ events }) {
       }
     }
 
-    for (let tier = 0; tier <= 4; tier++) {
-      map.setPaintProperty(`zcta-top-outline-${tier}`, 'line-opacity', threeD ? 1 : 0);
-      map.setPaintProperty(`zcta-top-outline-${tier}`, 'line-offset', 0);
+    map.setPaintProperty('zcta-top-cap', 'fill-extrusion-opacity', threeD ? 1 : 0);
+    if (threeD) {
+      map.setPaintProperty('zcta-top-cap', 'fill-extrusion-color', OUTLINE_COLOR);
+      if (heatmap) {
+        map.setPaintProperty('zcta-top-cap', 'fill-extrusion-base', extrudeH);
+        map.setPaintProperty('zcta-top-cap', 'fill-extrusion-height', ['+', extrudeH, 18]);
+      } else {
+        map.setPaintProperty('zcta-top-cap', 'fill-extrusion-base', flatH);
+        map.setPaintProperty('zcta-top-cap', 'fill-extrusion-height', ['+', flatH, 18]);
+      }
+    } else {
+      map.setPaintProperty('zcta-top-cap', 'fill-extrusion-base', 0);
+      map.setPaintProperty('zcta-top-cap', 'fill-extrusion-height', 0);
     }
   }, [heatmap, threeD, timespanIdx, events, geoData, mapReady, satellite, adjacency]);
 
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !mapReady || !map.getLayer('zcta-top-outline-0')) return;
-
-    const getLineTranslate = heightMeters => {
-      if (!threeD) return [0, 0];
-      const center = map.getCenter();
-      const groundScreen = map.transform.locationToScreenPoint(center);
-      const topScreen = map.transform.coordinatePoint(
-        maplibregl.MercatorCoordinate.fromLngLat(center),
-        heightMeters
-      );
-      return [0, Math.round(topScreen.y - groundScreen.y)];
-    };
-
-    const tierHeights = [30, 200, 700, 1600, 2800];
-    const flatHeight = 400;
-
-    const update = () => {
-      for (let tier = 0; tier <= 4; tier++) {
-        const height = heatmap ? tierHeights[tier] : flatHeight;
-        map.setPaintProperty(`zcta-top-outline-${tier}`, 'line-translate', getLineTranslate(height));
-      }
-    };
-
-    update();
-    map.on('move', update);
-    map.on('pitch', update);
-    map.on('zoom', update);
-    return () => {
-      map.off('move', update);
-      map.off('pitch', update);
-      map.off('zoom', update);
-    };
-  }, [mapReady, threeD, heatmap]);
+  // 3D pitch
 
   // 3D pitch
   useEffect(() => {
