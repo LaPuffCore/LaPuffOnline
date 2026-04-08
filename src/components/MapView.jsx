@@ -211,9 +211,14 @@ function normalizeRing(ring) {
 }
 
 function normalizePolygonCoords(coords) {
-  return coords
+  const normalized = coords
     .map(normalizeRing)
     .filter(ring => ring && ring.length >= 4);
+  // Ensure rings are properly closed
+  return normalized.map(ring => {
+    const closed = closeRing(ring);
+    return closed && closed.length >= 4 ? closed : null;
+  }).filter(Boolean);
 }
 
 function normalizeFeatureGeometry(feature) {
@@ -234,13 +239,14 @@ function normalizeFeatureGeometry(feature) {
 function getZoomAwareOutlineWidth(map, baseMeters = 18) {
   if (!map || typeof map.getZoom !== 'function') return baseMeters;
   const zoom = map.getZoom();
-  const extra = Math.max(0, 14 - zoom) * 0.8;
+  const extra = Math.max(0, 14 - zoom) * 2.5;
   return baseMeters + extra;
 }
 
 function offsetRing(outerRing, widthMeters) {
   const normalized = normalizeRing(outerRing);
-  if (!normalized) return null;
+  if (!normalized || normalized.length < 4) return null;
+  // Remove closing point if present for offset calculation
   const ring = normalized[0][0] === normalized[normalized.length - 1][0] && normalized[0][1] === normalized[normalized.length - 1][1]
     ? normalized.slice(0, -1)
     : normalized;
@@ -293,10 +299,13 @@ function offsetRing(outerRing, widthMeters) {
     return [pts[i][0] - avg[0] * halfWidth, pts[i][1] - avg[1] * halfWidth];
   });
 
-  return [
-    closeRing(outer).map(coord => metersToLngLat(coord, refLat)),
-    closeRing(inner.reverse()).map(coord => metersToLngLat(coord, refLat)),
-  ];
+  const outerGeo = closeRing(outer).map(coord => metersToLngLat(coord, refLat));
+  const innerGeo = closeRing(inner.reverse()).map(coord => metersToLngLat(coord, refLat));
+
+  // Ensure both rings are valid simple polygons with at least 4 points
+  if (outerGeo.length < 4 || innerGeo.length < 4) return null;
+
+  return [outerGeo, innerGeo];
 }
 
 function createOutlineGeoJSON(sourceGeoJSON, widthMeters = 12) {
@@ -503,6 +512,7 @@ export default function MapView({ events }) {
   const threeDRef       = useRef(false);
   const tiersRef        = useRef([]);
   const geoDataRef      = useRef(null);
+  const layerHandlersRef = useRef({ handleZctaHover: null, handleZctaLeave: null, handleZctaClick: null });
 
   const [timespanIdx,   setTimespanIdx]   = useState(4);
   const [heatmap,       setHeatmap]       = useState(false);
@@ -642,7 +652,7 @@ export default function MapView({ events }) {
       },
     });
 
-    // Events
+    // Events — store handlers in ref for conditional management based on 3D state
     const handleZctaHover = e => {
       if (!e.features.length) return;
       const f = e.features[0];
@@ -670,11 +680,12 @@ export default function MapView({ events }) {
       openHologram(e.features[0]);
     };
 
-    ['zcta-fill', 'zcta-extrude'].forEach(layer => {
-      map.on('mousemove', layer, handleZctaHover);
-      map.on('mouseleave', layer, handleZctaLeave);
-      map.on('click', layer, handleZctaClick);
-    });
+    layerHandlersRef.current = { handleZctaHover, handleZctaLeave, handleZctaClick };
+
+    // Attach hover to fill layer initially (2D mode default). 3D mode switching is handled by useEffect below.
+    map.on('mousemove', 'zcta-fill', handleZctaHover);
+    map.on('mouseleave', 'zcta-fill', handleZctaLeave);
+    map.on('click', 'zcta-fill', handleZctaClick);
   }
 
   function openHologram(clickedFeature) {
@@ -692,6 +703,35 @@ export default function MapView({ events }) {
     if (!map || !mapReady || !geoData) return;
     addLayers(map, geoData, satellite);
   }, [mapReady, geoData]);
+
+  // Manage hover layer based on 3D state — switch from fill to extrude when 3D is on
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady || !map.getLayer('zcta-fill')) return;
+    
+    const { handleZctaHover, handleZctaLeave, handleZctaClick } = layerHandlersRef.current;
+    if (!handleZctaHover) return;
+
+    if (threeD) {
+      // In 3D mode: remove hover from fill, attach to extrude
+      map.off('mousemove', 'zcta-fill', handleZctaHover);
+      map.off('mouseleave', 'zcta-fill', handleZctaLeave);
+      map.off('click', 'zcta-fill', handleZctaClick);
+      
+      map.on('mousemove', 'zcta-extrude', handleZctaHover);
+      map.on('mouseleave', 'zcta-extrude', handleZctaLeave);
+      map.on('click', 'zcta-extrude', handleZctaClick);
+    } else {
+      // In 2D mode: remove hover from extrude, attach to fill
+      map.off('mousemove', 'zcta-extrude', handleZctaHover);
+      map.off('mouseleave', 'zcta-extrude', handleZctaLeave);
+      map.off('click', 'zcta-extrude', handleZctaClick);
+      
+      map.on('mousemove', 'zcta-fill', handleZctaHover);
+      map.on('mouseleave', 'zcta-fill', handleZctaLeave);
+      map.on('click', 'zcta-fill', handleZctaClick);
+    }
+  }, [threeD, mapReady]);
 
   // ── Main heatmap + 3D update ──────────────────────────────────────────────
   useEffect(() => {
