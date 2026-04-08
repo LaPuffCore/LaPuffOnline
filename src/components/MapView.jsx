@@ -306,8 +306,8 @@ function normalizeFeatureGeometry(feature) {
 function getZoomAwareOutlineWidth(map, baseMeters = 14) {
   if (!map || typeof map.getZoom !== 'function') return baseMeters;
   const zoom = map.getZoom();
-  // Balanced width scaling for boundary accuracy without excessive thickening
-  const extra = Math.max(0, 14 - zoom) * 4.0;
+  // Relative to our locked viewport (zoom 9-16) - scale width for visibility at low zoom
+  const extra = Math.max(0, 12 - zoom) * 8.0;
   return baseMeters + extra;
 }
 
@@ -371,16 +371,15 @@ function offsetRing(outerRing, widthMeters, zoom = 10) {
     return [pts[i][0] - avg[0] * halfWidth, pts[i][1] - avg[1] * halfWidth];
   });
 
-  // Reduce decimation for boundary accuracy - only decimate at very low zoom
-  const decimateFactor = zoom < 10 ? 2 : 1;
-  const outerDecimated = decimateRing(outer, decimateFactor);
-  const innerDecimated = decimateRing(inner, decimateFactor);
+  // No geometry decimation - preserve full boundary accuracy
+  const outerDecimated = outer;
+  const innerDecimated = inner;
 
   const outerGeo = closeRing(outerDecimated).map(coord => metersToLngLat(coord, refLat));
   const innerGeo = closeRing(innerDecimated.reverse()).map(coord => metersToLngLat(coord, refLat));
 
-  // Enforce higher minimum points for boundary accuracy
-  if (outerGeo.length < 12 || innerGeo.length < 12) return null;
+  // Enforce minimum 8 points for both rings to prevent artifacts and degenerate geometry
+  if (outerGeo.length < 8 || innerGeo.length < 8) return null;
 
   return [outerGeo, innerGeo];
 }
@@ -884,9 +883,10 @@ export default function MapView({ events }) {
           ['case', ['boolean', ['get', '_special'], false], '#222222', '#1a0505']);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-height', 0);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', 0);
-        map.setPaintProperty('zcta-line',      'line-opacity', 1);
-        map.setPaintProperty('zcta-line-glow', 'line-opacity', satellite ? 0.55 : 0.75);
-        map.setPaintProperty('zcta-line-glow2','line-opacity', satellite ? 0.25 : 0.35);
+        // Hide ALL 2D boundary lines completely - only show 3D extruded outlines
+        map.setPaintProperty('zcta-line',      'line-opacity', 0);
+        map.setPaintProperty('zcta-line-glow', 'line-opacity', 0);
+        map.setPaintProperty('zcta-line-glow2','line-opacity', 0);
       }
     } else {
       // No heatmap
@@ -911,9 +911,10 @@ export default function MapView({ events }) {
           ['case', ['boolean', ['get', '_special'], false], '#222222', '#1a0505']);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-height', 0);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', 0);
-        map.setPaintProperty('zcta-line',      'line-opacity', 1);
-        map.setPaintProperty('zcta-line-glow', 'line-opacity', satellite ? 0.55 : 0.75);
-        map.setPaintProperty('zcta-line-glow2','line-opacity', satellite ? 0.25 : 0.35);
+        // Hide ALL 2D boundary lines completely - only show 3D extruded outlines
+        map.setPaintProperty('zcta-line',      'line-opacity', 0);
+        map.setPaintProperty('zcta-line-glow', 'line-opacity', 0);
+        map.setPaintProperty('zcta-line-glow2','line-opacity', 0);
       }
     }
 
@@ -923,10 +924,10 @@ export default function MapView({ events }) {
       map.setPaintProperty('zcta-outline', 'fill-extrusion-opacity', threeD ? 0.98 : 0);
       map.setPaintProperty('zcta-outline-line', 'line-opacity', threeD ? 0 : 0);
       if (threeD) {
-        const outlineTopColor = OUTLINE_COLOR;
+        const outlineTopColor = '#ff2200'; // Explicit red color
         map.setPaintProperty('zcta-outline', 'fill-extrusion-color', outlineTopColor);
         map.setPaintProperty('zcta-outline', 'fill-extrusion-base', heatmap ? extrudeH : flatH);
-        map.setPaintProperty('zcta-outline', 'fill-extrusion-height', ['+', heatmap ? extrudeH : flatH, ['interpolate', ['linear'], ['zoom'], 9, 24, 16, 12]]);
+        map.setPaintProperty('zcta-outline', 'fill-extrusion-height', ['+', heatmap ? extrudeH : flatH, ['interpolate', ['linear'], ['zoom'], 9, 32, 16, 8]]);
       } else {
         map.setPaintProperty('zcta-outline', 'fill-extrusion-base', 0);
         map.setPaintProperty('zcta-outline', 'fill-extrusion-height', 0);
