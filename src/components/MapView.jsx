@@ -280,11 +280,11 @@ function normalizeFeatureGeometry(feature) {
   return null;
 }
 
-function getZoomAwareOutlineWidth(map, baseMeters = 18) {
+function getZoomAwareOutlineWidth(map, baseMeters = 14) {
   if (!map || typeof map.getZoom !== 'function') return baseMeters;
   const zoom = map.getZoom();
-  // Aggressive scaling to handle zoom-out pixelation: extra width grows exponentially as zooming out
-  const extra = Math.max(0, 14 - zoom) * 5.5;
+  // More conservative width scaling; keep outlines visible without creating huge, artifact-prone rings.
+  const extra = Math.max(0, 14 - zoom) * 2.0;
   return baseMeters + extra;
 }
 
@@ -700,6 +700,15 @@ export default function MapView({ events }) {
         'fill-extrusion-vertical-gradient': false,
       },
     });
+    map.addLayer({
+      id: 'zcta-outline-line', type: 'line', source: 'zcta-outline',
+      paint: {
+        'line-color': OUTLINE_COLOR,
+        'line-width': 1.5,
+        'line-opacity': 0,
+        'line-blur': 0.5,
+      },
+    });
 
     // Events — store handlers in ref for conditional management based on 3D state
     const handleZctaHover = e => {
@@ -810,7 +819,7 @@ export default function MapView({ events }) {
 
     // Helper: wrap color expression with hover state check for 3D mode
     const withHoverColor = (baseExpr) => {
-      return ['case', ['boolean', ['feature-state', 'hovered'], false], '#7C3AED', ...baseExpr];
+      return ['case', ['boolean', ['feature-state', 'hovered'], false], '#7C3AED', baseExpr];
     };
 
     // Height expressions — heatmap 3D
@@ -883,9 +892,13 @@ export default function MapView({ events }) {
     map.setPaintProperty('zcta-hover', 'fill-opacity', threeD ? 0 : ['case', ['boolean', ['feature-state', 'hovered'], false], 0.5, 0]);
 
     if (map.getSource('zcta-outline')) {
-      map.setPaintProperty('zcta-outline', 'fill-extrusion-opacity', threeD ? 1 : 0);
+      map.setPaintProperty('zcta-outline', 'fill-extrusion-opacity', threeD ? 0.98 : 0);
+      map.setPaintProperty('zcta-outline-line', 'line-opacity', threeD ? 1 : 0);
       if (threeD) {
-        map.setPaintProperty('zcta-outline', 'fill-extrusion-color', OUTLINE_COLOR);
+        const outlineTopColor = heatmap
+          ? ['case', ['boolean', ['get', '_special'], false], '#111111', ['step', ['get', '_tier'], HEAT_COLORS.cold, 1, HEAT_COLORS.cool, 2, HEAT_COLORS.warm, 3, HEAT_COLORS.orange, 4, HEAT_COLORS.hot]]
+          : ['case', ['boolean', ['get', '_special'], false], '#111111', '#3a0505'];
+        map.setPaintProperty('zcta-outline', 'fill-extrusion-color', outlineTopColor);
         map.setPaintProperty('zcta-outline', 'fill-extrusion-base', heatmap ? extrudeH : flatH);
         map.setPaintProperty('zcta-outline', 'fill-extrusion-height', ['+', heatmap ? extrudeH : flatH, 18]);
       } else {
