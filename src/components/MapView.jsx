@@ -439,6 +439,8 @@ export default function MapView({ events }) {
         'line-width': ['interpolate', ['linear'], ['zoom'], 9, 1.1, 10, 1.4, 11, 1.8, 12, 2.3, 13, 2.8, 14, 3.4, 15, 4.0],
         'line-opacity': 0,
         'line-blur': 0,
+        'line-translate': [0, 0],
+        'line-translate-anchor': 'viewport',
       },
     });
 
@@ -571,11 +573,42 @@ export default function MapView({ events }) {
     }
 
     map.setPaintProperty('zcta-top-outline', 'line-opacity', threeD ? 1 : 0);
-    map.setPaintProperty('zcta-top-outline', 'line-translate', [0, 0]);
     map.setPaintProperty('zcta-top-outline', 'line-offset', 0);
     map.setLayoutProperty('zcta-top-outline', 'line-cap', 'round');
     map.setLayoutProperty('zcta-top-outline', 'line-join', 'round');
   }, [heatmap, threeD, timespanIdx, events, geoData, mapReady, satellite, adjacency]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady || !map.getLayer('zcta-top-outline')) return;
+
+    const earthCircumference = 40075016.686;
+    const getTopOutlineTranslate = () => {
+      if (!threeD) return [0, 0];
+      const center = map.getCenter();
+      const zoom = map.getZoom();
+      const pitch = map.getPitch();
+      const pitchRad = pitch * Math.PI / 180;
+      const pixelsPerMeter = 512 * Math.pow(2, zoom) / earthCircumference * Math.cos(center.lat * Math.PI / 180);
+      const maxHeight = heatmap ? 2800 : 400;
+      const raw = Math.round(-Math.min(56, maxHeight * pixelsPerMeter * Math.sin(pitchRad) * 0.52));
+      return [0, raw];
+    };
+
+    const update = () => {
+      map.setPaintProperty('zcta-top-outline', 'line-translate', getTopOutlineTranslate());
+    };
+
+    update();
+    map.on('move', update);
+    map.on('pitch', update);
+    map.on('zoom', update);
+    return () => {
+      map.off('move', update);
+      map.off('pitch', update);
+      map.off('zoom', update);
+    };
+  }, [mapReady, threeD, heatmap]);
 
   // 3D pitch
   useEffect(() => {
