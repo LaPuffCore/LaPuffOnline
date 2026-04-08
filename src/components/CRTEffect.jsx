@@ -1,6 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 
-export default function CRTEffect({ active = true }) {
+/**
+ * CRTEffect
+ * @param {boolean} active - Toggles the effect
+ * @param {boolean} limitMobile - Reduces vignette intensity for mobile accessibility
+ */
+export default function CRTEffect({ active = true, limitMobile = false }) {
   const washRef = useRef(null);
 
   useEffect(() => {
@@ -19,11 +24,13 @@ export default function CRTEffect({ active = true }) {
   if (!active) return null;
 
   return (
-    <div className="fixed inset-0 pointer-events-none overflow-hidden" style={{ zIndex: 9999 }}>
+    /* FIX 1: Z-POSITION
+      Changed from 'fixed z-9999' to 'absolute z-1'.
+      This places it behind the map container (z-2) but above the background.
+    */
+    <div className="absolute inset-0 pointer-events-none overflow-hidden" style={{ zIndex: 1 }}>
       
-      {/* 1. CALMED NOISE GRAIN
-          Lowered intensity and slowed down the flicker rate to reduce the "spinning" feel.
-      */}
+      {/* 1. CALMED NOISE GRAIN */}
       <div 
         className="absolute inset-0 opacity-[0.04]" 
         style={{
@@ -34,10 +41,7 @@ export default function CRTEffect({ active = true }) {
         }} 
       />
 
-      {/* 2. BALANCED LATTICE MESH
-          Both horizontal and vertical are equal presence. 
-          Locked to 32px spacing for the cinematic "shadow mask" look.
-      */}
+      {/* 2. BALANCED LATTICE MESH */}
       <div className="absolute inset-0 opacity-[0.12]">
         <div className="absolute inset-0" style={{
           backgroundImage: `
@@ -48,9 +52,7 @@ export default function CRTEffect({ active = true }) {
         }} />
       </div>
 
-      {/* 3. CHROMA FRINGE 
-          Subtle color bleed at the viewport edges.
-      */}
+      {/* 3. CHROMA FRINGE */}
       <div className="absolute inset-0" style={{
         background: 'linear-gradient(90deg, rgba(255,0,0,0.04) 0%, transparent 15%, transparent 85%, rgba(0,255,255,0.04) 100%)',
       }} />
@@ -65,10 +67,17 @@ export default function CRTEffect({ active = true }) {
         }}
       />
 
-      {/* Heavy Vignette (Tube Frame) */}
-      <div className="absolute inset-0" style={{
-        background: 'radial-gradient(circle at center, transparent 40%, rgba(0,0,0,0.4) 80%, rgba(0,0,0,0.8) 100%)',
-      }} />
+      {/* FIX 2: VIGNETTE ISSUE
+         Added transition and opacity check for limitMobile.
+         On mobile, the vignette drops to 35% opacity to avoid blocking UI.
+      */}
+      <div 
+        className="absolute inset-0 transition-opacity duration-500" 
+        style={{
+          background: 'radial-gradient(circle at center, transparent 40%, rgba(0,0,0,0.4) 80%, rgba(0,0,0,0.8) 100%)',
+          opacity: limitMobile ? 0.35 : 1
+        }} 
+      />
 
       <style jsx>{`
         @keyframes vhs-flicker {
