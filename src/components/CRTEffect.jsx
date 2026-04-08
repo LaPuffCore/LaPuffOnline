@@ -1,11 +1,6 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
-/**
- * CRTEffect
- * @param {boolean} active - Toggle the effect on/off
- * @param {boolean} limitMobile - Reduces opacity/intensity for mobile UI
- */
-export default function CRTEffect({ active = true, limitMobile = false }) {
+export default function CRTEffect({ active = true }) {
   const washRef = useRef(null);
 
   useEffect(() => {
@@ -23,26 +18,11 @@ export default function CRTEffect({ active = true, limitMobile = false }) {
 
   if (!active) return null;
 
-  /**
-   * STACKING STRATEGY:
-   * z-index: 1 sits behind your map container (z-index: 2).
-   * pointerEvents: 'none' ensures it never blocks clicks.
-   */
-  const overlayZIndex = 1; 
-  const globalOpacity = limitMobile ? 0.35 : 1;
-
   return (
-    <div 
-      className="absolute inset-0 pointer-events-none overflow-hidden transition-opacity duration-300" 
-      style={{ 
-        zIndex: overlayZIndex, 
-        opacity: globalOpacity,
-        backgroundColor: 'transparent'
-      }}
-    >
+    <div className="fixed inset-0 pointer-events-none overflow-hidden" style={{ zIndex: 9999 }}>
       
       {/* 1. CALMED NOISE GRAIN
-          Speed: 0.18s | Intensity: 0.04
+          Lowered intensity and slowed down the flicker rate to reduce the "spinning" feel.
       */}
       <div 
         className="absolute inset-0 opacity-[0.04]" 
@@ -55,7 +35,8 @@ export default function CRTEffect({ active = true, limitMobile = false }) {
       />
 
       {/* 2. BALANCED LATTICE MESH
-          32px grid - Equal presence on both axes.
+          Both horizontal and vertical are equal presence. 
+          Locked to 32px spacing for the cinematic "shadow mask" look.
       */}
       <div className="absolute inset-0 opacity-[0.12]">
         <div className="absolute inset-0" style={{
@@ -67,9 +48,11 @@ export default function CRTEffect({ active = true, limitMobile = false }) {
         }} />
       </div>
 
-      {/* 3. CHROMA FRINGE */}
+      {/* 3. CHROMA FRINGE 
+          Subtle color bleed at the viewport edges.
+      */}
       <div className="absolute inset-0" style={{
-        background: 'linear-gradient(90deg, rgba(255,0,0,0.03) 0%, transparent 15%, transparent 85%, rgba(0,255,255,0.03) 100%)',
+        background: 'linear-gradient(90deg, rgba(255,0,0,0.04) 0%, transparent 15%, transparent 85%, rgba(0,255,255,0.04) 100%)',
       }} />
 
       {/* 4. DATA WASH LINE */}
@@ -82,9 +65,9 @@ export default function CRTEffect({ active = true, limitMobile = false }) {
         }}
       />
 
-      {/* 5. TUBE VIGNETTE */}
+      {/* Heavy Vignette (Tube Frame) */}
       <div className="absolute inset-0" style={{
-        background: 'radial-gradient(circle at center, transparent 40%, rgba(0,0,0,0.3) 80%, rgba(0,0,0,0.6) 100%)',
+        background: 'radial-gradient(circle at center, transparent 40%, rgba(0,0,0,0.4) 80%, rgba(0,0,0,0.8) 100%)',
       }} />
 
       <style jsx>{`
