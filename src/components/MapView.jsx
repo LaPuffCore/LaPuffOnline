@@ -16,7 +16,7 @@ const TIMESPAN_STEPS = [
   { label: '3mo', days: 90 }, { label: '6mo', days: 180 },
 ];
 
-// Heatmap fill colors — slightly muted so neon outline always reads brighter
+// Fill colors slightly muted so the bright neon outline always reads brighter
 const HEAT_COLORS = {
   cold:   '#00ccdd',
   cool:   '#00dd66',
@@ -25,24 +25,28 @@ const HEAT_COLORS = {
   hot:    '#cc0d00',
 };
 
-// Full-saturation neon for outlines
+// Full-saturation neon for outlines — always visually dominant over fills
 const OUTLINE_COLOR = '#ff2200';
 const OUTLINE_GLOW  = '#ff0000';
 
-// 5 tonal shades per tier for Real3D building clustering
-// Index 0 = darkest, 4 = brightest. Neighboring buildings use different indices.
+// Tonal shades per tier (legacy, kept for compatibility)
 const HEAT_TONES = {
-  cold:   ['#001a22', '#003344', '#005566', '#007799', '#00aabb'],
-  cool:   ['#001a0d', '#003311', '#005522', '#007733', '#00aa55'],
-  warm:   ['#222200', '#334400', '#556600', '#778800', '#99bb00'],
-  orange: ['#331100', '#551100', '#882200', '#aa3300', '#cc5500'],
-  hot:    ['#220200', '#440400', '#770800', '#aa0c00', '#dd1100'],
+  cold:   ['#003344', '#006688', '#00ccdd'],
+  cool:   ['#003311', '#007733', '#00dd66'],
+  warm:   ['#334400', '#778800', '#aadd00'],
+  orange: ['#441100', '#882200', '#dd6600'],
+  hot:    ['#440400', '#880800', '#cc0d00'],
 };
 
-// Default dark-mode region fill (no heatmap) — semi-transparent dark red
-const DEFAULT_FILL_COLOR  = '#2a0505';
-const DEFAULT_FILL_OPACITY_DARK = 0.35;   // subtle, mostly transparent
-const DEFAULT_FILL_OPACITY_SAT  = 0.20;   // even lighter over satellite
+// FIX REAL3D: 5 wide-range shades per heatmap tier for building cluster coloring.
+// Neighbors get different shades (via featureId % 5). Range is light→dark for differentiation.
+const HEAT_BUILDING_TONES = {
+  cold:   ['#001824', '#003d5c', '#007a8c', '#00b8c8', '#a0eeff'],
+  cool:   ['#001408', '#003d1c', '#007a38', '#00b854', '#a0ffb8'],
+  warm:   ['#1a1400', '#4d3d00', '#8c7000', '#c8a000', '#ffe060'],
+  orange: ['#1a0500', '#4d1200', '#8c3300', '#c86000', '#ff9040'],
+  hot:    ['#1a0000', '#4d0000', '#8c0000', '#c80000', '#ff4040'],
+};
 
 function tierColor(tier) {
   if (tier >= 4) return HEAT_COLORS.hot;
@@ -50,14 +54,6 @@ function tierColor(tier) {
   if (tier >= 2) return HEAT_COLORS.warm;
   if (tier >= 1) return HEAT_COLORS.cool;
   return HEAT_COLORS.cold;
-}
-
-function tierToneKey(tier) {
-  if (tier >= 4) return 'hot';
-  if (tier >= 3) return 'orange';
-  if (tier >= 2) return 'warm';
-  if (tier >= 1) return 'cool';
-  return 'cold';
 }
 
 function isSpecialZip(zip) {
@@ -137,66 +133,80 @@ function computeTiers(features, zipMap, maxCount, adjacency) {
   return tiers;
 }
 
-// ── Geometry helpers (preserved exactly from source) ──────────────────────────
 function lngLatToMeters([lng, lat], refLat) {
   const latRad = refLat * Math.PI / 180;
   const metersPerDegLat = 111132;
   const metersPerDegLng = 111320 * Math.cos(latRad);
   return [lng * metersPerDegLng, lat * metersPerDegLat];
 }
+
 function metersToLngLat([x, y], refLat) {
   const latRad = refLat * Math.PI / 180;
   const metersPerDegLat = 111132;
   const metersPerDegLng = 111320 * Math.cos(latRad);
   return [x / metersPerDegLng, y / metersPerDegLat];
 }
+
 function normalize([x, y]) {
   const len = Math.hypot(x, y);
   return len === 0 ? [0, 0] : [x / len, y / len];
 }
+
 function lineIntersection(p0, p1, q0, q1) {
-  const s1x = p1[0] - p0[0], s1y = p1[1] - p0[1];
-  const s2x = q1[0] - q0[0], s2y = q1[1] - q0[1];
+  const s1x = p1[0] - p0[0];
+  const s1y = p1[1] - p0[1];
+  const s2x = q1[0] - q0[0];
+  const s2y = q1[1] - q0[1];
   const denom = (-s2x * s1y + s1x * s2y);
   if (Math.abs(denom) < 1e-9) return null;
   const s = (-s1y * (p0[0] - q0[0]) + s1x * (p0[1] - q0[1])) / denom;
   return [q0[0] + (s * s2x), q0[1] + (s * s2y)];
 }
+
 function signedArea(ring) {
   let area = 0;
   for (let i = 0; i < ring.length - 1; i++) {
-    const [x1, y1] = ring[i], [x2, y2] = ring[i + 1];
+    const [x1, y1] = ring[i];
+    const [x2, y2] = ring[i + 1];
     area += x1 * y2 - x2 * y1;
   }
   return area / 2;
 }
+
 function dedupeRing(ring) {
   if (!ring || ring.length === 0) return [];
   const cleaned = [ring[0]];
   for (let i = 1; i < ring.length; i += 1) {
-    const [x, y] = ring[i], [px, py] = cleaned[cleaned.length - 1];
+    const [x, y] = ring[i];
+    const [px, py] = cleaned[cleaned.length - 1];
     if (Math.abs(x - px) > 1e-8 || Math.abs(y - py) > 1e-8) cleaned.push(ring[i]);
   }
   if (cleaned.length > 1) {
-    const [x, y] = cleaned[0], [lx, ly] = cleaned[cleaned.length - 1];
+    const [x, y] = cleaned[0];
+    const [lx, ly] = cleaned[cleaned.length - 1];
     if (Math.abs(x - lx) < 1e-8 && Math.abs(y - ly) < 1e-8) cleaned.pop();
   }
   return cleaned;
 }
+
 function isNearlyCollinear(a, b, c) {
   const cross = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
   return Math.abs(cross) < 1e-8;
 }
+
 function simplifyRing(ring) {
   if (ring.length < 4) return ring;
   const simplified = [ring[0]];
   for (let i = 1; i < ring.length - 1; i += 1) {
-    const prev = simplified[simplified.length - 1], curr = ring[i], next = ring[i + 1];
+    const prev = simplified[simplified.length - 1];
+    const curr = ring[i];
+    const next = ring[i + 1];
     if (!isNearlyCollinear(prev, curr, next)) simplified.push(curr);
   }
   simplified.push(ring[ring.length - 1]);
   return simplified.length >= 4 ? simplified : ring;
 }
+
 function subdivideRing(ring, minPoints = 8) {
   const closed = closeRing(ring);
   const baseCount = closed.length - 1;
@@ -205,46 +215,65 @@ function subdivideRing(ring, minPoints = 8) {
   const insertCount = Math.max(1, Math.ceil((minPoints - baseCount) / segments));
   const subdivided = [];
   for (let i = 0; i < segments; i += 1) {
-    const current = closed[i], next = closed[i + 1];
+    const current = closed[i];
+    const next = closed[i + 1];
     subdivided.push(current);
     for (let step = 1; step <= insertCount; step += 1) {
       const t = step / (insertCount + 1);
-      subdivided.push([current[0] + (next[0] - current[0]) * t, current[1] + (next[1] - current[1]) * t]);
+      subdivided.push([
+        current[0] + (next[0] - current[0]) * t,
+        current[1] + (next[1] - current[1]) * t,
+      ]);
     }
   }
   return closeRing(subdivided);
 }
+
 function smoothRing(ring, passes = 1) {
   let current = closeRing(ring).slice(0, -1);
   for (let pass = 0; pass < passes; pass += 1) {
     if (current.length < 3) break;
     const next = [];
     for (let i = 0; i < current.length; i += 1) {
-      const p = current[i], q = current[(i + 1) % current.length];
-      next.push([p[0] * 0.75 + q[0] * 0.25, p[1] * 0.75 + q[1] * 0.25]);
-      next.push([p[0] * 0.25 + q[0] * 0.75, p[1] * 0.25 + q[1] * 0.75]);
+      const p = current[i];
+      const q = current[(i + 1) % current.length];
+      next.push([
+        p[0] * 0.75 + q[0] * 0.25,
+        p[1] * 0.75 + q[1] * 0.25,
+      ]);
+      next.push([
+        p[0] * 0.25 + q[0] * 0.75,
+        p[1] * 0.25 + q[1] * 0.75,
+      ]);
     }
     current = next;
   }
   return closeRing(current);
 }
+
 function closeRing(ring) {
   return ring.length === 0 || (ring[0][0] === ring[ring.length - 1][0] && ring[0][1] === ring[ring.length - 1][1])
-    ? ring : [...ring, ring[0]];
+    ? ring
+    : [...ring, ring[0]];
 }
+
 function normalizeRing(ring) {
   const closed = closeRing(ring);
   const deduped = dedupeRing(closed);
   if (deduped.length < 4) return null;
   return closeRing(simplifyRing(deduped));
 }
+
 function normalizePolygonCoords(coords) {
-  const normalized = coords.map(normalizeRing).filter(ring => ring && ring.length >= 4);
+  const normalized = coords
+    .map(normalizeRing)
+    .filter(ring => ring && ring.length >= 4);
   return normalized.map(ring => {
     const closed = closeRing(ring);
     return closed && closed.length >= 4 ? closed : null;
   }).filter(Boolean);
 }
+
 function normalizeFeatureGeometry(feature) {
   const geom = feature.geometry;
   if (geom.type === 'Polygon') {
@@ -259,57 +288,84 @@ function normalizeFeatureGeometry(feature) {
   }
   return null;
 }
+
+// FIX 3D PIXELIZATION: More aggressive width scaling so outlines remain visible
+// when zoomed out. The extra width creates natural overlap-bleed at low zoom.
 function getZoomAwareOutlineWidth(map, baseMeters = 14) {
   if (!map || typeof map.getZoom !== 'function') return baseMeters;
   const zoom = map.getZoom();
-  const extra = Math.max(0, 14 - zoom) * 2.0;
+  // Slightly more aggressive ramp — each zoom step below 13 adds 4.5m of ring width
+  const extra = Math.max(0, 13 - zoom) * 4.5;
   return baseMeters + extra;
 }
+
 function offsetRing(outerRing, widthMeters) {
   const normalized = normalizeRing(outerRing);
   if (!normalized || normalized.length < 4) return null;
   let ring = normalized[0][0] === normalized[normalized.length - 1][0] && normalized[0][1] === normalized[normalized.length - 1][1]
-    ? normalized.slice(0, -1) : normalized;
+    ? normalized.slice(0, -1)
+    : normalized;
   if (ring.length < 3) return null;
+
   ring = subdivideRing(ring, 10);
   const smoothPasses = Math.min(2, Math.max(1, Math.floor(widthMeters / 24)));
   ring = smoothRing(ring, smoothPasses);
+
   const refLat = ring.reduce((sum, [, lat]) => sum + lat, 0) / ring.length;
   const pts = ring.map(coord => lngLatToMeters(coord, refLat));
   const orientation = signedArea([...pts, pts[0]]) >= 0 ? 1 : -1;
   const halfWidth = widthMeters / 2;
+
   const normals = pts.map((p, i) => {
     const next = pts[(i + 1) % pts.length];
-    const dx = next[0] - p[0], dy = next[1] - p[1];
+    const dx = next[0] - p[0];
+    const dy = next[1] - p[1];
     return normalize(orientation > 0 ? [dy, -dx] : [-dy, dx]);
   });
+
   const outerEdges = pts.map((p, i) => {
-    const next = pts[(i + 1) % pts.length], norm = normals[i];
-    return { p0: [p[0] + norm[0] * halfWidth, p[1] + norm[1] * halfWidth], p1: [next[0] + norm[0] * halfWidth, next[1] + norm[1] * halfWidth] };
+    const next = pts[(i + 1) % pts.length];
+    const norm = normals[i];
+    return {
+      p0: [p[0] + norm[0] * halfWidth, p[1] + norm[1] * halfWidth],
+      p1: [next[0] + norm[0] * halfWidth, next[1] + norm[1] * halfWidth],
+    };
   });
   const innerEdges = pts.map((p, i) => {
-    const next = pts[(i + 1) % pts.length], norm = normals[i];
-    return { p0: [p[0] - norm[0] * halfWidth, p[1] - norm[1] * halfWidth], p1: [next[0] - norm[0] * halfWidth, next[1] - norm[1] * halfWidth] };
+    const next = pts[(i + 1) % pts.length];
+    const norm = normals[i];
+    return {
+      p0: [p[0] - norm[0] * halfWidth, p[1] - norm[1] * halfWidth],
+      p1: [next[0] - norm[0] * halfWidth, next[1] - norm[1] * halfWidth],
+    };
   });
+
   const outer = pts.map((_, i) => {
-    const prev = outerEdges[(i - 1 + outerEdges.length) % outerEdges.length], curr = outerEdges[i];
+    const prev = outerEdges[(i - 1 + outerEdges.length) % outerEdges.length];
+    const curr = outerEdges[i];
     const intersection = lineIntersection(prev.p0, prev.p1, curr.p0, curr.p1);
     if (intersection) return intersection;
     const avg = normalize([normals[(i - 1 + normals.length) % normals.length][0] + normals[i][0], normals[(i - 1 + normals.length) % normals.length][1] + normals[i][1]]);
     return [pts[i][0] + avg[0] * halfWidth, pts[i][1] + avg[1] * halfWidth];
   });
+
   const inner = pts.map((_, i) => {
-    const prev = innerEdges[(i - 1 + innerEdges.length) % innerEdges.length], curr = innerEdges[i];
+    const prev = innerEdges[(i - 1 + innerEdges.length) % innerEdges.length];
+    const curr = innerEdges[i];
     const intersection = lineIntersection(prev.p0, prev.p1, curr.p0, curr.p1);
     if (intersection) return intersection;
     const avg = normalize([normals[(i - 1 + normals.length) % normals.length][0] + normals[i][0], normals[(i - 1 + normals.length) % normals.length][1] + normals[i][1]]);
     return [pts[i][0] - avg[0] * halfWidth, pts[i][1] - avg[1] * halfWidth];
   });
+
   const outerGeo = closeRing(outer).map(coord => metersToLngLat(coord, refLat));
   const innerGeo = closeRing(inner.reverse()).map(coord => metersToLngLat(coord, refLat));
+
   if (outerGeo.length < 8 || innerGeo.length < 8) return null;
+
   return [outerGeo, innerGeo];
 }
+
 function createOutlineGeoJSON(sourceGeoJSON, widthMeters = 12) {
   return {
     type: 'FeatureCollection',
@@ -335,7 +391,6 @@ function createOutlineGeoJSON(sourceGeoJSON, widthMeters = 12) {
   };
 }
 
-// ── Map styles ────────────────────────────────────────────────────────────────
 function darkMapStyle() {
   return { version: 8, glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf', sources: {}, layers: [{ id: 'bg', type: 'background', paint: { 'background-color': '#0d0000' } }] };
 }
@@ -343,10 +398,47 @@ function satelliteMapStyle() {
   return { version: 8, sources: { sat: { type: 'raster', tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'], tileSize: 256, maxzoom: 19 } }, layers: [{ id: 'sat', type: 'raster', source: 'sat' }] };
 }
 
+// FIX REAL3D: Point-in-polygon (ray casting) for building→zip spatial assignment
+function pointInRing(px, py, ring) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i];
+    const [xj, yj] = ring[j];
+    if (((yi > py) !== (yj > py)) && (px < (xj - xi) * (py - yi) / (yj - yi) + xi)) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+// Centroid of first ring (fast approximation for placement)
+function getGeomCentroid(geometry) {
+  const ring = geometry.type === 'MultiPolygon'
+    ? geometry.coordinates[0][0]
+    : geometry.coordinates[0];
+  if (!ring || ring.length === 0) return [0, 0];
+  let sx = 0, sy = 0;
+  for (const [x, y] of ring) { sx += x; sy += y; }
+  return [sx / ring.length, sy / ring.length];
+}
+
+// Find which zcta tier a point falls in (returns 0 if not found / special)
+function findTierForPoint([px, py], features, tiers) {
+  for (let i = 0; i < features.length; i++) {
+    if (features[i].properties._special) continue;
+    const geom = features[i].geometry;
+    const polys = geom.type === 'MultiPolygon' ? geom.coordinates : [geom.coordinates];
+    for (const poly of polys) {
+      if (pointInRing(px, py, poly[0])) return Math.max(0, tiers[i]);
+    }
+  }
+  return 0;
+}
+
 const MEDALS = ['🥇', '🥈', '🥉'];
 const PAGE_SIZE = 6;
 
-// ── PaginatedSection ──────────────────────────────────────────────────────────
+// ── Paginated list section ─────────────────────────────────────────────
 function PaginatedSection({ items, renderItem, emptyMsg, headerLabel, headerColor = 'text-white/30' }) {
   const [page, setPage] = useState(0);
   const totalPages = Math.ceil(items.length / PAGE_SIZE);
@@ -373,16 +465,22 @@ function PaginatedSection({ items, renderItem, emptyMsg, headerLabel, headerColo
 
 // ── ZipHologram desktop ───────────────────────────────────────────────────────
 function ZipHologram({ feature, color, onClose }) {
-  const canvasRef = useRef(null), animRef = useRef(null), timeRef = useRef(0);
+  const canvasRef = useRef(null);
+  const animRef   = useRef(null);
+  const timeRef   = useRef(0);
+
   useEffect(() => {
-    const canvas = canvasRef.current; if (!canvas || !feature) return;
-    const ctx = canvas.getContext('2d'), W = canvas.width, H = canvas.height;
+    const canvas = canvasRef.current;
+    if (!canvas || !feature) return;
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width, H = canvas.height;
     const allRings = feature.geometry.type === 'MultiPolygon' ? feature.geometry.coordinates.flat(1) : feature.geometry.coordinates;
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     allRings.forEach(ring => ring.forEach(([x, y]) => { minX = Math.min(minX, x); minY = Math.min(minY, y); maxX = Math.max(maxX, x); maxY = Math.max(maxY, y); }));
     const geoW = maxX - minX, geoH = maxY - minY, padding = 0.15;
     const scale = Math.min(W * (1 - padding * 2) / geoW, H * (1 - padding * 2) / geoH);
-    const offX = W / 2 - (minX + geoW / 2) * scale, offY = H / 2 + (minY + geoH / 2) * scale;
+    const offX = W / 2 - (minX + geoW / 2) * scale;
+    const offY = H / 2 + (minY + geoH / 2) * scale;
     function project(lng, lat) { return [lng * scale + offX, -lat * scale + offY]; }
     function drawShape(dx, dy, alpha, strokeOnly) {
       ctx.save(); ctx.translate(dx, dy);
@@ -396,7 +494,8 @@ function ZipHologram({ feature, color, onClose }) {
       ctx.restore();
     }
     function frame() {
-      timeRef.current += 0.018; const t = timeRef.current, rotY = Math.sin(t) * 0.35;
+      timeRef.current += 0.018;
+      const t = timeRef.current, rotY = Math.sin(t) * 0.35;
       ctx.clearRect(0, 0, W, H);
       const depth = 18;
       for (let d = depth; d >= 0; d--) drawShape(Math.sin(rotY) * d * 1.8, -d * 0.7, 0.08 + (1 - d / depth) * 0.18, d > 0);
@@ -410,10 +509,13 @@ function ZipHologram({ feature, color, onClose }) {
     animRef.current = requestAnimationFrame(frame);
     return () => { if (animRef.current) cancelAnimationFrame(animRef.current); };
   }, [feature, color]);
+
   useEffect(() => {
     const h = e => { if (e.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h);
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
   }, [onClose]);
+
   const zipLabel = feature?.properties?.MODZCTA;
   return (
     <div className="absolute z-40 pointer-events-none" style={{ left: 0, right: 400, top: 0, bottom: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -431,18 +533,24 @@ function ZipHologram({ feature, color, onClose }) {
   );
 }
 
-// ── ZipHologramMobile ─────────────────────────────────────────────────────────
+// ── ZipHologramMobile — constrained to top 50% of MapView container ─────
 function ZipHologramMobile({ feature, color, onClose }) {
-  const canvasRef = useRef(null), animRef = useRef(null), timeRef = useRef(0);
+  const canvasRef = useRef(null);
+  const animRef   = useRef(null);
+  const timeRef   = useRef(0);
+
   useEffect(() => {
-    const canvas = canvasRef.current; if (!canvas || !feature) return;
-    const ctx = canvas.getContext('2d'), W = canvas.width, H = canvas.height;
+    const canvas = canvasRef.current;
+    if (!canvas || !feature) return;
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width, H = canvas.height;
     const allRings = feature.geometry.type === 'MultiPolygon' ? feature.geometry.coordinates.flat(1) : feature.geometry.coordinates;
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     allRings.forEach(ring => ring.forEach(([x, y]) => { minX = Math.min(minX, x); minY = Math.min(minY, y); maxX = Math.max(maxX, x); maxY = Math.max(maxY, y); }));
     const geoW = maxX - minX, geoH = maxY - minY, padding = 0.15;
     const scale = Math.min(W * (1 - padding * 2) / geoW, H * (1 - padding * 2) / geoH);
-    const offX = W / 2 - (minX + geoW / 2) * scale, offY = H / 2 + (minY + geoH / 2) * scale;
+    const offX = W / 2 - (minX + geoW / 2) * scale;
+    const offY = H / 2 + (minY + geoH / 2) * scale;
     function project(lng, lat) { return [lng * scale + offX, -lat * scale + offY]; }
     function drawShape(dx, dy, alpha, strokeOnly) {
       ctx.save(); ctx.translate(dx, dy);
@@ -450,13 +558,14 @@ function ZipHologramMobile({ feature, color, onClose }) {
         ctx.beginPath();
         ring.forEach(([x, y], i) => { const [px, py] = project(x, y); if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py); });
         ctx.closePath();
-        if (!strokeOnly) { ctx.fillStyle = color + Math.round(alpha * 255).toString(16).padStart(2, '00'); ctx.fill(); }
+        if (!strokeOnly) { ctx.fillStyle = color + Math.round(alpha * 255).toString(16).padStart(2, '0'); ctx.fill(); }
         ctx.strokeStyle = color; ctx.lineWidth = strokeOnly ? 1.5 : 2; ctx.globalAlpha = alpha; ctx.stroke();
       });
       ctx.restore();
     }
     function frame() {
-      timeRef.current += 0.018; const t = timeRef.current, rotY = Math.sin(t) * 0.35;
+      timeRef.current += 0.018;
+      const t = timeRef.current, rotY = Math.sin(t) * 0.35;
       ctx.clearRect(0, 0, W, H);
       const depth = 14;
       for (let d = depth; d >= 0; d--) drawShape(Math.sin(rotY) * d * 1.8, -d * 0.7, 0.08 + (1 - d / depth) * 0.18, d > 0);
@@ -469,6 +578,7 @@ function ZipHologramMobile({ feature, color, onClose }) {
     animRef.current = requestAnimationFrame(frame);
     return () => { if (animRef.current) cancelAnimationFrame(animRef.current); };
   }, [feature, color]);
+
   const zipLabel = feature?.properties?.MODZCTA;
   return (
     <div className="absolute inset-x-0 top-0 z-40 flex flex-col" style={{ height: '50%', background: 'rgba(0,0,0,0.78)', backdropFilter: 'blur(4px)' }}>
@@ -484,45 +594,51 @@ function ZipHologramMobile({ feature, color, onClose }) {
 
 // ── Main component ────────────────────────────────────────────────────────────
 export default function MapView({ events }) {
-  const containerRef      = useRef(null);
-  const mapContainerRef   = useRef(null);
-  const mapRef            = useRef(null);
-  const hoveredIdRef      = useRef(null);
+  const containerRef    = useRef(null);
+  const mapContainerRef = useRef(null);
+  const mapRef          = useRef(null);
+  const hoveredIdRef    = useRef(null);
   const locationMarkerRef = useRef(null);
-  // Always-current refs so closures inside map callbacks never go stale
-  const heatmapRef        = useRef(false);
-  const threeDRef         = useRef(false);
-  const real3DRef         = useRef(false);
-  const satelliteRef      = useRef(false);
-  const tiersRef          = useRef([]);
-  const geoDataRef        = useRef(null);
-  const layerHandlersRef  = useRef({ handleZctaHover: null, handleZctaLeave: null, handleZctaClick: null });
+  const heatmapRef      = useRef(false);
+  const threeDRef       = useRef(false);
+  const tiersRef        = useRef([]);
+  const geoDataRef      = useRef(null);
+  const layerHandlersRef = useRef({ handleZctaHover: null, handleZctaLeave: null, handleZctaClick: null });
+  // FIX ADDITIVE STATE: refs for satellite and real3D for use in async callbacks
+  const real3DRef       = useRef(false);
+  const satelliteRef    = useRef(false);
+  // FIX REAL3D: store computed withHeat GeoJSON for zoom-based outline re-generation
+  const withHeatRef     = useRef(null);
+  // FIX REAL3D: cleanup handle for building tier assignment event listeners
+  const buildingAssignCleanupRef = useRef(null);
 
-  const [timespanIdx,      setTimespanIdx]      = useState(4);
-  const [heatmap,          setHeatmap]          = useState(false);
-  const [satellite,        setSatellite]        = useState(false);
-  const [threeD,           setThreeD]           = useState(false);
-  const [real3D,           setReal3D]           = useState(false);
-  const [geoData,          setGeoData]          = useState(null);
-  const [adjacency,        setAdjacency]        = useState([]);
-  const [mapReady,         setMapReady]         = useState(false);
-  const [entered,          setEntered]          = useState(false);
-  const [hoveredZip,       setHoveredZip]       = useState(null);
-  const [hoveredEvents,    setHoveredEvents]    = useState([]);
+  const [timespanIdx,   setTimespanIdx]   = useState(4);
+  const [heatmap,       setHeatmap]       = useState(false);
+  const [satellite,     setSatellite]     = useState(false);
+  const [threeD,        setThreeD]        = useState(false);
+  const [real3D,        setReal3D]        = useState(false);
+  const [geoData,       setGeoData]       = useState(null);
+  const [adjacency,     setAdjacency]     = useState([]);
+  const [mapReady,      setMapReady]      = useState(false);
+  const [entered,       setEntered]       = useState(false);
+  const [hoveredZip,    setHoveredZip]    = useState(null);
+  const [hoveredEvents, setHoveredEvents] = useState([]);
   const [hoveredColonists, setHoveredColonists] = useState(null);
-  const [tooltipPos,       setTooltipPos]       = useState(null);
-  const [sideZip,          setSideZip]          = useState(null);
-  const [sideEvents,       setSideEvents]       = useState([]);
-  const [sideColonists,    setSideColonists]    = useState([]);
-  const [selectedEvent,    setSelectedEvent]    = useState(null);
-  const [userLocation,     setUserLocation]     = useState(getLastLocation());
-  const [notInNYC,         setNotInNYC]         = useState(false);
-  const [locLoading,       setLocLoading]       = useState(false);
-  const [holoFeature,      setHoloFeature]      = useState(null);
-  const [holoColor,        setHoloColor]        = useState(HEAT_COLORS.cold);
-  const [isMobile,         setIsMobile]         = useState(false);
+  const [tooltipPos,    setTooltipPos]    = useState(null);
+  const [sideZip,       setSideZip]       = useState(null);
+  const [sideEvents,    setSideEvents]    = useState([]);
+  const [sideColonists, setSideColonists] = useState([]);
+  const [selectedEvent, setSelectedEvent] = useState(null);
+  const [userLocation,  setUserLocation]  = useState(getLastLocation());
+  const [notInNYC,      setNotInNYC]      = useState(false);
+  const [locLoading,    setLocLoading]    = useState(false);
+  const [holoFeature,   setHoloFeature]   = useState(null);
+  const [holoColor,     setHoloColor]     = useState(HEAT_COLORS.cold);
+  const [isMobile,      setIsMobile]      = useState(false);
+  // FIX ADDITIVE STATE: bump this after style swap so the main heatmap effect
+  // re-runs and re-applies all paint properties to the freshly added layers.
+  const [styleVersion,  setStyleVersion]  = useState(0);
 
-  // Keep refs in sync with state
   heatmapRef.current   = heatmap;
   threeDRef.current    = threeD;
   real3DRef.current    = real3D;
@@ -531,11 +647,12 @@ export default function MapView({ events }) {
 
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768);
-    check(); window.addEventListener('resize', check);
+    check();
+    window.addEventListener('resize', check);
     return () => window.removeEventListener('resize', check);
   }, []);
 
-  // GeoJSON fetch
+  // GeoJSON
   useEffect(() => {
     fetch(GEOJSON_URL).then(r => r.json()).then(data => {
       const features = data.features.map((f, i) => {
@@ -548,7 +665,7 @@ export default function MapView({ events }) {
     });
   }, []);
 
-  // Map init — canvas background transparent so CRT (zIndex:1) shows behind it (zIndex:2)
+  // Map init — make canvas background transparent so CRT can show on edges
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
     const map = new maplibregl.Map({
@@ -570,81 +687,61 @@ export default function MapView({ events }) {
     return () => { map.remove(); mapRef.current = null; };
   }, []);
 
-  // ── addLayers ──────────────────────────────────────────────────────────────
+  // ── Layer setup ────────────────────────────────────────────────────────────
   function addLayers(map, data, sat) {
     if (!map || !data || map.getSource('zcta')) return;
     map.addSource('zcta', { type: 'geojson', data, generateId: false });
 
-    // FIX #2 (artifacting): fill-extrusion for degenerate/broken geometry produces
-    // random 2D triangles. Setting fill-extrusion-opacity to 0 by default and only
-    // enabling it when 3D is active prevents stray geometry from being visible.
+    // Extrusion base — fully opaque, blocks everything below
     map.addLayer({
       id: 'zcta-extrude', type: 'fill-extrusion', source: 'zcta',
       paint: {
-        'fill-extrusion-color': ['case', ['boolean', ['get', '_special'], false], '#222222', DEFAULT_FILL_COLOR],
+        'fill-extrusion-color': ['case', ['boolean', ['get', '_special'], false], '#222222', '#1a0505'],
         'fill-extrusion-height': 0,
         'fill-extrusion-base': 0,
-        // Start fully transparent — only raised to 1.0 when 3D mode is on
-        'fill-extrusion-opacity': 0,
+        'fill-extrusion-opacity': 1.0,
       },
     });
 
-    // Flat fill — subtle semi-transparent by default (no heatmap, no satellite)
+    // Flat fill — slightly transparent dark red to differentiate regions from bg without solid fill
     map.addLayer({
       id: 'zcta-fill', type: 'fill', source: 'zcta',
       paint: {
-        'fill-color': ['case', ['boolean', ['get', '_special'], false], 'rgba(255,255,255,0.05)', DEFAULT_FILL_COLOR],
-        'fill-opacity': sat ? DEFAULT_FILL_OPACITY_SAT : DEFAULT_FILL_OPACITY_DARK,
+        'fill-color': ['case', ['boolean', ['get', '_special'], false], '#ffffff', '#1a0505'],
+        'fill-opacity': sat ? 0.38 : 0.55,
       },
     });
 
-    // Hover overlay (electric purple)
+    // Hover — electric purple
     map.addLayer({
       id: 'zcta-hover', type: 'fill', source: 'zcta',
-      paint: { 'fill-color': '#7C3AED', 'fill-opacity': ['case', ['boolean', ['feature-state', 'hovered'], false], 0.45, 0] },
+      paint: { 'fill-color': '#7C3AED', 'fill-opacity': ['case', ['boolean', ['feature-state', 'hovered'], false], 0.5, 0] },
     });
 
-    // Safe zone outline — hidden when 3D is on (would bleed through extrusions)
+    // Safe zone outline — toggled off when 3D is on
     map.addLayer({
       id: 'zcta-safe-line', type: 'line', source: 'zcta',
       filter: ['==', ['get', '_special'], true],
-      paint: { 'line-color': '#444444', 'line-width': 1.5, 'line-opacity': 0.6 },
+      paint: { 'line-color': '#000000', 'line-width': 2, 'line-opacity': 1 },
     });
 
-    // FIX #3 (pixelation at zoom out): use 'line-width' zoom interpolation so
-    // outlines stay visually consistent. Natural bleed overlap is preferred over
-    // simplification — wider lines at lower zoom = visible without artifacts.
+    // Ground boundary glows (non-special)
     map.addLayer({
       id: 'zcta-line-glow2', type: 'line', source: 'zcta',
       filter: ['!=', ['get', '_special'], true],
-      paint: {
-        'line-color': OUTLINE_GLOW,
-        'line-width': ['interpolate', ['linear'], ['zoom'], 9, 6, 12, 4, 16, 3],
-        'line-opacity': sat ? 0.25 : 0.35,
-        'line-blur': 8,
-      },
+      paint: { 'line-color': OUTLINE_GLOW, 'line-width': 3, 'line-opacity': sat ? 0.25 : 0.35, 'line-blur': 10 },
     });
     map.addLayer({
       id: 'zcta-line-glow', type: 'line', source: 'zcta',
       filter: ['!=', ['get', '_special'], true],
-      paint: {
-        'line-color': OUTLINE_COLOR,
-        'line-width': ['interpolate', ['linear'], ['zoom'], 9, 2.5, 12, 1.5, 16, 1],
-        'line-opacity': sat ? 0.55 : 0.75,
-        'line-blur': 2,
-      },
+      paint: { 'line-color': OUTLINE_COLOR, 'line-width': 1, 'line-opacity': sat ? 0.55 : 0.75, 'line-blur': 3 },
     });
     map.addLayer({
       id: 'zcta-line', type: 'line', source: 'zcta',
       filter: ['!=', ['get', '_special'], true],
-      paint: {
-        'line-color': OUTLINE_COLOR,
-        'line-width': ['interpolate', ['linear'], ['zoom'], 9, 1.5, 12, 0.8, 16, 0.5],
-        'line-opacity': 1,
-      },
+      paint: { 'line-color': OUTLINE_COLOR, 'line-width': 0.5, 'line-opacity': 1 },
     });
 
-    // Outline extrusion source (used for 3D top-of-block outlines)
     map.addSource('zcta-outline', { type: 'geojson', data: { type: 'FeatureCollection', features: [] }, generateId: false });
     map.addLayer({
       id: 'zcta-outline', type: 'fill-extrusion', source: 'zcta-outline',
@@ -658,10 +755,15 @@ export default function MapView({ events }) {
     });
     map.addLayer({
       id: 'zcta-outline-line', type: 'line', source: 'zcta-outline',
-      paint: { 'line-color': OUTLINE_COLOR, 'line-width': 1.5, 'line-opacity': 0, 'line-blur': 0.5 },
+      paint: {
+        'line-color': OUTLINE_COLOR,
+        'line-width': 1.5,
+        'line-opacity': 0,
+        'line-blur': 0.5,
+      },
     });
 
-    // ── Mouse event handlers ──
+    // Events — store handlers in ref for conditional management based on 3D state
     const handleZctaHover = e => {
       if (!e.features.length) return;
       const f = e.features[0];
@@ -673,6 +775,7 @@ export default function MapView({ events }) {
       setHoveredZip(String(f.properties.MODZCTA || ''));
       setTooltipPos({ x: e.point.x, y: e.point.y });
     };
+
     const handleZctaLeave = () => {
       if (hoveredIdRef.current !== null) {
         map.setFeatureState({ source: 'zcta', id: hoveredIdRef.current }, { hovered: false });
@@ -681,6 +784,7 @@ export default function MapView({ events }) {
       map.getCanvas().style.cursor = '';
       setHoveredZip(null); setTooltipPos(null);
     };
+
     const handleZctaClick = e => {
       if (!e.features.length) return;
       openSidePanel(String(e.features[0].properties.MODZCTA || ''));
@@ -688,13 +792,15 @@ export default function MapView({ events }) {
     };
 
     layerHandlersRef.current = { handleZctaHover, handleZctaLeave, handleZctaClick };
+
     map.on('mousemove', 'zcta-fill', handleZctaHover);
     map.on('mouseleave', 'zcta-fill', handleZctaLeave);
     map.on('click', 'zcta-fill', handleZctaClick);
   }
 
   function openHologram(clickedFeature) {
-    const data = geoDataRef.current; if (!data) return;
+    const data = geoDataRef.current;
+    if (!data) return;
     const feat = data.features.find(f => f.id === clickedFeature.id) || clickedFeature;
     const idx = data.features.findIndex(f => f.id === clickedFeature.id);
     const tier = tiersRef.current[idx] ?? 0;
@@ -708,32 +814,36 @@ export default function MapView({ events }) {
     addLayers(map, geoData, satellite);
   }, [mapReady, geoData]);
 
-  // Switch hover target between fill (2D) and extrude (3D)
+  // Manage hover layer based on 3D state — switch from fill to extrude when 3D is on
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady || !map.getLayer('zcta-fill')) return;
+    
     const { handleZctaHover, handleZctaLeave, handleZctaClick } = layerHandlersRef.current;
     if (!handleZctaHover) return;
+
     if (threeD) {
       map.off('mousemove', 'zcta-fill', handleZctaHover);
       map.off('mouseleave', 'zcta-fill', handleZctaLeave);
-      map.off('click',     'zcta-fill', handleZctaClick);
+      map.off('click', 'zcta-fill', handleZctaClick);
+      
       map.on('mousemove', 'zcta-extrude', handleZctaHover);
       map.on('mouseleave', 'zcta-extrude', handleZctaLeave);
-      map.on('click',     'zcta-extrude', handleZctaClick);
+      map.on('click', 'zcta-extrude', handleZctaClick);
     } else {
       map.off('mousemove', 'zcta-extrude', handleZctaHover);
       map.off('mouseleave', 'zcta-extrude', handleZctaLeave);
-      map.off('click',     'zcta-extrude', handleZctaClick);
+      map.off('click', 'zcta-extrude', handleZctaClick);
+      
       map.on('mousemove', 'zcta-fill', handleZctaHover);
       map.on('mouseleave', 'zcta-fill', handleZctaLeave);
-      map.on('click',     'zcta-fill', handleZctaClick);
+      map.on('click', 'zcta-fill', handleZctaClick);
     }
   }, [threeD, mapReady]);
 
   // ── Main heatmap + 3D update ──────────────────────────────────────────────
-  // This effect is the SINGLE source of truth for all layer paint properties.
-  // Satellite, heatmap, threeD all coexist — no toggle resets another.
+  // FIX ADDITIVE STATE: added `styleVersion` and `real3D` to deps so this re-runs
+  // after satellite style swap (which increments styleVersion) and after real3D changes.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady || !geoData || !map.getLayer('zcta-fill')) return;
@@ -752,83 +862,98 @@ export default function MapView({ events }) {
       }),
     };
     if (map.getSource('zcta')) map.getSource('zcta').setData(withHeat);
+    // FIX REAL3D: store so zoom listener can regenerate outline width without full recompute
+    withHeatRef.current = withHeat;
     if (map.getSource('zcta-outline')) map.getSource('zcta-outline').setData(createOutlineGeoJSON(withHeat, getZoomAwareOutlineWidth(map)));
 
-    // Heat color map expression (used for fill and extrude)
     const heatColorExpr = [
-      'case', ['boolean', ['get', '_special'], false], 'rgba(255,255,255,0.04)',
+      'case', ['boolean', ['get', '_special'], false], '#ffffff',
       ['step', ['get', '_tier'], HEAT_COLORS.cold, 1, HEAT_COLORS.cool, 2, HEAT_COLORS.warm, 3, HEAT_COLORS.orange, 4, HEAT_COLORS.hot],
     ];
 
-    // Extrude color with hover override (electric purple on hover)
-    const withHoverColor = (baseExpr) => ['case', ['boolean', ['feature-state', 'hovered'], false], '#7C3AED', baseExpr];
+    // Wrap color expression with hover state check for 3D mode
+    const withHoverColor = (baseExpr) => {
+      return ['case', ['boolean', ['feature-state', 'hovered'], false], '#7C3AED', baseExpr];
+    };
 
-    // Height expressions
-    const extrudeH = ['case', ['boolean', ['get', '_special'], false], 30,
-      ['step', ['get', '_tier'], 30, 1, 200, 2, 700, 3, 1600, 4, 2800]];
-    const flatH = ['case', ['boolean', ['get', '_special'], false], 30, 400];
+    // Height expressions — heatmap 3D
+    const extrudeH = ['case', ['boolean', ['get', '_special'], false], 30, ['step', ['get', '_tier'], 30, 1, 200, 2, 700, 3, 1600, 4, 2800]];
+    // Flat 3D
+    const flatH    = ['case', ['boolean', ['get', '_special'], false], 30, 400];
 
-    // ── FILL layer: visible in 2D and satellite, hidden when 3D covers it ──
+    // FIX 3D PIXELIZATION: in 3D mode keep ground-level lines visible at low zoom
+    // so outlines remain readable when zoomed out (natural overlap-bleed approach).
+    // These fade to 0 as zoom increases so they don't interfere with the 3D view up close.
+    const zoomBasedLineOpacity = ['interpolate', ['linear'], ['zoom'], 9.5, 0.4, 11, 0.18, 12.5, 0];
+
     if (heatmap) {
       map.setPaintProperty('zcta-fill', 'fill-color', heatColorExpr);
-      // When 3D is on the extrude block covers fill → hide fill to avoid z-fighting
-      // When heatmap+satellite: semi-transparent so satellite shows through
-      // When heatmap only: solid enough to read, slightly transparent
-      map.setPaintProperty('zcta-fill', 'fill-opacity',
-        threeD ? 0 : (satellite ? 0.52 : 0.82));
-    } else {
-      // No heatmap: very subtle dark red overlay to distinguish from background
-      map.setPaintProperty('zcta-fill', 'fill-color',
-        ['case', ['boolean', ['get', '_special'], false], 'rgba(255,255,255,0.04)', DEFAULT_FILL_COLOR]);
-      map.setPaintProperty('zcta-fill', 'fill-opacity',
-        threeD ? 0 : (satellite ? DEFAULT_FILL_OPACITY_SAT : DEFAULT_FILL_OPACITY_DARK));
-    }
+      // FIX ADDITIVE STATE: heatmap fill — 0 when 3D is on (extrusion takes over),
+      // semi-transparent when satellite on, solid otherwise.
+      map.setPaintProperty('zcta-fill', 'fill-opacity', threeD ? 0 : (satellite ? 0.5 : 0.9));
 
-    // ── EXTRUDE block: only raised when 3D is on ──
-    // FIX #2: opacity stays 0 unless 3D is on → stray broken-geometry triangles invisible
-    if (threeD) {
-      // Safe zone outlines hidden — would bleed through solid 3D blocks
-      map.setPaintProperty('zcta-safe-line', 'line-opacity', 0);
+      if (threeD) {
+        map.setPaintProperty('zcta-safe-line', 'line-opacity', 0);
 
-      if (heatmap) {
-        map.setPaintProperty('zcta-extrude', 'fill-extrusion-color',
-          withHoverColor(['case', ['boolean', ['get', '_special'], false], '#111111',
-            ['step', ['get', '_tier'], HEAT_COLORS.cold, 1, HEAT_COLORS.cool, 2, HEAT_COLORS.warm, 3, HEAT_COLORS.orange, 4, HEAT_COLORS.hot]]));
+        const extrudeColorExpr = [
+          'case', ['boolean', ['get', '_special'], false], '#111111',
+          ['step', ['get', '_tier'], HEAT_COLORS.cold, 1, HEAT_COLORS.cool, 2, HEAT_COLORS.warm, 3, HEAT_COLORS.orange, 4, HEAT_COLORS.hot],
+        ];
+        // FIX SATELLITE: 3D+heatmap extrusion stays solid (1.0) even when satellite is on
+        map.setPaintProperty('zcta-extrude', 'fill-extrusion-color', withHoverColor(extrudeColorExpr));
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-height', extrudeH);
-        // Heatmap 3D blocks are always solid — satellite does NOT make them transparent
+        map.setPaintProperty('zcta-extrude', 'fill-extrusion-base', 0);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', 1.0);
-      } else {
-        // No heatmap, 3D on: dark red blocks, slightly transparent if satellite
-        map.setPaintProperty('zcta-extrude', 'fill-extrusion-color',
-          withHoverColor(['case', ['boolean', ['get', '_special'], false], '#111111', '#3a0505']));
-        map.setPaintProperty('zcta-extrude', 'fill-extrusion-height', flatH);
-        map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', satellite ? 0.75 : 1.0);
-      }
-      map.setPaintProperty('zcta-extrude', 'fill-extrusion-base', 0);
 
-      // Ground boundary lines off — outline extrusion at top of block takes over
-      map.setPaintProperty('zcta-line',       'line-opacity', 0);
-      map.setPaintProperty('zcta-line-glow',  'line-opacity', 0);
-      map.setPaintProperty('zcta-line-glow2', 'line-opacity', 0);
+        // FIX 3D PIXELIZATION: hide solid lines but keep them faintly visible at low zoom
+        map.setPaintProperty('zcta-line',       'line-opacity', zoomBasedLineOpacity);
+        map.setPaintProperty('zcta-line-glow',  'line-opacity', zoomBasedLineOpacity);
+        map.setPaintProperty('zcta-line-glow2', 'line-opacity', zoomBasedLineOpacity);
+      } else {
+        map.setPaintProperty('zcta-safe-line', 'line-opacity', 1);
+        map.setPaintProperty('zcta-extrude', 'fill-extrusion-color',
+          ['case', ['boolean', ['get', '_special'], false], '#222222', '#1a0505']);
+        map.setPaintProperty('zcta-extrude', 'fill-extrusion-height', 0);
+        map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', 0);
+        map.setPaintProperty('zcta-line',      'line-opacity', 1);
+        map.setPaintProperty('zcta-line-glow', 'line-opacity', satellite ? 0.55 : 0.75);
+        map.setPaintProperty('zcta-line-glow2','line-opacity', satellite ? 0.25 : 0.35);
+      }
     } else {
-      // 2D mode: extrude hidden, ground lines visible
-      map.setPaintProperty('zcta-safe-line', 'line-opacity', 0.6);
-      map.setPaintProperty('zcta-extrude', 'fill-extrusion-color',
-        ['case', ['boolean', ['get', '_special'], false], '#222222', DEFAULT_FILL_COLOR]);
-      map.setPaintProperty('zcta-extrude', 'fill-extrusion-height', 0);
-      map.setPaintProperty('zcta-extrude', 'fill-extrusion-base', 0);
-      // FIX #2: always 0 opacity in 2D → no stray geometry visible
-      map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', 0);
-      map.setPaintProperty('zcta-line',       'line-opacity', 1);
-      map.setPaintProperty('zcta-line-glow',  'line-opacity', satellite ? 0.55 : 0.75);
-      map.setPaintProperty('zcta-line-glow2', 'line-opacity', satellite ? 0.25 : 0.35);
+      // No heatmap — use dark red theme
+      map.setPaintProperty('zcta-fill', 'fill-color', ['case', ['boolean', ['get', '_special'], false], '#ffffff', '#1a0505']);
+      // FIX ADDITIVE STATE / 3D ARTIFACTING: zero opacity in 3D so the flat fill
+      // doesn't appear as stray 2D surfaces beneath or through extrusions.
+      map.setPaintProperty('zcta-fill', 'fill-opacity', threeD ? 0 : (satellite ? 0.38 : 0.55));
+
+      if (threeD) {
+        map.setPaintProperty('zcta-safe-line', 'line-opacity', 0);
+        // FIX SATELLITE: 3D no-heatmap extrusion is semi-transparent when satellite is on
+        const flatColorExpr = ['case', ['boolean', ['get', '_special'], false], '#111111', '#3a0505'];
+        map.setPaintProperty('zcta-extrude', 'fill-extrusion-color', withHoverColor(flatColorExpr));
+        map.setPaintProperty('zcta-extrude', 'fill-extrusion-height', flatH);
+        map.setPaintProperty('zcta-extrude', 'fill-extrusion-base', 0);
+        map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', satellite ? 0.9 : 1.0);
+
+        // FIX 3D PIXELIZATION: same zoom-based ground line fade
+        map.setPaintProperty('zcta-line',       'line-opacity', zoomBasedLineOpacity);
+        map.setPaintProperty('zcta-line-glow',  'line-opacity', zoomBasedLineOpacity);
+        map.setPaintProperty('zcta-line-glow2', 'line-opacity', zoomBasedLineOpacity);
+      } else {
+        map.setPaintProperty('zcta-safe-line', 'line-opacity', 1);
+        map.setPaintProperty('zcta-extrude', 'fill-extrusion-color', 
+          ['case', ['boolean', ['get', '_special'], false], '#222222', '#1a0505']);
+        map.setPaintProperty('zcta-extrude', 'fill-extrusion-height', 0);
+        map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', 0);
+        map.setPaintProperty('zcta-line',      'line-opacity', 1);
+        map.setPaintProperty('zcta-line-glow', 'line-opacity', satellite ? 0.55 : 0.75);
+        map.setPaintProperty('zcta-line-glow2','line-opacity', satellite ? 0.25 : 0.35);
+      }
     }
 
-    // Hover fill only shown in 2D; in 3D the extrude color handles hover
-    map.setPaintProperty('zcta-hover', 'fill-opacity',
-      threeD ? 0 : ['case', ['boolean', ['feature-state', 'hovered'], false], 0.45, 0]);
+    // Hover fill: only in 2D modes (3D hover is handled via extrusion color)
+    map.setPaintProperty('zcta-hover', 'fill-opacity', threeD ? 0 : ['case', ['boolean', ['feature-state', 'hovered'], false], 0.5, 0]);
 
-    // Outline extrusion (top-of-block red border ring)
     if (map.getSource('zcta-outline')) {
       map.setPaintProperty('zcta-outline', 'fill-extrusion-opacity', threeD ? 0.98 : 0);
       map.setPaintProperty('zcta-outline-line', 'line-opacity', 0);
@@ -841,81 +966,113 @@ export default function MapView({ events }) {
         map.setPaintProperty('zcta-outline', 'fill-extrusion-height', 0);
       }
     }
-  }, [heatmap, threeD, timespanIdx, events, geoData, mapReady, satellite, adjacency]);
+  }, [heatmap, threeD, real3D, timespanIdx, events, geoData, mapReady, satellite, adjacency, styleVersion]);
 
-  // 3D pitch/bearing
+  // 3D pitch
   useEffect(() => {
-    const map = mapRef.current; if (!map || !mapReady) return;
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
     map.easeTo({ pitch: threeD ? 48 : 0, bearing: threeD ? -17 : 0, duration: 700 });
   }, [threeD, mapReady]);
 
-  // ── FIX #1: Satellite is strictly additive ────────────────────────────────
-  // setStyle wipes all custom layers → re-add them, then let the main effect
-  // re-run (satellite is in its dep array) to restore correct paint properties.
-  // Heatmap / 3D / real3D states are never touched here.
+  // FIX 3D PIXELIZATION: re-generate outline ring width on zoom so it stays visible.
+  // Uses withHeatRef so it doesn't need to recompute tiers/zip data.
   useEffect(() => {
-    const map = mapRef.current; if (!map || !mapReady) return;
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+    const onZoom = () => {
+      if (!threeDRef.current || !withHeatRef.current) return;
+      if (map.getSource('zcta-outline')) {
+        map.getSource('zcta-outline').setData(createOutlineGeoJSON(withHeatRef.current, getZoomAwareOutlineWidth(map)));
+      }
+    };
+    map.on('zoom', onZoom);
+    return () => map.off('zoom', onZoom);
+  }, [mapReady]);
+
+  // FIX ADDITIVE STATE: Satellite is additive — does NOT touch heatmap/3D/real3D state.
+  // After style swap, re-adds zcta layers and real3D layers if active.
+  // styleVersion increment triggers the main heatmap effect to re-apply all paint
+  // properties to the freshly created layers, restoring all active combos.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
     map.setStyle(satellite ? satelliteMapStyle() : darkMapStyle());
     map.once('styledata', () => {
-      if (!geoData || map.getSource('zcta')) return;
-      addLayers(map, geoData, satellite);
+      const currentGeoData = geoDataRef.current;
+      if (!currentGeoData || map.getSource('zcta')) return;
+      addLayers(map, currentGeoData, satelliteRef.current);
       if (real3DRef.current) applyReal3DLayers(map, heatmapRef.current);
+      // This triggers the main heatmap+3D useEffect to re-run and restore all styles
+      setStyleVersion(v => v + 1);
     });
   }, [satellite]);
 
-  // ── Real3D building color expressions ────────────────────────────────────
-  // FIX (real3D+heatmap): Buildings inherit a 5-shade cluster of the heatmap
-  // color for their height band. When heatmap off → dark red theme.
-  // Outline removed at full render zoom (>= 14) since cluster color provides
-  // enough visual distinction between neighboring buildings.
-  function buildingColorExpr(isHeatmap) {
+  // FIX REAL3D: Building color expression using feature-state (tier+shadeIdx) for
+  // heatmap mode, or deterministic ID-based red shades for non-heatmap mode.
+  // In heatmap mode: tier comes from spatial assignment (zip region lookup),
+  // shadeIdx = featureId % 5 for cluster differentiation.
+  function buildingColorExprByState(isHeatmap) {
     if (!isHeatmap) {
-      // Dark red range for no-heatmap mode — 5 shades for neighbor clustering
-      return [
-        'step', ['coalesce', ['get', 'render_height'], ['get', 'height'], 0],
-        '#1a0000',  // 0m
-          5,  '#220200',
-          15, '#2e0300',
-          30, '#3a0400',
-          60, '#440500',
+      // 5 distinct dark-red shades so neighboring buildings are visually different
+      return ['case',
+        ['==', ['%', ['to-number', ['id'], 0], 5], 0], '#0d0202',
+        ['==', ['%', ['to-number', ['id'], 0], 5], 1], '#280606',
+        ['==', ['%', ['to-number', ['id'], 0], 5], 2], '#0a0101',
+        ['==', ['%', ['to-number', ['id'], 0], 5], 3], '#3d0a0a',
+        '#1f0505',
       ];
     }
-    // Heatmap on: each height band maps to a 5-shade cluster within its tier tones.
-    // The ['%', ...] modulo trick lets us cycle through 5 shades based on a
-    // deterministic property — we use render_height bands to approximate neighbor
-    // variation without needing feature ID math in expressions.
-    return [
-      'step', ['coalesce', ['get', 'render_height'], ['get', 'height'], 0],
-      // 0–4m: cold tier shade 0
-      HEAT_TONES.cold[0],
-        4,  HEAT_TONES.cold[1],
-        8,  HEAT_TONES.cold[2],
-        12, HEAT_TONES.cold[3],
-        16, HEAT_TONES.cold[4],
-        20, HEAT_TONES.cool[0],
-        28, HEAT_TONES.cool[1],
-        38, HEAT_TONES.cool[2],
-        50, HEAT_TONES.cool[3],
-        65, HEAT_TONES.cool[4],
-        80, HEAT_TONES.warm[0],
-       100, HEAT_TONES.warm[1],
-       130, HEAT_TONES.warm[2],
-       165, HEAT_TONES.warm[3],
-       210, HEAT_TONES.warm[4],
-       260, HEAT_TONES.orange[0],
-       320, HEAT_TONES.orange[1],
-       400, HEAT_TONES.orange[2],
-       500, HEAT_TONES.orange[3],
-       640, HEAT_TONES.orange[4],
-       700, HEAT_TONES.hot[0],
-       800, HEAT_TONES.hot[1],
-       950, HEAT_TONES.hot[2],
-      1100, HEAT_TONES.hot[3],
-      1300, HEAT_TONES.hot[4],
+
+    // Heatmap: nested case — outer=tier from feature-state, inner=shade index from feature-state
+    const shades = (tones) => ['case',
+      ['==', ['feature-state', 'shadeIdx'], 0], tones[0],
+      ['==', ['feature-state', 'shadeIdx'], 1], tones[1],
+      ['==', ['feature-state', 'shadeIdx'], 2], tones[2],
+      ['==', ['feature-state', 'shadeIdx'], 3], tones[3],
+      tones[4],
+    ];
+
+    return ['case',
+      ['==', ['feature-state', 'tier'], 4], shades(HEAT_BUILDING_TONES.hot),
+      ['==', ['feature-state', 'tier'], 3], shades(HEAT_BUILDING_TONES.orange),
+      ['==', ['feature-state', 'tier'], 2], shades(HEAT_BUILDING_TONES.warm),
+      ['==', ['feature-state', 'tier'], 1], shades(HEAT_BUILDING_TONES.cool),
+      shades(HEAT_BUILDING_TONES.cold),
     ];
   }
 
+  // FIX REAL3D: Spatial assignment — queries rendered buildings, does point-in-polygon
+  // against zcta features to get the region tier, then sets feature-state on each building.
+  // shadeIdx = featureId % 5 ensures neighboring buildings (different OSM IDs) get
+  // different shades of the same hue for visibility without needing outlines.
+  function assignBuildingTiersToMap(map) {
+    if (!map || !map.getLayer('real3d-buildings')) return;
+    const features = geoDataRef.current?.features;
+    const tiers = tiersRef.current;
+    if (!features || !tiers.length) return;
+    try {
+      const buildings = map.queryRenderedFeatures(undefined, { layers: ['real3d-buildings'] });
+      buildings.forEach(b => {
+        if (b.id == null) return;
+        const centroid = getGeomCentroid(b.geometry);
+        const tier = findTierForPoint(centroid, features, tiers);
+        const shadeIdx = Math.abs(Number(b.id) || 0) % 5;
+        map.setFeatureState(
+          { source: 'openmaptiles', sourceLayer: 'building', id: b.id },
+          { tier, shadeIdx }
+        );
+      });
+    } catch (e) { /* ignore mid-render errors */ }
+  }
+
   function applyReal3DLayers(map, isHeatmap) {
+    // Clean up any previous building assignment listeners
+    if (buildingAssignCleanupRef.current) {
+      buildingAssignCleanupRef.current();
+      buildingAssignCleanupRef.current = null;
+    }
+
     ['real3d-buildings', 'real3d-buildings-outline'].forEach(id => { if (map.getLayer(id)) map.removeLayer(id); });
     if (!map.getSource('openmaptiles')) {
       try {
@@ -926,51 +1083,72 @@ export default function MapView({ events }) {
       map.addLayer({
         id: 'real3d-buildings', type: 'fill-extrusion', source: 'openmaptiles', 'source-layer': 'building', minzoom: 12,
         paint: {
-          'fill-extrusion-color': buildingColorExpr(isHeatmap),
+          'fill-extrusion-color': buildingColorExprByState(isHeatmap),
           'fill-extrusion-height': ['coalesce', ['get', 'render_height'], ['get', 'height'], 5],
           'fill-extrusion-base':   ['coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0],
           'fill-extrusion-opacity': 1.0,
           'fill-extrusion-vertical-gradient': true,
         },
       });
-      // Outline only at basemap / intermediate zoom — hide at full 3D render zoom
-      // because cluster colors provide visual separation at that level.
-      map.addLayer({
-        id: 'real3d-buildings-outline', type: 'line', source: 'openmaptiles', 'source-layer': 'building',
-        minzoom: 12,
-        maxzoom: 14,  // hidden when buildings are fully rendered 3D blocks
-        paint: { 'line-color': OUTLINE_COLOR, 'line-width': 0.5, 'line-opacity': 0.35 },
-      });
+      // FIX REAL3D BOTTOM OUTLINE: Do NOT add the outline layer for full 3D blocks.
+      // The outline (minzoom 14) only appears when buildings are fully 3D extruded,
+      // which is exactly when we want NO outline — cluster colors provide distinction.
+      // For baseplate phase (zoom 12-14), the footprint fill provides enough boundary.
+
       map.easeTo({ pitch: 55, bearing: -17, duration: 700 });
+
+      if (isHeatmap) {
+        // Assign zip tiers to building feature-states for heatmap color inheritance
+        const assignFn = () => assignBuildingTiersToMap(map);
+        setTimeout(assignFn, 500);
+        map.on('moveend', assignFn);
+        map.on('zoomend', assignFn);
+        buildingAssignCleanupRef.current = () => {
+          map.off('moveend', assignFn);
+          map.off('zoomend', assignFn);
+        };
+      }
     } catch (err) { console.warn('Real3D layer add failed:', err); }
   }
 
   useEffect(() => {
-    const map = mapRef.current; if (!map || !mapReady) return;
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
     if (!real3D) {
       ['real3d-buildings', 'real3d-buildings-outline'].forEach(id => { if (map.getLayer(id)) map.removeLayer(id); });
+      if (buildingAssignCleanupRef.current) { buildingAssignCleanupRef.current(); buildingAssignCleanupRef.current = null; }
       if (!threeD) map.easeTo({ pitch: 0, bearing: 0, duration: 700 });
       return;
     }
     applyReal3DLayers(map, heatmapRef.current);
   }, [real3D, mapReady]);
 
-  // Refresh building colors when heatmap changes while real3D is on
+  // FIX REAL3D HEATMAP: refresh building color expression + spatial assignment when heatmap changes
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady || !real3D || !map.getLayer('real3d-buildings')) return;
-    map.setPaintProperty('real3d-buildings', 'fill-extrusion-color', buildingColorExpr(heatmap));
+    map.setPaintProperty('real3d-buildings', 'fill-extrusion-color', buildingColorExprByState(heatmap));
+    if (heatmap) {
+      // Re-assign tiers with new heatmap state; set up move/zoom listeners
+      if (buildingAssignCleanupRef.current) { buildingAssignCleanupRef.current(); buildingAssignCleanupRef.current = null; }
+      const assignFn = () => assignBuildingTiersToMap(map);
+      setTimeout(assignFn, 300);
+      map.on('moveend', assignFn);
+      map.on('zoomend', assignFn);
+      buildingAssignCleanupRef.current = () => { map.off('moveend', assignFn); map.off('zoomend', assignFn); };
+    } else {
+      // Heatmap turned off — clear listeners, ID-based expression needs no state
+      if (buildingAssignCleanupRef.current) { buildingAssignCleanupRef.current(); buildingAssignCleanupRef.current = null; }
+    }
   }, [heatmap, real3D, mapReady]);
 
-  // ── Toggle logic ──────────────────────────────────────────────────────────
-  // 3D and Real3D are mutually exclusive (clicking one turns the other off).
-  // Heatmap and satellite are independent — they persist regardless.
-  const handleThreeDToggle  = () => { setThreeD(v => { if (!v) setReal3D(false); return !v; }); };
-  const handleReal3DToggle  = () => { setReal3D(v => { if (!v) setThreeD(false); return !v; }); };
+  const handleThreeDToggle = () => { setThreeD(v => { if (!v) setReal3D(false); return !v; }); };
+  const handleReal3DToggle = () => { setReal3D(v => { if (!v) setThreeD(false); return !v; }); };
 
   // Location orb
   useEffect(() => {
-    const map = mapRef.current; if (!map || !mapReady) return;
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
     if (locationMarkerRef.current) { locationMarkerRef.current.remove(); locationMarkerRef.current = null; }
     if (!userLocation) return;
     const el = document.createElement('div');
@@ -1013,20 +1191,25 @@ export default function MapView({ events }) {
 
   useEffect(() => {
     const h = e => { if (e.key === 'Escape') { setHoloFeature(null); setSideZip(null); setSideEvents([]); setSideColonists([]); } };
-    window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h);
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
   }, []);
 
   const zipLabel  = hoveredZip === 'SAFEZONE' ? 'Safe Zone' : hoveredZip ? `ZIP ${hoveredZip}` : '';
   const sideLabel = sideZip   === 'SAFEZONE' ? 'Safe Zone' : sideZip   ? `ZIP ${sideZip}`   : '';
 
-  // ── Render ────────────────────────────────────────────────────────────────
   return (
+    // Outer div is the positioning root for everything
     <div ref={containerRef} className="absolute inset-0 overflow-hidden" style={{ background: '#0d0000' }}>
 
-      {/* LAYER 1 — CRT effect at zIndex:1, behind map canvas */}
-      <CRTEffect active={true} limitMobile={isMobile} />
+      {/* FIX CRT: Wrap CRTEffect at z-index 20 so it renders ABOVE the map canvas
+          (z:2) as a visible overlay on all views and combos, while remaining below
+          popups (z:30+). pointer-events-none ensures it never blocks interaction. */}
+      <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 20 }}>
+        <CRTEffect active={true} limitMobile={isMobile} />
+      </div>
 
-      {/* LAYER 2 — Map canvas at zIndex:2, transparent bg so CRT shows through dark bg */}
+      {/* Map canvas at z-index 2 */}
       <div
         ref={mapContainerRef}
         className="absolute inset-0 w-full h-full"
@@ -1037,7 +1220,7 @@ export default function MapView({ events }) {
 
       {entered && (
         <>
-          {/* Controls — zIndex:30 (above everything) */}
+          {/* Controls */}
           <div className="absolute top-3 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-2">
             <div className="flex items-center gap-1 bg-black/80 backdrop-blur border border-white/20 rounded-2xl px-3 py-1.5">
               <span className="text-white text-xs font-black mr-1">📅</span>
@@ -1113,7 +1296,7 @@ export default function MapView({ events }) {
             </div>
           )}
 
-          {/* ── DESKTOP side panel (paginated) ── */}
+          {/* ── DESKTOP side panel ── */}
           {sideZip && !isMobile && (
             <div className="absolute right-0 top-0 bottom-0 z-50 flex flex-col overflow-hidden"
               style={{ width: 400, background: 'rgba(3,0,10,0.82)', backdropFilter: 'blur(16px)', borderLeft: '1px solid rgba(180,0,0,0.3)' }}>
@@ -1205,10 +1388,14 @@ export default function MapView({ events }) {
                 <button onClick={() => { setSideZip(null); setSideEvents([]); setSideColonists([]); setHoloFeature(null); }}
                   className="text-white/40 text-lg w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10">✕</button>
               </div>
+
               <div className="flex flex-1 overflow-hidden min-h-0">
                 <div className="flex-1 flex flex-col overflow-hidden border-r border-white/10 min-h-0">
                   <PaginatedSection
-                    items={sideEvents} emptyMsg="None" headerLabel="Events" headerColor="text-white/30"
+                    items={sideEvents}
+                    emptyMsg="None"
+                    headerLabel="Events"
+                    headerColor="text-white/30"
                     renderItem={(event) => (
                       <div key={event.id} onClick={() => setSelectedEvent(event)}
                         className="flex items-center gap-2 px-2 py-2 border-b border-white/5 cursor-pointer active:bg-white/5"
@@ -1225,7 +1412,10 @@ export default function MapView({ events }) {
                 {sideZip !== 'SAFEZONE' && (
                   <div className="flex-1 flex flex-col overflow-hidden min-h-0">
                     <PaginatedSection
-                      items={sideColonists} emptyMsg="None yet" headerLabel="Colony" headerColor="text-green-400/50"
+                      items={sideColonists}
+                      emptyMsg="None yet"
+                      headerLabel="Colony"
+                      headerColor="text-green-400/50"
                       renderItem={(c, i) => {
                         const medal = MEDALS[i] || null, isTop = i < 3;
                         return (
