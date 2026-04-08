@@ -123,48 +123,131 @@ function computeTiers(features, zipMap, maxCount, adjacency) {
   return tiers;
 }
 
-function geographicalDistanceMeters([lng1, lat1], [lng2, lat2]) {
-  const latRad = ((lat1 + lat2) / 2) * Math.PI / 180;
+function lngLatToMeters([lng, lat], refLat) {
+  const latRad = refLat * Math.PI / 180;
   const metersPerDegLat = 111132;
   const metersPerDegLng = 111320 * Math.cos(latRad);
-  const dx = (lng2 - lng1) * metersPerDegLng;
-  const dy = (lat2 - lat1) * metersPerDegLat;
-  return Math.sqrt(dx * dx + dy * dy);
+  return [lng * metersPerDegLng, lat * metersPerDegLat];
 }
 
-function polygonCentroid(ring) {
-  let x = 0, y = 0, count = 0;
-  ring.forEach(([lng, lat]) => { x += lng; y += lat; count += 1; });
-  return count === 0 ? [0, 0] : [x / count, y / count];
+function metersToLngLat([x, y], refLat) {
+  const latRad = refLat * Math.PI / 180;
+  const metersPerDegLat = 111132;
+  const metersPerDegLng = 111320 * Math.cos(latRad);
+  return [x / metersPerDegLng, y / metersPerDegLat];
 }
 
-function scaleRingToCentroid(ring, centroid, scale) {
-  return ring.map(([lng, lat]) => [centroid[0] + (lng - centroid[0]) * scale, centroid[1] + (lat - centroid[1]) * scale]);
+function normalize([x, y]) {
+  const len = Math.hypot(x, y);
+  return len === 0 ? [0, 0] : [x / len, y / len];
 }
 
-function makeOutlinePolygon(outerRing, widthMeters) {
-  const centroid = polygonCentroid(outerRing);
-  const avgRadius = outerRing.reduce((sum, coord) => sum + geographicalDistanceMeters(centroid, coord), 0) / Math.max(outerRing.length, 1);
-  const scale = avgRadius > widthMeters * 2 ? Math.max(0.5, 1 - widthMeters / avgRadius) : 0.75;
-  return [outerRing, scaleRingToCentroid(outerRing, centroid, scale)];
+function lineIntersection(p0, p1, q0, q1) {
+  const s1x = p1[0] - p0[0];
+  const s1y = p1[1] - p0[1];
+  const s2x = q1[0] - q0[0];
+  const s2y = q1[1] - q0[1];
+  const denom = (-s2x * s1y + s1x * s2y);
+  if (Math.abs(denom) < 1e-9) return null;
+  const s = (-s1y * (p0[0] - q0[0]) + s1x * (p0[1] - q0[1])) / denom;
+  return [q0[0] + (s * s2x), q0[1] + (s * s2y)];
 }
 
-function createOutlineGeoJSON(sourceGeoJSON, widthMeters = 18) {
+function signedArea(ring) {
+  let area = 0;
+  for (let i = 0; i < ring.length - 1; i++) {
+    const [x1, y1] = ring[i];
+    const [x2, y2] = ring[i + 1];
+    area += x1 * y2 - x2 * y1;
+  }
+  return area / 2;
+}
+
+function closeRing(ring) {
+  return ring.length === 0 || (ring[0][0] === ring[ring.length - 1][0] && ring[0][1] === ring[ring.length - 1][1])
+    ? ring
+    : [...ring, ring[0]];
+}
+
+function offsetRing(outerRing, widthMeters) {
+  const ring = outerRing[0][0] === outerRing[outerRing.length - 1][0] && outerRing[0][1] === outerRing[outerRing.length - 1][1]
+    ? outerRing.slice(0, -1)
+    : outerRing;
+  if (ring.length < 3) return null;
+
+  const refLat = ring.reduce((sum, [, lat]) => sum + lat, 0) / ring.length;
+  const pts = ring.map(coord => lngLatToMeters(coord, refLat));
+  const orientation = signedArea([...pts, pts[0]]) >= 0 ? 1 : -1;
+  const halfWidth = widthMeters / 2;
+
+  const normals = pts.map((p, i) => {
+    const next = pts[(i + 1) % pts.length];
+    const dx = next[0] - p[0];
+    const dy = next[1] - p[1];
+    return normalize(orientation > 0 ? [dy, -dx] : [-dy, dx]);
+  });
+
+  const outerEdges = pts.map((p, i) => {
+    const next = pts[(i + 1) % pts.length];
+    const norm = normals[i];
+    return {
+      p0: [p[0] + norm[0] * halfWidth, p[1] + norm[1] * halfWidth],
+      p1: [next[0] + norm[0] * halfWidth, next[1] + norm[1] * halfWidth],
+    };
+  });
+  const innerEdges = pts.map((p, i) => {
+    const next = pts[(i + 1) % pts.length];
+    const norm = normals[i];
+    return {
+      p0: [p[0] - norm[0] * halfWidth, p[1] - norm[1] * halfWidth],
+      p1: [next[0] - norm[0] * halfWidth, next[1] - norm[1] * halfWidth],
+    };
+  });
+
+  const outer = pts.map((_, i) => {
+    const prev = outerEdges[(i - 1 + outerEdges.length) % outerEdges.length];
+    const curr = outerEdges[i];
+    const intersection = lineIntersection(prev.p0, prev.p1, curr.p0, curr.p1);
+    if (intersection) return intersection;
+    const avg = normalize([normals[(i - 1 + normals.length) % normals.length][0] + normals[i][0], normals[(i - 1 + normals.length) % normals.length][1] + normals[i][1]]);
+    return [pts[i][0] + avg[0] * halfWidth, pts[i][1] + avg[1] * halfWidth];
+  });
+
+  const inner = pts.map((_, i) => {
+    const prev = innerEdges[(i - 1 + innerEdges.length) % innerEdges.length];
+    const curr = innerEdges[i];
+    const intersection = lineIntersection(prev.p0, prev.p1, curr.p0, curr.p1);
+    if (intersection) return intersection;
+    const avg = normalize([normals[(i - 1 + normals.length) % normals.length][0] + normals[i][0], normals[(i - 1 + normals.length) % normals.length][1] + normals[i][1]]);
+    return [pts[i][0] - avg[0] * halfWidth, pts[i][1] - avg[1] * halfWidth];
+  });
+
+  return [
+    closeRing(outer).map(coord => metersToLngLat(coord, refLat)),
+    closeRing(inner.reverse()).map(coord => metersToLngLat(coord, refLat)),
+  ];
+}
+
+function createOutlineGeoJSON(sourceGeoJSON, widthMeters = 12) {
   return {
     type: 'FeatureCollection',
     features: sourceGeoJSON.features.map(feature => {
       const geom = feature.geometry;
-      let outlineGeometry = null;
       if (geom.type === 'Polygon') {
-        outlineGeometry = { type: 'Polygon', coordinates: makeOutlinePolygon(geom.coordinates[0], widthMeters) };
-      } else if (geom.type === 'MultiPolygon') {
-        outlineGeometry = {
-          type: 'MultiPolygon',
-          coordinates: geom.coordinates.map(polygon => makeOutlinePolygon(polygon[0], widthMeters)),
-        };
+        const outline = offsetRing(geom.coordinates[0], widthMeters);
+        if (!outline) return null;
+        return { ...feature, geometry: { type: 'Polygon', coordinates: outline } };
       }
-      if (!outlineGeometry) return null;
-      return { ...feature, geometry: outlineGeometry };
+      if (geom.type === 'MultiPolygon') {
+        const polygons = [];
+        geom.coordinates.forEach(polygon => {
+          const outline = offsetRing(polygon[0], widthMeters);
+          if (outline) polygons.push(outline);
+        });
+        if (polygons.length === 0) return null;
+        return { ...feature, geometry: { type: 'MultiPolygon', coordinates: polygons } };
+      }
+      return null;
     }).filter(Boolean),
   };
 }
