@@ -586,16 +586,15 @@ export default function MapView({ events }) {
     const map = mapRef.current;
     if (!map || !mapReady || !map.getLayer('zcta-top-outline-0')) return;
 
-    const earthCircumference = 40075016.686;
     const getLineTranslate = heightMeters => {
       if (!threeD) return [0, 0];
       const center = map.getCenter();
-      const zoom = map.getZoom();
-      const pitch = map.getPitch();
-      const pitchRad = pitch * Math.PI / 180;
-      const pixelsPerMeter = 512 * Math.pow(2, zoom) / earthCircumference * Math.cos(center.lat * Math.PI / 180);
-      const raw = Math.round(-Math.min(220, heightMeters * pixelsPerMeter * Math.sin(pitchRad) * 0.6));
-      return [0, raw];
+      const groundScreen = map.transform.locationToScreenPoint(center);
+      const topScreen = map.transform.coordinatePoint(
+        maplibregl.MercatorCoordinate.fromLngLat(center),
+        heightMeters
+      );
+      return [0, Math.round(topScreen.y - groundScreen.y)];
     };
 
     const tierHeights = [30, 200, 700, 1600, 2800];
