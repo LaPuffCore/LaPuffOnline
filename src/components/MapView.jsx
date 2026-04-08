@@ -163,16 +163,87 @@ function signedArea(ring) {
   return area / 2;
 }
 
+function dedupeRing(ring) {
+  if (!ring || ring.length === 0) return [];
+  const cleaned = [ring[0]];
+  for (let i = 1; i < ring.length; i += 1) {
+    const [x, y] = ring[i];
+    const [px, py] = cleaned[cleaned.length - 1];
+    if (Math.abs(x - px) > 1e-8 || Math.abs(y - py) > 1e-8) cleaned.push(ring[i]);
+  }
+  if (cleaned.length > 1) {
+    const [x, y] = cleaned[0];
+    const [lx, ly] = cleaned[cleaned.length - 1];
+    if (Math.abs(x - lx) < 1e-8 && Math.abs(y - ly) < 1e-8) cleaned.pop();
+  }
+  return cleaned;
+}
+
+function isNearlyCollinear(a, b, c) {
+  const cross = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+  return Math.abs(cross) < 1e-8;
+}
+
+function simplifyRing(ring) {
+  if (ring.length < 4) return ring;
+  const simplified = [ring[0]];
+  for (let i = 1; i < ring.length - 1; i += 1) {
+    const prev = simplified[simplified.length - 1];
+    const curr = ring[i];
+    const next = ring[i + 1];
+    if (!isNearlyCollinear(prev, curr, next)) simplified.push(curr);
+  }
+  simplified.push(ring[ring.length - 1]);
+  return simplified.length >= 4 ? simplified : ring;
+}
+
 function closeRing(ring) {
   return ring.length === 0 || (ring[0][0] === ring[ring.length - 1][0] && ring[0][1] === ring[ring.length - 1][1])
     ? ring
     : [...ring, ring[0]];
 }
 
+function normalizeRing(ring) {
+  const closed = closeRing(ring);
+  const deduped = dedupeRing(closed);
+  if (deduped.length < 4) return null;
+  return closeRing(simplifyRing(deduped));
+}
+
+function normalizePolygonCoords(coords) {
+  return coords
+    .map(normalizeRing)
+    .filter(ring => ring && ring.length >= 4);
+}
+
+function normalizeFeatureGeometry(feature) {
+  const geom = feature.geometry;
+  if (geom.type === 'Polygon') {
+    const rings = normalizePolygonCoords(geom.coordinates);
+    if (rings.length === 0) return null;
+    return { type: 'Polygon', coordinates: rings };
+  }
+  if (geom.type === 'MultiPolygon') {
+    const polygons = geom.coordinates.map(normalizePolygonCoords).filter(rings => rings.length);
+    if (polygons.length === 0) return null;
+    return { type: 'MultiPolygon', coordinates: polygons };
+  }
+  return null;
+}
+
+function getZoomAwareOutlineWidth(map, baseMeters = 18) {
+  if (!map || typeof map.getZoom !== 'function') return baseMeters;
+  const zoom = map.getZoom();
+  const extra = Math.max(0, 14 - zoom) * 0.8;
+  return baseMeters + extra;
+}
+
 function offsetRing(outerRing, widthMeters) {
-  const ring = outerRing[0][0] === outerRing[outerRing.length - 1][0] && outerRing[0][1] === outerRing[outerRing.length - 1][1]
-    ? outerRing.slice(0, -1)
-    : outerRing;
+  const normalized = normalizeRing(outerRing);
+  if (!normalized) return null;
+  const ring = normalized[0][0] === normalized[normalized.length - 1][0] && normalized[0][1] === normalized[normalized.length - 1][1]
+    ? normalized.slice(0, -1)
+    : normalized;
   if (ring.length < 3) return null;
 
   const refLat = ring.reduce((sum, [, lat]) => sum + lat, 0) / ring.length;
@@ -232,15 +303,16 @@ function createOutlineGeoJSON(sourceGeoJSON, widthMeters = 12) {
   return {
     type: 'FeatureCollection',
     features: sourceGeoJSON.features.map(feature => {
-      const geom = feature.geometry;
-      if (geom.type === 'Polygon') {
-        const outline = offsetRing(geom.coordinates[0], widthMeters);
+      const normalizedGeom = normalizeFeatureGeometry(feature) || feature.geometry;
+      if (!normalizedGeom) return null;
+      if (normalizedGeom.type === 'Polygon') {
+        const outline = offsetRing(normalizedGeom.coordinates[0], widthMeters);
         if (!outline) return null;
         return { ...feature, geometry: { type: 'Polygon', coordinates: outline } };
       }
-      if (geom.type === 'MultiPolygon') {
+      if (normalizedGeom.type === 'MultiPolygon') {
         const polygons = [];
-        geom.coordinates.forEach(polygon => {
+        normalizedGeom.coordinates.forEach(polygon => {
           const outline = offsetRing(polygon[0], widthMeters);
           if (outline) polygons.push(outline);
         });
@@ -571,7 +643,7 @@ export default function MapView({ events }) {
     });
 
     // Events
-    map.on('mousemove', 'zcta-fill', e => {
+    const handleZctaHover = e => {
       if (!e.features.length) return;
       const f = e.features[0];
       if (hoveredIdRef.current !== null && hoveredIdRef.current !== f.id)
@@ -581,19 +653,27 @@ export default function MapView({ events }) {
       map.getCanvas().style.cursor = 'pointer';
       setHoveredZip(String(f.properties.MODZCTA || ''));
       setTooltipPos({ x: e.point.x, y: e.point.y });
-    });
-    map.on('mouseleave', 'zcta-fill', () => {
+    };
+
+    const handleZctaLeave = () => {
       if (hoveredIdRef.current !== null) {
         map.setFeatureState({ source: 'zcta', id: hoveredIdRef.current }, { hovered: false });
         hoveredIdRef.current = null;
       }
       map.getCanvas().style.cursor = '';
       setHoveredZip(null); setTooltipPos(null);
-    });
-    map.on('click', 'zcta-fill', e => {
+    };
+
+    const handleZctaClick = e => {
       if (!e.features.length) return;
       openSidePanel(String(e.features[0].properties.MODZCTA || ''));
       openHologram(e.features[0]);
+    };
+
+    ['zcta-fill', 'zcta-extrude'].forEach(layer => {
+      map.on('mousemove', layer, handleZctaHover);
+      map.on('mouseleave', layer, handleZctaLeave);
+      map.on('click', layer, handleZctaClick);
     });
   }
 
@@ -632,7 +712,7 @@ export default function MapView({ events }) {
       }),
     };
     if (map.getSource('zcta')) map.getSource('zcta').setData(withHeat);
-    if (map.getSource('zcta-outline')) map.getSource('zcta-outline').setData(createOutlineGeoJSON(withHeat, 18));
+    if (map.getSource('zcta-outline')) map.getSource('zcta-outline').setData(createOutlineGeoJSON(withHeat, getZoomAwareOutlineWidth(map)));
 
     const heatColorExpr = [
       'case', ['boolean', ['get', '_special'], false], '#ffffff',
