@@ -3,7 +3,7 @@ import { useEffect, useRef } from 'react';
 /**
  * CRTEffect
  * @param {boolean} active - Toggle the effect on/off
- * @param {boolean} limitMobile - If true, reduces opacity and zIndex for UI accessibility
+ * @param {boolean} limitMobile - Reduces opacity/intensity for mobile UI
  */
 export default function CRTEffect({ active = true, limitMobile = false }) {
   const washRef = useRef(null);
@@ -23,18 +23,26 @@ export default function CRTEffect({ active = true, limitMobile = false }) {
 
   if (!active) return null;
 
-  // Dynamic constraints based on the limitMobile prop
-  const overlayZIndex = limitMobile ? 3 : 9999;
+  /**
+   * STACKING STRATEGY:
+   * z-index: 1 sits behind your map container (z-index: 2).
+   * pointerEvents: 'none' ensures it never blocks clicks.
+   */
+  const overlayZIndex = 1; 
   const globalOpacity = limitMobile ? 0.35 : 1;
 
   return (
     <div 
-      className="fixed inset-0 pointer-events-none overflow-hidden transition-opacity duration-500" 
-      style={{ zIndex: overlayZIndex, opacity: globalOpacity }}
+      className="absolute inset-0 pointer-events-none overflow-hidden transition-opacity duration-300" 
+      style={{ 
+        zIndex: overlayZIndex, 
+        opacity: globalOpacity,
+        backgroundColor: 'transparent'
+      }}
     >
       
       {/* 1. CALMED NOISE GRAIN
-          Speed: 0.18s (Slowed) | Intensity: 0.04
+          Speed: 0.18s | Intensity: 0.04
       */}
       <div 
         className="absolute inset-0 opacity-[0.04]" 
@@ -47,7 +55,7 @@ export default function CRTEffect({ active = true, limitMobile = false }) {
       />
 
       {/* 2. BALANCED LATTICE MESH
-          32px grid - Equal Horizontal/Vertical Presence
+          32px grid - Equal presence on both axes.
       */}
       <div className="absolute inset-0 opacity-[0.12]">
         <div className="absolute inset-0" style={{
@@ -61,7 +69,7 @@ export default function CRTEffect({ active = true, limitMobile = false }) {
 
       {/* 3. CHROMA FRINGE */}
       <div className="absolute inset-0" style={{
-        background: 'linear-gradient(90deg, rgba(255,0,0,0.04) 0%, transparent 15%, transparent 85%, rgba(0,255,255,0.04) 100%)',
+        background: 'linear-gradient(90deg, rgba(255,0,0,0.03) 0%, transparent 15%, transparent 85%, rgba(0,255,255,0.03) 100%)',
       }} />
 
       {/* 4. DATA WASH LINE */}
@@ -74,11 +82,9 @@ export default function CRTEffect({ active = true, limitMobile = false }) {
         }}
       />
 
-      {/* 5. HEAVY VIGNETTE
-          Constrained by limitMobile opacity for control visibility.
-      */}
+      {/* 5. TUBE VIGNETTE */}
       <div className="absolute inset-0" style={{
-        background: 'radial-gradient(circle at center, transparent 40%, rgba(0,0,0,0.4) 80%, rgba(0,0,0,0.8) 100%)',
+        background: 'radial-gradient(circle at center, transparent 40%, rgba(0,0,0,0.3) 80%, rgba(0,0,0,0.6) 100%)',
       }} />
 
       <style jsx>{`
