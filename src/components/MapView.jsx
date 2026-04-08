@@ -247,29 +247,6 @@ function closeRing(ring) {
     : [...ring, ring[0]];
 }
 
-function decimateRing(ring, factor) {
-  if (factor <= 1) return ring;
-  const result = [];
-  for (let i = 0; i < ring.length; i += factor) {
-    result.push(ring[i]);
-  }
-  return result;
-}
-
-function isValidPolygon(polygon) {
-  if (!polygon || polygon.length !== 2) return false;
-  const [outer, inner] = polygon;
-  if (!outer || outer.length < 4 || !inner || inner.length < 4) return false;
-  // Check if rings are closed
-  if (outer[0][0] !== outer[outer.length - 1][0] || outer[0][1] !== outer[outer.length - 1][1]) return false;
-  if (inner[0][0] !== inner[inner.length - 1][0] || inner[0][1] !== inner[inner.length - 1][1]) return false;
-  // Check areas: outer should have larger area than inner
-  const outerArea = Math.abs(signedArea(outer.map(coord => lngLatToMeters(coord, 40.7)))); // approx ref lat
-  const innerArea = Math.abs(signedArea(inner.map(coord => lngLatToMeters(coord, 40.7))));
-  if (outerArea <= innerArea || outerArea < 1e6 || innerArea < 1e4) return false; // basic sanity
-  return true;
-}
-
 function normalizeRing(ring) {
   const closed = closeRing(ring);
   const deduped = dedupeRing(closed);
@@ -306,12 +283,12 @@ function normalizeFeatureGeometry(feature) {
 function getZoomAwareOutlineWidth(map, baseMeters = 14) {
   if (!map || typeof map.getZoom !== 'function') return baseMeters;
   const zoom = map.getZoom();
-  // Relative to our locked viewport (zoom 9-16) - scale width for visibility at low zoom.
-  const extra = Math.max(0, 12 - zoom) * 8.0;
+  // More conservative width scaling; keep outlines visible without creating huge, artifact-prone rings.
+  const extra = Math.max(0, 14 - zoom) * 2.0;
   return baseMeters + extra;
 }
 
-function offsetRing(outerRing, widthMeters, zoom = 10) {
+function offsetRing(outerRing, widthMeters) {
   const normalized = normalizeRing(outerRing);
   if (!normalized || normalized.length < 4) return null;
   // Remove closing point if present for offset calculation
@@ -371,12 +348,8 @@ function offsetRing(outerRing, widthMeters, zoom = 10) {
     return [pts[i][0] - avg[0] * halfWidth, pts[i][1] - avg[1] * halfWidth];
   });
 
-  // No geometry decimation - preserve full boundary accuracy
-  const outerDecimated = outer;
-  const innerDecimated = inner;
-
-  const outerGeo = closeRing(outerDecimated).map(coord => metersToLngLat(coord, refLat));
-  const innerGeo = closeRing(innerDecimated.reverse()).map(coord => metersToLngLat(coord, refLat));
+  const outerGeo = closeRing(outer).map(coord => metersToLngLat(coord, refLat));
+  const innerGeo = closeRing(inner.reverse()).map(coord => metersToLngLat(coord, refLat));
 
   // Enforce minimum 8 points for both rings to prevent artifacts and degenerate geometry
   if (outerGeo.length < 8 || innerGeo.length < 8) return null;
@@ -384,49 +357,27 @@ function offsetRing(outerRing, widthMeters, zoom = 10) {
   return [outerGeo, innerGeo];
 }
 
-function createOutlineGeoJSON(sourceGeoJSON, widthMeters = 12, zoom = 10) {
+function createOutlineGeoJSON(sourceGeoJSON, widthMeters = 12) {
   return {
     type: 'FeatureCollection',
     features: sourceGeoJSON.features.map(feature => {
       const normalizedGeom = normalizeFeatureGeometry(feature) || feature.geometry;
       if (!normalizedGeom) return null;
       if (normalizedGeom.type === 'Polygon') {
-        const outline = offsetRing(normalizedGeom.coordinates[0], widthMeters, zoom);
-        if (!outline || !isValidPolygon(outline)) return null;
+        const outline = offsetRing(normalizedGeom.coordinates[0], widthMeters);
+        if (!outline) return null;
         return { ...feature, geometry: { type: 'Polygon', coordinates: outline } };
       }
       if (normalizedGeom.type === 'MultiPolygon') {
         const polygons = [];
         normalizedGeom.coordinates.forEach(polygon => {
-          const outline = offsetRing(polygon[0], widthMeters, zoom);
-          if (outline && isValidPolygon(outline)) polygons.push(outline);
+          const outline = offsetRing(polygon[0], widthMeters);
+          if (outline) polygons.push(outline);
         });
         if (polygons.length === 0) return null;
         return { ...feature, geometry: { type: 'MultiPolygon', coordinates: polygons } };
       }
       return null;
-    }).filter(Boolean),
-  };
-}
-
-function createOutlineOuterRingGeoJSON(sourceGeoJSON, widthMeters = 12, zoom = 10) {
-  return {
-    type: 'FeatureCollection',
-    features: sourceGeoJSON.features.map(feature => {
-      const normalizedGeom = normalizeFeatureGeometry(feature) || feature.geometry;
-      if (!normalizedGeom) return null;
-      const lineCoords = [];
-      if (normalizedGeom.type === 'Polygon') {
-        const outline = offsetRing(normalizedGeom.coordinates[0], widthMeters, zoom);
-        if (outline && isValidPolygon(outline)) lineCoords.push(outline[0]);
-      } else if (normalizedGeom.type === 'MultiPolygon') {
-        normalizedGeom.coordinates.forEach(polygon => {
-          const outline = offsetRing(polygon[0], widthMeters, zoom);
-          if (outline && isValidPolygon(outline)) lineCoords.push(outline[0]);
-        });
-      }
-      if (lineCoords.length === 0) return null;
-      return { ...feature, geometry: { type: 'MultiLineString', coordinates: lineCoords } };
     }).filter(Boolean),
   };
 }
@@ -738,47 +689,24 @@ export default function MapView({ events }) {
       paint: { 'line-color': OUTLINE_COLOR, 'line-width': 0.5, 'line-opacity': 1 },
     });
 
+    map.addSource('zcta-outline', { type: 'geojson', data: { type: 'FeatureCollection', features: [] }, generateId: false });
     map.addLayer({
-      id: 'zcta-extrude-cap', type: 'fill-extrusion', source: 'zcta',
-      filter: ['!=', ['get', '_special'], true],
+      id: 'zcta-outline', type: 'fill-extrusion', source: 'zcta-outline',
       paint: {
         'fill-extrusion-color': OUTLINE_COLOR,
         'fill-extrusion-height': 0,
         'fill-extrusion-base': 0,
         'fill-extrusion-opacity': 0,
-      },
-    });
-    map.addSource('zcta-outline-outer', { type: 'geojson', data: { type: 'FeatureCollection', features: [] }, generateId: false });
-    map.addLayer({
-      id: 'zcta-outline-outer-glow2', type: 'line', source: 'zcta-outline-outer',
-      paint: {
-        'line-color': OUTLINE_COLOR,
-        'line-width': ['interpolate', ['linear'], ['zoom'], 9, 4, 12, 6, 16, 10],
-        'line-opacity': 0,
-        'line-blur': 14,
-        'line-join': 'round',
-        'line-cap': 'round',
+        'fill-extrusion-vertical-gradient': false,
       },
     });
     map.addLayer({
-      id: 'zcta-outline-outer-glow', type: 'line', source: 'zcta-outline-outer',
+      id: 'zcta-outline-line', type: 'line', source: 'zcta-outline',
       paint: {
         'line-color': OUTLINE_COLOR,
-        'line-width': ['interpolate', ['linear'], ['zoom'], 9, 2.5, 12, 4, 16, 6],
+        'line-width': 1.5,
         'line-opacity': 0,
-        'line-blur': 6,
-        'line-join': 'round',
-        'line-cap': 'round',
-      },
-    });
-    map.addLayer({
-      id: 'zcta-outline-outer-line', type: 'line', source: 'zcta-outline-outer',
-      paint: {
-        'line-color': OUTLINE_COLOR,
-        'line-width': ['interpolate', ['linear'], ['zoom'], 9, 1.5, 12, 2.5, 16, 4],
-        'line-opacity': 0,
-        'line-join': 'round',
-        'line-cap': 'round',
+        'line-blur': 0.5,
       },
     });
 
@@ -882,7 +810,7 @@ export default function MapView({ events }) {
       }),
     };
     if (map.getSource('zcta')) map.getSource('zcta').setData(withHeat);
-    if (map.getSource('zcta-outline-outer')) map.getSource('zcta-outline-outer').setData(createOutlineOuterRingGeoJSON(withHeat, getZoomAwareOutlineWidth(map), map.getZoom()));
+    if (map.getSource('zcta-outline')) map.getSource('zcta-outline').setData(createOutlineGeoJSON(withHeat, getZoomAwareOutlineWidth(map)));
 
     const heatColorExpr = [
       'case', ['boolean', ['get', '_special'], false], '#ffffff',
@@ -898,8 +826,6 @@ export default function MapView({ events }) {
     const extrudeH = ['case', ['boolean', ['get', '_special'], false], 30, ['step', ['get', '_tier'], 30, 1, 200, 2, 700, 3, 1600, 4, 2800]];
     // Flat 3D
     const flatH    = ['case', ['boolean', ['get', '_special'], false], 30, 400];
-    const outlineTopColor = '#ff2200';
-    const zctaExtrudeOpacity = ['case', ['boolean', ['feature-state', 'hovered'], false], 1.0, satellite ? 0.92 : 0.88];
 
     if (heatmap) {
       map.setPaintProperty('zcta-fill', 'fill-color', heatColorExpr);
@@ -917,7 +843,7 @@ export default function MapView({ events }) {
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-color', withHoverColor(extrudeColorExpr));
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-height', extrudeH);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-base', 0);
-        map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', zctaExtrudeOpacity);
+        map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', 1.0);
 
         // In 3D, hide the ground-level boundary lines and show only the raised top outline.
         map.setPaintProperty('zcta-line',      'line-opacity', 0);
@@ -930,7 +856,6 @@ export default function MapView({ events }) {
           ['case', ['boolean', ['get', '_special'], false], '#222222', '#1a0505']);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-height', 0);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', 0);
-        // Show 2D boundary lines in 2D mode
         map.setPaintProperty('zcta-line',      'line-opacity', 1);
         map.setPaintProperty('zcta-line-glow', 'line-opacity', satellite ? 0.55 : 0.75);
         map.setPaintProperty('zcta-line-glow2','line-opacity', satellite ? 0.25 : 0.35);
@@ -947,7 +872,7 @@ export default function MapView({ events }) {
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-color', withHoverColor(flatColorExpr));
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-height', flatH);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-base', 0);
-        map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', zctaExtrudeOpacity);
+        map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', satellite ? 0.9 : 1.0);
         map.setPaintProperty('zcta-line',      'line-opacity', 0);
         map.setPaintProperty('zcta-line-glow', 'line-opacity', 0);
         map.setPaintProperty('zcta-line-glow2','line-opacity', 0);
@@ -958,7 +883,6 @@ export default function MapView({ events }) {
           ['case', ['boolean', ['get', '_special'], false], '#222222', '#1a0505']);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-height', 0);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', 0);
-        // Show 2D boundary lines in 2D mode
         map.setPaintProperty('zcta-line',      'line-opacity', 1);
         map.setPaintProperty('zcta-line-glow', 'line-opacity', satellite ? 0.55 : 0.75);
         map.setPaintProperty('zcta-line-glow2','line-opacity', satellite ? 0.25 : 0.35);
@@ -967,26 +891,18 @@ export default function MapView({ events }) {
 
     map.setPaintProperty('zcta-hover', 'fill-opacity', threeD ? 0 : ['case', ['boolean', ['feature-state', 'hovered'], false], 0.5, 0]);
 
-    if (map.getLayer('zcta-extrude-cap')) {
-      map.setPaintProperty('zcta-extrude-cap', 'fill-extrusion-opacity', threeD ? 1.0 : 0);
+    if (map.getSource('zcta-outline')) {
+      map.setPaintProperty('zcta-outline', 'fill-extrusion-opacity', threeD ? 0.98 : 0);
+      map.setPaintProperty('zcta-outline-line', 'line-opacity', threeD ? 0 : 0);
       if (threeD) {
-        const capBase = heatmap ? extrudeH : flatH;
-        const capHeight = heatmap
-          ? ['case', ['boolean', ['get', '_special'], false], 50, ['step', ['get', '_tier'], 50, 1, 220, 2, 720, 3, 1620, 4, 2820]]
-          : ['case', ['boolean', ['get', '_special'], false], 50, 420];
-        map.setPaintProperty('zcta-extrude-cap', 'fill-extrusion-color', outlineTopColor);
-        map.setPaintProperty('zcta-extrude-cap', 'fill-extrusion-base', capBase);
-        map.setPaintProperty('zcta-extrude-cap', 'fill-extrusion-height', ['+', capBase, capHeight]);
+        const outlineTopColor = OUTLINE_COLOR;
+        map.setPaintProperty('zcta-outline', 'fill-extrusion-color', outlineTopColor);
+        map.setPaintProperty('zcta-outline', 'fill-extrusion-base', heatmap ? extrudeH : flatH);
+        map.setPaintProperty('zcta-outline', 'fill-extrusion-height', ['+', heatmap ? extrudeH : flatH, 18]);
       } else {
-        map.setPaintProperty('zcta-extrude-cap', 'fill-extrusion-base', 0);
-        map.setPaintProperty('zcta-extrude-cap', 'fill-extrusion-height', 0);
+        map.setPaintProperty('zcta-outline', 'fill-extrusion-base', 0);
+        map.setPaintProperty('zcta-outline', 'fill-extrusion-height', 0);
       }
-    }
-
-    if (map.getSource('zcta-outline-outer')) {
-      map.setPaintProperty('zcta-outline-outer-glow2', 'line-opacity', threeD ? 0.14 : 0);
-      map.setPaintProperty('zcta-outline-outer-glow', 'line-opacity', threeD ? 0.35 : 0);
-      map.setPaintProperty('zcta-outline-outer-line', 'line-opacity', threeD ? 1 : 0);
     }
   }, [heatmap, threeD, timespanIdx, events, geoData, mapReady, satellite, adjacency]);
 
@@ -1396,7 +1312,6 @@ export default function MapView({ events }) {
       )}
 
       {selectedEvent && <EventDetailPopup event={selectedEvent} onClose={() => setSelectedEvent(null)} />}
-      <CRTEffect active={true} limitMobile={isMobile} />
     </div>
   );
 }
