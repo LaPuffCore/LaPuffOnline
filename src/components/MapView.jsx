@@ -137,14 +137,6 @@ function metersToLngLat([x, y], refLat) {
   return [x / metersPerDegLng, y / metersPerDegLat];
 }
 
-function getOutlineWidthMeters(map, widthPixels = 3.5) {
-  if (!map) return widthPixels * 1.0;
-  const zoom = map.getZoom();
-  const lat = map.getCenter().lat;
-  const metersPerPixel = 156543.03392 * Math.cos(lat * Math.PI / 180) / Math.pow(2, zoom);
-  return Math.max(1, widthPixels * metersPerPixel);
-}
-
 function normalize([x, y]) {
   const len = Math.hypot(x, y);
   return len === 0 ? [0, 0] : [x / len, y / len];
@@ -439,7 +431,6 @@ export default function MapView({ events }) {
   const threeDRef       = useRef(false);
   const tiersRef        = useRef([]);
   const geoDataRef      = useRef(null);
-  const eventsRef       = useRef([]);
 
   const [timespanIdx,   setTimespanIdx]   = useState(4);
   const [heatmap,       setHeatmap]       = useState(false);
@@ -449,7 +440,6 @@ export default function MapView({ events }) {
   const [geoData,       setGeoData]       = useState(null);
   const [adjacency,     setAdjacency]     = useState([]);
   const [mapReady,      setMapReady]      = useState(false);
-  const [zoom,          setZoom]          = useState(10.5);
   const [entered,       setEntered]       = useState(false);
   const [hoveredZip,    setHoveredZip]    = useState(null);
   const [hoveredEvents, setHoveredEvents] = useState([]);
@@ -469,7 +459,6 @@ export default function MapView({ events }) {
   heatmapRef.current = heatmap;
   threeDRef.current  = threeD;
   geoDataRef.current = geoData;
-  eventsRef.current  = events;
 
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768);
@@ -510,8 +499,6 @@ export default function MapView({ events }) {
       // FIX CRT: transparent canvas so CRT effect behind it can bleed through dark bg
       map.getCanvas().style.backgroundColor = 'transparent';
       setMapReady(true);
-      setZoom(map.getZoom());
-      map.on('zoomend', () => setZoom(map.getZoom()));
     });
     return () => { map.remove(); mapRef.current = null; };
   }, []);
@@ -645,7 +632,7 @@ export default function MapView({ events }) {
       }),
     };
     if (map.getSource('zcta')) map.getSource('zcta').setData(withHeat);
-    if (map.getSource('zcta-outline')) map.getSource('zcta-outline').setData(createOutlineGeoJSON(withHeat, getOutlineWidthMeters(map, 3.5)));
+    if (map.getSource('zcta-outline')) map.getSource('zcta-outline').setData(createOutlineGeoJSON(withHeat, 18));
 
     const heatColorExpr = [
       'case', ['boolean', ['get', '_special'], false], '#ffffff',
@@ -723,7 +710,7 @@ export default function MapView({ events }) {
         map.setPaintProperty('zcta-outline', 'fill-extrusion-height', 0);
       }
     }
-  }, [heatmap, threeD, timespanIdx, events, geoData, mapReady, satellite, adjacency, zoom]);
+  }, [heatmap, threeD, timespanIdx, events, geoData, mapReady, satellite, adjacency]);
 
   // 3D pitch
 
