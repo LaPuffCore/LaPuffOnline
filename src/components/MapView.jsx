@@ -416,31 +416,29 @@ export default function MapView({ events }) {
     map.addLayer({
       id: 'zcta-line-glow2', type: 'line', source: 'zcta',
       filter: ['!=', ['get', '_special'], true],
-      paint: { 'line-color': OUTLINE_GLOW, 'line-width': 10, 'line-opacity': sat ? 0.25 : 0.35, 'line-blur': 10 },
+      paint: { 'line-color': OUTLINE_GLOW, 'line-width': 3, 'line-opacity': sat ? 0.25 : 0.35, 'line-blur': 10 },
     });
     map.addLayer({
       id: 'zcta-line-glow', type: 'line', source: 'zcta',
       filter: ['!=', ['get', '_special'], true],
-      paint: { 'line-color': OUTLINE_COLOR, 'line-width': 5, 'line-opacity': sat ? 0.55 : 0.75, 'line-blur': 3 },
+      paint: { 'line-color': OUTLINE_COLOR, 'line-width': 1, 'line-opacity': sat ? 0.55 : 0.75, 'line-blur': 3 },
     });
     map.addLayer({
       id: 'zcta-line', type: 'line', source: 'zcta',
       filter: ['!=', ['get', '_special'], true],
-      paint: { 'line-color': OUTLINE_COLOR, 'line-width': 3, 'line-opacity': 1 },
+      paint: { 'line-color': OUTLINE_COLOR, 'line-width': 0.5, 'line-opacity': 1 },
     });
 
-    // FIX #2/#4/#5: Cap extrusion — 20-unit shell whose SIDE WALLS form the
-    // outline ring at the top of every block. Fill top face = transparent.
-    // opacity 0.55 → side walls render as bright neon, top face semi-see-through.
-    // Adjacent zips each have their own cap; shared side wall = internal boundary.
+    // Top outline — floating crisp outline at the top of each extrusion block.
     map.addLayer({
-      id: 'zcta-extrude-cap', type: 'fill-extrusion', source: 'zcta',
+      id: 'zcta-top-outline', type: 'line', source: 'zcta',
       filter: ['!=', ['get', '_special'], true],
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'fill-extrusion-color': OUTLINE_COLOR,
-        'fill-extrusion-height': 0,
-        'fill-extrusion-base': 0,
-        'fill-extrusion-opacity': 0,
+        'line-color': OUTLINE_COLOR,
+        'line-width': ['interpolate', ['linear'], ['zoom'], 9, 1.1, 10, 1.4, 11, 1.8, 12, 2.3, 13, 2.8, 14, 3.4, 15, 4.0],
+        'line-opacity': 0,
+        'line-blur': 0,
       },
     });
 
@@ -514,18 +512,13 @@ export default function MapView({ events }) {
 
     // Height expressions — heatmap 3D
     const extrudeH = ['case', ['boolean', ['get', '_special'], false], 30, ['step', ['get', '_tier'], 30, 1, 200, 2, 700, 3, 1600, 4, 2800]];
-    // FIX #2/#4/#5: Cap base = block top, cap height = block top + 20 (thick shell walls)
-    const capBase  = extrudeH;
-    const capH     = ['case', ['boolean', ['get', '_special'], false], 50, ['step', ['get', '_tier'], 50, 1, 220, 2, 720, 3, 1620, 4, 2820]];
     // Flat 3D
     const flatH    = ['case', ['boolean', ['get', '_special'], false], 30, 400];
-    const flatCB   = ['case', ['boolean', ['get', '_special'], false], 30, 400];
-    const flatCH   = ['case', ['boolean', ['get', '_special'], false], 50, 420];
 
     if (heatmap) {
       map.setPaintProperty('zcta-fill', 'fill-color', heatColorExpr);
       // FIX #8: flat heatmap slightly more transparent to feel lighter
-      map.setPaintProperty('zcta-fill', 'fill-opacity', threeD ? 0 : (satellite ? 0.38 : 0.52));
+      map.setPaintProperty('zcta-fill', 'fill-opacity', threeD ? 0 : (satellite ? 0.5 : 0.9));
 
       if (threeD) {
         // FIX #3: safe zone outlines hidden — they'd bleed through 3D blocks
@@ -539,13 +532,7 @@ export default function MapView({ events }) {
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-base', 0);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', 1.0);
 
-        // FIX #2/#4/#5: Cap shell — bright neon walls, semi-transparent top face
-        map.setPaintProperty('zcta-extrude-cap', 'fill-extrusion-color', OUTLINE_COLOR);
-        map.setPaintProperty('zcta-extrude-cap', 'fill-extrusion-base', capBase);
-        map.setPaintProperty('zcta-extrude-cap', 'fill-extrusion-height', capH);
-        map.setPaintProperty('zcta-extrude-cap', 'fill-extrusion-opacity', 0.55);
-
-        // Ground lines off — cap handles all outlines at top of blocks
+        // In 3D, hide the ground-level boundary lines and show only the raised top outline.
         map.setPaintProperty('zcta-line',      'line-opacity', 0);
         map.setPaintProperty('zcta-line-glow', 'line-opacity', 0);
         map.setPaintProperty('zcta-line-glow2','line-opacity', 0);
@@ -553,8 +540,6 @@ export default function MapView({ events }) {
         map.setPaintProperty('zcta-safe-line', 'line-opacity', 1);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-height', 0);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', 0);
-        map.setPaintProperty('zcta-extrude-cap', 'fill-extrusion-height', 0);
-        map.setPaintProperty('zcta-extrude-cap', 'fill-extrusion-opacity', 0);
         map.setPaintProperty('zcta-line',      'line-opacity', 1);
         map.setPaintProperty('zcta-line-glow', 'line-opacity', satellite ? 0.55 : 0.75);
         map.setPaintProperty('zcta-line-glow2','line-opacity', satellite ? 0.25 : 0.35);
@@ -572,10 +557,6 @@ export default function MapView({ events }) {
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-height', flatH);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-base', 0);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', satellite ? 0.9 : 1.0);
-        map.setPaintProperty('zcta-extrude-cap', 'fill-extrusion-color', OUTLINE_COLOR);
-        map.setPaintProperty('zcta-extrude-cap', 'fill-extrusion-base', flatCB);
-        map.setPaintProperty('zcta-extrude-cap', 'fill-extrusion-height', flatCH);
-        map.setPaintProperty('zcta-extrude-cap', 'fill-extrusion-opacity', 0.55);
         map.setPaintProperty('zcta-line',      'line-opacity', 0);
         map.setPaintProperty('zcta-line-glow', 'line-opacity', 0);
         map.setPaintProperty('zcta-line-glow2','line-opacity', 0);
@@ -583,13 +564,17 @@ export default function MapView({ events }) {
         map.setPaintProperty('zcta-safe-line', 'line-opacity', 1);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-height', 0);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', 0);
-        map.setPaintProperty('zcta-extrude-cap', 'fill-extrusion-height', 0);
-        map.setPaintProperty('zcta-extrude-cap', 'fill-extrusion-opacity', 0);
         map.setPaintProperty('zcta-line',      'line-opacity', 1);
         map.setPaintProperty('zcta-line-glow', 'line-opacity', satellite ? 0.55 : 0.75);
         map.setPaintProperty('zcta-line-glow2','line-opacity', satellite ? 0.25 : 0.35);
       }
     }
+
+    map.setPaintProperty('zcta-top-outline', 'line-opacity', threeD ? 1 : 0);
+    map.setPaintProperty('zcta-top-outline', 'line-translate', [0, 0]);
+    map.setPaintProperty('zcta-top-outline', 'line-offset', 0);
+    map.setLayoutProperty('zcta-top-outline', 'line-cap', 'round');
+    map.setLayoutProperty('zcta-top-outline', 'line-join', 'round');
   }, [heatmap, threeD, timespanIdx, events, geoData, mapReady, satellite, adjacency]);
 
   // 3D pitch
