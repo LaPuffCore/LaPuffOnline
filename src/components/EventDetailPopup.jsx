@@ -5,31 +5,42 @@ import { TAG_COLORS } from '../lib/tagColors';
 import { getUserTZOffset, utcToLocal, TIMEZONES } from '../lib/timezones';
 
 function MiniMap({ lat, lng, address, city }) {
-  // Direct OSM Tile Logic - No Auth Required
-  const zoom = 15;
-  const x = Math.floor((lng + 180) / 360 * Math.pow(2, zoom));
-  const y = Math.floor((1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * Math.pow(2, zoom));
-  
-  const staticMapUrl = (lat && lng)
-    ? `https://basemaps.cartocdn.com/rastertiles/voyager/${zoom}/${x}/${y}.png`
-    : `https://static-maps.yandex.ru/1.x/?lang=en_US&ll=${encodeURIComponent(address || city || 'NYC')}&z=14&l=map&size=450,200`;
+  // 100% Reliable No-API Map Strategy: Iframe Embed
+  // Iframes bypass standard image CORS/Referrer blocks. We use pointer-events-none 
+  // so it renders the visual map, but the parent <a> tag handles the click.
+  const mapUrl = (lat && lng)
+    ? `https://www.openstreetmap.org/export/embed.html?bbox=${lng - 0.005},${lat - 0.005},${lng + 0.005},${lat + 0.005}&layer=mapnik&marker=${lat},${lng}`
+    : `https://maps.google.com/maps?q=${encodeURIComponent(address || city || 'New York')}&t=&z=14&ie=UTF8&iwloc=&output=embed`;
+
+  const outUrl = (lat && lng)
+    ? `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=16/${lat}/${lng}`
+    : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address || city || 'New York')}`;
 
   return (
-    <div className="group relative w-full h-full rounded-2xl overflow-hidden border-2 border-black bg-[#e5e3df] shadow-[4px_4px_0px_black]">
-      <img
-        src={staticMapUrl}
-        alt="Sector Grid"
-        className="w-full h-full object-cover grayscale opacity-80 group-hover:grayscale-0 transition-all duration-500"
-        onError={(e) => { e.target.src = 'https://placehold.co/450x200?text=SIGNAL+LOST'; }}
-      />
-      <div className="absolute inset-0 flex items-center justify-center pointer-events-none pb-4">
-        <span className="text-xl">📍</span>
+    <a 
+      href={outUrl} 
+      target="_blank" 
+      rel="noopener noreferrer" 
+      className="group block relative w-full h-full rounded-2xl overflow-hidden border-2 border-black bg-[#e5e3df] shadow-[4px_4px_0px_black]"
+    >
+      <iframe 
+        src={mapUrl}
+        width="100%" 
+        height="100%" 
+        frameBorder="0"
+        scrolling="no"
+        style={{ border: 0, filter: 'grayscale(0.6)' }} 
+        className="group-hover:filter-none transition-all duration-500 pointer-events-none"
+        title="Location Map"
+      ></iframe>
+      <div className="absolute inset-0 flex items-center justify-center pointer-events-none pb-4 z-10 drop-shadow-md">
+        <span className="text-xl opacity-0 group-hover:opacity-100 transition-opacity">📍</span>
       </div>
-      <div className="absolute bottom-0 left-0 right-0 bg-white border-t-2 border-black p-1.5 flex items-center justify-between">
+      <div className="absolute bottom-0 left-0 right-0 bg-white border-t-2 border-black p-1.5 flex items-center justify-between z-20">
         <p className="text-[9px] font-black truncate uppercase tracking-tighter">{address || city || 'NYC GRID'}</p>
-        <span className="bg-black text-white px-1.5 py-0.5 rounded text-[7px] font-black uppercase">OSM</span>
+        <span className="bg-black text-white px-1.5 py-0.5 rounded text-[7px] font-black uppercase tracking-widest">MAP ↗</span>
       </div>
-    </div>
+    </a>
   );
 }
 
@@ -40,14 +51,23 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
   const borderColor = event.hex_color || '#FF6B6B';
 
   useEffect(() => {
+    // Scroll Lock: Prevents the background from glitching/scrolling while popup is open
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
     setFav(isFavorite(event.id));
+    
     const handleKey = (e) => {
       if (e.key === 'Escape') onClose();
       if (e.key === 'ArrowRight') onNext?.();
       if (e.key === 'ArrowLeft') onPrev?.();
     };
     window.addEventListener('keydown', handleKey);
-    return () => window.removeEventListener('keydown', handleKey);
+    
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      window.removeEventListener('keydown', handleKey);
+    };
   }, [event.id, onClose, onNext, onPrev]);
 
   const displayTime = event.event_time_utc ? utcToLocal(event.event_time_utc, getUserTZOffset()) : '';
@@ -57,10 +77,9 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
 
   return (
     <div className="fixed inset-0 z-[100000] flex items-center justify-center p-4">
-      {/* INFINITE BLUR FIX: Covers every edge with safe bleed */}
+      {/* UNIVERSAL BLUR: Fixed to viewport, no horizontal scroll bugs */}
       <div 
-        className="fixed inset-[-100%] z-[-1] backdrop-blur-2xl bg-white/30 pointer-events-none" 
-        style={{ width: '300vw', height: '300vh' }}
+        className="fixed inset-0 z-[-1] backdrop-blur-xl bg-white/40" 
       />
       
       {/* Background click to close */}
@@ -94,7 +113,7 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
             <img 
               src={event.photos[0]} 
               alt="" 
-              className="w-full h-full object-cover scale-105" // Zoom fix for pixel clipping
+              className="w-full h-full object-cover scale-[1.015]" // Slight 1.5% pixel shift fix
               onError={() => setImgError(true)} 
             />
           ) : (
