@@ -87,123 +87,132 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
     : '';
 
   return (
-    // Top-adjusted container: items-start + pt-24 creates the consistent gap below the header
     <div className="fixed inset-0 z-[100000] flex items-start justify-center p-4 pt-24 overflow-y-auto custom-scrollbar">
       
-      {/* UNIVERSAL BLUR: Hardware accelerated to prevent jitter */}
+      {/* Hardware-accelerated blur background */}
       <div 
         className="fixed inset-0 z-[-1] backdrop-blur-xl bg-white/40 transform-gpu" 
         onClick={onClose}
       />
       
-      {/* Navigation Arrows: Flanking the popup horizontally */}
-      <div className="fixed inset-y-0 left-0 right-0 pointer-events-none flex items-center justify-between px-4 lg:px-12 z-50">
-        <button 
-          onClick={(e) => { e.stopPropagation(); onPrev?.(); }}
-          className="pointer-events-auto w-14 h-14 lg:w-16 lg:h-16 flex items-center justify-center bg-white border-4 border-black rounded-full text-2xl lg:text-3xl shadow-[6px_6px_0px_black] hover:bg-black hover:text-white hover:-translate-x-1 active:translate-x-0 active:shadow-none transition-all"
+      {/* NAVIGATION & CARD WRAPPER 
+         We wrap everything in a relative container so buttons center vertically 
+         based on the height of the card, not the viewport.
+      */}
+      <div className="relative w-full max-w-xl flex items-center justify-center">
+        
+        {/* Navigation Arrows: Positioned absolutely relative to the popup card */}
+        {onPrev && (
+          <button 
+            onClick={(e) => { e.stopPropagation(); onPrev(); }}
+            className="hidden md:flex absolute -left-20 lg:-left-32 z-50 w-14 h-14 lg:w-16 lg:h-16 items-center justify-center bg-white border-4 border-black rounded-full text-2xl lg:text-3xl shadow-[6px_6px_0px_black] hover:bg-black hover:text-white hover:-translate-x-1 active:translate-x-0 active:shadow-none transition-all"
+          >
+            ←
+          </button>
+        )}
+
+        {onNext && (
+          <button 
+            onClick={(e) => { e.stopPropagation(); onNext(); }}
+            className="hidden md:flex absolute -right-20 lg:-right-32 z-50 w-14 h-14 lg:w-16 lg:h-16 items-center justify-center bg-white border-4 border-black rounded-full text-2xl lg:text-3xl shadow-[6px_6px_0px_black] hover:bg-black hover:text-white hover:translate-x-1 active:translate-x-0 active:shadow-none transition-all"
+          >
+            →
+          </button>
+        )}
+
+        {/* Popup Card */}
+        <div
+          className="bg-white border-[6px] border-black rounded-[2rem] w-full shadow-[25px_25px_0px_rgba(0,0,0,0.2)] relative z-10 overflow-hidden flex flex-col mb-12"
+          style={{ borderColor: borderColor }}
+          onClick={e => e.stopPropagation()} 
         >
-          ←
-        </button>
-        <button 
-          onClick={(e) => { e.stopPropagation(); onNext?.(); }}
-          className="pointer-events-auto w-14 h-14 lg:w-16 lg:h-16 flex items-center justify-center bg-white border-4 border-black rounded-full text-2xl lg:text-3xl shadow-[6px_6px_0px_black] hover:bg-black hover:text-white hover:translate-x-1 active:translate-x-0 active:shadow-none transition-all"
-        >
-          →
-        </button>
-      </div>
+          <button onClick={onClose} className="absolute top-4 right-4 z-50 w-10 h-10 bg-black text-white rounded-full font-black flex items-center justify-center border-2 border-white hover:bg-red-500 transition-colors">✕</button>
 
-      {/* Popup Card */}
-      <div
-        className="bg-white border-[6px] border-black rounded-[2rem] w-full max-w-xl shadow-[25px_25px_0px_rgba(0,0,0,0.2)] relative z-10 overflow-hidden flex flex-col mb-12"
-        style={{ borderColor: borderColor }}
-        onClick={e => e.stopPropagation()} 
-      >
-        <button onClick={onClose} className="absolute top-4 right-4 z-50 w-10 h-10 bg-black text-white rounded-full font-black flex items-center justify-center border-2 border-white hover:bg-red-500 transition-colors">✕</button>
-
-        <div className="relative h-56 flex-shrink-0 bg-gray-100 border-b-4 border-black overflow-hidden">
-          {(!imgError && event.photos?.length > 0) ? (
-            <img 
-              src={event.photos[0]} 
-              alt="" 
-              className="w-full h-full object-cover scale-[1.01]"
-              onError={() => setImgError(true)} 
-            />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center text-8xl opacity-10" style={{ backgroundColor: borderColor }}>
-              {event.representative_emoji || '⚡'}
-            </div>
-          )}
-        </div>
-
-        <div className="p-6">
-          <div className="flex justify-between items-start gap-4 mb-6">
-            <div className="flex-1">
-              <h2 className="text-3xl font-black leading-[0.95] mb-2 uppercase italic tracking-tighter">{event.event_name}</h2>
-              <p className="text-[10px] text-gray-400 font-black uppercase tracking-widest">{event.name || 'SYSTEM_OPERATOR'}</p>
-            </div>
-            <div className="flex flex-col items-center gap-1">
-              <button 
-                onClick={() => toggleFavorite(event.id) && setFav(!fav)} 
-                className={`w-14 h-14 rounded-xl border-4 border-black flex items-center justify-center text-3xl shadow-[4px_4px_0px_black] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all ${fav ? 'bg-yellow-400' : 'bg-white'}`}
-              >
-                {fav ? '⭐' : '☆'}
-              </button>
-              <div className="flex items-center gap-1 bg-black text-white px-2 py-0.5 rounded-md font-black text-[10px]">
-                {trend === 'up' ? <span className="text-green-400">▲</span> : trend === 'down' ? <span className="text-red-400">▼</span> : <span className="text-gray-400">—</span>} 
-                {favCount}
-              </div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-            <div className="bg-gray-50 border-2 border-black rounded-xl p-4 flex items-center gap-3 shadow-[4px_4px_0px_black]">
-              <span className="text-3xl">📅</span>
-              <div>
-                <p className="text-sm font-black leading-tight">{displayDate}</p>
-                <p className="text-[10px] font-bold text-gray-400 uppercase">{displayTime}</p>
-              </div>
-            </div>
-            
-            <div className="h-[100px]">
-              <MiniMap
-                lat={event.location_data?.lat}
-                lng={event.location_data?.lng}
-                address={event.location_data?.address}
-                city={event.location_data?.city}
-                borderColor={borderColor}
+          <div className="relative h-56 flex-shrink-0 bg-gray-100 border-b-4 border-black overflow-hidden">
+            {(!imgError && event.photos?.length > 0) ? (
+              <img 
+                src={event.photos[0]} 
+                alt="" 
+                className="w-full h-full object-cover scale-[1.015]" // Exact 1.5% zoom to fix edge pixels
+                onError={() => setImgError(true)} 
               />
-            </div>
+            ) : (
+              <div className="w-full h-full flex items-center justify-center text-8xl opacity-10" style={{ backgroundColor: borderColor }}>
+                {event.representative_emoji || '⚡'}
+              </div>
+            )}
           </div>
 
-          {event.description && (
-            <div className="mb-6">
-              <p className="text-[9px] font-black uppercase text-gray-400 mb-2 tracking-widest">Protocol Intel</p>
-              <div className="text-sm font-bold leading-relaxed bg-gray-50 border-2 border-black p-4 rounded-xl shadow-[inset_4px_4px_0px_rgba(0,0,0,0.05)]">
-                {event.description}
+          <div className="p-6">
+            <div className="flex justify-between items-start gap-4 mb-6">
+              <div className="flex-1">
+                <h2 className="text-3xl font-black leading-[0.95] mb-2 uppercase italic tracking-tighter">{event.event_name}</h2>
+                <p className="text-[10px] text-gray-400 font-black uppercase tracking-widest">{event.name || 'SYSTEM_OPERATOR'}</p>
+              </div>
+              <div className="flex flex-col items-center gap-1">
+                <button 
+                  onClick={() => toggleFavorite(event.id) && setFav(!fav)} 
+                  className={`w-14 h-14 rounded-xl border-4 border-black flex items-center justify-center text-3xl shadow-[4px_4px_0px_black] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all ${fav ? 'bg-yellow-400' : 'bg-white'}`}
+                >
+                  {fav ? '⭐' : '☆'}
+                </button>
+                <div className="flex items-center gap-1 bg-black text-white px-2 py-0.5 rounded-md font-black text-[10px]">
+                  {trend === 'up' ? <span className="text-green-400">▲</span> : trend === 'down' ? <span className="text-red-400">▼</span> : <span className="text-gray-400">—</span>} 
+                  {favCount}
+                </div>
               </div>
             </div>
-          )}
 
-          <div className="flex flex-wrap gap-2 mb-6">
-            {tags.map(tag => (
-              <span key={tag} className={`text-[9px] font-black px-3 py-1.5 rounded-lg border-2 border-black shadow-[2px_2px_0px_black] ${TAG_COLORS[tag] || 'bg-white'} uppercase tracking-tighter`}>
-                #{tag}
-              </span>
-            ))}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+              <div className="bg-gray-50 border-2 border-black rounded-xl p-4 flex items-center gap-3 shadow-[4px_4px_0px_black]">
+                <span className="text-3xl">📅</span>
+                <div>
+                  <p className="text-sm font-black leading-tight">{displayDate}</p>
+                  <p className="text-[10px] font-bold text-gray-400 uppercase">{displayTime}</p>
+                </div>
+              </div>
+              
+              <div className="h-[100px]">
+                <MiniMap
+                  lat={event.location_data?.lat}
+                  lng={event.location_data?.lng}
+                  address={event.location_data?.address}
+                  city={event.location_data?.city}
+                  borderColor={borderColor}
+                />
+              </div>
+            </div>
+
+            {event.description && (
+              <div className="mb-6">
+                <p className="text-[9px] font-black uppercase text-gray-400 mb-2 tracking-widest">Protocol Intel</p>
+                <div className="text-sm font-bold leading-relaxed bg-gray-50 border-2 border-black p-4 rounded-xl shadow-[inset_4px_4px_0px_rgba(0,0,0,0.05)]">
+                  {event.description}
+                </div>
+              </div>
+            )}
+
+            <div className="flex flex-wrap gap-2 mb-6">
+              {tags.map(tag => (
+                <span key={tag} className={`text-[9px] font-black px-3 py-1.5 rounded-lg border-2 border-black shadow-[2px_2px_0px_black] ${TAG_COLORS[tag] || 'bg-white'} uppercase tracking-tighter`}>
+                  #{tag}
+                </span>
+              ))}
+            </div>
+
+            {event.relevant_links?.length > 0 && (
+              <div className="border-t-4 border-black pt-6">
+                <div className="grid grid-cols-1 gap-2">
+                  {event.relevant_links.map((link, i) => (
+                    <a key={i} href={link} target="_blank" rel="noopener noreferrer" className="flex items-center justify-between p-4 bg-gray-50 border-2 border-black rounded-xl hover:bg-black hover:text-white transition-all group shadow-[4px_4px_0px_black] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none">
+                      <span className="text-[10px] font-black truncate max-w-[85%] uppercase tracking-tighter">{link.replace(/^https?:\/\/(www\.)?/, '')}</span>
+                      <span className="text-xl group-hover:translate-x-1 transition-transform">→</span>
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
-
-          {event.relevant_links?.length > 0 && (
-            <div className="border-t-4 border-black pt-6">
-              <div className="grid grid-cols-1 gap-2">
-                {event.relevant_links.map((link, i) => (
-                  <a key={i} href={link} target="_blank" rel="noopener noreferrer" className="flex items-center justify-between p-4 bg-gray-50 border-2 border-black rounded-xl hover:bg-black hover:text-white transition-all group shadow-[4px_4px_0px_black] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none">
-                    <span className="text-[10px] font-black truncate max-w-[85%] uppercase tracking-tighter">{link.replace(/^https?:\/\/(www\.)?/, '')}</span>
-                    <span className="text-xl group-hover:translate-x-1 transition-transform">→</span>
-                  </a>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
       </div>
     </div>
