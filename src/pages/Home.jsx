@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import EventSubmitForm from '../components/EventSubmitForm';
 import TileView from '../components/TileView';
 import MapView from '../components/MapView';
@@ -19,7 +19,28 @@ export default function Home({ events = [] }) {
   const [showHeader, setShowHeader] = useState(true);
   const lastScrollY = useRef(0);
   
+  const location = useLocation();
   const isMap = view === 'map';
+
+  // REFERRAL LOGIC: Capture and Persist
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const refCode = params.get('ref');
+    
+    if (refCode) {
+      // Save to local storage so it persists through email validation redirects
+      localStorage.setItem('lapuff_pending_referral', refCode);
+      
+      // If not logged in, auto-open the sign up modal after 1000ms delay
+      const timer = setTimeout(() => {
+        if (!user) {
+          setShowAuth(true);
+        }
+      }, 1000);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [location.search, user]);
 
   useEffect(() => {
     async function initAuth() {
@@ -123,11 +144,11 @@ export default function Home({ events = [] }) {
                   </button>
                 )}
               </div>
-              <HamburgerMenu events={events} />
+              <HamburgerMenu events={events} user={user} onAuthClick={() => setShowAuth(true)} />
             </div>
           </div>
 
-          {/* Mobile Secondary Row: Auth + Submit (New centered row for mobile only) */}
+          {/* Mobile Secondary Row: Auth + Submit */}
           <div className="flex md:hidden items-center justify-center gap-3 mt-2 pb-1">
              {user ? (
                 <button onClick={() => setShowUserMenu(v => !v)}

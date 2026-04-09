@@ -34,9 +34,23 @@ export default function AuthModal({ onClose, onSuccess }) {
         if (containsProfanity(form.bio)) throw new Error('Error profanity filter');
         if (form.home_zip && !/^\d{5}$/.test(form.home_zip)) throw new Error('Enter a valid 5-digit NYC ZIP');
 
-        const result = await signUp(form.email, form.password, form.username, form.bio, form.home_zip || '10001');
+        // NEW: Pull the referral code from the browser
+        const pendingRef = localStorage.getItem('lapuff_pending_referral');
+
+        // Pass the ref code as the final argument to signUp
+        const result = await signUp(
+          form.email, 
+          form.password, 
+          form.username, 
+          form.bio, 
+          form.home_zip || '10001',
+          pendingRef // <--- The Handshake
+        );
+
         if (result.pending) {
           setSuccess('📨 Check your email to finish enlisting! You must confirm your email before you can log in.');
+          // Optional: Clear the ref after a successful sign-up attempt
+          localStorage.removeItem('lapuff_pending_referral');
         } else {
           onSuccess(result.username || form.username);
         }
@@ -141,8 +155,8 @@ export default function AuthModal({ onClose, onSuccess }) {
                     <p className="text-xs text-gray-400 mt-1">Your NYC colony ZIP — this is your territory.</p>
                   </div>
                   <div className="bg-violet-50 border-2 border-[#7C3AED] rounded-2xl p-3">
-                    <p className="text-xs font-black text-[#7C3AED]">💜 Clout Points</p>
-                    <p className="text-xs text-gray-600 mt-1">Earn Clout Points by submitting events, getting favorites, and showing up. Your ZIP code is your colony.</p>
+                    <p className="text-xs font-black text-[#7C3AED]">💜 Expansion Protocol</p>
+                    <p className="text-xs text-gray-600 mt-1">Verified recruits via referral links award the referrer +50 Clout Points once email is confirmed.</p>
                   </div>
                 </div>
               )}

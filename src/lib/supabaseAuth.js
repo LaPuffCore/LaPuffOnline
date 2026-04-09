@@ -5,7 +5,7 @@ const SUPABASE_URL = 'https://gazuabyyugbbthonqnsp.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_tLCmZUz3bgISgxs4KVq28g_x36Xo6Cp';
 const SESSION_KEY = 'lapuff_session';
 
-// 1. EXPORT THE ACTUAL CLIENT (Fixes the .from error)
+// 1. EXPORT THE ACTUAL CLIENT
 export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // --- Session Management ---
@@ -79,9 +79,10 @@ export async function getValidSession() {
  * @param {string} username 
  * @param {string} bio 
  * @param {string} home_zip 
+ * @param {string} referred_by // Added for the Expansion Protocol
  */
-export async function signUp(email, password, username, bio, home_zip) {
-  // Use the client to check username
+export async function signUp(email, password, username, bio, home_zip, referred_by) {
+  // Check username uniqueness
   const { data: existing } = await supabase
     .from('profiles')
     .select('username')
@@ -90,33 +91,37 @@ export async function signUp(email, password, username, bio, home_zip) {
 
   if (existing) throw new Error('Username already taken.');
 
-  const res = await fetch(`${SUPABASE_URL}/auth/v1/signup`, {
-    method: 'POST',
-    headers: { 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
+  // Use Supabase Client for signUp to properly handle metadata and options
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: {
+      data: {
+        username: username.trim(),
+        bio: bio || '',
+        home_zip: home_zip || '10001',
+        referred_by: referred_by || null // THE HANDSHAKE
+      }
+    }
   });
-  const authData = await res.json();
-  if (authData.error) throw new Error(authData.error.message);
 
-  if (authData.access_token && authData.user?.id) {
-    // Use the client for the insert
-    await supabase.from('profiles').insert([{
-      id: authData.user.id,
-      username: username.trim(),
-      bio: bio || '',
-      home_zip: home_zip || '10001',
-      clout_points: 0,
-      updated_at: new Date().toISOString(),
-    }]);
-    
+  if (error) throw new Error(error.message);
+
+  // If auto-confirm is off (standard), we wait for email
+  if (data.user && !data.session) {
+    return { pending: true };
+  }
+
+  // If auto-confirm is on (local dev / certain configs)
+  if (data.session) {
     const session = { 
-      user: { ...authData.user, username }, 
-      access_token: authData.access_token,
-      refresh_token: authData.refresh_token,
-      expires_at: Math.floor(Date.now() / 1000) + authData.expires_in
+      user: { ...data.user, username }, 
+      access_token: data.session.access_token,
+      refresh_token: data.session.refresh_token,
+      expires_at: Math.floor(Date.now() / 1000) + data.session.expires_in
     };
     saveSession(session);
-    return { user: authData.user, username };
+    return { user: data.user, username };
   }
 
   return { pending: true };
