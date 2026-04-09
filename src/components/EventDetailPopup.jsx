@@ -1,17 +1,18 @@
 import { useState, useEffect } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { generateAutoTags } from '../lib/autoTags';
 import { toggleFavorite, isFavorite, getFavoriteCount, getFavTrend } from '../lib/favorites';
 import { TAG_COLORS } from '../lib/tagColors';
-import { getUserTZOffset, utcToLocal, TIMEZONES } from '../lib/timezones';
+import { getUserTZOffset, utcToLocal } from '../lib/timezones';
 
 function MiniMap({ lat, lng, address, city, borderColor }) {
   const mapUrl = (lat && lng)
     ? `https://www.openstreetmap.org/export/embed.html?bbox=${lng - 0.005},${lat - 0.005},${lng + 0.005},${lat + 0.005}&layer=mapnik&marker=${lat},${lng}`
-    : `https://maps.google.com/maps?q=${encodeURIComponent(address || city || 'New York')}&t=&z=14&ie=UTF8&iwloc=&output=embed`;
+    : `https://www.openstreetmap.org/export/embed.html?bbox=-74.01,40.70,-73.95,40.80&layer=mapnik`;
 
   const outUrl = (lat && lng)
     ? `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=16/${lat}/${lng}`
-    : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address || city || 'New York')}`;
+    : `https://www.openstreetmap.org/search?query=${encodeURIComponent(address || city || 'New York')}`;
 
   return (
     <a 
@@ -19,14 +20,6 @@ function MiniMap({ lat, lng, address, city, borderColor }) {
       target="_blank" 
       rel="noopener noreferrer" 
       className="group block relative w-full h-full rounded-2xl overflow-hidden border-2 border-black bg-[#e5e3df] shadow-[4px_4px_0px_black] transition-all duration-300 hover:scale-[1.02]"
-      onMouseEnter={(e) => {
-        e.currentTarget.style.borderColor = borderColor;
-        e.currentTarget.lastChild.style.borderColor = borderColor;
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.borderColor = 'black';
-        e.currentTarget.lastChild.style.borderColor = 'black';
-      }}
     >
       <iframe 
         src={mapUrl}
@@ -38,7 +31,7 @@ function MiniMap({ lat, lng, address, city, borderColor }) {
         className="group-hover:filter-none transition-all duration-500 pointer-events-none"
         title="Location Map"
       ></iframe>
-      <div className="absolute bottom-0 left-0 right-0 bg-white border-t-2 border-black p-1.5 flex items-center justify-between z-20 transition-colors duration-300">
+      <div className="absolute bottom-0 left-0 right-0 bg-white border-t-2 border-black p-1.5 flex items-center justify-between z-20">
         <p className="text-[9px] font-black truncate uppercase tracking-tighter">{address || city || 'NYC GRID'}</p>
         <span className="bg-black text-white px-1.5 py-0.5 rounded text-[7px] font-black uppercase tracking-widest">MAP ↗</span>
       </div>
@@ -47,6 +40,7 @@ function MiniMap({ lat, lng, address, city, borderColor }) {
 }
 
 export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
+  const navigate = useNavigate();
   const [fav, setFav] = useState(false);
   const [favCount, setFavCount] = useState(0);
   const [trend, setTrend] = useState('neutral');
@@ -87,130 +81,135 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
     : '';
 
   return (
-    // items-start + pt-24 ensures it spawns at the top of the current viewport relative to scroll
-    <div className="fixed inset-0 z-[100000] flex items-start justify-center p-4 pt-24 overflow-y-auto custom-scrollbar">
+    <div className="fixed inset-0 z-[100000] flex items-start justify-center p-4 pt-20 overflow-y-auto custom-scrollbar">
       
-      {/* Hardware-accelerated blur backdrop */}
+      {/* Backdrop */}
       <div 
         className="fixed inset-0 z-[-1] backdrop-blur-xl bg-white/40 transform-gpu" 
         onClick={onClose}
       />
       
-      {/* NAVIGATION ARROWS: 
-        Fixed relative to the viewport, centered vertically on the card area 
-      */}
-      <div className="fixed inset-0 pointer-events-none z-[100001] flex items-center justify-between px-4 lg:px-12 max-w-5xl mx-auto">
+      {/* Relative Wrapper for Navigation and Card */}
+      <div className="relative w-full max-w-xl flex items-center justify-center min-h-fit">
+        
+        {/* Navigation Arrows: Centered vertically to the card wrapper */}
         {onPrev && (
           <button 
             onClick={(e) => { e.stopPropagation(); onPrev(); }}
-            className="pointer-events-auto w-14 h-14 lg:w-16 lg:h-16 flex items-center justify-center bg-white border-4 border-black rounded-full text-2xl lg:text-3xl shadow-[6px_6px_0px_black] hover:bg-black hover:text-white hover:-translate-x-1 active:translate-x-0 active:shadow-none transition-all"
+            className="hidden md:flex absolute -left-20 lg:-left-28 z-50 w-14 h-14 items-center justify-center bg-white border-4 border-black rounded-full text-2xl shadow-[6px_6px_0px_black] hover:bg-black hover:text-white hover:-translate-x-1 active:translate-x-0 active:shadow-none transition-all"
           >
             ←
           </button>
         )}
-        <div className="flex-1" /> {/* Spacer */}
+
         {onNext && (
           <button 
             onClick={(e) => { e.stopPropagation(); onNext(); }}
-            className="pointer-events-auto w-14 h-14 lg:w-16 lg:h-16 flex items-center justify-center bg-white border-4 border-black rounded-full text-2xl lg:text-3xl shadow-[6px_6px_0px_black] hover:bg-black hover:text-white hover:translate-x-1 active:translate-x-0 active:shadow-none transition-all"
+            className="hidden md:flex absolute -right-20 lg:-right-28 z-50 w-14 h-14 items-center justify-center bg-white border-4 border-black rounded-full text-2xl shadow-[6px_6px_0px_black] hover:bg-black hover:text-white hover:translate-x-1 active:translate-x-0 active:shadow-none transition-all"
           >
             →
           </button>
         )}
-      </div>
 
-      {/* Main Popup Card Container */}
-      <div
-        className="bg-white border-[6px] border-black rounded-[2rem] w-full max-w-xl shadow-[25px_25px_0px_rgba(0,0,0,0.2)] relative z-10 overflow-hidden flex flex-col mb-12"
-        style={{ borderColor: borderColor }}
-        onClick={e => e.stopPropagation()} 
-      >
-        <button onClick={onClose} className="absolute top-4 right-4 z-50 w-10 h-10 bg-black text-white rounded-full font-black flex items-center justify-center border-2 border-white hover:bg-red-500 transition-colors">✕</button>
+        {/* Popup Card */}
+        <div
+          className="bg-white border-[6px] border-black rounded-[2rem] w-full shadow-[25px_25px_0px_rgba(0,0,0,0.15)] relative z-10 overflow-hidden flex flex-col mb-12"
+          style={{ borderColor: borderColor }}
+          onClick={e => e.stopPropagation()} 
+        >
+          <button onClick={onClose} className="absolute top-4 right-4 z-50 w-10 h-10 bg-black text-white rounded-full font-black flex items-center justify-center border-2 border-white hover:bg-red-500 transition-colors shadow-lg">✕</button>
 
-        <div className="relative h-56 flex-shrink-0 bg-gray-100 border-b-4 border-black overflow-hidden">
-          {(!imgError && event.photos?.length > 0) ? (
-            <img 
-              src={event.photos[0]} 
-              alt="" 
-              className="w-full h-full object-cover scale-[1.015]" // Exact 1.5% zoom to eliminate edge-gap without over-cropping
-              onError={() => setImgError(true)} 
-            />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center text-8xl opacity-10" style={{ backgroundColor: borderColor }}>
-              {event.representative_emoji || '⚡'}
-            </div>
-          )}
-        </div>
-
-        <div className="p-6">
-          <div className="flex justify-between items-start gap-4 mb-6">
-            <div className="flex-1">
-              <h2 className="text-3xl font-black leading-[0.95] mb-2 uppercase italic tracking-tighter">{event.event_name}</h2>
-              <p className="text-[10px] text-gray-400 font-black uppercase tracking-widest">{event.name || 'SYSTEM_OPERATOR'}</p>
-            </div>
-            <div className="flex flex-col items-center gap-1">
-              <button 
-                onClick={() => toggleFavorite(event.id) && setFav(!fav)} 
-                className={`w-14 h-14 rounded-xl border-4 border-black flex items-center justify-center text-3xl shadow-[4px_4px_0px_black] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all ${fav ? 'bg-yellow-400' : 'bg-white'}`}
-              >
-                {fav ? '⭐' : '☆'}
-              </button>
-              <div className="flex items-center gap-1 bg-black text-white px-2 py-0.5 rounded-md font-black text-[10px]">
-                {trend === 'up' ? <span className="text-green-400">▲</span> : trend === 'down' ? <span className="text-red-400">▼</span> : <span className="text-gray-400">—</span>} 
-                {favCount}
-              </div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-            <div className="bg-gray-50 border-2 border-black rounded-xl p-4 flex items-center gap-3 shadow-[4px_4px_0px_black]">
-              <span className="text-3xl">📅</span>
-              <div>
-                <p className="text-sm font-black leading-tight">{displayDate}</p>
-                <p className="text-[10px] font-bold text-gray-400 uppercase">{displayTime}</p>
-              </div>
-            </div>
-            
-            <div className="h-[100px]">
-              <MiniMap
-                lat={event.location_data?.lat}
-                lng={event.location_data?.lng}
-                address={event.location_data?.address}
-                city={event.location_data?.city}
-                borderColor={borderColor}
+          <div className="relative h-56 flex-shrink-0 bg-gray-100 border-b-4 border-black overflow-hidden">
+            {(!imgError && event.photos?.length > 0) ? (
+              <img 
+                src={event.photos[0]} 
+                alt="" 
+                className="w-full h-full object-cover scale-[1.015]"
+                onError={() => setImgError(true)} 
               />
-            </div>
+            ) : (
+              <div className="w-full h-full flex items-center justify-center text-8xl opacity-10" style={{ backgroundColor: borderColor }}>
+                {event.representative_emoji || '⚡'}
+              </div>
+            )}
           </div>
 
-          {event.description && (
-            <div className="mb-6">
-              <p className="text-[9px] font-black uppercase text-gray-400 mb-2 tracking-widest">Protocol Intel</p>
-              <div className="text-sm font-bold leading-relaxed bg-gray-50 border-2 border-black p-4 rounded-xl shadow-[inset_4px_4px_0px_rgba(0,0,0,0.05)]">
-                {event.description}
+          <div className="p-6">
+            <div className="flex justify-between items-start gap-4 mb-6">
+              <div className="flex-1">
+                <h2 className="text-3xl font-black leading-[0.95] mb-2 uppercase italic tracking-tighter">{event.event_name}</h2>
+                <p className="text-[10px] text-gray-400 font-black uppercase tracking-widest">{event.name || 'SYSTEM_OPERATOR'}</p>
+              </div>
+              <div className="flex flex-col items-center gap-1">
+                <button 
+                  onClick={() => toggleFavorite(event.id) && setFav(!fav)} 
+                  className={`w-14 h-14 rounded-xl border-4 border-black flex items-center justify-center text-3xl shadow-[4px_4px_0px_black] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all ${fav ? 'bg-yellow-400' : 'bg-white'}`}
+                >
+                  {fav ? '⭐' : '☆'}
+                </button>
+                <div className="flex items-center gap-1 bg-black text-white px-2 py-0.5 rounded-md font-black text-[10px]">
+                  {trend === 'up' ? <span className="text-green-400">▲</span> : trend === 'down' ? <span className="text-red-400">▼</span> : <span className="text-gray-400">—</span>} 
+                  {favCount}
+                </div>
               </div>
             </div>
-          )}
 
-          <div className="flex flex-wrap gap-2 mb-6">
-            {tags.map(tag => (
-              <span key={tag} className={`text-[9px] font-black px-3 py-1.5 rounded-lg border-2 border-black shadow-[2px_2px_0px_black] ${TAG_COLORS[tag] || 'bg-white'} uppercase tracking-tighter`}>
-                #{tag}
-              </span>
-            ))}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+              {/* Calendar Link Button */}
+              <button
+                onClick={() => navigate('/calendar', { state: { initialDate: event.event_date, initialView: 'weekly' } })}
+                className="group relative bg-gray-50 border-2 border-black rounded-xl p-4 flex items-center gap-3 shadow-[4px_4px_0px_black] transition-all hover:-translate-y-0.5 active:translate-y-0 active:shadow-none text-left"
+                style={{ '--hover-color': borderColor }}
+              >
+                <div className="absolute inset-0 rounded-xl transition-colors duration-200 opacity-0 group-hover:opacity-10" style={{ backgroundColor: borderColor }} />
+                <span className="text-3xl z-10">📅</span>
+                <div className="z-10">
+                  <p className="text-sm font-black leading-tight group-hover:underline" style={{ textDecorationColor: borderColor }}>{displayDate}</p>
+                  <p className="text-[10px] font-bold text-gray-400 uppercase">{displayTime}</p>
+                </div>
+              </button>
+              
+              <div className="h-[100px]">
+                <MiniMap
+                  lat={event.location_data?.lat}
+                  lng={event.location_data?.lng}
+                  address={event.location_data?.address}
+                  city={event.location_data?.city}
+                  borderColor={borderColor}
+                />
+              </div>
+            </div>
+
+            {event.description && (
+              <div className="mb-6">
+                <p className="text-[9px] font-black uppercase text-gray-400 mb-2 tracking-widest">Protocol Intel</p>
+                <div className="text-sm font-bold leading-relaxed bg-gray-50 border-2 border-black p-4 rounded-xl shadow-[inset_4px_4px_0px_rgba(0,0,0,0.05)]">
+                  {event.description}
+                </div>
+              </div>
+            )}
+
+            <div className="flex flex-wrap gap-2 mb-6">
+              {tags.map(tag => (
+                <span key={tag} className={`text-[9px] font-black px-3 py-1.5 rounded-lg border-2 border-black shadow-[2px_2px_0px_black] ${TAG_COLORS[tag] || 'bg-white'} uppercase tracking-tighter`}>
+                  #{tag}
+                </span>
+              ))}
+            </div>
+
+            {event.relevant_links?.length > 0 && (
+              <div className="border-t-4 border-black pt-6">
+                <div className="grid grid-cols-1 gap-2">
+                  {event.relevant_links.map((link, i) => (
+                    <a key={i} href={link} target="_blank" rel="noopener noreferrer" className="flex items-center justify-between p-4 bg-gray-50 border-2 border-black rounded-xl hover:bg-black hover:text-white transition-all group shadow-[4px_4px_0px_black] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none">
+                      <span className="text-[10px] font-black truncate max-w-[85%] uppercase tracking-tighter">{link.replace(/^https?:\/\/(www\.)?/, '')}</span>
+                      <span className="text-xl group-hover:translate-x-1 transition-transform">→</span>
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
-
-          {event.relevant_links?.length > 0 && (
-            <div className="border-t-4 border-black pt-6">
-              <div className="grid grid-cols-1 gap-2">
-                {event.relevant_links.map((link, i) => (
-                  <a key={i} href={link} target="_blank" rel="noopener noreferrer" className="flex items-center justify-between p-4 bg-gray-50 border-2 border-black rounded-xl hover:bg-black hover:text-white transition-all group shadow-[4px_4px_0px_black] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none">
-                    <span className="text-[10px] font-black truncate max-w-[85%] uppercase tracking-tighter">{link.replace(/^https?:\/\/(www\.)?/, '')}</span>
-                    <span className="text-xl group-hover:translate-x-1 transition-transform">→</span>
-                  </a>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
       </div>
     </div>

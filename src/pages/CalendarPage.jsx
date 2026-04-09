@@ -1,17 +1,30 @@
 import { useState, useEffect } from 'react';
 import { getFavorites } from '../lib/favorites';
 import EventDetailPopup from '../components/EventDetailPopup';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 
 function getDaysInMonth(year, month) { return new Date(year, month + 1, 0).getDate(); }
 function getFirstDay(year, month) { return new Date(year, month, 1).getDay(); }
 
 export default function CalendarPage({ events = [] }) {
   const today = new Date();
+  const location = useLocation();
   const [view, setView] = useState('monthly');
   const [curDate, setCurDate] = useState(new Date(today.getFullYear(), today.getMonth(), today.getDate()));
   const [favorites, setFavorites] = useState([]);
   const [selectedEvent, setSelectedEvent] = useState(null);
+
+  // Handle incoming navigation state from the EventDetailPopup
+  useEffect(() => {
+    if (location.state?.initialDate) {
+      const parts = location.state.initialDate.split('-');
+      const targetDate = new Date(parts[0], parts[1] - 1, parts[2]);
+      setCurDate(targetDate);
+    }
+    if (location.state?.initialView) {
+      setView(location.state.initialView);
+    }
+  }, [location.state]);
 
   useEffect(() => {
     setFavorites(getFavorites());
