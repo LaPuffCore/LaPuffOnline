@@ -5,37 +5,45 @@ import { TAG_COLORS } from '../lib/tagColors';
 import { getUserTZOffset, utcToLocal, TIMEZONES } from '../lib/timezones';
 
 function MiniMap({ lat, lng, address, city }) {
+  // Fix the Google Maps external link syntax
   const mapsQuery = lat && lng ? `${lat},${lng}` : encodeURIComponent(`${address || ''} ${city || 'New York'} NY`);
   const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${mapsQuery}`;
 
-  const staticMapUrl = lat && lng
-    ? `https://staticmap.openstreetmap.de/staticmap.php?center=${lat},${lng}&zoom=15&size=400x160&markers=${lat},${lng},red-pushpin`
+  // Freeware Standard Map - No Key Required
+  // 'l=map' provides the clean, non-satellite road map view
+  const staticMapUrl = (lat && lng)
+    ? `https://static-maps.yandex.ru/1.x/?lang=en_US&ll=${lng},${lat}&z=15&l=map&size=400,160&pt=${lng},${lat},pm2rdm`
     : null;
 
   return (
-    <a href={mapsUrl} target="_blank" rel="noopener noreferrer" className="group block relative w-full h-full rounded-2xl overflow-hidden border-2 border-black cursor-pointer hover:border-blue-500 transition-all shadow-[4px_4px_0px_black] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none">
-      <div className="h-24 md:h-full min-h-[100px] bg-gray-200 relative overflow-hidden">
+    <a href={mapsUrl} target="_blank" rel="noopener noreferrer" className="group block relative w-full h-full rounded-2xl overflow-hidden border-2 border-black cursor-pointer hover:border-blue-500 transition-all shadow-[4px_4px_0px_black] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none bg-gray-100">
+      <div className="h-24 md:h-full min-h-[100px] relative overflow-hidden bg-[#e5e3df]">
         {staticMapUrl ? (
           <img
             src={staticMapUrl}
-            alt="Map"
-            className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all"
+            alt="Event Location"
+            className="w-full h-full object-cover group-hover:contrast-110 transition-all"
+            onError={(e) => { 
+              e.target.style.display = 'none'; 
+              e.target.parentElement.classList.add('bg-gray-200');
+            }}
           />
         ) : (
-          <div className="w-full h-full flex flex-col items-center justify-center bg-gray-100 gap-1">
+          <div className="w-full h-full flex flex-col items-center justify-center gap-1 bg-gray-200/50">
             <span className="text-3xl">📍</span>
-            <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest text-center px-2">
-              {address || city || 'View on Maps'}
+            <span className="text-[8px] font-black text-gray-400 uppercase tracking-widest text-center px-4">
+              Map Preview Unavailable
             </span>
           </div>
         )}
       </div>
+      
       <div className="absolute bottom-0 left-0 right-0 bg-white border-t-2 border-black p-2 flex items-center justify-between gap-2">
-        <div className="truncate">
+        <div className="truncate flex-1">
           <p className="text-[8px] font-black uppercase text-gray-400 leading-none mb-0.5">Location</p>
           <p className="text-[10px] md:text-xs font-black truncate">{address || city || 'New York'}</p>
         </div>
-        <div className="flex-shrink-0 bg-black text-white px-2 py-1 rounded-lg text-[9px] font-black group-hover:bg-blue-600 transition-colors">
+        <div className="flex-shrink-0 bg-black text-white px-2 py-1 rounded-lg text-[9px] font-black group-hover:bg-blue-600 transition-colors flex items-center gap-1">
           MAPS ↗
         </div>
       </div>
@@ -96,13 +104,13 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-start justify-center p-4 overflow-y-auto" onClick={onClose}>
 
       {onPrev && (
-        <button onClick={(e) => { e.stopPropagation(); onPrev(); }} className="fixed left-4 top-1/2 -translate-y-1/2 z-[60] w-12 h-20 bg-white/10 hover:bg-white/20 text-white hidden md:flex items-center justify-center rounded-2xl transition-all group">
+        <button onClick={(e) => { e.stopPropagation(); onPrev(); }} className="fixed left-4 top-1/2 -translate-y-1/2 z-[60] w-12 h-20 bg-white/10 hover:bg-white/20 text-white hidden md:flex items-center justify-center rounded-2xl transition-all group border-2 border-white/20">
           <span className="text-4xl font-light group-hover:-translate-x-1 transition-transform">＜</span>
         </button>
       )}
 
       {onNext && (
-        <button onClick={(e) => { e.stopPropagation(); onNext(); }} className="fixed right-4 top-1/2 -translate-y-1/2 z-[60] w-12 h-20 bg-white/10 hover:bg-white/20 text-white hidden md:flex items-center justify-center rounded-2xl transition-all group">
+        <button onClick={(e) => { e.stopPropagation(); onNext(); }} className="fixed right-4 top-1/2 -translate-y-1/2 z-[60] w-12 h-20 bg-white/10 hover:bg-white/20 text-white hidden md:flex items-center justify-center rounded-2xl transition-all group border-2 border-white/20">
           <span className="text-4xl font-light group-hover:translate-x-1 transition-transform">＞</span>
         </button>
       )}
@@ -112,7 +120,7 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
         style={{ borderColor: borderColor }}
         onClick={e => e.stopPropagation()}
       >
-        <button onClick={onClose} className="absolute top-4 right-4 z-20 w-10 h-10 bg-black text-white rounded-full font-black hover:bg-red-500 flex items-center justify-center shadow-[4px_4px_0px_#333] transition-all active:translate-x-0.5 active:translate-y-0.5 active:shadow-none">✕</button>
+        <button onClick={onClose} className="absolute top-4 right-4 z-20 w-10 h-10 bg-black text-white rounded-full font-black hover:bg-red-500 flex items-center justify-center shadow-[4px_4px_0px_#333] transition-all active:translate-x-0.5 active:translate-y-0.5 active:shadow-none border-2 border-white/20">✕</button>
 
         <div className="relative h-64 md:h-80 bg-gray-100 border-b-4 border-black">
           {showImage ? (
@@ -138,7 +146,7 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
           <div className="flex flex-col gap-4 mb-8">
             <div className="flex justify-between items-start gap-4">
               <div className="flex-1">
-                <h2 className="text-2xl md:text-4xl font-black leading-tight mb-1 line-clamp-3 md:line-clamp-2 uppercase italic">{event.event_name}</h2>
+                <h2 className="text-2xl md:text-4xl font-black leading-tight mb-1 line-clamp-3 md:line-clamp-2 uppercase italic italic italic italic">{event.event_name}</h2>
                 <div className="flex items-center gap-2 md:gap-3">
                   <span className="md:hidden text-lg">{event.representative_emoji || '🎉'}</span>
                   {event.name && (
