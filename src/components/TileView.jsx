@@ -253,6 +253,20 @@ export default function TileView({ events }) {
     return list;
   }, [events, search, timespanIdx, showArchive, borough, emojiFilters, priceFilter, rsvpOnly, favOnly, sourceMode, tagFilters, favVersion]);
 
+  // NAVIGATION LOGIC: Calculate index within the current filtered list
+  const currentEventIndex = useMemo(() => {
+    if (!selectedEvent) return -1;
+    return filtered.findIndex(e => e.id === selectedEvent.id);
+  }, [selectedEvent, filtered]);
+
+  const handleNext = currentEventIndex < filtered.length - 1 
+    ? () => setSelectedEvent(filtered[currentEventIndex + 1]) 
+    : null;
+
+  const handlePrev = currentEventIndex > 0 
+    ? () => setSelectedEvent(filtered[currentEventIndex - 1]) 
+    : null;
+
   const displayed = filtered.slice(0, page * PAGE_SIZE);
   const hasMore = displayed.length < filtered.length;
 
@@ -572,7 +586,14 @@ export default function TileView({ events }) {
         </div>
       )}
 
-      {selectedEvent && <EventDetailPopup event={selectedEvent} onClose={() => setSelectedEvent(null)} />}
+      {selectedEvent && (
+        <EventDetailPopup 
+          event={selectedEvent} 
+          onClose={() => setSelectedEvent(null)} 
+          onNext={handleNext}
+          onPrev={handlePrev}
+        />
+      )}
     </div>
   );
 }
