@@ -5,7 +5,6 @@ import { TAG_COLORS } from '../lib/tagColors';
 import { getUserTZOffset, utcToLocal, TIMEZONES } from '../lib/timezones';
 
 function MiniMap({ lat, lng, address, city, borderColor }) {
-  // 100% Reliable No-API Map Strategy: Iframe Embed
   const mapUrl = (lat && lng)
     ? `https://www.openstreetmap.org/export/embed.html?bbox=${lng - 0.005},${lat - 0.005},${lng + 0.005},${lat + 0.005}&layer=mapnik&marker=${lat},${lng}`
     : `https://maps.google.com/maps?q=${encodeURIComponent(address || city || 'New York')}&t=&z=14&ie=UTF8&iwloc=&output=embed`;
@@ -39,8 +38,6 @@ function MiniMap({ lat, lng, address, city, borderColor }) {
         className="group-hover:filter-none transition-all duration-500 pointer-events-none"
         title="Location Map"
       ></iframe>
-      
-      {/* Container bottom bar dynamically matches event color on hover */}
       <div className="absolute bottom-0 left-0 right-0 bg-white border-t-2 border-black p-1.5 flex items-center justify-between z-20 transition-colors duration-300">
         <p className="text-[9px] font-black truncate uppercase tracking-tighter">{address || city || 'NYC GRID'}</p>
         <span className="bg-black text-white px-1.5 py-0.5 rounded text-[7px] font-black uppercase tracking-widest">MAP ↗</span>
@@ -58,11 +55,9 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
   const borderColor = event.hex_color || '#FF6B6B';
 
   useEffect(() => {
-    // Scroll Lock: Freezes background to prevent glitching/scrolling while popup is open
     const originalOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
 
-    // Live inheritance of universal favorite stats
     const syncFavorites = () => {
       setFav(isFavorite(event.id));
       setFavCount(getFavoriteCount(event.id));
@@ -72,7 +67,6 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
     syncFavorites();
     window.addEventListener('favoritesChanged', syncFavorites);
     
-    // Keyboard navigation
     const handleKey = (e) => {
       if (e.key === 'Escape') onClose();
       if (e.key === 'ArrowRight' && onNext) onNext();
@@ -93,39 +87,34 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
     : '';
 
   return (
-    // Outer container locked to viewport center
-    <div className="fixed inset-0 z-[100000] flex items-center justify-center p-4">
+    // Top-adjusted container: items-start + pt-24 creates the consistent gap below the header
+    <div className="fixed inset-0 z-[100000] flex items-start justify-center p-4 pt-24 overflow-y-auto custom-scrollbar">
       
-      {/* UNIVERSAL BLUR: Hardware accelerated (transform-gpu) to prevent scrolling glitch on mobile/web */}
+      {/* UNIVERSAL BLUR: Hardware accelerated to prevent jitter */}
       <div 
         className="fixed inset-0 z-[-1] backdrop-blur-xl bg-white/40 transform-gpu" 
+        onClick={onClose}
       />
       
-      {/* Background click to close */}
-      <div className="absolute inset-0 z-0" onClick={onClose} />
-
-      {/* Navigation Arrows (Renders if props exist) */}
-      {onPrev && (
+      {/* Navigation Arrows: Flanking the popup horizontally */}
+      <div className="fixed inset-y-0 left-0 right-0 pointer-events-none flex items-center justify-between px-4 lg:px-12 z-50">
         <button 
-          onClick={(e) => { e.stopPropagation(); onPrev(); }}
-          className="hidden md:flex fixed left-4 lg:left-8 z-50 w-14 h-14 lg:w-16 lg:h-16 items-center justify-center bg-white border-4 border-black rounded-full text-2xl lg:text-3xl shadow-[6px_6px_0px_black] hover:bg-black hover:text-white hover:-translate-x-1 active:translate-x-0 active:shadow-none transition-all"
+          onClick={(e) => { e.stopPropagation(); onPrev?.(); }}
+          className="pointer-events-auto w-14 h-14 lg:w-16 lg:h-16 flex items-center justify-center bg-white border-4 border-black rounded-full text-2xl lg:text-3xl shadow-[6px_6px_0px_black] hover:bg-black hover:text-white hover:-translate-x-1 active:translate-x-0 active:shadow-none transition-all"
         >
           ←
         </button>
-      )}
-
-      {onNext && (
         <button 
-          onClick={(e) => { e.stopPropagation(); onNext(); }}
-          className="hidden md:flex fixed right-4 lg:right-8 z-50 w-14 h-14 lg:w-16 lg:h-16 items-center justify-center bg-white border-4 border-black rounded-full text-2xl lg:text-3xl shadow-[6px_6px_0px_black] hover:bg-black hover:text-white hover:translate-x-1 active:translate-x-0 active:shadow-none transition-all"
+          onClick={(e) => { e.stopPropagation(); onNext?.(); }}
+          className="pointer-events-auto w-14 h-14 lg:w-16 lg:h-16 flex items-center justify-center bg-white border-4 border-black rounded-full text-2xl lg:text-3xl shadow-[6px_6px_0px_black] hover:bg-black hover:text-white hover:translate-x-1 active:translate-x-0 active:shadow-none transition-all"
         >
           →
         </button>
-      )}
+      </div>
 
-      {/* Succinct Popup Card */}
+      {/* Popup Card */}
       <div
-        className="bg-white border-[6px] border-black rounded-[2rem] w-full max-w-xl shadow-[25px_25px_0px_rgba(0,0,0,0.2)] relative z-10 overflow-hidden flex flex-col max-h-[90vh]"
+        className="bg-white border-[6px] border-black rounded-[2rem] w-full max-w-xl shadow-[25px_25px_0px_rgba(0,0,0,0.2)] relative z-10 overflow-hidden flex flex-col mb-12"
         style={{ borderColor: borderColor }}
         onClick={e => e.stopPropagation()} 
       >
@@ -136,7 +125,7 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
             <img 
               src={event.photos[0]} 
               alt="" 
-              className="w-full h-full object-cover scale-[1.01]" // Exact 1% pixel shift fix
+              className="w-full h-full object-cover scale-[1.01]"
               onError={() => setImgError(true)} 
             />
           ) : (
@@ -146,7 +135,7 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
           )}
         </div>
 
-        <div className="p-6 overflow-y-auto custom-scrollbar">
+        <div className="p-6">
           <div className="flex justify-between items-start gap-4 mb-6">
             <div className="flex-1">
               <h2 className="text-3xl font-black leading-[0.95] mb-2 uppercase italic tracking-tighter">{event.event_name}</h2>
