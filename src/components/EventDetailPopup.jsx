@@ -4,10 +4,8 @@ import { toggleFavorite, isFavorite, getFavoriteCount, getFavTrend } from '../li
 import { TAG_COLORS } from '../lib/tagColors';
 import { getUserTZOffset, utcToLocal, TIMEZONES } from '../lib/timezones';
 
-function MiniMap({ lat, lng, address, city }) {
+function MiniMap({ lat, lng, address, city, borderColor }) {
   // 100% Reliable No-API Map Strategy: Iframe Embed
-  // Iframes bypass standard image CORS/Referrer blocks. We use pointer-events-none 
-  // so it renders the visual map, but the parent <a> tag handles the click.
   const mapUrl = (lat && lng)
     ? `https://www.openstreetmap.org/export/embed.html?bbox=${lng - 0.005},${lat - 0.005},${lng + 0.005},${lat + 0.005}&layer=mapnik&marker=${lat},${lng}`
     : `https://maps.google.com/maps?q=${encodeURIComponent(address || city || 'New York')}&t=&z=14&ie=UTF8&iwloc=&output=embed`;
@@ -21,7 +19,15 @@ function MiniMap({ lat, lng, address, city }) {
       href={outUrl} 
       target="_blank" 
       rel="noopener noreferrer" 
-      className="group block relative w-full h-full rounded-2xl overflow-hidden border-2 border-black bg-[#e5e3df] shadow-[4px_4px_0px_black]"
+      className="group block relative w-full h-full rounded-2xl overflow-hidden border-2 border-black bg-[#e5e3df] shadow-[4px_4px_0px_black] transition-all duration-300 hover:scale-[1.02]"
+      onMouseEnter={(e) => {
+        e.currentTarget.style.borderColor = borderColor;
+        e.currentTarget.lastChild.style.borderColor = borderColor;
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.borderColor = 'black';
+        e.currentTarget.lastChild.style.borderColor = 'black';
+      }}
     >
       <iframe 
         src={mapUrl}
@@ -33,10 +39,9 @@ function MiniMap({ lat, lng, address, city }) {
         className="group-hover:filter-none transition-all duration-500 pointer-events-none"
         title="Location Map"
       ></iframe>
-      <div className="absolute inset-0 flex items-center justify-center pointer-events-none pb-4 z-10 drop-shadow-md">
-        <span className="text-xl opacity-0 group-hover:opacity-100 transition-opacity">📍</span>
-      </div>
-      <div className="absolute bottom-0 left-0 right-0 bg-white border-t-2 border-black p-1.5 flex items-center justify-between z-20">
+      
+      {/* Container bottom bar dynamically matches event color on hover */}
+      <div className="absolute bottom-0 left-0 right-0 bg-white border-t-2 border-black p-1.5 flex items-center justify-between z-20 transition-colors duration-300">
         <p className="text-[9px] font-black truncate uppercase tracking-tighter">{address || city || 'NYC GRID'}</p>
         <span className="bg-black text-white px-1.5 py-0.5 rounded text-[7px] font-black uppercase tracking-widest">MAP ↗</span>
       </div>
@@ -46,26 +51,38 @@ function MiniMap({ lat, lng, address, city }) {
 
 export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
   const [fav, setFav] = useState(false);
+  const [favCount, setFavCount] = useState(0);
+  const [trend, setTrend] = useState('neutral');
   const [imgError, setImgError] = useState(false);
   const tags = generateAutoTags(event);
   const borderColor = event.hex_color || '#FF6B6B';
 
   useEffect(() => {
-    // Scroll Lock: Prevents the background from glitching/scrolling while popup is open
+    // Scroll Lock: Freezes background to prevent glitching/scrolling while popup is open
     const originalOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
 
-    setFav(isFavorite(event.id));
+    // Live inheritance of universal favorite stats
+    const syncFavorites = () => {
+      setFav(isFavorite(event.id));
+      setFavCount(getFavoriteCount(event.id));
+      setTrend(getFavTrend(event.id));
+    };
     
+    syncFavorites();
+    window.addEventListener('favoritesChanged', syncFavorites);
+    
+    // Keyboard navigation
     const handleKey = (e) => {
       if (e.key === 'Escape') onClose();
-      if (e.key === 'ArrowRight') onNext?.();
-      if (e.key === 'ArrowLeft') onPrev?.();
+      if (e.key === 'ArrowRight' && onNext) onNext();
+      if (e.key === 'ArrowLeft' && onPrev) onPrev();
     };
     window.addEventListener('keydown', handleKey);
     
     return () => {
       document.body.style.overflow = originalOverflow;
+      window.removeEventListener('favoritesChanged', syncFavorites);
       window.removeEventListener('keydown', handleKey);
     };
   }, [event.id, onClose, onNext, onPrev]);
@@ -76,29 +93,35 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
     : '';
 
   return (
+    // Outer container locked to viewport center
     <div className="fixed inset-0 z-[100000] flex items-center justify-center p-4">
-      {/* UNIVERSAL BLUR: Fixed to viewport, no horizontal scroll bugs */}
+      
+      {/* UNIVERSAL BLUR: Hardware accelerated (transform-gpu) to prevent scrolling glitch on mobile/web */}
       <div 
-        className="fixed inset-0 z-[-1] backdrop-blur-xl bg-white/40" 
+        className="fixed inset-0 z-[-1] backdrop-blur-xl bg-white/40 transform-gpu" 
       />
       
       {/* Background click to close */}
       <div className="absolute inset-0 z-0" onClick={onClose} />
 
-      {/* Navigation Arrows */}
-      <button 
-        onClick={(e) => { e.stopPropagation(); onPrev?.(); }}
-        className="hidden md:flex fixed left-8 z-50 w-16 h-16 items-center justify-center bg-white border-4 border-black rounded-full text-3xl shadow-[6px_6px_0px_black] hover:bg-black hover:text-white hover:-translate-x-1 active:translate-x-0 active:shadow-none transition-all"
-      >
-        ←
-      </button>
+      {/* Navigation Arrows (Renders if props exist) */}
+      {onPrev && (
+        <button 
+          onClick={(e) => { e.stopPropagation(); onPrev(); }}
+          className="hidden md:flex fixed left-4 lg:left-8 z-50 w-14 h-14 lg:w-16 lg:h-16 items-center justify-center bg-white border-4 border-black rounded-full text-2xl lg:text-3xl shadow-[6px_6px_0px_black] hover:bg-black hover:text-white hover:-translate-x-1 active:translate-x-0 active:shadow-none transition-all"
+        >
+          ←
+        </button>
+      )}
 
-      <button 
-        onClick={(e) => { e.stopPropagation(); onNext?.(); }}
-        className="hidden md:flex fixed right-8 z-50 w-16 h-16 items-center justify-center bg-white border-4 border-black rounded-full text-3xl shadow-[6px_6px_0px_black] hover:bg-black hover:text-white hover:translate-x-1 active:translate-x-0 active:shadow-none transition-all"
-      >
-        →
-      </button>
+      {onNext && (
+        <button 
+          onClick={(e) => { e.stopPropagation(); onNext(); }}
+          className="hidden md:flex fixed right-4 lg:right-8 z-50 w-14 h-14 lg:w-16 lg:h-16 items-center justify-center bg-white border-4 border-black rounded-full text-2xl lg:text-3xl shadow-[6px_6px_0px_black] hover:bg-black hover:text-white hover:translate-x-1 active:translate-x-0 active:shadow-none transition-all"
+        >
+          →
+        </button>
+      )}
 
       {/* Succinct Popup Card */}
       <div
@@ -113,7 +136,7 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
             <img 
               src={event.photos[0]} 
               alt="" 
-              className="w-full h-full object-cover scale-[1.015]" // Slight 1.5% pixel shift fix
+              className="w-full h-full object-cover scale-[1.01]" // Exact 1% pixel shift fix
               onError={() => setImgError(true)} 
             />
           ) : (
@@ -129,12 +152,18 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
               <h2 className="text-3xl font-black leading-[0.95] mb-2 uppercase italic tracking-tighter">{event.event_name}</h2>
               <p className="text-[10px] text-gray-400 font-black uppercase tracking-widest">{event.name || 'SYSTEM_OPERATOR'}</p>
             </div>
-            <button 
-              onClick={() => toggleFavorite(event.id) && setFav(!fav)} 
-              className={`w-14 h-14 rounded-xl border-4 border-black flex items-center justify-center text-3xl shadow-[4px_4px_0px_black] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all ${fav ? 'bg-yellow-400' : 'bg-white'}`}
-            >
-              {fav ? '⭐' : '☆'}
-            </button>
+            <div className="flex flex-col items-center gap-1">
+              <button 
+                onClick={() => toggleFavorite(event.id) && setFav(!fav)} 
+                className={`w-14 h-14 rounded-xl border-4 border-black flex items-center justify-center text-3xl shadow-[4px_4px_0px_black] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all ${fav ? 'bg-yellow-400' : 'bg-white'}`}
+              >
+                {fav ? '⭐' : '☆'}
+              </button>
+              <div className="flex items-center gap-1 bg-black text-white px-2 py-0.5 rounded-md font-black text-[10px]">
+                {trend === 'up' ? <span className="text-green-400">▲</span> : trend === 'down' ? <span className="text-red-400">▼</span> : <span className="text-gray-400">—</span>} 
+                {favCount}
+              </div>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
@@ -152,6 +181,7 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
                 lng={event.location_data?.lng}
                 address={event.location_data?.address}
                 city={event.location_data?.city}
+                borderColor={borderColor}
               />
             </div>
           </div>
