@@ -5,7 +5,6 @@ import { TAG_COLORS } from '../lib/tagColors';
 import { getUserTZOffset, utcToLocal } from '../lib/timezones';
 import { useNavigate } from 'react-router-dom';
 
-// REVERTED: High-performance Static OSM logic from working variant
 function MiniMap({ lat, lng, address, city, borderColor }) {
   const mapUrl = (lat && lng)
     ? `https://www.openstreetmap.org/export/embed.html?bbox=${lng - 0.005},${lat - 0.005},${lng + 0.005},${lat + 0.005}&layer=mapnik&marker=${lat},${lng}`
@@ -54,14 +53,21 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
   const [favCount, setFavCount] = useState(0);
   const [trend, setTrend] = useState('neutral');
   const [imgError, setImgError] = useState(false);
-  const [verticalOffset, setVerticalOffset] = useState(0);
+  const [scrollOffset, setScrollOffset] = useState(0);
 
   const tags = generateAutoTags(event);
   const borderColor = event.hex_color || '#FF6B6B';
 
   useEffect(() => {
-    const scrollPos = window.pageYOffset || document.documentElement.scrollTop;
-    setVerticalOffset(scrollPos);
+    // FRESH LOOK AT POSITIONING: 
+    // We target the main scrollable element if it exists, otherwise fallback to window.
+    // This handles the "Totalizing" scroll count by checking the actual displacement.
+    const calculateOffset = () => {
+      const scrollEl = document.querySelector('main.overflow-y-auto') || document.documentElement;
+      setScrollOffset(scrollEl.scrollTop || window.pageYOffset);
+    };
+
+    calculateOffset();
     
     const originalOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
@@ -74,6 +80,7 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
     
     syncFavorites();
     window.addEventListener('favoritesChanged', syncFavorites);
+    window.addEventListener('resize', calculateOffset); // Handle layout shifts
     
     const handleKey = (e) => {
       if (e.key === 'Escape') onClose();
@@ -85,17 +92,16 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
     return () => {
       document.body.style.overflow = originalOverflow;
       window.removeEventListener('favoritesChanged', syncFavorites);
+      window.removeEventListener('resize', calculateOffset);
       window.removeEventListener('keydown', handleKey);
     };
   }, [event.id, onClose, onNext, onPrev]);
 
-  const handleFavoriteClick = async () => {
-    // Uses the same logic as TileView to ensure clout and sync
-    const success = await toggleFavorite(event.id);
-    if (success) {
-      setFav(!fav);
-      // Event listener 'favoritesChanged' handles universal UI update
-    }
+  const handleFavoriteClick = async (e) => {
+    e.stopPropagation();
+    // This call updates the local storage/database and dispatches the 'favoritesChanged' event
+    // which our TileView and this Popup both listen to, ensuring 1:1 sync.
+    await toggleFavorite(event.id);
   };
 
   const handleDateClick = () => {
@@ -115,7 +121,7 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
   return (
     <div 
       className="absolute inset-x-0 z-[100000] min-h-screen flex flex-col items-center p-2 sm:p-4"
-      style={{ top: `${verticalOffset}px` }}
+      style={{ top: `${scrollOffset}px` }}
     >
       <div 
         className="fixed inset-0 z-[-1] backdrop-blur-xl bg-white/40 transform-gpu" 
@@ -129,7 +135,7 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
         
         <button 
           onClick={(e) => { e.stopPropagation(); onPrev?.(); }}
-          className={`hidden sm:flex w-14 h-14 lg:w-16 lg:h-16 items-center justify-center bg-white border-4 border-black rounded-full text-2xl lg:text-3xl shadow-[6px_6px_0px_black] transition-all
+          className={`hidden sm:flex w-14 h-14 lg:w-16 lg:h-16 flex-shrink-0 items-center justify-center bg-white border-4 border-black rounded-full text-2xl lg:text-3xl shadow-[6px_6px_0px_black] transition-all
             ${onPrev ? 'hover:bg-black hover:text-white hover:-translate-x-1 active:translate-x-0 cursor-pointer opacity-100' : 'opacity-20 grayscale cursor-not-allowed'}`}
         >
           ←
@@ -157,7 +163,6 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
               </div>
             )}
             
-            {/* Mobile Navigation Arrows Overlay */}
             <div className="absolute inset-y-0 left-0 right-0 flex justify-between items-center px-2 sm:hidden pointer-events-none">
                 <button onClick={onPrev} className={`pointer-events-auto w-10 h-10 bg-white/90 border-2 border-black rounded-full font-black ${!onPrev ? 'opacity-0' : ''}`}>←</button>
                 <button onClick={onNext} className={`pointer-events-auto w-10 h-10 bg-white/90 border-2 border-black rounded-full font-black ${!onNext ? 'opacity-0' : ''}`}>→</button>
@@ -233,7 +238,7 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
                 <div className="grid grid-cols-1 gap-2">
                   {event.relevant_links.map((link, i) => (
                     <a key={i} href={link} target="_blank" rel="noopener noreferrer" className="flex items-center justify-between p-3 sm:p-4 bg-gray-50 border-2 border-black rounded-xl hover:bg-black hover:text-white transition-all group shadow-[4px_4px_0px_black] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none">
-                      <span className="text-[9px] sm:text-[10px] font-black truncate max-w-[85%] uppercase tracking-tighter">{link.replace(/^https?:\/\/(www\\.)?/, '')}</span>
+                      <span className="text-[9px] sm:text-[10px] font-black truncate max-w-[85%] uppercase tracking-tighter">{link.replace(/^https?:\/\/(www\.)?/, '')}</span>
                       <span className="text-lg sm:text-xl group-hover:translate-x-1 transition-transform">→</span>
                     </a>
                   ))}
@@ -245,7 +250,7 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
 
         <button 
           onClick={(e) => { e.stopPropagation(); onNext?.(); }}
-          className={`hidden sm:flex w-14 h-14 lg:w-16 lg:h-16 items-center justify-center bg-white border-4 border-black rounded-full text-2xl lg:text-3xl shadow-[6px_6px_0px_black] transition-all
+          className={`hidden sm:flex w-14 h-14 lg:w-16 lg:h-16 flex-shrink-0 items-center justify-center bg-white border-4 border-black rounded-full text-2xl lg:text-3xl shadow-[6px_6px_0px_black] transition-all
             ${onNext ? 'hover:bg-black hover:text-white hover:translate-x-1 active:translate-x-0 cursor-pointer opacity-100' : 'opacity-20 grayscale cursor-not-allowed'}`}
         >
           →
