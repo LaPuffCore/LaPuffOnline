@@ -3,6 +3,7 @@ import { generateAutoTags } from '../lib/autoTags';
 import { toggleFavorite, isFavorite, getFavoriteCount, getFavTrend } from '../lib/favorites';
 import { TAG_COLORS } from '../lib/tagColors';
 import { getUserTZOffset, utcToLocal } from '../lib/timezones';
+import { useNavigate } from 'react-router-dom';
 
 // REVERTED: High-performance Static OSM logic from working variant
 function MiniMap({ lat, lng, address, city, borderColor }) {
@@ -48,6 +49,7 @@ function MiniMap({ lat, lng, address, city, borderColor }) {
 }
 
 export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
+  const navigate = useNavigate();
   const [fav, setFav] = useState(false);
   const [favCount, setFavCount] = useState(0);
   const [trend, setTrend] = useState('neutral');
@@ -58,13 +60,10 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
   const borderColor = event.hex_color || '#FF6B6B';
 
   useEffect(() => {
-    // FIX: Totalizing scroll count capture
-    // We capture the current scroll position of the window to anchor the "absolute" container
     const scrollPos = window.pageYOffset || document.documentElement.scrollTop;
     setVerticalOffset(scrollPos);
     
     const originalOverflow = document.body.style.overflow;
-    // We keep overflow hidden to prevent "double scrolling" while the popup is open
     document.body.style.overflow = 'hidden';
 
     const syncFavorites = () => {
@@ -90,32 +89,47 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
     };
   }, [event.id, onClose, onNext, onPrev]);
 
+  const handleFavoriteClick = async () => {
+    // Uses the same logic as TileView to ensure clout and sync
+    const success = await toggleFavorite(event.id);
+    if (success) {
+      setFav(!fav);
+      // Event listener 'favoritesChanged' handles universal UI update
+    }
+  };
+
+  const handleDateClick = () => {
+    navigate('/calendar', { 
+      state: { 
+        initialDate: event.event_date,
+        initialView: 'weekly'
+      } 
+    });
+  };
+
   const displayTime = event.event_time_utc ? utcToLocal(event.event_time_utc, getUserTZOffset()) : '';
   const displayDate = event.event_date 
     ? new Date(event.event_date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) 
     : '';
 
   return (
-    /* Changed to absolute and used top offset to place it correctly in the scroll flow */
     <div 
-      className="absolute inset-x-0 z-[100000] min-h-screen flex flex-col items-center p-4"
+      className="absolute inset-x-0 z-[100000] min-h-screen flex flex-col items-center p-2 sm:p-4"
       style={{ top: `${verticalOffset}px` }}
     >
-      {/* Background Blur - fixed so it covers the viewport while looking at the popup */}
       <div 
         className="fixed inset-0 z-[-1] backdrop-blur-xl bg-white/40 transform-gpu" 
         onClick={onClose}
       />
       
-      {/* Spacer to push content down slightly from top of viewport */}
-      <div className="w-full pt-16" />
+      <div className="w-full pt-8 sm:pt-16" />
 
       {/* ARROW WRAPPER */}
-      <div className="flex items-center justify-center gap-4 lg:gap-12 w-full max-w-5xl mb-12">
+      <div className="flex items-center justify-center gap-2 sm:gap-4 lg:gap-12 w-full max-w-5xl mb-12">
         
         <button 
           onClick={(e) => { e.stopPropagation(); onPrev?.(); }}
-          className={`w-14 h-14 lg:w-16 lg:h-16 flex items-center justify-center bg-white border-4 border-black rounded-full text-2xl lg:text-3xl shadow-[6px_6px_0px_black] transition-all
+          className={`hidden sm:flex w-14 h-14 lg:w-16 lg:h-16 items-center justify-center bg-white border-4 border-black rounded-full text-2xl lg:text-3xl shadow-[6px_6px_0px_black] transition-all
             ${onPrev ? 'hover:bg-black hover:text-white hover:-translate-x-1 active:translate-x-0 cursor-pointer opacity-100' : 'opacity-20 grayscale cursor-not-allowed'}`}
         >
           ←
@@ -123,13 +137,13 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
 
         {/* Popup Card */}
         <div
-          className="bg-white border-[6px] border-black rounded-[2rem] w-full max-w-xl shadow-[25px_25px_0px_rgba(0,0,0,0.2)] relative z-10 overflow-hidden flex flex-col"
+          className="bg-white border-[4px] sm:border-[6px] border-black rounded-[1.5rem] sm:rounded-[2rem] w-full max-w-xl shadow-[15px_15px_0px_rgba(0,0,0,0.2)] sm:shadow-[25px_25px_0px_rgba(0,0,0,0.2)] relative z-10 overflow-hidden flex flex-col mx-2 sm:mx-0"
           style={{ borderColor: borderColor }}
           onClick={e => e.stopPropagation()} 
         >
-          <button onClick={onClose} className="absolute top-4 right-4 z-50 w-10 h-10 bg-black text-white rounded-full font-black flex items-center justify-center border-2 border-white hover:bg-red-500 transition-colors">✕</button>
+          <button onClick={onClose} className="absolute top-3 right-3 sm:top-4 sm:right-4 z-50 w-8 h-8 sm:w-10 sm:h-10 bg-black text-white rounded-full font-black flex items-center justify-center border-2 border-white hover:bg-red-500 transition-colors text-xs sm:text-base">✕</button>
 
-          <div className="relative h-56 flex-shrink-0 bg-gray-100 border-b-4 border-black overflow-hidden">
+          <div className="relative h-48 sm:h-56 flex-shrink-0 bg-gray-100 border-b-4 border-black overflow-hidden">
             {(!imgError && event.photos?.length > 0) ? (
               <img 
                 src={event.photos[0]} 
@@ -138,41 +152,53 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
                 onError={() => setImgError(true)} 
               />
             ) : (
-              /* FIXED: Emoji clarity - removed opacity-10 and ensured solid background */
-              <div className="w-full h-full flex items-center justify-center text-8xl" style={{ backgroundColor: borderColor }}>
+              <div className="w-full h-full flex items-center justify-center text-6xl sm:text-8xl" style={{ backgroundColor: borderColor }}>
                 <span className="drop-shadow-lg">{event.representative_emoji || '⚡'}</span>
               </div>
             )}
+            
+            {/* Mobile Navigation Arrows Overlay */}
+            <div className="absolute inset-y-0 left-0 right-0 flex justify-between items-center px-2 sm:hidden pointer-events-none">
+                <button onClick={onPrev} className={`pointer-events-auto w-10 h-10 bg-white/90 border-2 border-black rounded-full font-black ${!onPrev ? 'opacity-0' : ''}`}>←</button>
+                <button onClick={onNext} className={`pointer-events-auto w-10 h-10 bg-white/90 border-2 border-black rounded-full font-black ${!onNext ? 'opacity-0' : ''}`}>→</button>
+            </div>
           </div>
 
-          <div className="p-6">
-            <div className="flex justify-between items-start gap-4 mb-6">
+          <div className="p-4 sm:p-6">
+            <div className="flex justify-between items-start gap-3 sm:gap-4 mb-4 sm:mb-6">
               <div className="flex-1">
-                <h2 className="text-3xl font-black leading-[0.95] mb-2 uppercase italic tracking-tighter">{event.event_name}</h2>
-                <p className="text-[10px] text-gray-400 font-black uppercase tracking-widest">{event.name || 'SYSTEM_OPERATOR'}</p>
+                <h2 className="text-xl sm:text-3xl font-black leading-[1.1] sm:leading-[0.95] mb-2 uppercase italic tracking-tighter line-clamp-3">
+                    {event.event_name}
+                </h2>
+                <p className="text-[9px] sm:text-[10px] text-gray-400 font-black uppercase tracking-widest">{event.name || 'SYSTEM_OPERATOR'}</p>
               </div>
               <div className="flex flex-col items-center gap-1">
                 <button 
-                  onClick={() => toggleFavorite(event.id) && setFav(!fav)} 
-                  className={`w-14 h-14 rounded-xl border-4 border-black flex items-center justify-center text-3xl shadow-[4px_4px_0px_black] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all ${fav ? 'bg-yellow-400' : 'bg-white'}`}
+                  onClick={handleFavoriteClick} 
+                  className={`w-12 h-12 sm:w-14 sm:h-14 rounded-xl border-[3px] sm:border-4 border-black flex items-center justify-center text-2xl sm:text-3xl shadow-[3px_3px_0px_black] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all ${fav ? 'bg-yellow-400' : 'bg-white'}`}
                 >
                   {fav ? '⭐' : '☆'}
                 </button>
-                <div className="flex items-center gap-1 bg-black text-white px-2 py-0.5 rounded-md font-black text-[10px]">
+                <div className="flex items-center gap-1 bg-black text-white px-2 py-0.5 rounded-md font-black text-[9px] sm:text-[10px]">
                   {trend === 'up' ? <span className="text-green-400">▲</span> : trend === 'down' ? <span className="text-red-400">▼</span> : <span className="text-gray-400">—</span>} 
                   {favCount}
                 </div>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-              <div className="bg-gray-50 border-2 border-black rounded-xl p-4 flex items-center gap-3 shadow-[4px_4px_0px_black]">
-                <span className="text-3xl">📅</span>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4 mb-6">
+              <button 
+                onClick={handleDateClick}
+                className="bg-gray-50 border-2 border-black rounded-xl p-3 sm:p-4 flex items-center gap-3 shadow-[4px_4px_0px_black] transition-all hover:scale-[1.02] text-left group"
+                onMouseEnter={(e) => e.currentTarget.style.borderColor = borderColor}
+                onMouseLeave={(e) => e.currentTarget.style.borderColor = 'black'}
+              >
+                <span className="text-2xl sm:text-3xl">📅</span>
                 <div>
-                  <p className="text-sm font-black leading-tight">{displayDate}</p>
-                  <p className="text-[10px] font-bold text-gray-400 uppercase">{displayTime}</p>
+                  <p className="text-xs sm:text-sm font-black leading-tight">{displayDate}</p>
+                  <p className="text-[9px] sm:text-[10px] font-bold text-gray-400 uppercase">{displayTime}</p>
                 </div>
-              </div>
+              </button>
               
               <div className="h-[100px]">
                 <MiniMap
@@ -188,15 +214,15 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
             {event.description && (
               <div className="mb-6">
                 <p className="text-[9px] font-black uppercase text-gray-400 mb-2 tracking-widest">Protocol Intel</p>
-                <div className="text-sm font-bold leading-relaxed bg-gray-50 border-2 border-black p-4 rounded-xl shadow-[inset_4px_4px_0px_rgba(0,0,0,0.05)]">
+                <div className="text-xs sm:text-sm font-bold leading-relaxed bg-gray-50 border-2 border-black p-3 sm:p-4 rounded-xl shadow-[inset_4px_4px_0px_rgba(0,0,0,0.05)]">
                   {event.description}
                 </div>
               </div>
             )}
 
-            <div className="flex flex-wrap gap-2 mb-6">
+            <div className="flex flex-wrap gap-1.5 sm:gap-2 mb-6">
               {tags.map(tag => (
-                <span key={tag} className={`text-[9px] font-black px-3 py-1.5 rounded-lg border-2 border-black shadow-[2px_2px_0px_black] ${TAG_COLORS[tag] || 'bg-white'} uppercase tracking-tighter`}>
+                <span key={tag} className={`text-[8px] sm:text-[9px] font-black px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg border-2 border-black shadow-[2px_2px_0px_black] ${TAG_COLORS[tag] || 'bg-white'} uppercase tracking-tighter`}>
                   #{tag}
                 </span>
               ))}
@@ -206,9 +232,9 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
               <div className="border-t-4 border-black pt-6">
                 <div className="grid grid-cols-1 gap-2">
                   {event.relevant_links.map((link, i) => (
-                    <a key={i} href={link} target="_blank" rel="noopener noreferrer" className="flex items-center justify-between p-4 bg-gray-50 border-2 border-black rounded-xl hover:bg-black hover:text-white transition-all group shadow-[4px_4px_0px_black] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none">
-                      <span className="text-[10px] font-black truncate max-w-[85%] uppercase tracking-tighter">{link.replace(/^https?:\/\/(www\.)?/, '')}</span>
-                      <span className="text-xl group-hover:translate-x-1 transition-transform">→</span>
+                    <a key={i} href={link} target="_blank" rel="noopener noreferrer" className="flex items-center justify-between p-3 sm:p-4 bg-gray-50 border-2 border-black rounded-xl hover:bg-black hover:text-white transition-all group shadow-[4px_4px_0px_black] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none">
+                      <span className="text-[9px] sm:text-[10px] font-black truncate max-w-[85%] uppercase tracking-tighter">{link.replace(/^https?:\/\/(www\\.)?/, '')}</span>
+                      <span className="text-lg sm:text-xl group-hover:translate-x-1 transition-transform">→</span>
                     </a>
                   ))}
                 </div>
@@ -219,7 +245,7 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
 
         <button 
           onClick={(e) => { e.stopPropagation(); onNext?.(); }}
-          className={`w-14 h-14 lg:w-16 lg:h-16 flex items-center justify-center bg-white border-4 border-black rounded-full text-2xl lg:text-3xl shadow-[6px_6px_0px_black] transition-all
+          className={`hidden sm:flex w-14 h-14 lg:w-16 lg:h-16 items-center justify-center bg-white border-4 border-black rounded-full text-2xl lg:text-3xl shadow-[6px_6px_0px_black] transition-all
             ${onNext ? 'hover:bg-black hover:text-white hover:translate-x-1 active:translate-x-0 cursor-pointer opacity-100' : 'opacity-20 grayscale cursor-not-allowed'}`}
         >
           →
