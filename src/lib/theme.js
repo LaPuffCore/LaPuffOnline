@@ -3,7 +3,7 @@ import { createContext, createElement, useContext, useEffect, useMemo, useState 
 const STORAGE_KEY = 'lapuff_theme_overrides';
 
 export const THEME_FIELDS = [
-  { key: 'accentColor', label: 'Accent' },
+  { key: 'accentColor', label: 'Selection Accent' },
   { key: 'buttonOutlineColor', label: 'Button Outline' },
   { key: 'buttonFillColor', label: 'Button Fill' },
   { key: 'pageBackgroundColor', label: 'Page Background' },
@@ -27,22 +27,82 @@ export const WINDOWS_CURSOR_PRESETS = [
   { key: 'default', label: 'Arrow', css: 'default' },
   { key: 'pointer', label: 'Hand', css: 'pointer' },
   { key: 'crosshair', label: 'Crosshair', css: 'crosshair' },
-  { key: 'text', label: 'Text I-Beam', css: 'text' },
+  { key: 'text', label: 'I-Beam', css: 'text' },
   { key: 'wait', label: 'Wait', css: 'wait' },
   { key: 'help', label: 'Help', css: 'help' },
   { key: 'move', label: 'Move', css: 'move' },
-  { key: 'cell', label: 'Precision', css: 'cell' },
+  { key: 'cell', label: 'Cell', css: 'cell' },
+  { key: 'not-allowed', label: 'Nope', css: 'not-allowed' },
+  { key: 'grab', label: 'Grab', css: 'grab' },
+  { key: 'zoom-in', label: 'Zoom In', css: 'zoom-in' },
+  { key: 'zoom-out', label: 'Zoom Out', css: 'zoom-out' },
+  { key: 'n-resize', label: 'N Resize', css: 'n-resize' },
+  { key: 'e-resize', label: 'E Resize', css: 'e-resize' },
+  { key: 'nwse-resize', label: 'NWSE', css: 'nwse-resize' },
+  { key: 'nesw-resize', label: 'NESW', css: 'nesw-resize' },
+  { key: 'copy', label: 'Copy', css: 'copy' },
+  { key: 'alias', label: 'Alias', css: 'alias' },
+  { key: 'progress', label: 'Progress', css: 'progress' },
 ];
 
 export const CURSOR_TRAILS = [
-  { key: 'none', label: 'None' },
-  { key: 'ghost', label: 'Ghost' },
-  { key: 'echo', label: 'Echo' },
-  { key: 'glitch', label: 'Glitch' },
-  { key: 'throb', label: 'Throb' },
-  { key: 'chromatic', label: 'Chromatic' },
-  { key: 'angry', label: 'Angry' },
-  { key: 'hearts', label: 'Love Hearts' },
+  { key: 'none', label: 'None', group: '' },
+
+  // ✨ Magical / Fantasy
+  { key: 'fairy', label: '🧚 Fairy Dust', group: 'Magical' },
+  { key: 'stardust', label: '⭐ Stardust', group: 'Magical' },
+  { key: 'sparkstorm', label: '✦ Sparkstorm', group: 'Magical' },
+  { key: 'rainbow', label: '🌈 Rainbow', group: 'Magical' },
+  { key: 'sakura', label: '🌸 Sakura', group: 'Magical' },
+  { key: 'snow', label: '❄️ Snowfall', group: 'Magical' },
+  { key: 'witch', label: '🔮 Witch Smoke', group: 'Magical' },
+
+  // 💕 Cute / Pop
+  { key: 'hearts', label: '❤️ Love Hearts', group: 'Cute' },
+  { key: 'kawaii', label: '✿ Kawaii', group: 'Cute' },
+  { key: 'bubblegum', label: '🫧 Bubblegum', group: 'Cute' },
+  { key: 'confetti', label: '🎊 Confetti', group: 'Cute' },
+  { key: 'candy', label: '🍬 Candy', group: 'Cute' },
+
+  // 🔥 Action / Power
+  { key: 'flames', label: '🔥 Flames', group: 'Action' },
+  { key: 'angry', label: '💥 Angry', group: 'Action' },
+  { key: 'lightning', label: '⚡ Lightning', group: 'Action' },
+  { key: 'laser', label: '🔴 Laser', group: 'Action' },
+  { key: 'comet', label: '☄️ Comet', group: 'Action' },
+
+  // 🤖 Sci-Fi / Tech
+  { key: 'chromatic', label: '🔬 Chromatic', group: 'Sci-Fi' },
+  { key: 'glitch', label: '👾 Glitch', group: 'Sci-Fi' },
+  { key: 'matrix', label: '💚 Matrix', group: 'Sci-Fi' },
+  { key: 'neon-blade', label: '🗡️ Neon Blade', group: 'Sci-Fi' },
+  { key: 'plasma', label: '⚛️ Plasma', group: 'Sci-Fi' },
+  { key: 'retro-net', label: '🕸 Retro Net', group: 'Sci-Fi' },
+  { key: 'hologram', label: '📡 Hologram', group: 'Sci-Fi' },
+
+  // 🌊 Ambient / Chill
+  { key: 'ghost', label: '👻 Ghost', group: 'Ambient' },
+  { key: 'echo', label: '○ Echo', group: 'Ambient' },
+  { key: 'throb', label: '💜 Throb', group: 'Ambient' },
+  { key: 'aero-glass', label: '🪟 Aero Glass', group: 'Ambient' },
+  { key: 'vaporwave', label: '🌅 Vaporwave', group: 'Ambient' },
+  { key: 'bubble', label: '◎ Bubbles', group: 'Ambient' },
+
+  // 🖤 Goth / Dark
+  { key: 'void', label: '⚫ Void', group: 'Goth' },
+  { key: 'shadow', label: '🖤 Shadow', group: 'Goth' },
+  { key: 'skull', label: '💀 Skull', group: 'Goth' },
+  { key: 'blood', label: '🩸 Blood Drip', group: 'Goth' },
+  { key: 'bats', label: '🦇 Bats', group: 'Goth' },
+  { key: 'cobweb', label: '🕷️ Cobweb', group: 'Goth' },
+
+  // 🧪 Weird / Nature / Horror
+  { key: 'slime', label: '🟢 Slime', group: 'Weird' },
+  { key: 'toxic', label: '☢️ Toxic Ooze', group: 'Weird' },
+  { key: 'vortex', label: '🌀 Vortex', group: 'Weird' },
+  { key: 'spider', label: '🕸️ Spider Silk', group: 'Weird' },
+  { key: 'lava', label: '🌋 Lava', group: 'Weird' },
+  { key: 'glitter', label: '💎 Glitter', group: 'Weird' },
 ];
 
 export const DEFAULT_THEME = {
@@ -70,6 +130,8 @@ export const DEFAULT_THEME = {
   cursorImageData: null,
   cursorSize: 28,
   cursorTrail: 'none',
+  cursorColor: '#FFFFFF',
+  cursorEffectColor: null,
 };
 
 const ThemeContext = createContext(null);

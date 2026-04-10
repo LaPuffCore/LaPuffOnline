@@ -172,3 +172,8 @@
 .lp-theme-scope [class*='shadow-[6px_6px_0px_black]'] { box-shadow: 6px 6px 0px var(--lp-tile-shadow) !important; }
 .lp-theme-scope [class*='shadow-[8px_8px_0px_black]'] { box-shadow: 8px 8px 0px var(--lp-tile-shadow) !important; }
 .lp-theme-scope [class*='shadow-[12px_12px_0px_black]'] { box-shadow: 12px 12px 0px var(--lp-tile-shadow) !important; }
+
+html.lp-force-custom-cursor,
+html.lp-force-custom-cursor * {
+  cursor: none !important;
+}
