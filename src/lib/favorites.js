@@ -97,23 +97,6 @@ function saveSbFavs(set) {
   localStorage.setItem(SB_FAVS_KEY, JSON.stringify([...set]));
 }
 
-async function ensureAnonymousFavoriteContribution(eventId) {
-  const session = await getValidSession();
-  if (session?.user?.id) return;
-
-  const id = normalizeEventId(eventId);
-  if (!isFavorite(id)) return;
-
-  const sbFavs = getSbFavs();
-  if (sbFavs.has(id)) return;
-
-  const { error } = await supabase.rpc('update_event_fav_count', { p_event_id: id, p_delta: 1 });
-  if (error) throw error;
-
-  sbFavs.add(id);
-  saveSbFavs(sbFavs);
-}
-
 // ─── TOGGLE ───────────────────────────────────────────────────────────────────
 
 export async function toggleFavorite(eventId) {
@@ -209,8 +192,6 @@ export async function getFavoriteCount(eventId) {
   const localCount = getCounts()[id] ?? 0;
 
   try {
-    await ensureAnonymousFavoriteContribution(id);
-
     const { data, error } = await supabase
       .from('events')
       .select('fav_count')
