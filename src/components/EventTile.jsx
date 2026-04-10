@@ -102,20 +102,22 @@ export default function EventTile({ event, onClick, onTagClick }) {
   return (
     <div
       onClick={onClick}
-      className="group bg-white rounded-[2rem] cursor-pointer hover:scale-[1.02] hover:-translate-y-1 transition-all duration-200 overflow-hidden"
+      className="group bg-white rounded-[2rem] cursor-pointer hover:scale-[1.02] hover:-translate-y-1 transition-all duration-200 overflow-hidden isolate"
       style={{ border: `3px solid ${borderColor}`, boxShadow: `6px 6px 0px black` }}
     >
       {/* Media Header: Height normalized for mobile density */}
-      <div className="h-40 sm:h-44 relative overflow-hidden bg-gray-50 border-b-2 border-black">
+      <div className="h-40 sm:h-44 relative overflow-hidden rounded-t-[calc(2rem-3px)] bg-gray-50 border-b-2 border-black [transform:translateZ(0)] [clip-path:inset(0_round_calc(2rem-3px)_calc(2rem-3px)_0_0)]">
         {showImage ? (
-          <img 
-            src={event.photos[0]} 
-            alt="" 
-            className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" 
-            onError={() => setImgError(true)} 
-          />
+          <div className="absolute inset-0 overflow-hidden rounded-t-[calc(2rem-3px)] [transform:translateZ(0)] [clip-path:inset(0_round_calc(2rem-3px)_calc(2rem-3px)_0_0)]">
+            <img 
+              src={event.photos[0]} 
+              alt="" 
+              className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-110 will-change-transform [transform-origin:center_center] [transform:translateZ(0)] [backface-visibility:hidden]" 
+              onError={() => setImgError(true)} 
+            />
+          </div>
         ) : (
-          <div className="w-full h-full flex items-center justify-center text-7xl select-none" style={{ backgroundColor: borderColor + '22' }}>
+          <div className="absolute inset-0 w-full h-full flex items-center justify-center text-7xl select-none rounded-t-[calc(2rem-3px)] [transform:translateZ(0)] [clip-path:inset(0_round_calc(2rem-3px)_calc(2rem-3px)_0_0)]" style={{ backgroundColor: borderColor + '22' }}>
             {event.representative_emoji || '🎉'}
           </div>
         )}
