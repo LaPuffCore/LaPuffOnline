@@ -23,6 +23,28 @@ export const THEME_FIELDS = [
   { key: 'calendarDayTextColor', label: 'Calendar Day Text' },
 ];
 
+export const WINDOWS_CURSOR_PRESETS = [
+  { key: 'default', label: 'Arrow', css: 'default' },
+  { key: 'pointer', label: 'Hand', css: 'pointer' },
+  { key: 'crosshair', label: 'Crosshair', css: 'crosshair' },
+  { key: 'text', label: 'Text I-Beam', css: 'text' },
+  { key: 'wait', label: 'Wait', css: 'wait' },
+  { key: 'help', label: 'Help', css: 'help' },
+  { key: 'move', label: 'Move', css: 'move' },
+  { key: 'cell', label: 'Precision', css: 'cell' },
+];
+
+export const CURSOR_TRAILS = [
+  { key: 'none', label: 'None' },
+  { key: 'ghost', label: 'Ghost' },
+  { key: 'echo', label: 'Echo' },
+  { key: 'glitch', label: 'Glitch' },
+  { key: 'throb', label: 'Throb' },
+  { key: 'chromatic', label: 'Chromatic' },
+  { key: 'angry', label: 'Angry' },
+  { key: 'hearts', label: 'Love Hearts' },
+];
+
 export const DEFAULT_THEME = {
   accentColor: '#7C3AED',
   buttonOutlineColor: '#000000',
@@ -42,6 +64,12 @@ export const DEFAULT_THEME = {
   calendarBackgroundColor: '#FAFAF8',
   calendarDayBackgroundColor: '#F3F4F6',
   calendarDayTextColor: '#9CA3AF',
+  cursorType: 'default',
+  cursorPreset: 'default',
+  cursorEmoji: '✨',
+  cursorImageData: null,
+  cursorSize: 28,
+  cursorTrail: 'none',
 };
 
 const ThemeContext = createContext(null);
@@ -105,10 +133,11 @@ function applyThemeToDocument(theme) {
 
 export function ThemeProvider({ children }) {
   const [overrides, setOverrides] = useState(() => readStoredOverrides());
+  const [previewOverrides, setPreviewOverrides] = useState(null);
 
   const resolvedTheme = useMemo(
-    () => ({ ...DEFAULT_THEME, ...overrides }),
-    [overrides]
+    () => ({ ...DEFAULT_THEME, ...(previewOverrides ?? overrides) }),
+    [overrides, previewOverrides]
   );
 
   useEffect(() => {
@@ -121,10 +150,12 @@ export function ThemeProvider({ children }) {
 
   const value = useMemo(() => ({
     overrides,
+    previewOverrides,
     resolvedTheme,
     applyThemeOverrides(nextOverrides) {
       if (!nextOverrides || typeof nextOverrides !== 'object') {
         setOverrides({});
+        setPreviewOverrides(null);
         return;
       }
 
@@ -136,6 +167,25 @@ export function ThemeProvider({ children }) {
       });
 
       setOverrides(cleaned);
+      setPreviewOverrides(null);
+    },
+    setPreviewThemeOverrides(nextOverrides) {
+      if (!nextOverrides || typeof nextOverrides !== 'object') {
+        setPreviewOverrides({});
+        return;
+      }
+
+      const cleaned = {};
+      Object.keys(nextOverrides).forEach((key) => {
+        const value = nextOverrides[key];
+        if (value == null || value === '' || value === DEFAULT_THEME[key]) return;
+        cleaned[key] = value;
+      });
+
+      setPreviewOverrides(cleaned);
+    },
+    clearPreviewThemeOverrides() {
+      setPreviewOverrides(null);
     },
     setThemeOverride(key, value) {
       setOverrides((prev) => {
@@ -158,7 +208,7 @@ export function ThemeProvider({ children }) {
     resetAllTheme() {
       setOverrides({});
     },
-  }), [overrides, resolvedTheme]);
+  }), [overrides, previewOverrides, resolvedTheme]);
 
   return createElement(ThemeContext.Provider, { value }, children);
 }

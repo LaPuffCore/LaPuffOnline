@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import ColorPicker from './ColorPicker';
-import { THEME_FIELDS, useSiteTheme } from '../lib/theme';
+import EmojiPicker from './EmojiPicker';
+import { CURSOR_TRAILS, THEME_FIELDS, useSiteTheme, WINDOWS_CURSOR_PRESETS } from '../lib/theme';
 
 function ThemeRow({ field, value, onChange, onReset }) {
 
@@ -30,8 +31,14 @@ function ThemeRow({ field, value, onChange, onReset }) {
 
 export default function ThemeCustomizerModal({ onClose }) {
   const ref = useRef(null);
-  const { overrides, applyThemeOverrides } = useSiteTheme();
+  const {
+    overrides,
+    applyThemeOverrides,
+    setPreviewThemeOverrides,
+    clearPreviewThemeOverrides,
+  } = useSiteTheme();
   const [draftOverrides, setDraftOverrides] = useState(() => ({ ...overrides }));
+  const [isDesktopCursorCapable, setIsDesktopCursorCapable] = useState(false);
 
   function setDraftOverride(key, value) {
     setDraftOverrides((prev) => {
@@ -51,6 +58,7 @@ export default function ThemeCustomizerModal({ onClose }) {
   }
 
   function handleCancel() {
+    clearPreviewThemeOverrides();
     onClose();
   }
 
@@ -61,6 +69,23 @@ export default function ThemeCustomizerModal({ onClose }) {
 
   function handleResetAll() {
     setDraftOverrides({});
+  }
+
+  useEffect(() => {
+    setPreviewThemeOverrides(draftOverrides);
+  }, [draftOverrides, setPreviewThemeOverrides]);
+
+  function handleCursorImageUpload(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        setDraftOverride('cursorType', 'image');
+        setDraftOverride('cursorImageData', reader.result);
+      }
+    };
+    reader.readAsDataURL(file);
   }
 
   useEffect(() => {
@@ -80,8 +105,18 @@ export default function ThemeCustomizerModal({ onClose }) {
       document.removeEventListener('keydown', handleKey);
       document.removeEventListener('mousedown', handleClick);
       document.body.style.overflow = originalOverflow;
+      clearPreviewThemeOverrides();
     };
-  }, [onClose]);
+  }, [onClose, clearPreviewThemeOverrides]);
+
+  useEffect(() => {
+    function updateCapability() {
+      setIsDesktopCursorCapable(window.matchMedia('(hover: hover) and (pointer: fine)').matches && window.innerWidth >= 768);
+    }
+    updateCapability();
+    window.addEventListener('resize', updateCapability);
+    return () => window.removeEventListener('resize', updateCapability);
+  }, []);
 
   if (typeof document === 'undefined') return null;
 
@@ -116,6 +151,110 @@ export default function ThemeCustomizerModal({ onClose }) {
                 onReset={() => resetDraftKey(field.key)}
               />
             ))}
+
+            <div className="rounded-2xl border-3 border-black bg-white p-3 md:p-4 shadow-[4px_4px_0px_black]">
+              <p className="font-black text-sm md:text-base leading-tight">Cursor (Web Only)</p>
+              {!isDesktopCursorCapable ? (
+                <p className="mt-2 text-xs font-bold text-gray-500">Cursor customization is available on desktop pointer devices only.</p>
+              ) : (
+                <>
+                  <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2">
+                    {[
+                      { key: 'default', label: 'Standard' },
+                      { key: 'windows', label: 'Windows' },
+                      { key: 'emoji', label: 'Emoji' },
+                      { key: 'image', label: 'Image' },
+                    ].map((opt) => (
+                      <button
+                        key={opt.key}
+                        type="button"
+                        onClick={() => setDraftOverride('cursorType', opt.key)}
+                        className={`px-2 py-2 rounded-xl border-2 text-xs font-black transition-colors ${((draftOverrides.cursorType || 'default') === opt.key) ? 'bg-[#7C3AED] text-white border-[#7C3AED]' : 'bg-white border-black hover:bg-violet-50'}`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {(draftOverrides.cursorType || 'default') === 'windows' && (
+                    <div className="mt-3">
+                      <p className="text-[11px] font-black uppercase tracking-wide text-gray-500 mb-1">Windows Classic</p>
+                      <div className="flex flex-wrap gap-2">
+                        {WINDOWS_CURSOR_PRESETS.map((preset) => (
+                          <button
+                            key={preset.key}
+                            type="button"
+                            onClick={() => setDraftOverride('cursorPreset', preset.key)}
+                            className={`px-2 py-1 rounded-lg border-2 text-[11px] font-black transition-colors ${((draftOverrides.cursorPreset || 'default') === preset.key) ? 'bg-[#7C3AED] text-white border-[#7C3AED]' : 'bg-white border-black hover:bg-violet-50'}`}
+                          >
+                            {preset.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {(draftOverrides.cursorType || 'default') === 'emoji' && (
+                    <div className="mt-3">
+                      <p className="text-[11px] font-black uppercase tracking-wide text-gray-500 mb-1">Emoji Cursor</p>
+                      <EmojiPicker
+                        value={draftOverrides.cursorEmoji || '✨'}
+                        onChange={(next) => setDraftOverride('cursorEmoji', next || '✨')}
+                        compact
+                      />
+                    </div>
+                  )}
+
+                  {(draftOverrides.cursorType || 'default') === 'image' && (
+                    <div className="mt-3">
+                      <p className="text-[11px] font-black uppercase tracking-wide text-gray-500 mb-1">Upload Image Cursor</p>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleCursorImageUpload}
+                        className="block w-full text-xs font-bold"
+                      />
+                    </div>
+                  )}
+
+                  {(draftOverrides.cursorType || 'default') !== 'default' && (
+                    <>
+                      <div className="mt-4">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-[11px] font-black uppercase tracking-wide text-gray-500">Cursor Size</p>
+                          <span className="text-xs font-black">{Number(draftOverrides.cursorSize || 28)}px</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="16"
+                          max="72"
+                          step="1"
+                          value={Number(draftOverrides.cursorSize || 28)}
+                          onChange={(e) => setDraftOverride('cursorSize', Number(e.target.value))}
+                          className="w-full mt-2"
+                        />
+                      </div>
+
+                      <div className="mt-4">
+                        <p className="text-[11px] font-black uppercase tracking-wide text-gray-500 mb-1">Cursor Trail</p>
+                        <div className="flex flex-wrap gap-2">
+                          {CURSOR_TRAILS.map((trail) => (
+                            <button
+                              key={trail.key}
+                              type="button"
+                              onClick={() => setDraftOverride('cursorTrail', trail.key)}
+                              className={`px-2 py-1 rounded-lg border-2 text-[11px] font-black transition-colors ${((draftOverrides.cursorTrail || 'none') === trail.key) ? 'bg-[#7C3AED] text-white border-[#7C3AED]' : 'bg-white border-black hover:bg-violet-50'}`}
+                            >
+                              {trail.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </>
+              )}
+            </div>
           </div>
 
           <div className="sticky bottom-0 pt-3 bg-[#FAFAF8] border-t-2 border-black flex items-center justify-end gap-2">

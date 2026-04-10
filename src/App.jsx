@@ -14,6 +14,7 @@ import PageNotFound from './lib/PageNotFound';
 import { AuthProvider, useAuth } from './lib/AuthContext'; // Fixed @ alias
 import { ThemeProvider } from './lib/theme';
 import { hydrateFavoriteEventCache } from './lib/favorites';
+import CustomCursorOverlay from './components/CustomCursorOverlay';
 // Add page imports here
 import Home from './pages/Home';
 import FavoritesPage from './pages/FavoritesPage';
@@ -120,6 +121,7 @@ function App() {
     <AuthProvider>
       <ThemeProvider>
         <QueryClientProvider client={queryClientInstance}>
+          <CustomCursorOverlay />
           {/* IMPORTANT: Added basename so Router knows it lives in a subfolder */}
           <Router basename="/LaPuffOnline">
             <AuthenticatedApp />
