@@ -91,8 +91,9 @@ function resolveTrendFromThreshold(count, threshold) {
   const c = Number(count ?? 0);
   const t = Number(threshold ?? 0);
 
-  // Until SQL migration is live, threshold may be null/0 for all events.
-  if (!Number.isFinite(t) || t <= 0) return 'neutral';
+  // Default freshly created events start at threshold 0. The first favorite
+  // should therefore show green because 1 is above the previous 12h peak of 0.
+  if (!Number.isFinite(t) || t <= 0) return c > 0 ? 'up' : 'neutral';
   if (c >= t) return 'up';
   if (c >= t - 4) return 'neutral';
   return 'down';
