@@ -653,31 +653,6 @@ export default function MapView({ events }) {
       paint: { 'line-color': OUTLINE_COLOR, 'line-width': zipLineWidthCrisp, 'line-opacity': 1 },
     });
 
-    // ── Borough outer outline (from borough.geo.json) — shown only in 3D modes ──
-    // MUST be fill-extrusion (not line). Line layers render in a separate 2D pass
-    // with no depth buffer interaction with fill-extrusions — they always appear
-    // on top regardless. fill-extrusion layers share the same depth pass and are
-    // properly occluded by taller zip blocks (min 30m). Height=15 keeps it below
-    // all zip extrusions while making the outer coastline side-wall visible.
-    fetch(BOROUGH_GEOJSON_URL)
-      .then(r => r.json())
-      .then(boroughData => {
-        if (map.getSource('borough-outline')) return; // guard against double-add on style reload
-        map.addSource('borough-outline', { type: 'geojson', data: boroughData });
-        map.addLayer({
-          id: 'borough-outline-extrude', type: 'fill-extrusion', source: 'borough-outline',
-          layout: { visibility: 'none' },
-          paint: {
-            'fill-extrusion-color': OUTLINE_COLOR,
-            'fill-extrusion-height': 15,   // below minimum zip height of 30m → depth-occluded by blocks
-            'fill-extrusion-base': 0,
-            'fill-extrusion-opacity': 0,   // starts hidden; shown only in 3D modes
-            'fill-extrusion-vertical-gradient': false,
-          },
-        });
-      })
-      .catch(err => console.warn('Borough outline load failed:', err));
-
     // ── Borough outer perimeter ──────────────────────────────────────────────
     // This is a FILL-EXTRUSION source, not a line, built from all non-special outer rings.
     // When all polygons are extruded to height=0 with the same color, adjacent polygons'
@@ -707,7 +682,6 @@ export default function MapView({ events }) {
     map.addSource('zcta-outline', { type: 'geojson', data: { type: 'FeatureCollection', features: [] }, generateId: false });
     map.addLayer({
       id: 'zcta-outline', type: 'fill-extrusion', source: 'zcta-outline',
-      layout: { visibility: 'visible' },
       paint: {
         'fill-extrusion-color': OUTLINE_COLOR,
         'fill-extrusion-height': 0,
@@ -887,11 +861,9 @@ export default function MapView({ events }) {
       // ── FIX #5 (upper outline ring) ──
       // Show the zcta-outline extrusion ON TOP of each block.
       // base = block height, height = block height + zoom-delta.
-      // Explicitly set layout visibility 'visible' as belt-and-suspenders to
-      // guarantee this layer is never accidentally suppressed.
+      // This is the ONLY outline visible in 3D mode — no 2D lines.
       if (map.getSource('zcta-outline')) {
         const baseH = heatmap ? extrudeH : flatH;
-        map.setLayoutProperty('zcta-outline', 'visibility', 'visible');
         map.setPaintProperty('zcta-outline', 'fill-extrusion-color', OUTLINE_COLOR);
         map.setPaintProperty('zcta-outline', 'fill-extrusion-base', baseH);
         map.setPaintProperty('zcta-outline', 'fill-extrusion-height', ['+', baseH, outlineRingDelta]);
@@ -944,6 +916,52 @@ export default function MapView({ events }) {
     };
     map.on('zoom', onZoom);
     return () => map.off('zoom', onZoom);
+  }, [mapReady]);
+
+  // ── Borough outline: loaded in its own effect so it never interferes with
+  // zcta-outline's paint state. Adding a fill-extrusion layer inside addLayers
+  // asynchronously was triggering MapLibre's fill-extrusion framebuffer
+  // re-render at an unpredictable time, resetting painted state on zcta-outline.
+  // Zoom-interpolated height prevents sub-pixel GL artifacts at far zoom levels.
+  useEffect(() => {
+    const map = mapRef.current; if (!map || !mapReady) return;
+    let fetchInProgress = false;
+    // Zoom-interpolated height: tall at far zoom (wall visible despite tiny scale),
+    // reduced at close zoom (stays below 30m min zip block, properly depth-occluded).
+    const boroughH = ['interpolate', ['linear'], ['zoom'],
+      9,  250,
+      10, 150,
+      11,  60,
+      12,  28,
+      13,  20,
+      16,  15,
+    ];
+    const tryAdd = () => {
+      if (map.getSource('borough-outline') || fetchInProgress) return;
+      fetchInProgress = true;
+      fetch(BOROUGH_GEOJSON_URL)
+        .then(r => r.json())
+        .then(boroughData => {
+          fetchInProgress = false;
+          if (map.getSource('borough-outline')) return;
+          map.addSource('borough-outline', { type: 'geojson', data: boroughData });
+          map.addLayer({
+            id: 'borough-outline-extrude', type: 'fill-extrusion', source: 'borough-outline',
+            paint: {
+              'fill-extrusion-color': OUTLINE_COLOR,
+              'fill-extrusion-height': boroughH,
+              'fill-extrusion-base': 0,
+              'fill-extrusion-opacity': 0,  // main effect controls visibility
+              'fill-extrusion-vertical-gradient': false,
+            },
+          });
+        })
+        .catch(() => { fetchInProgress = false; });
+    };
+    // styledata fires after every style reload (satellite toggle wipes all sources)
+    map.on('styledata', tryAdd);
+    tryAdd();
+    return () => map.off('styledata', tryAdd);
   }, [mapReady]);
 
   // Satellite — additive, re-adds layers and triggers main effect via styleVersion
