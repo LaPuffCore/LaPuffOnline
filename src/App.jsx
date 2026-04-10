@@ -17,36 +17,63 @@ import Home from './pages/Home';
 import FavoritesPage from './pages/FavoritesPage';
 import CalendarPage from './pages/CalendarPage';
 
+const EVENTS_CACHE_KEY = 'lapuff_cached_events';
+
+function getInitialEvents() {
+  if (SAMPLE_MODE && SAMPLE_EVENTS.length) return SAMPLE_EVENTS;
+  try {
+    const cached = JSON.parse(sessionStorage.getItem(EVENTS_CACHE_KEY) || '[]');
+    return Array.isArray(cached) ? cached : [];
+  } catch {
+    return [];
+  }
+}
+
 // Shared events state wrapper
 function AppWithEvents() {
-  const [events, setEvents] = useState([]);
+  const [events, setEvents] = useState(getInitialEvents);
+  const [eventsLoading, setEventsLoading] = useState(true);
   
   useEffect(() => {
     let mounted = true;
 
     async function loadEvents() {
       try {
-        if (SYNC_SAMPLE_EVENTS_TO_SUPABASE) {
-          await syncSampleEvents(
-            SAMPLE_EVENTS,
-            SAMPLE_MODE,
-            CLEAR_SUPABASE_SAMPLES_ON_DISABLE
-          );
+        const syncPromise = SYNC_SAMPLE_EVENTS_TO_SUPABASE
+          ? syncSampleEvents(
+              SAMPLE_EVENTS,
+              SAMPLE_MODE,
+              CLEAR_SUPABASE_SAMPLES_ON_DISABLE
+            )
+          : Promise.resolve(true);
+
+        let dbEvents = await getApprovedEvents({ sampleOnly: SAMPLE_MODE });
+
+        if (SAMPLE_MODE && (!dbEvents || dbEvents.length === 0)) {
+          await syncPromise;
+          dbEvents = await getApprovedEvents({ sampleOnly: SAMPLE_MODE });
+        } else {
+          syncPromise.catch(() => {});
         }
 
-        const dbEvents = await getApprovedEvents({ sampleOnly: SAMPLE_MODE });
         if (!mounted) return;
 
         if (dbEvents && dbEvents.length > 0) {
           setEvents(dbEvents);
+          try {
+            sessionStorage.setItem(EVENTS_CACHE_KEY, JSON.stringify(dbEvents));
+          } catch {}
+          setEventsLoading(false);
           return;
         }
 
         // Safety fallback while developing if DB is unreachable.
         if (SAMPLE_MODE) setEvents(SAMPLE_EVENTS);
+        setEventsLoading(false);
       } catch {
         if (!mounted) return;
         if (SAMPLE_MODE) setEvents(SAMPLE_EVENTS);
+        setEventsLoading(false);
       }
     }
 
@@ -59,7 +86,7 @@ function AppWithEvents() {
 
   return (
     <Routes>
-      <Route path="/" element={<Home events={events} />} />
+      <Route path="/" element={<Home events={events} eventsLoading={eventsLoading} />} />
       <Route path="/favorites" element={<FavoritesPage events={events} />} />
       <Route path="/calendar" element={<CalendarPage events={events} />} />
       <Route path="*" element={<PageNotFound />} />

@@ -9,7 +9,7 @@ import ParticipantDot from '../components/ParticipantDot';
 import Leaderboard from '../components/Leaderboard'; 
 import { getValidSession, signOut } from '../lib/supabaseAuth';
 
-export default function Home({ events = [] }) {
+export default function Home({ events = [], eventsLoading = false }) {
   const [view, setView] = useState('tiles');
   const [showForm, setShowForm] = useState(false);
   const [showAuth, setShowAuth] = useState(false);
@@ -178,7 +178,7 @@ export default function Home({ events = [] }) {
         ) : (
           <main className="h-full overflow-y-auto" onScroll={handleScroll}>
             <div className={`max-w-7xl mx-auto w-full transition-all duration-300 ${!showHeader ? 'pt-2' : 'pt-0'}`}>
-              <TileView events={events} />
+              <TileView events={events} eventsLoading={eventsLoading} />
             </div>
           </main>
         )}

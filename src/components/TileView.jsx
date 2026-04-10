@@ -116,7 +116,7 @@ function expandSearchQuery(query) {
   return Array.from(expanded);
 }
 
-export default function TileView({ events }) {
+export default function TileView({ events, eventsLoading = false }) {
   const [search, setSearch] = useState('');
   const [timespanIdx, setTimespanIdx] = useState(4);
   const [showArchive, setShowArchive] = useState(false);
@@ -567,8 +567,8 @@ export default function TileView({ events }) {
       {/* Grid */}
       {filtered.length === 0 ? (
         <div className="text-center py-16">
-          <div className="text-6xl mb-4">🎪</div>
-          <p className="text-xl font-black">No events found!</p>
+          <div className="text-6xl mb-4">{eventsLoading ? '📡' : '🎪'}</div>
+          <p className="text-xl font-black">{eventsLoading ? 'Events loading...' : 'No events found!'}</p>
         </div>
       ) : (
         <div className={`grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 ${isMobile ? 'gap-2 px-3 pb-4' : 'gap-4 px-4 pb-4'}`}>
