@@ -37,8 +37,6 @@ const COUNTS_KEY  = 'lapuff_fav_counts';
 const HISTORY_KEY = 'lapuff_fav_history';
 const SB_SYNC_VERSION_KEY = 'lapuff_sb_favs_version';
 const SB_SYNC_VERSION = '2';
-const UNIVERSAL_TREND_KEY = 'lapuff_universal_fav_trend_history';
-const TREND_WINDOW_MS = 6 * 3600 * 1000;
 
 // Tracks which event IDs this anonymous device has already contributed to
 // events.fav_count in Supabase. Only used for non-authenticated users.
@@ -87,30 +85,57 @@ function recordActivity(eventId, delta) {
   localStorage.setItem(HISTORY_KEY, JSON.stringify(h));
 }
 
-function getUniversalTrendHistory() {
-  try { return JSON.parse(localStorage.getItem(UNIVERSAL_TREND_KEY) || '{}'); } catch { return {}; }
+const trendByEventId = new Map();
+
+function resolveTrendFromThreshold(count, threshold) {
+  const c = Number(count ?? 0);
+  const t = Number(threshold ?? 0);
+
+  // Until SQL migration is live, threshold may be null/0 for all events.
+  if (!Number.isFinite(t) || t <= 0) return 'neutral';
+  if (c >= t) return 'up';
+  if (c >= t - 4) return 'neutral';
+  return 'down';
 }
 
-function saveUniversalTrendHistory(history) {
-  localStorage.setItem(UNIVERSAL_TREND_KEY, JSON.stringify(history));
-}
-
-function recordUniversalCount(eventId, count) {
+function updateTrendCache(eventId, count, threshold) {
   const id = normalizeEventId(eventId);
-  const now = Date.now();
-  const history = getUniversalTrendHistory();
-  const entry = history[id] || { lastCount: null, changes: [] };
+  const trend = resolveTrendFromThreshold(count, threshold);
+  trendByEventId.set(id, trend);
+  return trend;
+}
 
-  if (typeof entry.lastCount === 'number' && count !== entry.lastCount) {
-    entry.changes.push({ d: count - entry.lastCount, t: now });
+function isLikelyUuid(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+async function fetchEventCountAndTrendThreshold(id) {
+  const withThreshold = await supabase
+    .from('events')
+    .select('fav_count,trend_threshold_count')
+    .eq('id', id)
+    .single();
+
+  if (!withThreshold.error) {
+    return {
+      favCount: withThreshold.data?.fav_count ?? 0,
+      trendThreshold: withThreshold.data?.trend_threshold_count ?? 0,
+    };
   }
 
-  const cutoff = now - TREND_WINDOW_MS;
-  entry.changes = (entry.changes || []).filter(x => x.t > cutoff);
-  entry.lastCount = count;
-  entry.lastSeen = now;
-  history[id] = entry;
-  saveUniversalTrendHistory(history);
+  // Backward compatibility while SQL migration is pending.
+  const fallback = await supabase
+    .from('events')
+    .select('fav_count')
+    .eq('id', id)
+    .single();
+
+  if (fallback.error) throw fallback.error;
+
+  return {
+    favCount: fallback.data?.fav_count ?? 0,
+    trendThreshold: 0,
+  };
 }
 
 // ─── ANONYMOUS SUPABASE CONTRIBUTION TRACKER ─────────────────────────────────
@@ -220,19 +245,11 @@ export async function getFavoriteCount(eventId) {
   const localCount = getCounts()[id] ?? 0;
 
   try {
-    const { data, error } = await supabase
-      .from('events')
-      .select('fav_count')
-      .eq('id', id)
-      .single();
+    const { favCount, trendThreshold } = await fetchEventCountAndTrendThreshold(id);
 
-    if (error) {
-      console.warn(`getFavoriteCount error for ${eventId}:`, error.message);
-      return localCount;
-    }
     // Universal count must be at least as large as local contribution
-    const resolvedCount = Math.max(data?.fav_count ?? 0, localCount);
-    recordUniversalCount(id, resolvedCount);
+    const resolvedCount = Math.max(favCount, localCount);
+    updateTrendCache(id, resolvedCount, trendThreshold);
     return resolvedCount;
   } catch (error) {
     console.warn(`getFavoriteCount exception for ${eventId}:`, error);
@@ -271,7 +288,8 @@ export function subscribeToFavoriteCount(eventId, callback) {
       { event: '*', schema: 'public', table: 'events', filter: `id=eq.${id}` },
       (payload) => {
         const nextCount = payload.new?.fav_count ?? 0;
-        recordUniversalCount(id, nextCount);
+        const trendThreshold = payload.new?.trend_threshold_count ?? 0;
+        updateTrendCache(id, nextCount, trendThreshold);
         // Broadcast to all listeners for this event
         const entry = favCountSubscriptions.get(id);
         if (entry?.callbacks) {
@@ -302,27 +320,48 @@ export function subscribeToFavoriteCount(eventId, callback) {
   };
 }
 
-// ─── FAV TREND (sync — based on universal count changes observed from Supabase) ───────
+// ─── FAV TREND (sync — universal threshold model from Supabase) ───────
 
 export function getFavTrend(eventId) {
   const id = normalizeEventId(eventId);
-  const history = getUniversalTrendHistory();
-  const cutoff = Date.now() - TREND_WINDOW_MS;
-  const entry = history[id] || { changes: [] };
-  const changes = (entry.changes || []).filter(x => x.t > cutoff);
-  if (changes.length !== (entry.changes || []).length) {
-    entry.changes = changes;
-    history[id] = entry;
-    saveUniversalTrendHistory(history);
-  }
-  const delta = changes.reduce((sum, x) => sum + x.d, 0);
-  return delta > 0 ? 'up' : delta < 0 ? 'down' : 'neutral';
+  return trendByEventId.get(id) || 'neutral';
 }
 
-// ─── BATCH TREND (for TileView filter — uses observed universal count changes) ──────────────────
-// Consistent with getFavTrend; no extra Supabase queries needed.
+// ─── BATCH TREND (for TileView filter — uses universal threshold model) ──────────────────
+// Consistent with getFavTrend; hydrates trend cache from Supabase in bulk.
 
 export async function getFavTrendsForEvents(eventIds) {
   if (!eventIds || !eventIds.length) return {};
-  return Object.fromEntries(eventIds.map(id => [normalizeEventId(id), getFavTrend(id)]));
+  const ids = eventIds.map(normalizeEventId);
+
+  const uuidIds = ids.filter(isLikelyUuid);
+  if (uuidIds.length) {
+    try {
+      const withThreshold = await supabase
+        .from('events')
+        .select('id,fav_count,trend_threshold_count')
+        .in('id', uuidIds);
+
+      if (!withThreshold.error) {
+        (withThreshold.data || []).forEach((row) => {
+          updateTrendCache(row.id, row.fav_count ?? 0, row.trend_threshold_count ?? 0);
+        });
+      } else {
+        // Backward compatibility while SQL migration is pending.
+        const fallback = await supabase
+          .from('events')
+          .select('id,fav_count')
+          .in('id', uuidIds);
+        if (!fallback.error) {
+          (fallback.data || []).forEach((row) => {
+            updateTrendCache(row.id, row.fav_count ?? 0, 0);
+          });
+        }
+      }
+    } catch (error) {
+      console.warn('getFavTrendsForEvents error:', error?.message || error);
+    }
+  }
+
+  return Object.fromEntries(ids.map((id) => [id, getFavTrend(id)]));
 }
