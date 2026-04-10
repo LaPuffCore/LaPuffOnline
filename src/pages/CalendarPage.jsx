@@ -8,6 +8,7 @@ import { TAG_COLORS } from '../lib/tagColors';
 
 function getDaysInMonth(year, month) { return new Date(year, month + 1, 0).getDate(); }
 function getFirstDay(year, month) { return new Date(year, month, 1).getDay(); }
+function getMonthShort(date) { return date.toLocaleDateString('en-US', { month: 'short' }).toUpperCase(); }
 
 function MiniMap({ lat, lng, address, city, borderColor }) {
   const mapUrl = (lat && lng)
@@ -58,7 +59,7 @@ function DayEventDetails({ event }) {
     : 'Date TBD';
 
   return (
-    <div className="mt-2 border-2 border-t-0 border-black rounded-b-2xl bg-gray-50 p-3 md:p-4 shadow-[inset_0_1px_0_rgba(0,0,0,0.05)]">
+    <div className="border-[2.5px] border-t-0 border-black rounded-b-[1.6rem] bg-gray-50 px-3 pb-3 pt-6 md:px-4 md:pb-4 md:pt-7 shadow-[inset_0_1px_0_rgba(0,0,0,0.05)]">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4 mb-4">
         <div className="bg-white border-2 border-black rounded-xl p-3">
           <p className="text-[10px] font-black uppercase tracking-widest text-gray-500 mb-2">Time + Date</p>
@@ -189,61 +190,86 @@ export default function CalendarPage({ events = [] }) {
     const cells = [];
     for (let i = 0; i < firstDay; i++) cells.push(null);
     for (let d = 1; d <= daysInMonth; d++) cells.push(new Date(year, month, d));
+    while (cells.length < 42) cells.push(null);
 
     return (
-      <div className="grid grid-cols-7 gap-1 md:gap-2">
-        {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => (
-          <div key={d} className="text-center text-[10px] md:text-xs font-black text-gray-400 py-2">{d}</div>
-        ))}
+      <div className="flex h-full min-h-0 flex-col">
+        <div className="hidden md:grid grid-cols-7 gap-2 mb-2">
+          {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => (
+            <div key={d} className="text-center text-xs font-black text-gray-400 py-1.5">{d}</div>
+          ))}
+        </div>
 
-        {cells.map((date, i) => {
-          if (!date) return <div key={`empty-${i}`} />;
-          const evs = eventsForDate(date);
-          const isToday = date.toDateString() === today.toDateString();
-          const showEvents = evs.slice(0, 3);
-          const hasMore = evs.length > 3;
+        <div className="grid flex-1 min-h-0 grid-cols-7 grid-rows-6 gap-1 md:gap-2">
+          {cells.map((date, i) => {
+            if (!date) {
+              return <div key={`empty-${i}`} className="rounded-2xl border border-transparent" />;
+            }
+            const evs = eventsForDate(date);
+            const isToday = date.toDateString() === today.toDateString();
+            const showEvents = evs.slice(0, isMobile ? 3 : 3);
+            const hasMore = evs.length > 3;
 
-          return (
-            <div
-              key={date.toDateString()}
-              onClick={() => drillToWeek(date)}
-              className={`rounded-2xl p-1.5 md:p-2 border-2 cursor-pointer transition-all hover:border-[#7C3AED] hover:shadow-md min-h-20 md:min-h-[12rem]
-              ${isToday ? 'border-[#7C3AED] bg-violet-50' : 'border-gray-200'}
-              ${evs.length > 0 ? 'ring-1 ring-[#7C3AED]/20' : ''}`}
-            >
-              <p className={`text-xs font-black mb-1 ${isToday ? 'text-[#7C3AED]' : 'text-gray-700'}`}>{date.getDate()}</p>
+            return (
+              <div
+                key={date.toDateString()}
+                onClick={() => drillToWeek(date)}
+                className={`rounded-2xl border-2 cursor-pointer transition-all min-h-0 overflow-hidden p-1 md:p-2 hover:border-[#7C3AED] hover:shadow-md ${isToday ? 'border-[#7C3AED] bg-violet-50' : 'border-gray-200 bg-white'} ${evs.length > 0 ? 'ring-1 ring-[#7C3AED]/20' : ''}`}
+              >
+                <div className="flex h-full min-h-0 flex-col">
+                  <div className="mb-1 flex items-start justify-between">
+                    <div className="flex flex-col">
+                      {isMobile && (
+                        <span className={`text-[8px] font-black leading-none ${isToday ? 'text-[#7C3AED]' : 'text-gray-400'}`}>
+                          {getMonthShort(date)}
+                        </span>
+                      )}
+                      <p className={`${isMobile ? 'text-sm' : 'text-xs'} font-black leading-none ${isToday ? 'text-[#7C3AED]' : 'text-gray-700'}`}>{date.getDate()}</p>
+                    </div>
+                  </div>
 
-              <div className="space-y-1 md:space-y-1.5 md:min-h-[9rem]">
-                {showEvents.map((e) => (
-                  <button
-                    key={e.id}
-                    onClick={(ev) => {
-                      ev.stopPropagation();
-                      setSelectedEvent(e);
-                    }}
-                    className="w-full text-left text-[9px] md:text-[10px] rounded-lg px-1.5 py-1 font-bold cursor-pointer hover:opacity-85 leading-tight line-clamp-2"
-                    style={{ backgroundColor: `${e.hex_color || '#7C3AED'}33`, color: e.hex_color || '#7C3AED' }}
-                  >
-                    <span className="mr-1">{e.representative_emoji || '🎉'}</span>
-                    {e.event_name}
-                  </button>
-                ))}
+                  <div className={`flex-1 min-h-0 ${isMobile ? 'space-y-1' : 'space-y-1.5 md:min-h-0'}`}>
+                    {showEvents.map((e) => (
+                      <button
+                        key={e.id}
+                        onClick={(ev) => {
+                          ev.stopPropagation();
+                          setSelectedEvent(e);
+                        }}
+                        className={isMobile ? 'flex h-6 w-full items-center rounded-lg px-1.5' : 'w-full text-left text-[9px] md:text-[10px] rounded-lg px-1.5 py-1 font-bold cursor-pointer hover:opacity-85 leading-tight line-clamp-2'}
+                        style={{ backgroundColor: `${e.hex_color || '#7C3AED'}33`, color: e.hex_color || '#7C3AED' }}
+                      >
+                        {isMobile ? (
+                          <>
+                            <span className="text-sm leading-none">{e.representative_emoji || '🎉'}</span>
+                            <span className="ml-auto h-2.5 w-2.5 rounded-full border border-black/10" style={{ backgroundColor: e.hex_color || '#7C3AED' }} />
+                          </>
+                        ) : (
+                          <>
+                            <span className="mr-1">{e.representative_emoji || '🎉'}</span>
+                            {e.event_name}
+                          </>
+                        )}
+                      </button>
+                    ))}
 
-                {hasMore && (
-                  <button
-                    onClick={(ev) => {
-                      ev.stopPropagation();
-                      drillToDay(date);
-                    }}
-                    className="w-full text-center text-[9px] md:text-[10px] font-black text-[#7C3AED] bg-violet-100/70 border border-[#7C3AED]/25 rounded-md py-0.5 hover:bg-violet-200/80"
-                  >
-                    [...]
-                  </button>
-                )}
+                    {hasMore && (
+                      <button
+                        onClick={(ev) => {
+                          ev.stopPropagation();
+                          drillToDay(date);
+                        }}
+                        className={`w-full text-center font-black text-[#7C3AED] bg-violet-100/70 border border-[#7C3AED]/25 rounded-md hover:bg-violet-200/80 ${isMobile ? 'py-0.5 text-[9px]' : 'py-0.5 text-[9px] md:text-[10px]'}`}
+                      >
+                        {isMobile ? `+${evs.length - 3}` : '[...]'}
+                      </button>
+                    )}
+                  </div>
+                </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
     );
   }
@@ -260,29 +286,28 @@ export default function CalendarPage({ events = [] }) {
     const limit = isMobile ? 2 : 3;
 
     return (
-      <div className="space-y-3 md:space-y-4">
+      <div className="space-y-3 md:space-y-4 h-full overflow-y-auto pr-1">
         {days.map((date) => {
           const evs = eventsForDate(date);
           const visible = evs.slice(0, limit);
           const hasMore = evs.length > limit;
           const isToday = date.toDateString() === today.toDateString();
+          const isPopulated = evs.length > 0;
 
           return (
-            <div key={date.toDateString()} className="border-2 border-black rounded-2xl bg-white shadow-[3px_3px_0px_black] overflow-hidden">
+            <div key={date.toDateString()} className="grid grid-cols-[64px_1fr] md:grid-cols-[84px_1fr] border-2 border-black rounded-[1.4rem] bg-white shadow-[3px_3px_0px_black] overflow-hidden min-h-[98px] md:min-h-[116px]">
               <button
                 onClick={() => drillToDay(date)}
-                className={`w-full text-left px-3 md:px-4 py-2 border-b-2 border-black font-black text-xs md:text-sm flex items-center justify-between ${isToday ? 'bg-violet-200 text-[#4c1d95]' : 'bg-gray-100 text-gray-700'}`}
+                className={`border-r-2 border-black px-2 py-3 text-left transition-colors ${isToday ? 'bg-violet-200 text-[#4c1d95]' : isPopulated ? 'bg-violet-50 text-black' : 'bg-gray-100 text-gray-500'}`}
               >
-                <span>
-                  {date.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}
-                </span>
-                <span className="text-[10px] md:text-xs">{evs.length} event{evs.length === 1 ? '' : 's'}</span>
+                <span className={`block font-black leading-none uppercase tracking-widest ${isPopulated ? 'text-[10px] md:text-xs' : 'text-[9px] md:text-[10px]'}`}>{getMonthShort(date)}</span>
+                <span className={`mt-1 block font-black leading-none ${isPopulated ? 'text-[2rem] md:text-[2.5rem]' : 'text-[1.6rem] md:text-[2rem]'}`}>{date.getDate()}</span>
               </button>
 
               {evs.length === 0 ? (
-                <div className="px-3 md:px-4 py-3 text-[11px] md:text-xs text-gray-400 font-bold">No favorites this day</div>
+                <div className="px-2.5 md:px-3 py-2.5" />
               ) : (
-                <div className="px-2.5 md:px-3 py-2.5 flex gap-2 md:gap-3 overflow-x-auto">
+                <div className="px-2.5 md:px-3 py-2.5 flex gap-2 md:gap-3 overflow-x-auto items-center">
                   {visible.map((e) => {
                     const tags = generateAutoTags(e).slice(0, 2);
                     const time = e.event_time_utc ? utcToLocal(e.event_time_utc, getUserTZOffset()) : '';
@@ -315,7 +340,7 @@ export default function CalendarPage({ events = [] }) {
                   {hasMore && (
                     <button
                       onClick={() => drillToDay(date)}
-                      className="min-w-[60px] md:min-w-[72px] rounded-xl border-2 border-[#7C3AED] bg-violet-100 text-[#7C3AED] font-black text-lg md:text-xl flex items-center justify-center hover:bg-violet-200"
+                      className="min-w-[60px] md:min-w-[72px] rounded-xl border-2 border-[#7C3AED] bg-violet-100 text-[#7C3AED] font-black text-lg md:text-xl flex items-center justify-center hover:bg-violet-200 self-stretch"
                       aria-label="Open day with more events"
                     >
                       [...]
@@ -333,7 +358,7 @@ export default function CalendarPage({ events = [] }) {
   function DayView() {
     const evs = eventsForDate(curDate);
     return (
-      <div className="space-y-3">
+      <div className="space-y-4 h-full overflow-y-auto pr-1 pt-1">
         {evs.length === 0 ? (
           <div className="text-center py-10 text-gray-400 font-medium">No favorites on this day</div>
         ) : (
@@ -346,33 +371,41 @@ export default function CalendarPage({ events = [] }) {
             return (
               <div
                 key={e.id}
-                className="bg-white border-3 border-black rounded-3xl overflow-hidden transition-transform shadow-[4px_4px_0px_black]"
-                style={{ borderLeftColor: e.hex_color || '#7C3AED', borderLeftWidth: 6 }}
+                className="relative overflow-visible transition-transform pb-1"
               >
-                <div className="p-4 flex items-center gap-3 md:gap-4">
-                  <div className="w-14 h-14 md:w-16 md:h-16 rounded-2xl overflow-hidden flex-shrink-0" style={{ backgroundColor: `${e.hex_color || '#7C3AED'}22` }}>
-                    {e.photos?.[0]
-                      ? <img src={e.photos[0]} className="w-full h-full object-cover" alt="" onError={(ev) => { ev.currentTarget.style.display = 'none'; }} />
-                      : <div className="w-full h-full flex items-center justify-center text-3xl">{e.representative_emoji || '🎉'}</div>}
-                  </div>
+                <div
+                  className="relative z-10 bg-white border-3 border-black rounded-3xl shadow-[4px_4px_0px_black]"
+                  style={{ borderLeftColor: e.hex_color || '#7C3AED', borderLeftWidth: 6 }}
+                >
+                  <div className="p-4 flex items-center gap-3 md:gap-4">
+                    <div className="w-14 h-14 md:w-16 md:h-16 rounded-2xl overflow-hidden flex-shrink-0" style={{ backgroundColor: `${e.hex_color || '#7C3AED'}22` }}>
+                      {e.photos?.[0]
+                        ? <img src={e.photos[0]} className="w-full h-full object-cover" alt="" onError={(ev) => { ev.currentTarget.style.display = 'none'; }} />
+                        : <div className="w-full h-full flex items-center justify-center text-3xl">{e.representative_emoji || '🎉'}</div>}
+                    </div>
 
-                  <div className="min-w-0 flex-1">
-                    <h3 className="font-black text-sm md:text-base leading-tight line-clamp-2">{e.event_name}</h3>
-                    <p className="text-[11px] md:text-sm text-gray-500 font-bold">
-                      {displayDate}{displayTime ? ` · ${displayTime}` : ''}
-                    </p>
-                  </div>
+                    <div className="min-w-0 flex-1">
+                      <h3 className="font-black text-sm md:text-base leading-tight line-clamp-2">{e.event_name}</h3>
+                      <p className="text-[11px] md:text-sm text-gray-500 font-bold">
+                        {displayDate}{displayTime ? ` · ${displayTime}` : ''}
+                      </p>
+                    </div>
 
-                  <button
-                    onClick={() => setExpandedEvents((prev) => ({ ...prev, [e.id]: !prev[e.id] }))}
-                    className="w-9 h-9 border-2 border-black rounded-xl bg-gray-100 hover:bg-violet-100 flex items-center justify-center text-base font-black shadow-[2px_2px_0px_black]"
-                    aria-label="Toggle details"
-                  >
-                    {expanded ? '⌃' : '⌄'}
-                  </button>
+                    <button
+                      onClick={() => setExpandedEvents((prev) => ({ ...prev, [e.id]: !prev[e.id] }))}
+                      className="w-9 h-9 border-2 border-black rounded-xl bg-gray-100 hover:bg-violet-100 flex items-center justify-center text-base font-black shadow-[2px_2px_0px_black]"
+                      aria-label="Toggle details"
+                    >
+                      {expanded ? '⌃' : '⌄'}
+                    </button>
+                  </div>
                 </div>
 
-                {expanded && <DayEventDetails event={e} />}
+                {expanded && (
+                  <div className="relative z-0 -mt-5 px-2 md:px-3">
+                    <DayEventDetails event={e} />
+                  </div>
+                )}
               </div>
             );
           })
@@ -394,22 +427,22 @@ export default function CalendarPage({ events = [] }) {
       : curDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
 
   return (
-    <div className="min-h-screen bg-[#FAFAF8]">
-      <div className="max-w-7xl mx-auto px-3 md:px-4 py-5 md:py-6">
-        <div className="flex items-start md:items-center justify-between mb-3 md:mb-4 gap-3 md:gap-4">
-          <Link to="/" className="flex flex-col items-center gap-1 text-black hover:text-[#7C3AED] transition-colors">
+    <div className="h-[100dvh] overflow-hidden bg-[#FAFAF8]">
+      <div className="max-w-7xl mx-auto h-full px-3 md:px-4 py-4 md:py-5 flex flex-col min-h-0">
+        <div className="grid grid-cols-[72px_minmax(0,1fr)_72px] md:grid-cols-[88px_minmax(0,1fr)_88px] items-start md:items-center mb-3 md:mb-4 gap-2 md:gap-4">
+          <Link to="/" className="w-[72px] md:w-[88px] flex flex-col items-center justify-start text-black hover:text-[#7C3AED] transition-colors">
             <div className="w-10 h-10 md:w-11 md:h-11 bg-black text-white rounded-2xl flex items-center justify-center font-black text-lg shadow-[3px_3px_0px_#333]">←</div>
-            <span className="text-[10px] md:text-xs font-black uppercase tracking-wide">Home</span>
+            <span className="mt-1 text-[10px] md:text-xs font-black uppercase tracking-wide leading-tight text-center break-words">Home</span>
           </Link>
 
-          <div className="flex-1 border-3 border-black bg-white rounded-2xl px-4 md:px-5 py-3 md:py-3.5 shadow-[4px_4px_0px_black] text-center mx-1 md:mx-3">
+          <div className="border-3 border-black bg-white rounded-2xl px-3 md:px-5 py-3 md:py-3.5 shadow-[4px_4px_0px_black] text-center justify-self-stretch">
             <h1 className="font-black text-lg md:text-2xl leading-none">📅 Favorites Calendar</h1>
             <p className="text-gray-500 text-xs md:text-sm mt-1 font-bold">{favEvents.length} favorited events</p>
           </div>
 
-          <Link to="/favorites" className="flex flex-col items-center gap-1 text-black hover:text-[#7C3AED] transition-colors">
+          <Link to="/favorites" className="w-[72px] md:w-[88px] flex flex-col items-center justify-start text-black hover:text-[#7C3AED] transition-colors">
             <div className="w-10 h-10 md:w-11 md:h-11 bg-black text-white rounded-2xl flex items-center justify-center font-black text-lg shadow-[3px_3px_0px_#333]">→</div>
-            <span className="text-[10px] md:text-xs font-black uppercase tracking-wide">My Favorites</span>
+            <span className="mt-1 text-[10px] md:text-xs font-black uppercase tracking-wide leading-tight text-center break-words">Favorites</span>
           </Link>
         </div>
 
@@ -427,13 +460,13 @@ export default function CalendarPage({ events = [] }) {
           </div>
         </div>
 
-        <div className="flex items-center gap-2 mb-4">
+        <div className="flex items-center gap-2 mb-3 md:mb-4">
           <button onClick={() => nav(-1)} className="w-9 h-9 bg-white border-3 border-black rounded-xl font-black hover:bg-[#7C3AED] hover:text-white transition-colors shadow-[2px_2px_0px_black]">←</button>
           <span className="font-black text-xs md:text-sm flex-1 text-center">{headLabel}</span>
           <button onClick={() => nav(1)} className="w-9 h-9 bg-white border-3 border-black rounded-xl font-black hover:bg-[#7C3AED] hover:text-white transition-colors shadow-[2px_2px_0px_black]">→</button>
         </div>
 
-        <div className="bg-white border-3 border-black rounded-3xl shadow-[5px_5px_0px_black] p-3 md:p-4">
+        <div className={`bg-white border-3 border-black rounded-3xl shadow-[5px_5px_0px_black] p-2.5 md:p-4 flex-1 min-h-0 ${view === 'monthly' ? 'overflow-hidden' : 'overflow-hidden'}`}>
           {view === 'monthly' && <MonthGrid />}
           {view === 'weekly' && <WeekList />}
           {view === 'daily' && <DayView />}

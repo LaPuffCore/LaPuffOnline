@@ -411,7 +411,8 @@ export default function TileView({ events, eventsLoading = false }) {
         </div>
 
         {/* ROW 2: Timespan + Favorites */}
-        <div className="flex items-center justify-between gap-2 overflow-x-auto no-scrollbar pb-1">
+        <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
+          {/* Left: Timespan buttons */}
           <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
             <span className="text-xs font-black whitespace-nowrap text-gray-400 uppercase tracking-tighter">Date</span>
             {TIMESPAN_OPTIONS.map((opt, i) => (
@@ -424,31 +425,29 @@ export default function TileView({ events, eventsLoading = false }) {
                 {opt.label}
               </button>
             ))}
-
-            {!isMobile && (
-              <>
-                <span className="ml-2 text-xs font-black whitespace-nowrap text-gray-400 uppercase tracking-tighter">Source</span>
-                {SOURCE_MODES.map(s => (
-                  <button
-                    key={s.key}
-                    onClick={() => { setSourceMode(s.key); resetPage(); }}
-                    title={s.title}
-                    className={`px-2.5 py-1 rounded-xl text-xs font-black border-[2.5px] border-black transition-colors whitespace-nowrap ${sourceMode === s.key ? 'bg-[#7C3AED] text-white border-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
-                  >
-                    {s.label}
-                  </button>
-                ))}
-              </>
-            )}
           </div>
 
+          {/* Right: Source + Favorites (web only, right-aligned) */}
           {!isMobile && (
-            <button
-              onClick={() => { setFavOnly(v => !v); resetPage(); }}
-              className={`px-3 py-1 rounded-xl text-xs font-black border-[2.5px] border-black flex items-center justify-center gap-1 transition-colors whitespace-nowrap ${favOnly ? 'bg-[#7C3AED] text-white border-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
-            >
-              ⭐ Favorites
-            </button>
+            <div className="flex items-center gap-2 ml-auto overflow-x-auto no-scrollbar">
+              <span className="text-xs font-black whitespace-nowrap text-gray-400 uppercase tracking-tighter">Source</span>
+              {SOURCE_MODES.map(s => (
+                <button
+                  key={s.key}
+                  onClick={() => { setSourceMode(s.key); resetPage(); }}
+                  title={s.title}
+                  className={`px-2.5 py-1 rounded-xl text-xs font-black border-[2.5px] border-black transition-colors whitespace-nowrap ${sourceMode === s.key ? 'bg-[#7C3AED] text-white border-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
+                >
+                  {s.label}
+                </button>
+              ))}
+              <button
+                onClick={() => { setFavOnly(v => !v); resetPage(); }}
+                className={`px-3 py-1 rounded-xl text-xs font-black border-[2.5px] border-black flex items-center justify-center gap-1 transition-colors whitespace-nowrap ${favOnly ? 'bg-[#7C3AED] text-white border-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
+              >
+                ⭐ Favorites
+              </button>
+            </div>
           )}
         </div>
 
