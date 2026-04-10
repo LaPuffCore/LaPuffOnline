@@ -122,6 +122,21 @@ export function ThemeProvider({ children }) {
   const value = useMemo(() => ({
     overrides,
     resolvedTheme,
+    applyThemeOverrides(nextOverrides) {
+      if (!nextOverrides || typeof nextOverrides !== 'object') {
+        setOverrides({});
+        return;
+      }
+
+      const cleaned = {};
+      Object.keys(nextOverrides).forEach((key) => {
+        const value = nextOverrides[key];
+        if (value == null || value === '' || value === DEFAULT_THEME[key]) return;
+        cleaned[key] = value;
+      });
+
+      setOverrides(cleaned);
+    },
     setThemeOverride(key, value) {
       setOverrides((prev) => {
         const next = { ...prev };

@@ -11,6 +11,7 @@ import { getValidSession, signOut } from '../lib/supabaseAuth';
 
 export default function Home({ events = [], eventsLoading = false }) {
   const [view, setView] = useState('tiles');
+  const [tileViewKey, setTileViewKey] = useState(0);
   const [showForm, setShowForm] = useState(false);
   const [showAuth, setShowAuth] = useState(false);
   const [showLeaderboard, setShowLeaderboard] = useState(false);
@@ -22,6 +23,7 @@ export default function Home({ events = [], eventsLoading = false }) {
   
   const location = useLocation();
   const isMap = view === 'map';
+  const displayName = user?.username || user?.user_metadata?.username || user?.email?.split('@')[0] || 'Account';
 
   // REFERRAL LOGIC: Capture and Persist
   useEffect(() => {
@@ -113,6 +115,14 @@ export default function Home({ events = [], eventsLoading = false }) {
     setShowUserMenu(false);
   }
 
+  function handleLogoHomeReset() {
+    setView('tiles');
+    setShowLeaderboard(false);
+    setShowHeader(true);
+    setShowUserMenu(false);
+    setTileViewKey((prev) => prev + 1);
+  }
+
   return (
     <div className="h-[100dvh] bg-[#FAFAF8] flex flex-col overflow-hidden" style={{ fontFamily: "'Nunito', cursive, sans-serif" }}>
       {/* Header */}
@@ -121,7 +131,11 @@ export default function Home({ events = [], eventsLoading = false }) {
           {/* Top Row: Logo, Nav, Menu */}
           <div className="flex items-center justify-between gap-2">
             {/* Logo - Scaled down for mobile */}
-            <div className="flex items-center gap-1.5 md:gap-2 scale-90 md:scale-100 origin-left">
+            <button
+              onClick={handleLogoHomeReset}
+              className="flex items-center gap-1.5 md:gap-2 scale-90 md:scale-100 origin-left text-left"
+              aria-label="Go to Home tile view and reset filters"
+            >
               <div className="w-9 h-9 md:w-11 md:h-11 bg-black rounded-xl md:rounded-2xl flex items-center justify-center text-xl md:text-2xl shadow-[2px_2px_0px_#7C3AED] md:shadow-[3px_3px_0px_#7C3AED]">
                 💨
               </div>
@@ -130,7 +144,7 @@ export default function Home({ events = [], eventsLoading = false }) {
                 <p className="text-[10px] md:text-xs text-gray-500 font-bold leading-none">NYC Events</p>
               </div>
               <ParticipantDot />
-            </div>
+            </button>
 
             {/* View Toggles - Scaled for mobile */}
             <div className="bg-gray-100 border-2 md:border-3 border-black rounded-xl md:rounded-2xl p-0.5 md:p-1 flex shadow-[2px_2px_0px_black] md:shadow-[3px_3px_0px_black] scale-90 md:scale-100">
@@ -159,8 +173,8 @@ export default function Home({ events = [], eventsLoading = false }) {
                 {user ? (
                   <div className="relative">
                     <button onClick={() => setShowUserMenu(v => !v)}
-                      className="flex items-center gap-2 bg-white border-3 border-[#7C3AED] rounded-full px-4 py-2 font-black text-sm text-[#7C3AED] hover:bg-violet-50 transition-colors shadow-[3px_3px_0px_#333]">
-                      💜 {user.username || user.email?.split('@')[0]}
+                      className="w-[136px] bg-white border-3 border-[#7C3AED] rounded-full px-4 py-2 font-black text-sm text-[#7C3AED] hover:bg-violet-50 transition-colors shadow-[3px_3px_0px_#333] truncate text-center">
+                      {displayName}
                     </button>
                     {showUserMenu && (
                       <div className="absolute right-0 top-12 bg-white border-3 border-black rounded-2xl shadow-[5px_5px_0px_black] z-50 overflow-hidden min-w-40">
@@ -176,7 +190,7 @@ export default function Home({ events = [], eventsLoading = false }) {
                   </div>
                 ) : (
                   <button onClick={() => setShowAuth(true)}
-                    className="bg-white border-3 border-black rounded-full px-4 py-2 font-black text-sm hover:bg-violet-50 transition-all shadow-[3px_3px_0px_black] whitespace-nowrap">
+                    className="w-[136px] bg-white border-3 border-black rounded-full px-4 py-2 font-black text-sm hover:bg-violet-50 transition-all shadow-[3px_3px_0px_black] whitespace-nowrap text-center">
                     Sign In / Up
                   </button>
                 )}
@@ -189,12 +203,12 @@ export default function Home({ events = [], eventsLoading = false }) {
           <div className="flex md:hidden items-center justify-center gap-3 mt-2 pb-1">
              {user ? (
                 <button onClick={() => setShowUserMenu(v => !v)}
-                  className="bg-white border-2 border-[#7C3AED] rounded-full px-3 py-1.5 font-black text-[11px] text-[#7C3AED] shadow-[2px_2px_0px_#333]">
-                  💜 Profile
+                className="w-[112px] bg-white border-2 border-[#7C3AED] rounded-full px-3 py-1.5 font-black text-[11px] text-[#7C3AED] shadow-[2px_2px_0px_#333] truncate text-center">
+                {displayName}
                 </button>
              ) : (
                 <button onClick={() => setShowAuth(true)}
-                  className="bg-white border-2 border-black rounded-full px-3 py-1.5 font-black text-[11px] shadow-[2px_2px_0px_black]">
+                className="w-[112px] bg-white border-2 border-black rounded-full px-3 py-1.5 font-black text-[11px] shadow-[2px_2px_0px_black] text-center">
                   Sign In / Up
                 </button>
              )}
@@ -215,7 +229,7 @@ export default function Home({ events = [], eventsLoading = false }) {
         ) : (
           <main className="h-full overflow-y-auto" onScroll={handleScroll}>
             <div className={`max-w-7xl mx-auto w-full transition-all duration-300 ${!showHeader ? 'pt-2' : 'pt-0'}`}>
-              <TileView events={events} eventsLoading={eventsLoading} />
+              <TileView key={tileViewKey} events={events} eventsLoading={eventsLoading} />
             </div>
           </main>
         )}

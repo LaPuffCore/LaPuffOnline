@@ -45,7 +45,7 @@ export default function ParticipantDot({ onStatusChange }) {
 
   const popupOpen = manualOpen || hoverOpen;
   const isParticipant = status === 'participant';
-  const statusLabel = isParticipant ? 'participant' : 'offline';
+  const statusLabel = isParticipant ? 'participant' : (isOffline ? 'offline' : 'orbiter');
   const dotColor = loading ? '#eab308' : isParticipant ? '#22c55e' : '#ef4444';
   const labelColor = loading ? '#ca8a04' : isParticipant ? '#16a34a' : '#dc2626';
 
@@ -145,7 +145,7 @@ export default function ParticipantDot({ onStatusChange }) {
     if (isOffline) {
       return 'You are currently in Offline cache mode. Reconnect to upgrade with a one-time private location ping.';
     }
-    return 'Would you like to upgrade from Offline with a one time and private location ping?';
+    return 'Would you like to upgrade from Orbiter with a one time and private location ping?';
   }
 
   function renderResult() {
@@ -162,7 +162,7 @@ export default function ParticipantDot({ onStatusChange }) {
       return (
         <div className="mt-3 rounded-xl border-2 border-red-300 bg-red-50 p-3 text-center">
           <div className="text-4xl leading-none">❌</div>
-          <p className="mt-2 text-xs font-black text-red-700">You are not in NYC and remain in Offline class</p>
+          <p className="mt-2 text-xs font-black text-red-700">You are not in NYC and maintain class 'Orbiter'</p>
         </div>
       );
     }

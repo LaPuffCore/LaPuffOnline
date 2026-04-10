@@ -1,10 +1,9 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import ColorPicker from './ColorPicker';
 import { THEME_FIELDS, useSiteTheme } from '../lib/theme';
 
-function ThemeRow({ field }) {
-  const { overrides, setThemeOverride, resetThemeKey } = useSiteTheme();
-  const value = overrides[field.key] ?? null;
+function ThemeRow({ field, value, onChange, onReset }) {
 
   return (
     <div className="rounded-2xl border-3 border-black bg-white p-3 md:p-4 shadow-[4px_4px_0px_black]">
@@ -13,10 +12,10 @@ function ThemeRow({ field }) {
           <p className="font-black text-sm md:text-base leading-tight">{field.label}</p>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
-          <ColorPicker value={value} onChange={(next) => setThemeOverride(field.key, next)} />
+          <ColorPicker value={value} onChange={onChange} />
           <button
             type="button"
-            onClick={() => resetThemeKey(field.key)}
+            onClick={onReset}
             className="w-11 h-11 rounded-2xl border-3 border-black bg-white shadow-[3px_3px_0px_black] hover:bg-gray-50 transition-colors flex items-center justify-center text-lg font-black"
             aria-label={`Reset ${field.label}`}
             title={`Reset ${field.label}`}
@@ -31,6 +30,38 @@ function ThemeRow({ field }) {
 
 export default function ThemeCustomizerModal({ onClose }) {
   const ref = useRef(null);
+  const { overrides, applyThemeOverrides } = useSiteTheme();
+  const [draftOverrides, setDraftOverrides] = useState(() => ({ ...overrides }));
+
+  function setDraftOverride(key, value) {
+    setDraftOverrides((prev) => {
+      const next = { ...prev };
+      if (value == null || value === '') delete next[key];
+      else next[key] = value;
+      return next;
+    });
+  }
+
+  function resetDraftKey(key) {
+    setDraftOverrides((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  }
+
+  function handleCancel() {
+    onClose();
+  }
+
+  function handleApply() {
+    applyThemeOverrides(draftOverrides);
+    onClose();
+  }
+
+  function handleResetAll() {
+    setDraftOverrides({});
+  }
 
   useEffect(() => {
     function handleKey(event) {
@@ -52,8 +83,10 @@ export default function ThemeCustomizerModal({ onClose }) {
     };
   }, [onClose]);
 
-  return (
-    <div className="fixed inset-0 z-[1000] overflow-y-auto bg-white/50 backdrop-blur-sm p-3 md:p-6">
+  if (typeof document === 'undefined') return null;
+
+  return createPortal(
+    <div className="lp-theme-scope fixed inset-0 z-[200000] overflow-y-auto bg-white/50 backdrop-blur-sm p-3 md:p-6">
       <div className="min-h-full flex items-start justify-center">
         <div
           ref={ref}
@@ -73,13 +106,44 @@ export default function ThemeCustomizerModal({ onClose }) {
             <p className="mt-2 text-xs md:text-sm font-bold text-gray-500">Choose override colors for the non-map UI. Leave a swatch empty to use the default look.</p>
           </div>
 
-          <div className="space-y-3 md:space-y-4">
+          <div className="space-y-3 md:space-y-4 pb-4">
             {THEME_FIELDS.map((field) => (
-              <ThemeRow key={field.key} field={field} />
+              <ThemeRow
+                key={field.key}
+                field={field}
+                value={draftOverrides[field.key] ?? null}
+                onChange={(next) => setDraftOverride(field.key, next)}
+                onReset={() => resetDraftKey(field.key)}
+              />
             ))}
+          </div>
+
+          <div className="sticky bottom-0 pt-3 bg-[#FAFAF8] border-t-2 border-black flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={handleResetAll}
+              className="px-3 py-2 rounded-xl border-3 border-black bg-white text-black text-xs md:text-sm font-black shadow-[3px_3px_0px_black] hover:bg-gray-100 transition-colors"
+            >
+              Reset All
+            </button>
+            <button
+              type="button"
+              onClick={handleCancel}
+              className="px-3 py-2 rounded-xl border-3 border-black bg-white text-black text-xs md:text-sm font-black shadow-[3px_3px_0px_black] hover:bg-gray-100 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleApply}
+              className="px-3 py-2 rounded-xl border-3 border-black bg-[#7C3AED] text-white text-xs md:text-sm font-black shadow-[3px_3px_0px_black] hover:bg-[#6D28D9] transition-colors"
+            >
+              Apply
+            </button>
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
