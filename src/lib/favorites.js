@@ -37,6 +37,8 @@ const COUNTS_KEY  = 'lapuff_fav_counts';
 const HISTORY_KEY = 'lapuff_fav_history';
 const SB_SYNC_VERSION_KEY = 'lapuff_sb_favs_version';
 const SB_SYNC_VERSION = '2';
+const UNIVERSAL_TREND_KEY = 'lapuff_universal_fav_trend_history';
+const TREND_WINDOW_MS = 6 * 3600 * 1000;
 
 // Tracks which event IDs this anonymous device has already contributed to
 // events.fav_count in Supabase. Only used for non-authenticated users.
@@ -83,6 +85,32 @@ function recordActivity(eventId, delta) {
   const cutoff = Date.now() - 24 * 3600 * 1000;
   h[eventId] = h[eventId].filter(x => x.t > cutoff);
   localStorage.setItem(HISTORY_KEY, JSON.stringify(h));
+}
+
+function getUniversalTrendHistory() {
+  try { return JSON.parse(localStorage.getItem(UNIVERSAL_TREND_KEY) || '{}'); } catch { return {}; }
+}
+
+function saveUniversalTrendHistory(history) {
+  localStorage.setItem(UNIVERSAL_TREND_KEY, JSON.stringify(history));
+}
+
+function recordUniversalCount(eventId, count) {
+  const id = normalizeEventId(eventId);
+  const now = Date.now();
+  const history = getUniversalTrendHistory();
+  const entry = history[id] || { lastCount: null, changes: [] };
+
+  if (typeof entry.lastCount === 'number' && count !== entry.lastCount) {
+    entry.changes.push({ d: count - entry.lastCount, t: now });
+  }
+
+  const cutoff = now - TREND_WINDOW_MS;
+  entry.changes = (entry.changes || []).filter(x => x.t > cutoff);
+  entry.lastCount = count;
+  entry.lastSeen = now;
+  history[id] = entry;
+  saveUniversalTrendHistory(history);
 }
 
 // ─── ANONYMOUS SUPABASE CONTRIBUTION TRACKER ─────────────────────────────────
@@ -203,7 +231,9 @@ export async function getFavoriteCount(eventId) {
       return localCount;
     }
     // Universal count must be at least as large as local contribution
-    return Math.max(data?.fav_count ?? 0, localCount);
+    const resolvedCount = Math.max(data?.fav_count ?? 0, localCount);
+    recordUniversalCount(id, resolvedCount);
+    return resolvedCount;
   } catch (error) {
     console.warn(`getFavoriteCount exception for ${eventId}:`, error);
     return localCount;
@@ -240,11 +270,13 @@ export function subscribeToFavoriteCount(eventId, callback) {
       'postgres_changes',
       { event: '*', schema: 'public', table: 'events', filter: `id=eq.${id}` },
       (payload) => {
+        const nextCount = payload.new?.fav_count ?? 0;
+        recordUniversalCount(id, nextCount);
         // Broadcast to all listeners for this event
         const entry = favCountSubscriptions.get(id);
         if (entry?.callbacks) {
           entry.callbacks.forEach(cb => {
-            try { cb(payload.new?.fav_count ?? 0); } catch (e) { console.warn('Subscription callback error:', e); }
+            try { cb(nextCount); } catch (e) { console.warn('Subscription callback error:', e); }
           });
         }
       }
@@ -270,17 +302,24 @@ export function subscribeToFavoriteCount(eventId, callback) {
   };
 }
 
-// ─── FAV TREND (sync, unchanged — local history, fast for tile display) ───────
+// ─── FAV TREND (sync — based on universal count changes observed from Supabase) ───────
 
 export function getFavTrend(eventId) {
-  const h = getHistory();
-  const cutoff = Date.now() - 6 * 3600 * 1000;
-  const delta = (h[normalizeEventId(eventId)] || []).filter(x => x.t > cutoff).reduce((sum, x) => sum + x.d, 0);
+  const id = normalizeEventId(eventId);
+  const history = getUniversalTrendHistory();
+  const cutoff = Date.now() - TREND_WINDOW_MS;
+  const entry = history[id] || { changes: [] };
+  const changes = (entry.changes || []).filter(x => x.t > cutoff);
+  if (changes.length !== (entry.changes || []).length) {
+    entry.changes = changes;
+    history[id] = entry;
+    saveUniversalTrendHistory(history);
+  }
+  const delta = changes.reduce((sum, x) => sum + x.d, 0);
   return delta > 0 ? 'up' : delta < 0 ? 'down' : 'neutral';
 }
 
-// ─── BATCH TREND (for TileView filter — uses local history) ──────────────────
-// event_favorites has no created_at column so trends use lapuff_fav_history.
+// ─── BATCH TREND (for TileView filter — uses observed universal count changes) ──────────────────
 // Consistent with getFavTrend; no extra Supabase queries needed.
 
 export async function getFavTrendsForEvents(eventIds) {
