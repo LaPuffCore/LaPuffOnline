@@ -179,7 +179,7 @@ export default function FavoritesPage({ events = [] }) {
   return (
     <div className="min-h-screen bg-[#FAFAF8]">
       <div className="max-w-7xl mx-auto px-3 md:px-4 py-5 md:py-6 overflow-visible">
-        <div className="flex items-start justify-between mb-6 md:mb-7 gap-3 md:gap-4">
+        <div className="flex items-start md:items-center justify-between mb-6 md:mb-7 gap-3 md:gap-4">
           <Link
             to="/"
             className="flex flex-col items-center gap-1 text-black hover:text-[#7C3AED] transition-colors"
