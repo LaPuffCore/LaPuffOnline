@@ -81,7 +81,29 @@ export async function syncSampleEvents(sampleEvents = [], enabled = true, clearO
     body: JSON.stringify(toInsert),
   });
 
-  return insertRes.ok;
+  if (insertRes.ok) return true;
+
+  // Fallback: attempt one-by-one inserts so one bad row does not block all.
+  // This also gives precise diagnostics in the browser console.
+  let allInserted = true;
+  const bulkError = await insertRes.text().catch(() => 'unknown bulk insert error');
+  console.warn('Bulk sample sync failed, retrying row-by-row:', bulkError);
+
+  for (const row of toInsert) {
+    const rowRes = await fetch(`${SUPABASE_URL}/rest/v1/events`, {
+      method: 'POST',
+      headers: { ...baseHeaders, Prefer: 'return=minimal' },
+      body: JSON.stringify([row]),
+    });
+
+    if (!rowRes.ok) {
+      allInserted = false;
+      const rowError = await rowRes.text().catch(() => 'unknown row insert error');
+      console.warn(`Sample event insert failed for "${row.event_name}":`, rowError);
+    }
+  }
+
+  return allInserted;
 }
 
 /**
