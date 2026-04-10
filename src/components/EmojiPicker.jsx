@@ -93,7 +93,7 @@ export default function EmojiPicker({ value, onChange, embedded = false, compact
     : currentCat.emojis;
 
   const panel = (
-    <div className={`${embedded ? 'relative' : 'absolute z-50 top-16 left-0'} bg-white border-3 border-black rounded-3xl shadow-[6px_6px_0px_black] ${compact ? 'w-[min(20rem,calc(100vw-2.25rem))]' : 'w-80'} overflow-hidden`}>
+    <div className={`${embedded ? 'relative max-w-full' : 'absolute z-50 top-16 left-0'} bg-white border-3 border-black rounded-3xl shadow-[6px_6px_0px_black] ${compact ? 'w-[min(20rem,calc(100vw-2.75rem))]' : 'w-80'} max-w-[calc(100vw-0.75rem)] overflow-hidden`}>
           {/* Search */}
           <div className="p-2 border-b-2 border-black">
             <input value={search} onChange={e => setSearch(e.target.value)}

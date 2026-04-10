@@ -57,6 +57,7 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
   const [trend, setTrend] = useState('neutral');
   const [imgError, setImgError] = useState(false);
   const [scrollOffset, setScrollOffset] = useState(0);
+  const [isMobile, setIsMobile] = useState(false);
 
   const tags = generateAutoTags(event);
   const borderColor = event.hex_color || '#FF6B6B';
@@ -66,6 +67,9 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
   const showImage = event.photos?.length > 0 && !imgError && !isExpired;
 
   useEffect(() => {
+    const mobile = window.innerWidth < 768;
+    setIsMobile(mobile);
+
     // FRESH LOOK AT POSITIONING: 
     // We target the main scrollable element if it exists, otherwise fallback to window.
     // This handles the "Totalizing" scroll count by checking the actual displacement.
@@ -74,7 +78,8 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
       setScrollOffset(scrollEl.scrollTop || window.pageYOffset);
     };
 
-    calculateOffset();
+    // Mobile should use a fixed overlay and keep initial position stable.
+    if (!mobile) calculateOffset();
     
     const originalOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
@@ -90,7 +95,6 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
     
     syncFavorites();
     window.addEventListener('favoritesChanged', syncFavorites);
-    window.addEventListener('resize', calculateOffset); // Handle layout shifts
     
     // Listen for real-time count changes from other users/devices
     const unsubscribe = subscribeToFavoriteCount(event.id, (newCount) => {
@@ -108,7 +112,6 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
     return () => {
       document.body.style.overflow = originalOverflow;
       window.removeEventListener('favoritesChanged', syncFavorites);
-      window.removeEventListener('resize', calculateOffset);
       window.removeEventListener('keydown', handleKey);
       unsubscribe?.();
     };
@@ -156,11 +159,11 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
 
   return (
     <div 
-      className="absolute inset-x-0 z-[100000] min-h-screen flex flex-col items-center p-2 sm:p-4"
-      style={{ top: `${scrollOffset}px` }}
+      className={`${isMobile ? 'fixed inset-0 overflow-y-auto overscroll-contain' : 'absolute inset-x-0'} z-[100000] min-h-screen flex flex-col items-center p-2 sm:p-4`}
+      style={isMobile ? undefined : { top: `${scrollOffset}px` }}
     >
       <div 
-        className="fixed inset-0 z-[-1] backdrop-blur-xl bg-white/40 transform-gpu" 
+        className={`${isMobile ? 'fixed inset-0 z-[-1] bg-black/45' : 'fixed inset-0 z-[-1] backdrop-blur-xl bg-white/40 transform-gpu'}`} 
         onClick={onClose}
       />
       

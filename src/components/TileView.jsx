@@ -348,12 +348,37 @@ export default function TileView({ events, eventsLoading = false }) {
   const hasMore = displayed.length < filtered.length;
 
   const popularEmojis = useMemo(() => {
-    const counts = {};
+    const directCounts = {};
     // Relative top vibes for the current filter frame (excluding emoji filter).
     baseFiltered.forEach(e => {
-      if (e.representative_emoji) counts[e.representative_emoji] = (counts[e.representative_emoji] || 0) + 1;
+      if (e.representative_emoji) {
+        directCounts[e.representative_emoji] = (directCounts[e.representative_emoji] || 0) + 1;
+      }
     });
-    const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]).map(e => e[0]);
+
+    const scored = Object.keys(directCounts).map((emoji) => {
+      const related = getRelatedEmojiSet(emoji);
+      const associated = [...related].reduce((sum, relEmoji) => {
+        if (relEmoji === emoji) return sum;
+        return sum + (directCounts[relEmoji] || 0);
+      }, 0);
+      const direct = directCounts[emoji] || 0;
+      return {
+        emoji,
+        direct,
+        associated,
+        score: direct + associated,
+      };
+    });
+
+    const sorted = scored
+      .sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        if (b.direct !== a.direct) return b.direct - a.direct;
+        return a.emoji.localeCompare(b.emoji);
+      })
+      .map(e => e.emoji);
+
     const limit = isMobile ? 7 : 8;
     return sorted.slice(0, limit);
   }, [baseFiltered, isMobile]);
@@ -590,7 +615,7 @@ export default function TileView({ events, eventsLoading = false }) {
                     {emojiPickerOpen ? '▲' : '▼'}
                   </button>
                   {emojiPickerOpen && (
-                    <div className={`absolute top-full mt-1 z-50 ${isMobile ? 'left-0' : 'right-0'}`}>
+                    <div className={`absolute top-full mt-1 z-50 ${isMobile ? 'right-0 max-w-[calc(100vw-1rem)]' : 'right-0'}`}>
                       <EmojiPicker
                         value=""
                         embedded
