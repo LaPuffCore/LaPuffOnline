@@ -59,6 +59,8 @@ export default function ParticipantDot({ onStatusChange }) {
   async function handleConfirm() {
     if (loading) return;
 
+    // Lock the popup open for the full validation flow regardless of hover state
+    setManualOpen(true);
     setLoading(true);
     setStage('validating');
     setProgress(6);
@@ -173,8 +175,7 @@ export default function ParticipantDot({ onStatusChange }) {
       {popupOpen && (
         <div
           onMouseEnter={() => setHoverOpen(true)}
-          onMouseLeave={() => { if (!manualOpen) setHoverOpen(false); }}
-          className="absolute top-10 left-1/2 -translate-x-1/2 z-50 bg-black text-white text-[11px] rounded-2xl px-3 py-3 w-72 max-w-[90vw] text-center font-bold shadow-lg whitespace-normal leading-snug"
+          className="absolute top-10 right-0 sm:right-auto sm:left-1/2 sm:-translate-x-1/2 z-50 bg-black text-white text-[11px] rounded-2xl px-3 py-3 w-72 max-w-[calc(100vw-1rem)] text-center font-bold shadow-lg whitespace-normal leading-snug relative"
         >
           {stage === 'prompt' && (
             <>
@@ -216,7 +217,16 @@ export default function ParticipantDot({ onStatusChange }) {
             </div>
           )}
 
-          {stage === 'result' && renderResult()}
+          {stage === 'result' && (
+            <>
+              <button
+                onClick={closePopup}
+                className="absolute top-2 right-2 w-5 h-5 rounded-full bg-white/20 hover:bg-white/40 flex items-center justify-center text-white text-[10px] font-black leading-none"
+                aria-label="Close"
+              >✕</button>
+              {renderResult()}
+            </>
+          )}
         </div>
       )}
     </div>
