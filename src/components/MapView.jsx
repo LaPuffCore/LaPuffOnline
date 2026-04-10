@@ -635,6 +635,8 @@ export default function MapView({ events }) {
   const [holoFeature,   setHoloFeature]   = useState(null);
   const [holoColor,     setHoloColor]     = useState(HEAT_COLORS.cold);
   const [isMobile,      setIsMobile]      = useState(false);
+  const [isOffline,     setIsOffline]     = useState(() => !navigator.onLine);
+  const [connectionNotice, setConnectionNotice] = useState('');
   // FIX ADDITIVE STATE: bump this after style swap so the main heatmap effect
   // re-runs and re-applies all paint properties to the freshly added layers.
   const [styleVersion,  setStyleVersion]  = useState(0);
@@ -650,6 +652,25 @@ export default function MapView({ events }) {
     check();
     window.addEventListener('resize', check);
     return () => window.removeEventListener('resize', check);
+  }, []);
+
+  useEffect(() => {
+    const onOnline = () => {
+      setIsOffline(false);
+      setConnectionNotice('');
+    };
+    const onOffline = () => {
+      setIsOffline(true);
+      // 3D features require live map/tile connection.
+      setThreeD(false);
+      setReal3D(false);
+    };
+    window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
+    return () => {
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
+    };
   }, []);
 
   // GeoJSON
@@ -1142,8 +1163,22 @@ export default function MapView({ events }) {
     }
   }, [heatmap, real3D, mapReady]);
 
-  const handleThreeDToggle = () => { setThreeD(v => { if (!v) setReal3D(false); return !v; }); };
-  const handleReal3DToggle = () => { setReal3D(v => { if (!v) setThreeD(false); return !v; }); };
+  const handleThreeDToggle = () => {
+    if (isOffline) {
+      setConnectionNotice('You must have an internet or mobile connection to use these features');
+      return;
+    }
+    setConnectionNotice('');
+    setThreeD(v => { if (!v) setReal3D(false); return !v; });
+  };
+  const handleReal3DToggle = () => {
+    if (isOffline) {
+      setConnectionNotice('You must have an internet or mobile connection to use these features');
+      return;
+    }
+    setConnectionNotice('');
+    setReal3D(v => { if (!v) setThreeD(false); return !v; });
+  };
 
   // Location orb
   useEffect(() => {
@@ -1249,6 +1284,11 @@ export default function MapView({ events }) {
                 🏛️ Real3D
               </button>
             </div>
+            {connectionNotice && (
+              <div className="max-w-[92vw] rounded-xl border border-red-400 bg-red-950/90 px-3 py-2 text-center">
+                <p className="text-red-200 text-xs font-black">{connectionNotice}</p>
+              </div>
+            )}
           </div>
 
           {/* Center-to-location */}
@@ -1265,7 +1305,7 @@ export default function MapView({ events }) {
               <span className="text-yellow-400 text-xl">⚠️</span>
               <div>
                 <p className="text-yellow-200 font-black text-sm">You are not in NYC</p>
-                <p className="text-yellow-400/70 text-xs mt-0.5">Orbiter mode — view only.</p>
+                <p className="text-yellow-400/70 text-xs mt-0.5">Offline mode — view only.</p>
               </div>
             </div>
           )}

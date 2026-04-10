@@ -8,6 +8,8 @@ import {
   getFavoriteCount,
   getFavTrend,
   subscribeToFavoriteCount,
+  mergeFavoriteEventsWithCache,
+  hydrateFavoriteEventCache,
 } from '../lib/favorites';
 import { getUserTZOffset, utcToLocal } from '../lib/timezones';
 
@@ -155,10 +157,15 @@ export default function FavoritesPage({ events = [] }) {
     return () => window.removeEventListener('favoritesChanged', handler);
   }, []);
 
-  const favEvents = useMemo(
-    () => events.filter((e) => favorites.includes(String(e.id))).sort(sortByDateThenName),
-    [events, favorites]
-  );
+  useEffect(() => {
+    hydrateFavoriteEventCache(events);
+  }, [events]);
+
+  const favEvents = useMemo(() => {
+    const merged = mergeFavoriteEventsWithCache(events);
+    const favSet = new Set(favorites.map(String));
+    return merged.filter((e) => favSet.has(String(e.id))).sort(sortByDateThenName);
+  }, [events, favorites]);
 
   const groupedByDate = useMemo(() => {
     const map = new Map();
@@ -177,7 +184,7 @@ export default function FavoritesPage({ events = [] }) {
   }
 
   return (
-    <div className="min-h-screen bg-[#FAFAF8]">
+    <div className="min-h-screen bg-[#FAFAF8] lp-theme-scope lp-page-bg">
       <div className="max-w-7xl mx-auto px-3 md:px-4 py-5 md:py-6 overflow-visible">
         <div className="flex items-start md:items-center justify-between mb-6 md:mb-7 gap-3 md:gap-4">
           <Link

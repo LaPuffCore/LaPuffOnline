@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabaseAuth';
 import { getValidSession } from '../lib/supabaseAuth';
+import { useSiteTheme } from '../lib/theme';
 import { Trophy, Zap, ChevronRight, ChevronLeft, X } from 'lucide-react';
 
 // ============================================================
@@ -33,7 +34,8 @@ export default function Leaderboard({ onClose }) {
   const [isMobile, setIsMobile] = useState(false);
   const [signedInUser, setSignedInUser] = useState(null);
   const [positionChanges, setPositionChanges] = useState({}); // trackId -> { oldRank, newRank }
-  
+  const { resolvedTheme } = useSiteTheme();
+
   const USERS_PER_PAGE = 10;
 
   useEffect(() => {
@@ -131,26 +133,46 @@ export default function Leaderboard({ onClose }) {
     return 'text-fuchsia-100';
   }
 
-  if (loading) return <div className="p-4 font-black text-xs animate-pulse text-center text-black">SYNCING_CLOUT_INDEX...</div>;
+  function trophyBadge(rank, tier) {
+    if (rank > 10) return null;
+
+    const config = tier === 'gold'
+      ? { fill: '#FFD84D', number: '#2b1600', trophy: '#6b3d00' }
+      : tier === 'silver'
+        ? { fill: '#334155', number: '#FFFFFF', trophy: '#E2E8F0' }
+        : { fill: '#9A5B2E', number: '#FFFFFF', trophy: '#FFF1E6' };
+
+    return (
+      <span className="relative w-5 h-5 flex items-center justify-center">
+        <Trophy className="w-5 h-5" style={{ color: config.trophy, fill: config.fill }} />
+        <span className="absolute inset-0 flex items-center justify-center text-[9px] font-black" style={{ color: config.number, paddingTop: 2 }}>
+          {rank}
+        </span>
+      </span>
+    );
+  }
+
+  if (loading) return <div className="p-4 font-black text-xs animate-pulse text-center text-black" style={{ color: resolvedTheme.leaderboardTextColor }}>SYNCING_CLOUT_INDEX...</div>;
 
   return (
-    <div className="bg-black border-2 border-black rounded-xl overflow-hidden shadow-[4px_4px_0px_black] w-full max-w-sm mx-auto max-h-[calc(100dvh-1rem)] md:max-h-[calc(100dvh-3rem)]">
+    <div className="lp-theme-scope bg-black border-2 border-black rounded-xl overflow-hidden shadow-[4px_4px_0px_black] w-full max-w-sm mx-auto max-h-[calc(100dvh-1rem)] md:max-h-[calc(100dvh-3rem)]" style={{ backgroundColor: resolvedTheme.leaderboardBackgroundColor, borderColor: resolvedTheme.buttonOutlineColor, boxShadow: `4px 4px 0px ${resolvedTheme.tileShadowColor}` }}>
       {/* Header */}
-      <div className="bg-violet-600 p-2.5 md:p-3 border-b-2 border-black flex items-center justify-between">
+      <div className="p-2.5 md:p-3 border-b-2 border-black flex items-center justify-between" style={{ backgroundColor: resolvedTheme.leaderboardHeaderColor, borderColor: resolvedTheme.buttonOutlineColor }}>
         <div className="flex items-center gap-2">
-          <Trophy className="w-4 h-4 text-white" />
-          <h2 className="text-white font-black text-[10px] md:text-xs tracking-tighter uppercase">The Clout Index — Top 50</h2>
+          <Trophy className="w-4 h-4" style={{ color: resolvedTheme.leaderboardHeaderTextColor, fill: resolvedTheme.leaderboardHeaderTextColor }} />
+          <h2 className="font-black text-[10px] md:text-xs tracking-tighter uppercase" style={{ color: resolvedTheme.leaderboardHeaderTextColor }}>The Clout Index — Top 50</h2>
         </div>
         <button
           onClick={onClose}
-          className="bg-black text-white w-6 h-6 rounded flex items-center justify-center hover:bg-gray-800 transition-colors"
+          className="w-6 h-6 rounded flex items-center justify-center hover:bg-gray-800 transition-colors"
+          style={{ backgroundColor: resolvedTheme.buttonOutlineColor, color: resolvedTheme.leaderboardHeaderTextColor }}
           aria-label="Close leaderboard"
         >
           <X className="w-4 h-4" />
         </button>
       </div>
 
-      <div className="bg-gray-100 border-b-2 border-black px-2.5 py-1 grid grid-cols-[16px_20px_1fr_auto_62px] md:grid-cols-[16px_20px_1fr_auto_72px] gap-2 text-[9px] md:text-[10px] font-black uppercase tracking-wide text-gray-600">
+      <div className="bg-gray-100 border-b-2 border-black px-2.5 py-1 grid grid-cols-[16px_20px_1fr_auto_62px] md:grid-cols-[16px_20px_1fr_auto_72px] gap-2 text-[9px] md:text-[10px] font-black uppercase tracking-wide text-gray-600" style={{ color: resolvedTheme.leaderboardTextColor, borderColor: resolvedTheme.buttonOutlineColor }}>
         <span>△</span>
         <span>#</span>
         <span>Name</span>

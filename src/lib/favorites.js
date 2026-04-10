@@ -48,6 +48,8 @@ import { getValidSession, supabase } from './supabaseAuth';
 const FAVS_KEY    = 'lapuff_favorites';
 const COUNTS_KEY  = 'lapuff_fav_counts';
 const HISTORY_KEY = 'lapuff_fav_history';
+const FAV_EVENT_CACHE_KEY = 'lapuff_favorite_event_cache';
+const MAX_FAVORITE_EVENT_CACHE = 240;
 const SB_SYNC_VERSION_KEY = 'lapuff_sb_favs_version';
 const SB_SYNC_VERSION = '2';
 
@@ -57,6 +59,110 @@ const SB_FAVS_KEY = 'lapuff_sb_favs';
 
 function normalizeEventId(eventId) {
   return String(eventId);
+}
+
+function sanitizeFavoriteEventSnapshot(event) {
+  if (!event || !event.id) return null;
+  return {
+    id: normalizeEventId(event.id),
+    event_name: event.event_name || '',
+    event_date: event.event_date || null,
+    event_time_utc: event.event_time_utc || null,
+    hex_color: event.hex_color || null,
+    representative_emoji: event.representative_emoji || null,
+    description: event.description || null,
+    price_category: event.price_category || null,
+    location_data: event.location_data || {},
+    photos: Array.isArray(event.photos) ? event.photos : [],
+    tags: Array.isArray(event.tags) ? event.tags : [],
+    relevant_links: Array.isArray(event.relevant_links) ? event.relevant_links : [],
+    source: event.source || null,
+    cachedAt: Date.now(),
+  };
+}
+
+function getFavoriteEventCacheMap() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(FAV_EVENT_CACHE_KEY) || '{}');
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveFavoriteEventCacheMap(map) {
+  localStorage.setItem(FAV_EVENT_CACHE_KEY, JSON.stringify(map));
+}
+
+function pruneFavoriteEventCacheMap(map, maxSize = MAX_FAVORITE_EVENT_CACHE) {
+  const entries = Object.entries(map || {});
+  if (entries.length <= maxSize) return map;
+
+  const favoriteIds = new Set(getFavorites().map(normalizeEventId));
+  const favoriteEntries = [];
+  const nonFavoriteEntries = [];
+
+  entries.forEach(([id, value]) => {
+    if (favoriteIds.has(normalizeEventId(id))) favoriteEntries.push([id, value]);
+    else nonFavoriteEntries.push([id, value]);
+  });
+
+  // Keep non-favorites by recency after preserving all favorited snapshots.
+  nonFavoriteEntries.sort((a, b) => (b?.[1]?.cachedAt || 0) - (a?.[1]?.cachedAt || 0));
+  const keepNonFav = Math.max(0, maxSize - favoriteEntries.length);
+
+  return Object.fromEntries([...favoriteEntries, ...nonFavoriteEntries.slice(0, keepNonFav)]);
+}
+
+export function cacheFavoriteEvent(event) {
+  const snapshot = sanitizeFavoriteEventSnapshot(event);
+  if (!snapshot) return;
+  const cache = getFavoriteEventCacheMap();
+  cache[snapshot.id] = snapshot;
+  saveFavoriteEventCacheMap(pruneFavoriteEventCacheMap(cache));
+}
+
+export function removeCachedFavoriteEvent(eventId) {
+  const id = normalizeEventId(eventId);
+  const cache = getFavoriteEventCacheMap();
+  if (!(id in cache)) return;
+  delete cache[id];
+  saveFavoriteEventCacheMap(cache);
+}
+
+export function hydrateFavoriteEventCache(events = []) {
+  const favSet = new Set(getFavorites().map(normalizeEventId));
+  if (!favSet.size || !Array.isArray(events) || !events.length) return;
+
+  const cache = getFavoriteEventCacheMap();
+  let changed = false;
+
+  events.forEach((event) => {
+    const id = normalizeEventId(event?.id);
+    if (!id || !favSet.has(id)) return;
+    const snapshot = sanitizeFavoriteEventSnapshot(event);
+    if (!snapshot) return;
+    cache[id] = snapshot;
+    changed = true;
+  });
+
+  if (changed) saveFavoriteEventCacheMap(pruneFavoriteEventCacheMap(cache));
+}
+
+export function getCachedFavoriteEvents() {
+  const cache = getFavoriteEventCacheMap();
+  const favSet = new Set(getFavorites().map(normalizeEventId));
+  return Object.values(cache).filter((event) => favSet.has(normalizeEventId(event.id)));
+}
+
+export function mergeFavoriteEventsWithCache(events = []) {
+  const liveMap = new Map((Array.isArray(events) ? events : []).map((event) => [normalizeEventId(event.id), event]));
+  const favIds = getFavorites().map(normalizeEventId);
+  const cache = getFavoriteEventCacheMap();
+
+  return favIds
+    .map((id) => liveMap.get(id) || cache[id])
+    .filter(Boolean);
 }
 
 function migrateAnonymousSyncState() {
@@ -166,7 +272,7 @@ function saveSbFavs(set) {
 
 // ─── TOGGLE ───────────────────────────────────────────────────────────────────
 
-export async function toggleFavorite(eventId) {
+export async function toggleFavorite(eventId, eventSnapshot = null) {
   const id = normalizeEventId(eventId);
   const favs = getFavorites();
   const idx = favs.indexOf(id);
@@ -175,6 +281,13 @@ export async function toggleFavorite(eventId) {
   // ── 1. ORIGINAL LOCAL UPDATE (unchanged) ──────────────────────────────────
   if (adding) favs.push(id); else favs.splice(idx, 1);
   localStorage.setItem(FAVS_KEY, JSON.stringify(favs));
+
+  if (adding && eventSnapshot) {
+    cacheFavoriteEvent(eventSnapshot);
+  }
+  if (!adding) {
+    removeCachedFavoriteEvent(id);
+  }
 
   const counts = getCounts();
   counts[id] = Math.max(0, (counts[id] || 0) + (adding ? 1 : -1));

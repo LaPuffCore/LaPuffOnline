@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import EventDetailPopup from '../components/EventDetailPopup';
-import { getFavorites } from '../lib/favorites';
+import { getFavorites, mergeFavoriteEventsWithCache, hydrateFavoriteEventCache } from '../lib/favorites';
 import { getUserTZOffset, utcToLocal } from '../lib/timezones';
 import { generateAutoTags } from '../lib/autoTags';
 import { TAG_COLORS } from '../lib/tagColors';
+import { useSiteTheme } from '../lib/theme';
 
 function getDaysInMonth(year, month) { return new Date(year, month + 1, 0).getDate(); }
 function getFirstDay(year, month) { return new Date(year, month, 1).getDay(); }
@@ -127,6 +128,7 @@ export default function CalendarPage({ events = [] }) {
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [expandedEvents, setExpandedEvents] = useState({});
   const [isMobile, setIsMobile] = useState(false);
+  const { resolvedTheme } = useSiteTheme();
 
   useEffect(() => {
     const onResize = () => setIsMobile(window.innerWidth < 768);
@@ -153,7 +155,15 @@ export default function CalendarPage({ events = [] }) {
     return () => window.removeEventListener('favoritesChanged', handler);
   }, []);
 
-  const favEvents = useMemo(() => events.filter((e) => favorites.includes(String(e.id))), [events, favorites]);
+  useEffect(() => {
+    hydrateFavoriteEventCache(events);
+  }, [events]);
+
+  const favEvents = useMemo(() => {
+    const merged = mergeFavoriteEventsWithCache(events);
+    const favSet = new Set(favorites.map(String));
+    return merged.filter((e) => favSet.has(String(e.id)));
+  }, [events, favorites]);
 
   function eventsForDate(date) {
     const key = date.toISOString().split('T')[0];
@@ -427,7 +437,7 @@ export default function CalendarPage({ events = [] }) {
       : curDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
 
   return (
-    <div className="h-[100dvh] overflow-hidden bg-[#FAFAF8]">
+    <div className="h-[100dvh] overflow-hidden bg-[#FAFAF8] lp-theme-scope" style={{ backgroundColor: resolvedTheme.calendarBackgroundColor }}>
       <div className="max-w-7xl mx-auto h-full px-3 md:px-4 py-4 md:py-5 flex flex-col min-h-0">
         <div className="grid grid-cols-[72px_minmax(0,1fr)_72px] md:grid-cols-[88px_minmax(0,1fr)_88px] items-start md:items-center mb-3 md:mb-4 gap-2 md:gap-4">
           <Link to="/" className="w-[72px] md:w-[88px] flex flex-col items-center justify-start text-black hover:text-[#7C3AED] transition-colors">

@@ -75,7 +75,7 @@ export default function EventTile({ event, onClick, onTagClick }) {
 
   const handleFav = async (e) => {
     e.stopPropagation();
-    const newFav = await toggleFavorite(event.id);
+    const newFav = await toggleFavorite(event.id, event);
     setFav(newFav);
     const count = await getFavoriteCount(event.id);
     const t = getFavTrend(event.id);

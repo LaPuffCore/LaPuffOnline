@@ -12,6 +12,8 @@ import { queryClientInstance } from './lib/query-client' // Fixed @ alias
 import { BrowserRouter as Router, Route, Routes } from 'react-router-dom';
 import PageNotFound from './lib/PageNotFound';
 import { AuthProvider, useAuth } from './lib/AuthContext'; // Fixed @ alias
+import { ThemeProvider } from './lib/theme';
+import { hydrateFavoriteEventCache } from './lib/favorites';
 // Add page imports here
 import Home from './pages/Home';
 import FavoritesPage from './pages/FavoritesPage';
@@ -84,6 +86,10 @@ function AppWithEvents() {
     };
   }, []);
 
+  useEffect(() => {
+    hydrateFavoriteEventCache(events);
+  }, [events]);
+
   return (
     <Routes>
       <Route path="/" element={<Home events={events} eventsLoading={eventsLoading} />} />
@@ -112,13 +118,15 @@ const AuthenticatedApp = () => {
 function App() {
   return (
     <AuthProvider>
-      <QueryClientProvider client={queryClientInstance}>
-        {/* IMPORTANT: Added basename so Router knows it lives in a subfolder */}
-        <Router basename="/LaPuffOnline">
-          <AuthenticatedApp />
-        </Router>
-        <Toaster />
-      </QueryClientProvider>
+      <ThemeProvider>
+        <QueryClientProvider client={queryClientInstance}>
+          {/* IMPORTANT: Added basename so Router knows it lives in a subfolder */}
+          <Router basename="/LaPuffOnline">
+            <AuthenticatedApp />
+          </Router>
+          <Toaster />
+        </QueryClientProvider>
+      </ThemeProvider>
     </AuthProvider>
   )
 }

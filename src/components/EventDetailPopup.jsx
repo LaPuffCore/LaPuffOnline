@@ -119,7 +119,7 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
 
   const handleFavoriteClick = async (e) => {
     e.stopPropagation();
-    const newFav = await toggleFavorite(event.id);
+    const newFav = await toggleFavorite(event.id, event);
     setFav(isFavorite(event.id));
     const count = await getFavoriteCount(event.id);
     const t = getFavTrend(event.id);
@@ -159,7 +159,7 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
 
   return (
     <div 
-      className={`${isMobile ? 'fixed inset-0 overflow-y-auto overscroll-contain' : 'absolute inset-x-0'} z-[100000] min-h-screen flex flex-col items-center p-2 sm:p-4`}
+      className={`lp-theme-scope ${isMobile ? 'fixed inset-0 overflow-y-auto overscroll-contain' : 'absolute inset-x-0'} z-[100000] min-h-screen flex flex-col items-center p-2 sm:p-4`}
       style={isMobile ? undefined : { top: `${scrollOffset}px` }}
     >
       <div 

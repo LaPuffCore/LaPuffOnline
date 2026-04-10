@@ -11,6 +11,7 @@ import { awardPoints, POINTS } from '../lib/pointsSystem';
  */
 export default function ParticipantDot({ onStatusChange }) {
   const [status, setStatus] = useState(() => getNYCParticipantStatus());
+  const [isOffline, setIsOffline] = useState(() => !navigator.onLine);
   const [loading, setLoading] = useState(false);
   const [hoverOpen, setHoverOpen] = useState(false);
   const [manualOpen, setManualOpen] = useState(false);
@@ -26,6 +27,17 @@ export default function ParticipantDot({ onStatusChange }) {
   }, []);
 
   useEffect(() => {
+    const onOnline = () => setIsOffline(false);
+    const onOffline = () => setIsOffline(true);
+    window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
+    return () => {
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
+    };
+  }, []);
+
+  useEffect(() => {
     return () => {
       if (progressTimerRef.current) clearInterval(progressTimerRef.current);
     };
@@ -33,6 +45,7 @@ export default function ParticipantDot({ onStatusChange }) {
 
   const popupOpen = manualOpen || hoverOpen;
   const isParticipant = status === 'participant';
+  const statusLabel = isParticipant ? 'participant' : 'offline';
   const dotColor = loading ? '#eab308' : isParticipant ? '#22c55e' : '#ef4444';
   const labelColor = loading ? '#ca8a04' : isParticipant ? '#16a34a' : '#dc2626';
 
@@ -129,7 +142,10 @@ export default function ParticipantDot({ onStatusChange }) {
     if (isParticipant) {
       return 'would you like to re-sync your Participant Status? (Disables every 24 hours)';
     }
-    return 'Would you like to upgrade from Orbiter with a one time and private location ping?';
+    if (isOffline) {
+      return 'You are currently in Offline cache mode. Reconnect to upgrade with a one-time private location ping.';
+    }
+    return 'Would you like to upgrade from Offline with a one time and private location ping?';
   }
 
   function renderResult() {
@@ -146,7 +162,7 @@ export default function ParticipantDot({ onStatusChange }) {
       return (
         <div className="mt-3 rounded-xl border-2 border-red-300 bg-red-50 p-3 text-center">
           <div className="text-4xl leading-none">❌</div>
-          <p className="mt-2 text-xs font-black text-red-700">You are not in NYC and maintain class 'Orbiter'</p>
+          <p className="mt-2 text-xs font-black text-red-700">You are not in NYC and remain in Offline class</p>
         </div>
       );
     }
@@ -178,7 +194,7 @@ export default function ParticipantDot({ onStatusChange }) {
           style={{ background: dotColor, boxShadow: `0 0 6px ${dotColor}` }}
         />
         <span className="text-xs font-black uppercase tracking-tighter" style={{ color: labelColor }}>
-          {loading && stage === 'validating' ? 'syncing' : status}
+          {loading && stage === 'validating' ? 'syncing' : statusLabel}
         </span>
       </button>
 

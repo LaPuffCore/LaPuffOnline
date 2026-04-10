@@ -62,7 +62,7 @@ export default function AuthModal({ onClose, onSuccess }) {
   }
 
   return (
-    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
+    <div className="lp-theme-scope fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white border-4 border-black rounded-3xl w-full shadow-[8px_8px_0px_black] overflow-hidden"
         style={{ maxWidth: 760, maxHeight: '90vh' }}
         onClick={e => e.stopPropagation()}>

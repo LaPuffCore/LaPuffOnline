@@ -387,7 +387,7 @@ export default function TileView({ events, eventsLoading = false }) {
   const hasActiveMoreFilters = priceFilter !== 'all' || emojiFilters.length > 0 || borough !== 'All';
 
   return (
-    <div className="w-full sm:scale-100 scale-[0.98] origin-top transition-transform">
+    <div className="w-full sm:scale-100 scale-[0.98] origin-top transition-transform lp-theme-scope">
       {/* Filter bar */}
       <div className="bg-white border-b-3 border-black sticky top-0 z-30 px-4 py-3 md:space-y-2.5 space-y-2 rounded-b-[24px] shadow-md">
 
