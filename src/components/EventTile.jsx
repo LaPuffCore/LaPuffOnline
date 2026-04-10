@@ -46,10 +46,8 @@ export default function EventTile({ event, onClick, onTagClick }) {
     
     const syncState = async () => {
       const currentFav = isFavorite(event.id);
-      const [count, t] = await Promise.all([
-        getFavoriteCount(event.id),
-        getFavTrend(event.id),
-      ]);
+      const count = await getFavoriteCount(event.id);
+      const t = getFavTrend(event.id);
       if (!mounted) return;
       setFav(currentFav);
       setFavCount(count);
@@ -65,6 +63,7 @@ export default function EventTile({ event, onClick, onTagClick }) {
     const unsubscribe = subscribeToFavoriteCount(event.id, (newCount) => {
       if (!mounted) return;
       setFavCount(newCount);
+      setTrend(getFavTrend(event.id));
     });
     
     return () => {
@@ -78,10 +77,8 @@ export default function EventTile({ event, onClick, onTagClick }) {
     e.stopPropagation();
     const newFav = await toggleFavorite(event.id);
     setFav(newFav);
-    const [count, t] = await Promise.all([
-      getFavoriteCount(event.id),
-      getFavTrend(event.id),
-    ]);
+    const count = await getFavoriteCount(event.id);
+    const t = getFavTrend(event.id);
     setFavCount(count);
     setTrend(t);
     if (newFav) {

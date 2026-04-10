@@ -81,10 +81,8 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
 
     const syncFavorites = async () => {
       const currentFav = isFavorite(event.id);
-      const [count, t] = await Promise.all([
-        getFavoriteCount(event.id),
-        getFavTrend(event.id),
-      ]);
+      const count = await getFavoriteCount(event.id);
+      const t = getFavTrend(event.id);
       setFav(currentFav);
       setFavCount(count);
       setTrend(t);
@@ -97,6 +95,7 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
     // Listen for real-time count changes from other users/devices
     const unsubscribe = subscribeToFavoriteCount(event.id, (newCount) => {
       setFavCount(newCount);
+      setTrend(getFavTrend(event.id));
     });
     
     const handleKey = (e) => {
@@ -119,10 +118,8 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
     e.stopPropagation();
     const newFav = await toggleFavorite(event.id);
     setFav(isFavorite(event.id));
-    const [count, t] = await Promise.all([
-      getFavoriteCount(event.id),
-      getFavTrend(event.id),
-    ]);
+    const count = await getFavoriteCount(event.id);
+    const t = getFavTrend(event.id);
     setFavCount(count);
     setTrend(t);
     if (newFav) {
