@@ -30,6 +30,41 @@ const MAX_TAG_FILTERS = 3;
 const MAX_EMOJI_FILTERS = 5;
 const PAGE_SIZE = 12;
 
+const EMOJI_GROUPS = [
+  ['⚽', '🏀', '🏈', '⚾', '🥎', '🎾', '🏐', '🏉', '🥊', '🏒', '🎽', '🏆', '🥇', '🥈', '🥉'],
+  ['🌸', '🌺', '🌻', '🌹', '🌷', '🌿', '🌱', '🍃', '🍀', '☘️'],
+  ['🎨', '🖌️', '🖼️', '📷', '📸', '🎭', '🖋️'],
+  ['🎵', '🎶', '🎼', '🎤', '🎧', '🎷', '🎺', '🎸', '🎻', '🥁', '🎹'],
+  ['🍕', '🍔', '🌮', '🍣', '🍜', '🍺', '🍷', '🍸', '🍹', '🥂', '🍽️', '🥘'],
+  ['💃', '🕺', '🎉', '🎊', '🎈', '🪩', '✨'],
+  ['📚', '📖', '📝', '✍️', '📰'],
+  ['🌙', '🌃', '🌆', '⭐', '🌟', '💫'],
+  ['🏙️', '🗽', '🏛️', '🏝️', '🏞️'],
+  ['🦁', '🐶', '🐱', '🐼', '🦊', '🐯', '🦄', '🦋', '🐬'],
+];
+
+function getRelatedEmojiSet(emoji) {
+  const group = EMOJI_GROUPS.find(g => g.includes(emoji));
+  return new Set(group || [emoji]);
+}
+
+function getEmojiPriorityRank(eventEmoji, selectedEmojis) {
+  if (!eventEmoji || !selectedEmojis.length) return Number.POSITIVE_INFINITY;
+
+  let bestRank = Number.POSITIVE_INFINITY;
+  selectedEmojis.forEach((selected, idx) => {
+    if (eventEmoji === selected) {
+      bestRank = Math.min(bestRank, idx * 2);
+      return;
+    }
+    const related = getRelatedEmojiSet(selected);
+    if (related.has(eventEmoji)) {
+      bestRank = Math.min(bestRank, idx * 2 + 1);
+    }
+  });
+  return bestRank;
+}
+
 const ALL_TAGS = [
   'music', 'jazz', 'art', 'food', 'brunch', 'market', 'sports', 'workshop', 'lecture',
   'family', 'kids', 'outdoor', 'free', 'nightlife', 'culture', 'fashion', 'film',
@@ -214,7 +249,7 @@ export default function TileView({ events, eventsLoading = false }) {
     resetPage();
   }
 
-  const filtered = useMemo(() => {
+  const baseFiltered = useMemo(() => {
     const now = new Date(); now.setHours(0, 0, 0, 0);
     const maxDate = new Date(now.getTime() + TIMESPAN_OPTIONS[timespanIdx].days * 86400000);
 
@@ -245,10 +280,6 @@ export default function TileView({ events, eventsLoading = false }) {
 
     if (borough !== 'All') list = list.filter(e => (e.borough || e.location_data?.city || '').toLowerCase() === borough.toLowerCase());
 
-    if (emojiFilters.length > 0) {
-      list = list.filter(e => emojiFilters.includes(e.representative_emoji));
-    }
-
     if (priceFilter !== 'all') list = list.filter(e => e.price_category === priceFilter);
     if (rsvpOnly) list = list.filter(e => !!e.location_data?.rsvp_link);
     if (favOnly) list = list.filter(e => isFavorite(e.id));
@@ -262,12 +293,42 @@ export default function TileView({ events, eventsLoading = false }) {
 
     if (trendFilter) list = list.filter(e => (trendCache[e.id] || 'neutral') === trendFilter);
 
+    return list;
+  }, [events, search, timespanIdx, showArchive, borough, priceFilter, rsvpOnly, favOnly, sourceMode, tagFilters, favVersion, trendFilter, trendCache]);
+
+  const filtered = useMemo(() => {
+    let list = [...baseFiltered];
+    let emojiRanks = null;
+
+    if (emojiFilters.length > 0) {
+      emojiRanks = new Map();
+      list = list.filter(e => {
+        const rank = getEmojiPriorityRank(e.representative_emoji, emojiFilters);
+        if (Number.isFinite(rank)) {
+          emojiRanks.set(e.id, rank);
+          return true;
+        }
+        return false;
+      });
+    }
+
     list.sort((a, b) => showArchive
       ? new Date(b.event_date) - new Date(a.event_date)
       : new Date(a.event_date) - new Date(b.event_date));
 
+    if (emojiRanks) {
+      list.sort((a, b) => {
+        const ra = emojiRanks.get(a.id) ?? Number.POSITIVE_INFINITY;
+        const rb = emojiRanks.get(b.id) ?? Number.POSITIVE_INFINITY;
+        if (ra !== rb) return ra - rb;
+        return showArchive
+          ? new Date(b.event_date) - new Date(a.event_date)
+          : new Date(a.event_date) - new Date(b.event_date);
+      });
+    }
+
     return list;
-  }, [events, search, timespanIdx, showArchive, borough, emojiFilters, priceFilter, rsvpOnly, favOnly, sourceMode, tagFilters, favVersion, trendFilter, trendCache]);
+  }, [baseFiltered, emojiFilters, showArchive]);
 
   // NAVIGATION LOGIC: Calculate index within the current filtered list
   const currentEventIndex = useMemo(() => {
@@ -288,11 +349,14 @@ export default function TileView({ events, eventsLoading = false }) {
 
   const popularEmojis = useMemo(() => {
     const counts = {};
-    events.forEach(e => { if (e.representative_emoji) counts[e.representative_emoji] = (counts[e.representative_emoji] || 0) + 1; });
+    // Relative top vibes for the current filter frame (excluding emoji filter).
+    baseFiltered.forEach(e => {
+      if (e.representative_emoji) counts[e.representative_emoji] = (counts[e.representative_emoji] || 0) + 1;
+    });
     const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]).map(e => e[0]);
     const limit = isMobile ? 7 : 8;
     return sorted.slice(0, limit);
-  }, [events, isMobile]);
+  }, [baseFiltered, isMobile]);
 
   const availableTags = ALL_TAGS.filter(t => !tagFilters.includes(t));
   const hasActiveMoreFilters = priceFilter !== 'all' || emojiFilters.length > 0 || borough !== 'All';
@@ -526,9 +590,11 @@ export default function TileView({ events, eventsLoading = false }) {
                     {emojiPickerOpen ? '▲' : '▼'}
                   </button>
                   {emojiPickerOpen && (
-                    <div className="absolute top-full right-0 mt-1 z-50">
+                    <div className={`absolute top-full mt-1 z-50 ${isMobile ? 'left-0' : 'right-0'}`}>
                       <EmojiPicker
                         value=""
+                        embedded
+                        compact={isMobile}
                         onChange={emoji => {
                           if (emoji) toggleEmojiFilter(emoji);
                           setEmojiPickerOpen(false);

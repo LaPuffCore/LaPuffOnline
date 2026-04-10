@@ -68,17 +68,21 @@ const EMOJI_CATEGORIES = [
   },
 ];
 
-export default function EmojiPicker({ value, onChange }) {
-  const [open, setOpen] = useState(false);
+export default function EmojiPicker({ value, onChange, embedded = false, compact = false }) {
+  const [open, setOpen] = useState(embedded);
   const [catIdx, setCatIdx] = useState(0);
   const [search, setSearch] = useState('');
   const ref = useRef(null);
 
   useEffect(() => {
+    if (embedded) setOpen(true);
+  }, [embedded]);
+
+  useEffect(() => {
     function handler(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
-    if (open) document.addEventListener('mousedown', handler);
+    if (open && !embedded) document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
-  }, [open]);
+  }, [open, embedded]);
 
   const currentCat = EMOJI_CATEGORIES[catIdx];
   const displayedEmojis = search
@@ -88,17 +92,8 @@ export default function EmojiPicker({ value, onChange }) {
       }).slice(0, 80)
     : currentCat.emojis;
 
-  return (
-    <div ref={ref} className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen(v => !v)}
-        className={`w-14 h-14 rounded-2xl border-3 border-black bg-white text-2xl hover:scale-105 transition-transform shadow-[3px_3px_0px_black] flex items-center justify-center ${open ? 'ring-2 ring-[#7C3AED]' : ''}`}
-      >
-        {value || '🔍'}
-      </button>
-      {open && (
-        <div className="absolute z-50 top-16 left-0 bg-white border-3 border-black rounded-3xl shadow-[6px_6px_0px_black] w-80 overflow-hidden">
+  const panel = (
+    <div className={`${embedded ? 'relative' : 'absolute z-50 top-16 left-0'} bg-white border-3 border-black rounded-3xl shadow-[6px_6px_0px_black] ${compact ? 'w-[min(20rem,calc(100vw-2.25rem))]' : 'w-80'} overflow-hidden`}>
           {/* Search */}
           <div className="p-2 border-b-2 border-black">
             <input value={search} onChange={e => setSearch(e.target.value)}
@@ -117,7 +112,7 @@ export default function EmojiPicker({ value, onChange }) {
             </div>
           )}
           {/* Emoji grid */}
-          <div className="grid grid-cols-9 gap-0.5 p-2 max-h-48 overflow-y-auto">
+          <div className={`grid grid-cols-9 gap-0.5 p-2 ${compact ? 'max-h-40' : 'max-h-48'} overflow-y-auto`}>
             {/* Clear button if selected */}
             {value && (
               <button type="button" onClick={() => { onChange(''); setOpen(false); }}
@@ -134,7 +129,20 @@ export default function EmojiPicker({ value, onChange }) {
             ))}
           </div>
         </div>
+  );
+
+  return (
+    <div ref={ref} className="relative">
+      {!embedded && (
+        <button
+          type="button"
+          onClick={() => setOpen(v => !v)}
+          className={`w-14 h-14 rounded-2xl border-3 border-black bg-white text-2xl hover:scale-105 transition-transform shadow-[3px_3px_0px_black] flex items-center justify-center ${open ? 'ring-2 ring-[#7C3AED]' : ''}`}
+        >
+          {value || '🔍'}
+        </button>
       )}
+      {open && panel}
     </div>
   );
 }
