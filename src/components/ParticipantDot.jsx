@@ -18,6 +18,7 @@ export default function ParticipantDot({ onStatusChange }) {
   const [progress, setProgress] = useState(0);
   const [resultType, setResultType] = useState(null); // success | fail | warning
   const progressTimerRef = useRef(null);
+  const popupRef = useRef(null);
 
   useEffect(() => {
     const id = setInterval(() => setStatus(getNYCParticipantStatus()), 120000);
@@ -64,35 +65,32 @@ export default function ParticipantDot({ onStatusChange }) {
     setLoading(true);
     setStage('validating');
     setProgress(6);
+    const startedAt = Date.now();
 
     progressTimerRef.current = setInterval(() => {
       setProgress(prev => (prev >= 92 ? prev : prev + Math.floor(Math.random() * 8 + 2)));
     }, 140);
 
+    let nextStatus = null;
+    let finalResultType = 'warning';
+    let statusResultPayload = null;
+
     try {
       const result = await pingNYCLocation();
-      const nextStatus = result.inNYC ? 'participant' : 'orbiter';
-      setStatus(nextStatus);
-      if (onStatusChange) onStatusChange(nextStatus, result);
+      nextStatus = result.inNYC ? 'participant' : 'orbiter';
+      statusResultPayload = result;
 
-      // If location check succeeded AND user is signed in, award points for existing favorites
       if (result.inNYC) {
         const session = await getValidSession();
         if (session?.user?.id) {
-          // Mark contributions and get count of events that received marks
           const eventsContributed = await markFavoriteContributions(session);
-          
           if (eventsContributed > 0) {
-            // Calculate final points based on front-end POINTS configuration
             const pointsAmount = eventsContributed * POINTS.EVENT_FAVORITED;
-            
-            // Award calculated points via secure RPC (adds to clout_points total)
             const awarded = await awardPoints(
               session,
               pointsAmount,
               `Favorite point contributions (${eventsContributed} event${eventsContributed > 1 ? 's' : ''} as active participant)`
             );
-            
             if (awarded) {
               console.log(`Awarded ${pointsAmount} points for ${eventsContributed} favorite(s)`);
             }
@@ -100,18 +98,30 @@ export default function ParticipantDot({ onStatusChange }) {
         }
       }
 
-      setResultType(result.inNYC ? 'success' : 'fail');
+      finalResultType = result.inNYC ? 'success' : 'fail';
     } catch (err) {
       console.warn('Ping failed:', err);
-      setResultType('warning');
+      finalResultType = 'warning';
     } finally {
+      const elapsed = Date.now() - startedAt;
+      if (elapsed < 3000) {
+        await new Promise(resolve => setTimeout(resolve, 3000 - elapsed));
+      }
+
       if (progressTimerRef.current) {
         clearInterval(progressTimerRef.current);
         progressTimerRef.current = null;
       }
+
+      if (nextStatus) {
+        setStatus(nextStatus);
+        if (onStatusChange) onStatusChange(nextStatus, statusResultPayload);
+      }
+
+      setResultType(finalResultType);
       setProgress(100);
       setLoading(false);
-      setTimeout(() => setStage('result'), 240);
+      setTimeout(() => setStage('result'), 160);
     }
   }
 
@@ -172,10 +182,19 @@ export default function ParticipantDot({ onStatusChange }) {
         </span>
       </button>
 
+      {/* Invisible bridge covers the gap between button bottom and popup top so hover doesn't dismiss mid-travel */}
+      {hoverOpen && !manualOpen && (
+        <div
+          className="absolute top-full left-0 right-0 h-3"
+          onMouseEnter={() => setHoverOpen(true)}
+        />
+      )}
+
       {popupOpen && (
         <div
+          ref={popupRef}
           onMouseEnter={() => setHoverOpen(true)}
-          className="absolute top-10 right-0 sm:right-auto sm:left-1/2 sm:-translate-x-1/2 z-50 bg-black text-white text-[11px] rounded-2xl px-3 py-3 w-72 max-w-[calc(100vw-1rem)] text-center font-bold shadow-lg whitespace-normal leading-snug relative"
+          className="absolute top-10 right-0 sm:right-auto sm:left-1/2 sm:-translate-x-1/2 z-50 bg-black text-white text-[11px] rounded-2xl px-3 py-3 w-72 max-w-[calc(100vw-1rem)] text-center font-bold shadow-lg whitespace-normal leading-snug"
         >
           {stage === 'prompt' && (
             <>
@@ -218,14 +237,14 @@ export default function ParticipantDot({ onStatusChange }) {
           )}
 
           {stage === 'result' && (
-            <>
+            <div className="relative">
               <button
                 onClick={closePopup}
-                className="absolute top-2 right-2 w-5 h-5 rounded-full bg-white/20 hover:bg-white/40 flex items-center justify-center text-white text-[10px] font-black leading-none"
+                className="absolute top-1 right-1 w-5 h-5 rounded-full bg-white/20 hover:bg-white/40 flex items-center justify-center text-white text-[10px] font-black leading-none z-10"
                 aria-label="Close"
               >✕</button>
               {renderResult()}
-            </>
+            </div>
           )}
         </div>
       )}
