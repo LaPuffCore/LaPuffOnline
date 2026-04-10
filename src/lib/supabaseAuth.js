@@ -8,6 +8,19 @@ const SESSION_KEY = 'lapuff_session';
 // 1. EXPORT THE ACTUAL CLIENT
 export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
+async function syncSupabaseClientSession(session) {
+  if (!session?.access_token || !session?.refresh_token) return;
+
+  const { error } = await supabase.auth.setSession({
+    access_token: session.access_token,
+    refresh_token: session.refresh_token,
+  });
+
+  if (error) {
+    console.warn('Supabase client session sync failed:', error.message);
+  }
+}
+
 // --- Session Management ---
 
 export function getSession() {
@@ -17,10 +30,14 @@ export function getSession() {
 /** @param {any} s */
 function saveSession(s) { 
   localStorage.setItem(SESSION_KEY, JSON.stringify(s)); 
+  syncSupabaseClientSession(s).catch((error) => {
+    console.warn('Failed to persist Supabase auth session:', error?.message || error);
+  });
 }
 
 export function clearSession() { 
   localStorage.removeItem(SESSION_KEY); 
+  supabase.auth.signOut().catch(() => {});
 }
 
 export function getCurrentUser() { 
@@ -69,6 +86,7 @@ export async function getValidSession() {
     return await refreshSession();
   }
 
+  await syncSupabaseClientSession(session);
   return session;
 }
 

@@ -29,7 +29,7 @@
 //
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { supabase } from './supabaseAuth';
+import { getValidSession, supabase } from './supabaseAuth';
 
 // ─── ORIGINAL KEYS (all preserved) ───────────────────────────────────────────
 const FAVS_KEY    = 'lapuff_favorites';
@@ -40,10 +40,19 @@ const HISTORY_KEY = 'lapuff_fav_history';
 // events.fav_count in Supabase. Only used for non-authenticated users.
 const SB_FAVS_KEY = 'lapuff_sb_favs';
 
+function normalizeEventId(eventId) {
+  return String(eventId);
+}
+
 // ─── ORIGINAL LOCAL HELPERS (preserved exactly) ──────────────────────────────
 
 export function getFavorites() {
-  try { return JSON.parse(localStorage.getItem(FAVS_KEY) || '[]'); } catch { return []; }
+  try {
+    const parsed = JSON.parse(localStorage.getItem(FAVS_KEY) || '[]');
+    return Array.isArray(parsed) ? parsed.map(normalizeEventId) : [];
+  } catch {
+    return [];
+  }
 }
 
 function getCounts() {
@@ -77,27 +86,27 @@ function saveSbFavs(set) {
 // ─── TOGGLE ───────────────────────────────────────────────────────────────────
 
 export async function toggleFavorite(eventId) {
-  const id = String(eventId);
+  const id = normalizeEventId(eventId);
   const favs = getFavorites();
-  const idx = favs.indexOf(eventId);
+  const idx = favs.indexOf(id);
   const adding = idx === -1;
 
   // ── 1. ORIGINAL LOCAL UPDATE (unchanged) ──────────────────────────────────
-  if (adding) favs.push(eventId); else favs.splice(idx, 1);
+  if (adding) favs.push(id); else favs.splice(idx, 1);
   localStorage.setItem(FAVS_KEY, JSON.stringify(favs));
 
   const counts = getCounts();
-  counts[eventId] = Math.max(0, (counts[eventId] || 0) + (adding ? 1 : -1));
+  counts[id] = Math.max(0, (counts[id] || 0) + (adding ? 1 : -1));
   localStorage.setItem(COUNTS_KEY, JSON.stringify(counts));
 
-  recordActivity(eventId, adding ? 1 : -1);
+  recordActivity(id, adding ? 1 : -1);
 
   // Broadcast immediately for instant tile/popup UI update
   window.dispatchEvent(new Event('favoritesChanged'));
 
   // ── 2. SUPABASE SYNC ───────────────────────────────────────────────────────
   try {
-    const { data: { session } } = await supabase.auth.getSession();
+    const session = await getValidSession();
     const userId = session?.user?.id ?? null;
 
     if (userId) {
@@ -107,17 +116,19 @@ export async function toggleFavorite(eventId) {
       //   - DELETE trigger: decrements events.fav_count (no points removed)
       // We do NOT call update_event_fav_count RPC here — the trigger does it.
       if (adding) {
-        await supabase
+        const { error } = await supabase
           .from('event_favorites')
           .upsert(
             { user_id: userId, event_id: id },
             { onConflict: 'user_id,event_id', ignoreDuplicates: true }
           );
+        if (error) throw error;
       } else {
-        await supabase
+        const { error } = await supabase
           .from('event_favorites')
           .delete()
           .match({ user_id: userId, event_id: id });
+        if (error) throw error;
       }
     } else {
       // ── ANONYMOUS ──────────────────────────────────────────────────────────
@@ -128,17 +139,20 @@ export async function toggleFavorite(eventId) {
       const alreadyContributed = sbFavs.has(id);
 
       if (adding && !alreadyContributed) {
-        await supabase.rpc('update_event_fav_count', { p_event_id: id, p_delta: 1 });
+        const { error } = await supabase.rpc('update_event_fav_count', { p_event_id: id, p_delta: 1 });
+        if (error) throw error;
         sbFavs.add(id);
         saveSbFavs(sbFavs);
       } else if (!adding && alreadyContributed) {
-        await supabase.rpc('update_event_fav_count', { p_event_id: id, p_delta: -1 });
+        const { error } = await supabase.rpc('update_event_fav_count', { p_event_id: id, p_delta: -1 });
+        if (error) throw error;
         sbFavs.delete(id);
         saveSbFavs(sbFavs);
       }
     }
-  } catch {
+  } catch (error) {
     // Network/RLS error: local state is already updated, don't revert UX
+    console.warn(`toggleFavorite sync error for ${id}:`, error?.message || error);
   }
 
   // Broadcast again after Supabase confirms so counts refresh
@@ -150,7 +164,7 @@ export async function toggleFavorite(eventId) {
 // ─── IS FAVORITE (sync, unchanged) ───────────────────────────────────────────
 
 export function isFavorite(eventId) {
-  return getFavorites().includes(eventId);
+  return getFavorites().includes(normalizeEventId(eventId));
 }
 
 // ─── FAVORITE COUNT (async — reads events.fav_count for universal total) ──────
@@ -158,21 +172,27 @@ export function isFavorite(eventId) {
 // IMPORTANT: No fallback to localStorage — if Supabase fails, we need to know about it.
 
 export async function getFavoriteCount(eventId) {
+  const id = normalizeEventId(eventId);
+  // Use localStorage count as a floor so the UI never shows less than what
+  // this device has already contributed (handles trigger lag / RLS issues).
+  const localCount = getCounts()[id] ?? 0;
+
   try {
     const { data, error } = await supabase
       .from('events')
       .select('fav_count')
-      .eq('id', String(eventId))
+      .eq('id', id)
       .single();
-    
+
     if (error) {
       console.warn(`getFavoriteCount error for ${eventId}:`, error.message);
-      return 0; // Return 0, not localStorage fallback, so caller knows there was an issue
+      return localCount;
     }
-    return data?.fav_count ?? 0;
+    // Universal count must be at least as large as local contribution
+    return Math.max(data?.fav_count ?? 0, localCount);
   } catch (error) {
     console.warn(`getFavoriteCount exception for ${eventId}:`, error);
-    return 0; // Return 0 instead of silent fallback
+    return localCount;
   }
 }
 
@@ -183,7 +203,7 @@ export async function getFavoriteCount(eventId) {
 const favCountSubscriptions = new Map(); // eventId -> { unsubscribe, callback }
 
 export function subscribeToFavoriteCount(eventId, callback) {
-  const id = String(eventId);
+  const id = normalizeEventId(eventId);
   
   // Reuse existing subscription if present
   if (favCountSubscriptions.has(id)) {
@@ -241,7 +261,7 @@ export function subscribeToFavoriteCount(eventId, callback) {
 export function getFavTrend(eventId) {
   const h = getHistory();
   const cutoff = Date.now() - 6 * 3600 * 1000;
-  const delta = (h[eventId] || []).filter(x => x.t > cutoff).reduce((sum, x) => sum + x.d, 0);
+  const delta = (h[normalizeEventId(eventId)] || []).filter(x => x.t > cutoff).reduce((sum, x) => sum + x.d, 0);
   return delta > 0 ? 'up' : delta < 0 ? 'down' : 'neutral';
 }
 
@@ -251,5 +271,5 @@ export function getFavTrend(eventId) {
 
 export async function getFavTrendsForEvents(eventIds) {
   if (!eventIds || !eventIds.length) return {};
-  return Object.fromEntries(eventIds.map(id => [id, getFavTrend(id)]));
+  return Object.fromEntries(eventIds.map(id => [normalizeEventId(id), getFavTrend(id)]));
 }

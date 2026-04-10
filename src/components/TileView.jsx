@@ -330,7 +330,7 @@ export default function TileView({ events }) {
                 key={opt.label}
                 onClick={() => { setTimespanIdx(i); resetPage(); }}
                 disabled={showArchive}
-                className={`px-3 py-1 rounded-xl text-xs font-black border-2 border-black whitespace-nowrap transition-colors ${timespanIdx === i && !showArchive ? 'bg-[#7C3AED] text-white border-[#7C3AED]' : 'bg-white hover:bg-violet-50 disabled:opacity-40'}`}
+                className={`px-3 py-1 rounded-xl text-xs font-black border-[2.5px] border-black whitespace-nowrap transition-colors ${timespanIdx === i && !showArchive ? 'bg-[#7C3AED] text-white border-[#7C3AED]' : 'bg-white hover:bg-violet-50 disabled:opacity-40'}`}
               >
                 {opt.label}
               </button>
@@ -340,7 +340,7 @@ export default function TileView({ events }) {
           {!isMobile && (
             <button
               onClick={() => { setFavOnly(v => !v); resetPage(); }}
-              className={`px-3 py-1 rounded-xl text-xs font-black border-2 border-black flex items-center justify-center gap-1 transition-colors whitespace-nowrap ${favOnly ? 'bg-[#7C3AED] text-white border-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
+              className={`px-3 py-1 rounded-xl text-xs font-black border-[2.5px] border-black flex items-center justify-center gap-1 transition-colors whitespace-nowrap ${favOnly ? 'bg-[#7C3AED] text-white border-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
             >
               ⭐ Favorites
             </button>
@@ -356,7 +356,7 @@ export default function TileView({ events }) {
                 key={s.key}
                 onClick={() => { setSourceMode(s.key); resetPage(); }}
                 title={s.title}
-                className={`px-2.5 py-1 rounded-xl text-xs font-black border-2 border-black transition-colors ${isMobile ? 'flex-1 text-center' : ''} whitespace-nowrap ${sourceMode === s.key ? 'bg-[#7C3AED] text-white border-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
+                className={`px-2.5 py-1 rounded-xl text-xs font-black border-[2.5px] border-black transition-colors ${isMobile ? 'flex-1 text-center' : ''} whitespace-nowrap ${sourceMode === s.key ? 'bg-[#7C3AED] text-white border-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
               >
                 {s.label}
               </button>
@@ -365,7 +365,7 @@ export default function TileView({ events }) {
             {isMobile && (
               <button
                 onClick={() => { setFavOnly(v => !v); resetPage(); }}
-                className={`px-3 py-1 rounded-xl text-xs font-black border-2 border-black flex items-center justify-center gap-1 transition-colors whitespace-nowrap flex-1 ${favOnly ? 'bg-[#7C3AED] text-white border-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
+                className={`px-3 py-1 rounded-xl text-xs font-black border-[2.5px] border-black flex items-center justify-center gap-1 transition-colors whitespace-nowrap flex-1 ${favOnly ? 'bg-[#7C3AED] text-white border-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
               >
                 ⭐ Favs
               </button>
@@ -377,7 +377,7 @@ export default function TileView({ events }) {
         <div className="flex items-center gap-2 flex-wrap">
           <button
             onClick={() => { setRsvpOnly(v => !v); resetPage(); }}
-            className={`flex items-center gap-1 px-3 py-1.5 rounded-2xl text-xs font-black border-2 border-black transition-colors ${rsvpOnly ? 'bg-[#7C3AED] text-white border-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
+            className={`flex items-center gap-1 px-3 py-1.5 rounded-2xl text-xs font-black border-[2.5px] border-black transition-colors ${rsvpOnly ? 'bg-[#7C3AED] text-white border-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
           >
             🤫 RSVP only
           </button>
@@ -385,7 +385,7 @@ export default function TileView({ events }) {
           {tagFilters.map(tag => (
             <span
               key={tag}
-              className="flex items-center gap-1 bg-[#7C3AED] text-white text-xs font-black px-2.5 py-1.5 rounded-full border-2 border-[#7C3AED]"
+              className="flex items-center gap-1 bg-[#7C3AED] text-white text-xs font-black px-2.5 py-1.5 rounded-full border-[2.5px] border-[#7C3AED]"
             >
               {tag}
               <button onClick={() => removeTagFilter(tag)} className="ml-0.5 hover:text-red-200">✕</button>
@@ -396,7 +396,7 @@ export default function TileView({ events }) {
             <div ref={tagDropdownRef} className="relative">
               <button
                 onClick={() => setTagDropdownOpen(v => !v)}
-                className={`flex items-center gap-1 px-3 py-1.5 rounded-2xl text-xs font-black border-2 border-black transition-colors ${tagDropdownOpen ? 'bg-violet-100 border-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
+                className={`flex items-center gap-1 px-3 py-1.5 rounded-2xl text-xs font-black border-[2.5px] border-black transition-colors ${tagDropdownOpen ? 'bg-violet-100 border-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
               >
                 + tag
                 <span className="text-[10px]">{tagDropdownOpen ? '▲' : '▼'}</span>
@@ -408,7 +408,7 @@ export default function TileView({ events }) {
                       <button
                         key={tag}
                         onClick={() => addTagFilter(tag)}
-                        className="px-2.5 py-1 rounded-xl text-xs font-black border-2 border-black bg-white hover:bg-[#7C3AED] hover:text-white hover:border-[#7C3AED] transition-colors"
+                        className="px-2.5 py-1 rounded-xl text-xs font-black border-[2.5px] border-black bg-white hover:bg-[#7C3AED] hover:text-white hover:border-[#7C3AED] transition-colors"
                       >
                         {tag}
                       </button>
@@ -424,28 +424,28 @@ export default function TileView({ events }) {
         <div className="flex items-center gap-2">
           <button
             onClick={() => setShowMoreFilters(v => !v)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-2xl text-xs font-black border-2 border-black transition-colors ${showMoreFilters ? 'bg-violet-100 border-[#7C3AED] text-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-2xl text-xs font-black border-[2.5px] border-black transition-colors ${showMoreFilters ? 'bg-violet-100 border-[#7C3AED] text-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
           >
-            <TrendIcon trend={showMoreFilters ? 'up' : 'down'} size="sm" /> more
+            {showMoreFilters ? '▲' : '▼'} more
             {hasActiveMoreFilters && !showMoreFilters && (
               <span className="ml-1 w-2 h-2 rounded-full bg-[#7C3AED] inline-block" />
             )}
           </button>
           <button
             onClick={() => { setTrendFilter(trendFilter === 'up' ? null : 'up'); resetPage(); }}
-            className={`px-2.5 py-1.5 rounded-2xl text-xs font-black border-2 border-black transition-colors flex items-center justify-center ${trendFilter === 'up' ? 'bg-[#7C3AED] border-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
+            className={`px-2.5 py-1.5 rounded-2xl text-xs font-black border-[2.5px] border-black transition-colors flex items-center justify-center ${trendFilter === 'up' ? 'bg-[#7C3AED] border-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
           >
             <TrendIcon trend="up" size="sm" />
           </button>
           <button
             onClick={() => { setTrendFilter(trendFilter === 'neutral' ? null : 'neutral'); resetPage(); }}
-            className={`px-2.5 py-1.5 rounded-2xl text-xs font-black border-2 border-black transition-colors flex items-center justify-center ${trendFilter === 'neutral' ? 'bg-[#7C3AED] border-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
+            className={`px-2.5 py-1.5 rounded-2xl text-xs font-black border-[2.5px] border-black transition-colors flex items-center justify-center ${trendFilter === 'neutral' ? 'bg-[#7C3AED] border-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
           >
             <TrendIcon trend="neutral" size="sm" />
           </button>
           <button
             onClick={() => { setTrendFilter(trendFilter === 'down' ? null : 'down'); resetPage(); }}
-            className={`px-2.5 py-1.5 rounded-2xl text-xs font-black border-2 border-black transition-colors flex items-center justify-center ${trendFilter === 'down' ? 'bg-[#7C3AED] border-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
+            className={`px-2.5 py-1.5 rounded-2xl text-xs font-black border-[2.5px] border-black transition-colors flex items-center justify-center ${trendFilter === 'down' ? 'bg-[#7C3AED] border-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
           >
             <TrendIcon trend="down" size="sm" />
           </button>
@@ -484,7 +484,7 @@ export default function TileView({ events }) {
                 <button
                   key={p}
                   onClick={() => { setPriceFilter(p); resetPage(); }}
-                  className={`px-2.5 py-1 rounded-xl text-xs font-black border-2 border-black transition-colors ${priceFilter === p ? 'bg-[#7C3AED] text-white border-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
+                  className={`px-2.5 py-1 rounded-xl text-xs font-black border-[2.5px] border-black transition-colors ${priceFilter === p ? 'bg-[#7C3AED] text-white border-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
                 >
                   {p === 'all' ? 'All' : p === 'free' ? 'FREE' : p}
                 </button>
@@ -498,7 +498,7 @@ export default function TileView({ events }) {
                 <button
                   key={em}
                   onClick={() => removeEmojiFilter(em)}
-                  className="w-8 h-8 rounded-xl border-2 border-[#7C3AED] text-lg flex items-center justify-center bg-[#7C3AED] hover:bg-violet-700 transition-colors"
+                  className="w-8 h-8 rounded-xl border-[2.5px] border-[#7C3AED] text-lg flex items-center justify-center bg-[#7C3AED] hover:bg-violet-700 transition-colors"
                 >
                   {em}
                 </button>
@@ -511,7 +511,7 @@ export default function TileView({ events }) {
                   <button
                     key={em}
                     onClick={() => { toggleEmojiFilter(em); }}
-                    className="w-8 h-8 rounded-xl border-2 border-black text-lg flex items-center justify-center bg-white hover:bg-violet-50 transition-colors"
+                    className="w-8 h-8 rounded-xl border-[2.5px] border-black text-lg flex items-center justify-center bg-white hover:bg-violet-50 transition-colors"
                   >
                     {em}
                   </button>
@@ -521,7 +521,7 @@ export default function TileView({ events }) {
                 <div ref={emojiPickerRef} className="relative">
                   <button
                     onClick={() => setEmojiPickerOpen(v => !v)}
-                    className={`w-8 h-8 rounded-xl border-2 border-black text-sm flex items-center justify-center bg-white hover:bg-violet-50 transition-colors font-black ${emojiPickerOpen ? 'bg-violet-100 border-[#7C3AED]' : ''}`}
+                    className={`w-8 h-8 rounded-xl border-[2.5px] border-black text-sm flex items-center justify-center bg-white hover:bg-violet-50 transition-colors font-black ${emojiPickerOpen ? 'bg-violet-100 border-[#7C3AED]' : ''}`}
                   >
                     {emojiPickerOpen ? '▲' : '▼'}
                   </button>
@@ -547,7 +547,7 @@ export default function TileView({ events }) {
                 <button
                   key={b}
                   onClick={() => { setBorough(b); resetPage(); }}
-                  className={`px-2 py-0.5 rounded-xl text-xs font-black border-2 border-black transition-colors ${borough === b ? 'bg-[#7C3AED] text-white border-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
+                  className={`px-2 py-0.5 rounded-xl text-xs font-black border-[2.5px] border-black transition-colors ${borough === b ? 'bg-[#7C3AED] text-white border-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
                 >
                   {isMobile && b === 'Staten Island' ? 'Staten' : b}
                 </button>

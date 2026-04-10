@@ -16,7 +16,7 @@ export default function FavoritesPage({ events = [] }) {
     return () => window.removeEventListener('favoritesChanged', handler);
   }, []);
 
-  const favEvents = events.filter(e => favorites.includes(e.id));
+  const favEvents = events.filter(e => favorites.includes(String(e.id)));
 
   function handleUnfav(e, eventId) {
     e.stopPropagation();

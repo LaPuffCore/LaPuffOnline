@@ -10,11 +10,16 @@ export default function HamburgerMenu({ events, user, onAuthClick }) {
   const ref = useRef(null);
 
   useEffect(() => {
-    setFavCount(getFavorites().length);
-    const handler = () => setFavCount(getFavorites().length);
-    window.addEventListener('favoritesChanged', handler);
-    return () => window.removeEventListener('favoritesChanged', handler);
-  }, []);
+    // Count only favorites that actually exist in the loaded events list.
+    // Raw getFavorites().length can include stale IDs for deleted/missing events.
+    const compute = () => {
+      const favIds = getFavorites();
+      setFavCount(events.filter(e => favIds.includes(String(e.id))).length);
+    };
+    compute();
+    window.addEventListener('favoritesChanged', compute);
+    return () => window.removeEventListener('favoritesChanged', compute);
+  }, [events]);
 
   useEffect(() => {
     function handleClick(e) {

@@ -22,7 +22,7 @@ function MiniMap({ lat, lng, address, city, borderColor }) {
       href={outUrl} 
       target="_blank" 
       rel="noopener noreferrer" 
-      className="group block relative w-full h-full rounded-2xl overflow-hidden border-2 border-black bg-[#e5e3df] shadow-[4px_4px_0px_black] transition-all duration-300 hover:scale-[1.02]"
+      className="group block relative w-full h-full rounded-2xl overflow-hidden border-[2.5px] border-black bg-[#e5e3df] shadow-[4px_4px_0px_black] transition-all duration-300 hover:scale-[1.02]"
       onMouseEnter={(e) => {
         e.currentTarget.style.borderColor = borderColor;
         e.currentTarget.lastChild.style.borderColor = borderColor;
@@ -186,7 +186,7 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
           style={{ borderColor: borderColor }}
           onClick={e => e.stopPropagation()} 
         >
-          <button onClick={onClose} className="absolute top-3 right-3 sm:top-4 sm:right-4 z-50 w-8 h-8 sm:w-10 sm:h-10 bg-black text-white rounded-full font-black flex items-center justify-center border-2 border-white hover:bg-red-500 transition-colors text-xs sm:text-base">✕</button>
+          <button onClick={onClose} className="absolute top-3 right-3 sm:top-4 sm:right-4 z-50 w-8 h-8 sm:w-10 sm:h-10 bg-black text-white rounded-full font-black flex items-center justify-center border-[2.5px] border-white hover:bg-red-500 transition-colors text-xs sm:text-base">✕</button>
 
           <div className="relative h-48 sm:h-56 flex-shrink-0 bg-gray-100 border-b-4 border-black overflow-hidden">
             {showImage ? (
@@ -203,8 +203,8 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
             )}
             
             <div className="absolute inset-y-0 left-0 right-0 flex justify-between items-center px-2 sm:hidden pointer-events-none">
-                <button onClick={onPrev} className={`pointer-events-auto w-10 h-10 bg-white/90 border-2 border-black rounded-full font-black ${!onPrev ? 'opacity-0' : ''}`}>←</button>
-                <button onClick={onNext} className={`pointer-events-auto w-10 h-10 bg-white/90 border-2 border-black rounded-full font-black ${!onNext ? 'opacity-0' : ''}`}>→</button>
+                <button onClick={onPrev} className={`pointer-events-auto w-10 h-10 bg-white/90 border-[2.5px] border-black rounded-full font-black ${!onPrev ? 'opacity-0' : ''}`}>←</button>
+                <button onClick={onNext} className={`pointer-events-auto w-10 h-10 bg-white/90 border-[2.5px] border-black rounded-full font-black ${!onNext ? 'opacity-0' : ''}`}>→</button>
             </div>
           </div>
 
@@ -233,7 +233,7 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4 mb-6">
               <button 
                 onClick={handleDateClick}
-                className="bg-gray-50 border-2 border-black rounded-xl p-3 sm:p-4 flex items-center gap-3 shadow-[4px_4px_0px_black] transition-all hover:scale-[1.02] text-left group"
+                className="bg-gray-50 border-[2.5px] border-black rounded-xl p-3 sm:p-4 flex items-center gap-3 shadow-[4px_4px_0px_black] transition-all hover:scale-[1.02] text-left group"
                 onMouseEnter={(e) => e.currentTarget.style.borderColor = borderColor}
                 onMouseLeave={(e) => e.currentTarget.style.borderColor = 'black'}
               >
@@ -258,7 +258,7 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
             {event.description && (
               <div className="mb-6">
                 <p className="text-[9px] font-black uppercase text-gray-400 mb-2 tracking-widest">Protocol Intel</p>
-                <div className="text-xs sm:text-sm font-bold leading-relaxed bg-gray-50 border-2 border-black p-3 sm:p-4 rounded-xl shadow-[inset_4px_4px_0px_rgba(0,0,0,0.05)]">
+                <div className="text-xs sm:text-sm font-bold leading-relaxed bg-gray-50 border-[2.5px] border-black p-3 sm:p-4 rounded-xl shadow-[inset_4px_4px_0px_rgba(0,0,0,0.05)]">
                   {event.description}
                 </div>
               </div>
@@ -266,7 +266,7 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
 
             <div className="flex flex-wrap gap-1.5 sm:gap-2 mb-6">
               {tags.map(tag => (
-                <span key={tag} className={`text-[8px] sm:text-[9px] font-black px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg border-2 border-black shadow-[2px_2px_0px_black] ${TAG_COLORS[tag] || 'bg-white'} uppercase tracking-tighter`}>
+                <span key={tag} className={`text-[8px] sm:text-[9px] font-black px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg border-[2.5px] border-black shadow-[2px_2px_0px_black] ${TAG_COLORS[tag] || 'bg-white'} uppercase tracking-tighter`}>
                   #{tag}
                 </span>
               ))}
@@ -276,7 +276,7 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
               <div className="border-t-4 border-black pt-6">
                 <div className="grid grid-cols-1 gap-2">
                   {event.relevant_links.map((link, i) => (
-                    <a key={i} href={link} target="_blank" rel="noopener noreferrer" className="flex items-center justify-between p-3 sm:p-4 bg-gray-50 border-2 border-black rounded-xl hover:bg-black hover:text-white transition-all group shadow-[4px_4px_0px_black] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none">
+                    <a key={i} href={link} target="_blank" rel="noopener noreferrer" className="flex items-center justify-between p-3 sm:p-4 bg-gray-50 border-[2.5px] border-black rounded-xl hover:bg-black hover:text-white transition-all group shadow-[4px_4px_0px_black] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none">
                       <span className="text-[9px] sm:text-[10px] font-black truncate max-w-[85%] uppercase tracking-tighter">{link.replace(/^https?:\/\/(www\.)?/, '')}</span>
                       <span className="text-lg sm:text-xl group-hover:translate-x-1 transition-transform">→</span>
                     </a>

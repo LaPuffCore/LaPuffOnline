@@ -33,7 +33,7 @@ export default function CalendarPage({ events = [] }) {
     return () => window.removeEventListener('favoritesChanged', handler);
   }, []);
 
-  const favEvents = events.filter(e => favorites.includes(e.id));
+  const favEvents = events.filter(e => favorites.includes(String(e.id)));
 
   function eventsForDate(date) {
     const key = date.toISOString().split('T')[0];

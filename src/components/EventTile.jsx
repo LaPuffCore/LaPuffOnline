@@ -102,22 +102,6 @@ export default function EventTile({ event, onClick, onTagClick }) {
     ? new Date(event.event_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
     : '';
 
-  const TrendIcon = () => {
-    if (trend === 'up') return (
-      <svg className="w-3.5 h-3.5 text-green-400" viewBox="0 0 16 16" fill="none">
-        <path d="M2 12 L6 7 L9 10 L14 4" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
-        <path d="M10 4 L14 4 L14 8" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
-      </svg>
-    );
-    if (trend === 'down') return (
-      <svg className="w-3.5 h-3.5 text-red-400" viewBox="0 0 16 16" fill="none">
-        <path d="M2 4 L6 9 L9 6 L14 12" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
-        <path d="M10 12 L14 12 L14 8" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
-      </svg>
-    );
-    return <span className="text-blue-400 font-black text-[10px]">—</span>;
-  };
-
   return (
     <div
       onClick={onClick}
@@ -141,14 +125,13 @@ export default function EventTile({ event, onClick, onTagClick }) {
 
         {/* Floating Overlays */}
         <div className="absolute top-2 right-2 flex items-center gap-1.5">
-          {favCount > 0 && (
-            <div className="flex items-center gap-1 bg-black/80 backdrop-blur-md rounded-full px-2 py-1 border border-white/10">
-              <TrendIcon />
-              <span className="text-white text-[11px] font-black">{favCount}</span>
-            </div>
-          )}
+          {/* Always show trend + count badge next to the star */}
+          <div className="flex items-center gap-1 bg-black/80 backdrop-blur-md rounded-full px-2 py-1 border border-white/10">
+            <TrendIcon trend={trend} size="sm" />
+            {favCount > 0 && <span className="text-white text-[11px] font-black">{favCount}</span>}
+          </div>
           <button onClick={handleFav}
-            className={`w-9 h-9 rounded-full border-2 border-black shadow-[2px_2px_0px_black] flex items-center justify-center text-lg transition-transform active:scale-90 ${fav ? 'bg-yellow-400' : 'bg-white hover:bg-yellow-50'}`}>
+            className={`w-9 h-9 rounded-full border-[2.5px] border-black shadow-[2px_2px_0px_black] flex items-center justify-center text-lg transition-transform active:scale-90 ${fav ? 'bg-yellow-400' : 'bg-white hover:bg-yellow-50'}`}>
             {fav ? '⭐' : '☆'}
           </button>
         </div>
@@ -157,7 +140,7 @@ export default function EventTile({ event, onClick, onTagClick }) {
           {event.price_category || 'FREE'}
         </div>
 
-        <div className="absolute top-2 left-2 w-9 h-9 bg-white rounded-full border-2 border-black flex items-center justify-center text-base shadow-[2px_2px_0px_black] select-none">
+        <div className="absolute top-2 left-2 w-9 h-9 bg-white rounded-full border-[2.5px] border-black flex items-center justify-center text-base shadow-[2px_2px_0px_black] select-none">
           {event.representative_emoji || '🎉'}
         </div>
       </div>
@@ -185,7 +168,7 @@ export default function EventTile({ event, onClick, onTagClick }) {
             <button
               key={tag}
               onClick={e => handleTagClick(e, tag)}
-              className={`text-[9px] font-black px-2 py-0.5 rounded-full border-2 border-black shadow-[1px_1px_0px_black] transition-colors ${TAG_COLORS[tag] || 'bg-gray-100'}`}
+              className={`text-[9px] font-black px-2 py-0.5 rounded-full border-[2.5px] border-black shadow-[1px_1px_0px_black] transition-colors ${TAG_COLORS[tag] || 'bg-gray-100'}`}
             >
               {tag.toUpperCase()}
             </button>
