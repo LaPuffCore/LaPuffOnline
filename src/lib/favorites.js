@@ -2,12 +2,14 @@
 // lib/favorites.js
 //
 // ─── SUPABASE SQL REQUIRED (run once) ────────────────────────────────────────
-// See the SQL block provided separately. It creates:
+// Run SQL_SCHEMA_SETUP.sql in Supabase console. It creates:
 //   - events.fav_count column (universal count)
+//   - favorite_point_contributions table (tracks user→event point contributions)
 //   - update_event_fav_count RPC (for anonymous users only)
-//   - on_event_favorite_insert trigger (authenticated: increments count + awards points once)
-//   - on_event_favorite_delete trigger (authenticated: decrements count only, no points removed)
-//   - RLS policies on event_favorites
+//   - award_points_for_active_favorites RPC (called when user becomes participant)
+//   - on_event_favorite_insert trigger (authenticated: increments count only)
+//   - on_event_favorite_delete trigger (authenticated: decrements count only)
+//   - RLS policies on favorite_point_contributions & event_favorites
 //
 // ─── LOGIC SUMMARY ───────────────────────────────────────────────────────────
 //
@@ -17,15 +19,26 @@
 //   - Contributes to universal count via update_event_fav_count RPC.
 //     lapuff_sb_favs tracks which events this device has synced to prevent
 //     double-counting if the user re-favorites after a page refresh.
-//   - NO points (points require a confirmed, signed-in session — enforced server-side).
+//   - NO points (points require signed-in + participant state — enforced server-side).
 //
-// Signed in:
+// Signed in but not participant (orbiter):
 //   - All localStorage behavior above.
 //   - Row inserted into event_favorites (user_id + event_id).
-//   - Supabase trigger on that INSERT handles BOTH:
-//       a) incrementing events.fav_count (server-side, not the RPC)
-//       b) awarding 5 points once via clout_ledger check (server-side, uncheateable)
-//   - When unfavoriting: row deleted, trigger decrements count only (points stay).
+//   - Trigger increments events.fav_count only (NO points awarded yet).
+//   - User can favorite/unfavorite freely without triggering point contributions.
+//
+// Signed in AND participant (verified NYC location in last 24h):
+//   - When user syncs participant status via ParticipantDot:
+//     1. pingNYCLocation() returns inNYC=true
+//     2. awardPointsForActiveFavorites() RPC is called
+//     3. For each favorite user has, if they haven't already contributed points to
+//        that event (via favorite_point_contributions table), we:
+//        - Insert into favorite_point_contributions to mark contribution
+//        - Award 5 points via clout_ledger
+//   - This means favoriting before becoming participant doesn't "waste" the
+//     one-time contribution — it only counts when you transition to active state.
+//   - Unfavoriting before becoming participant doesn't prevent point attribution.
+//   - Each user → event gets points exactly once.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 

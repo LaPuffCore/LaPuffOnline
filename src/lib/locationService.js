@@ -113,3 +113,43 @@ export function isEventCheckInActive(eventDate, eventTimeUtc) {
 export const requestLocation = pingLocation;
 export function startWatching() {}
 export function stopWatching() {}
+
+/**
+ * When user becomes participant while signed in, mark favorite contributions.
+ * Frontend will then call awardPoints() with calculated amount.
+ * @param {any} session - the authenticated session from getValidSession()
+ * @returns {Promise<number>} number of events that received contribution marks
+ */
+export async function markFavoriteContributions(session) {
+  if (!session?.user?.id || !session?.access_token) {
+    console.warn('markFavoriteContributions: No valid session');
+    return 0;
+  }
+
+  try {
+    const SUPABASE_URL = 'https://gazuabyyugbbthonqnsp.supabase.co';
+    const SUPABASE_KEY = 'sb_publishable_tLCmZUz3bgISgxs4KVq28g_x36Xo6Cp';
+
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/award_points_for_active_favorites`, {
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${session.access_token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ p_user_id: session.user.id }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      console.warn('markFavoriteContributions error:', err.message || err);
+      return 0;
+    }
+
+    const eventsCount = await res.json();
+    return eventsCount || 0;
+  } catch (error) {
+    console.warn('markFavoriteContributions exception:', error?.message || error);
+    return 0;
+  }
+}
