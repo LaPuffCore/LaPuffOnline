@@ -1,0 +1,17 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>LaPuff Online</title>
+    <script>
+      // GitHub Pages SPA fallback: preserve the route and send user to app root.
+      (function() {
+        var l = window.location;
+        var redirectPath = l.pathname + l.search + l.hash;
+        sessionStorage.setItem('spa-redirect', redirectPath);
+        window.location.replace('/LaPuffOnline/');
+      })();
+    </script>
+  </head>
+  <body></body>
+</html>

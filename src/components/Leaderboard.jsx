@@ -80,14 +80,14 @@ export default function Leaderboard() {
   }
 
   function tierActiveRowClass(tier) {
-    if (tier === 'gold') return 'bg-amber-900/85 ring-2 ring-amber-500/70 border-l-4 border-amber-500';
+    if (tier === 'gold') return 'bg-yellow-500/25 ring-2 ring-yellow-300/90 border-l-4 border-yellow-300';
     if (tier === 'silver') return 'bg-slate-700/90 ring-2 ring-slate-300/70 border-l-4 border-slate-300';
     if (tier === 'bronze') return 'bg-orange-900/85 ring-2 ring-orange-400/70 border-l-4 border-orange-400';
     return 'bg-violet-900/85 ring-2 ring-fuchsia-400/70 border-l-4 border-fuchsia-400';
   }
 
   function tierActiveTextClass(tier) {
-    if (tier === 'gold') return 'text-amber-100';
+    if (tier === 'gold') return 'text-yellow-50';
     if (tier === 'silver') return 'text-slate-100';
     if (tier === 'bronze') return 'text-orange-100';
     return 'text-fuchsia-100';
@@ -95,7 +95,7 @@ export default function Leaderboard() {
 
   function tierShadow(tier, active) {
     if (!active) return 'none';
-    if (tier === 'gold') return '-1px 0 rgba(255,120,0,0.9), 1px 0 rgba(255,230,80,0.9), 0 0 10px rgba(255,210,0,0.5)';
+    if (tier === 'gold') return '-1px 0 rgba(255,200,0,0.95), 1px 0 rgba(255,255,160,0.98), 0 0 14px rgba(255,235,80,0.85), 0 0 24px rgba(255,220,0,0.55)';
     if (tier === 'silver') return '-1px 0 rgba(140,180,255,0.85), 1px 0 rgba(255,255,255,0.9), 0 0 10px rgba(190,210,255,0.45)';
     if (tier === 'bronze') return '-1px 0 rgba(255,120,80,0.85), 1px 0 rgba(255,190,140,0.9), 0 0 10px rgba(230,140,80,0.45)';
     return '-1px 0 rgba(255,80,80,0.75), 1px 0 rgba(80,255,255,0.75), 0 0 8px rgba(170,120,255,0.4)';

@@ -231,12 +231,6 @@ export default function Home({ events = [], eventsLoading = false }) {
                   className="relative w-full max-w-md animate-in fade-in zoom-in duration-200"
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <button
-                    onClick={() => setShowLeaderboard(false)}
-                    className="absolute top-2 right-2 z-20 bg-black text-white px-3 py-1.5 rounded-full font-black text-[10px] md:text-xs shadow-[2px_2px_0px_#7C3AED]"
-                  >
-                    CLOSE [X]
-                  </button>
                   <Leaderboard />
                 </div>
               </div>
