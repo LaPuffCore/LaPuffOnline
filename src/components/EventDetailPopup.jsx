@@ -5,6 +5,7 @@ import { TAG_COLORS } from '../lib/tagColors';
 import { getUserTZOffset, utcToLocal } from '../lib/timezones';
 import { useNavigate } from 'react-router-dom';
 import { awardPoints, POINTS, isEligibleForPoints } from '../lib/pointsSystem';
+import { getValidSession } from '../lib/supabaseAuth';
 
 function MiniMap({ lat, lng, address, city, borderColor }) {
   const mapUrl = (lat && lng)
@@ -77,10 +78,15 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
     const originalOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
 
-    const syncFavorites = () => {
-      setFav(isFavorite(event.id));
-      setFavCount(getFavoriteCount(event.id));
-      setTrend(getFavTrend(event.id));
+    const syncFavorites = async () => {
+      const currentFav = isFavorite(event.id);
+      const [count, t] = await Promise.all([
+        getFavoriteCount(event.id),
+        getFavTrend(event.id),
+      ]);
+      setFav(currentFav);
+      setFavCount(count);
+      setTrend(t);
     };
     
     syncFavorites();
@@ -106,11 +112,17 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
     e.stopPropagation();
     const newFav = await toggleFavorite(event.id);
     setFav(isFavorite(event.id));
-    setFavCount(getFavoriteCount(event.id));
-    setTrend(getFavTrend(event.id));
-    window.dispatchEvent(new Event('favoritesChanged'));
-    if (newFav && isEligibleForPoints(event.id, 'favorite')) {
-      awardPoints(POINTS.FAVORITE);
+    const [count, t] = await Promise.all([
+      getFavoriteCount(event.id),
+      getFavTrend(event.id),
+    ]);
+    setFavCount(count);
+    setTrend(t);
+    if (newFav) {
+      const session = await getValidSession();
+      if (isEligibleForPoints(session)) {
+        awardPoints(session, POINTS.EVENT_FAVORITED, 'Event Favorited');
+      }
     }
   };
 
@@ -119,9 +131,6 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
     try {
       const shareUrl = `${window.location.origin}${window.location.pathname}?event=${event.id}`;
       await navigator.clipboard.writeText(shareUrl);
-      if (isEligibleForPoints(event.id, 'share')) {
-        awardPoints(POINTS.SHARE);
-      }
     } catch {
       // clipboard access denied — silently fail
     }

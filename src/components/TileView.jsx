@@ -3,7 +3,7 @@ import { generateAutoTags } from '../lib/autoTags';
 import EmojiPicker from './EmojiPicker';
 import EventTile from './EventTile';
 import EventDetailPopup from './EventDetailPopup';
-import { isFavorite, getFavoriteCount, getFavTrend } from '../lib/favorites';
+import { isFavorite, getFavoriteCount, getFavTrendsForEvents } from '../lib/favorites';
 import { SAMPLE_MODE } from '../lib/sampleConfig';
 
 // ============================================================
@@ -135,6 +135,7 @@ export default function TileView({ events }) {
   const [showMoreFilters, setShowMoreFilters] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [trendFilter, setTrendFilter] = useState(null);
+  const [trendCache, setTrendCache] = useState({});
 
   const tagDropdownRef = useRef(null);
   const emojiPickerRef = useRef(null);
@@ -170,6 +171,18 @@ export default function TileView({ events }) {
     if (emojiPickerOpen) document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [emojiPickerOpen]);
+
+  // Batch-fetch trend data from Supabase in a single query whenever the
+  // trend filter is active or favorites change. Uses getFavTrendsForEvents
+  // to avoid O(n) individual requests.
+  useEffect(() => {
+    if (!trendFilter || !events.length) return;
+    let cancelled = false;
+    getFavTrendsForEvents(events.map(e => e.id)).then(cache => {
+      if (!cancelled) setTrendCache(cache);
+    });
+    return () => { cancelled = true; };
+  }, [trendFilter, favVersion, events]);
 
   function resetPage() { setPage(1); }
 
@@ -247,14 +260,14 @@ export default function TileView({ events }) {
       });
     }
 
-    if (trendFilter) list = list.filter(e => getFavTrend(e.id) === trendFilter);
+    if (trendFilter) list = list.filter(e => (trendCache[e.id] || 'neutral') === trendFilter);
 
     list.sort((a, b) => showArchive
       ? new Date(b.event_date) - new Date(a.event_date)
       : new Date(a.event_date) - new Date(b.event_date));
 
     return list;
-  }, [events, search, timespanIdx, showArchive, borough, emojiFilters, priceFilter, rsvpOnly, favOnly, sourceMode, tagFilters, favVersion, trendFilter]);
+  }, [events, search, timespanIdx, showArchive, borough, emojiFilters, priceFilter, rsvpOnly, favOnly, sourceMode, tagFilters, favVersion, trendFilter, trendCache]);
 
   // NAVIGATION LOGIC: Calculate index within the current filtered list
   const currentEventIndex = useMemo(() => {
@@ -420,21 +433,27 @@ export default function TileView({ events }) {
           </button>
           <button
             onClick={() => { setTrendFilter(trendFilter === 'up' ? null : 'up'); resetPage(); }}
-            className={`px-2.5 py-1.5 rounded-2xl text-xs font-black border-2 border-black transition-colors ${trendFilter === 'up' ? 'bg-[#7C3AED] border-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
+            className={`px-2.5 py-1.5 rounded-2xl text-xs font-black border-2 border-black transition-colors flex items-center justify-center ${trendFilter === 'up' ? 'bg-[#7C3AED] border-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
           >
-            <span className={trendFilter === 'up' ? 'text-green-300' : 'text-green-400'}>▲</span>
+            <svg className={`w-3.5 h-3.5 ${trendFilter === 'up' ? 'text-green-300' : 'text-green-400'}`} viewBox="0 0 16 16" fill="none">
+              <path d="M2 12 L6 7 L9 10 L14 4" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M10 4 L14 4 L14 8" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
           </button>
           <button
             onClick={() => { setTrendFilter(trendFilter === 'neutral' ? null : 'neutral'); resetPage(); }}
-            className={`px-2.5 py-1.5 rounded-2xl text-xs font-black border-2 border-black transition-colors ${trendFilter === 'neutral' ? 'bg-[#7C3AED] border-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
+            className={`px-2.5 py-1.5 rounded-2xl text-xs font-black border-2 border-black transition-colors flex items-center justify-center ${trendFilter === 'neutral' ? 'bg-[#7C3AED] border-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
           >
-            <span className={trendFilter === 'neutral' ? 'text-blue-300' : 'text-blue-400'}>—</span>
+            <span className={`font-black text-[10px] ${trendFilter === 'neutral' ? 'text-blue-300' : 'text-blue-400'}`}>—</span>
           </button>
           <button
             onClick={() => { setTrendFilter(trendFilter === 'down' ? null : 'down'); resetPage(); }}
-            className={`px-2.5 py-1.5 rounded-2xl text-xs font-black border-2 border-black transition-colors ${trendFilter === 'down' ? 'bg-[#7C3AED] border-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
+            className={`px-2.5 py-1.5 rounded-2xl text-xs font-black border-2 border-black transition-colors flex items-center justify-center ${trendFilter === 'down' ? 'bg-[#7C3AED] border-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
           >
-            <span className={trendFilter === 'down' ? 'text-red-300' : 'text-red-400'}>▼</span>
+            <svg className={`w-3.5 h-3.5 ${trendFilter === 'down' ? 'text-red-300' : 'text-red-400'}`} viewBox="0 0 16 16" fill="none">
+              <path d="M2 4 L6 9 L9 6 L14 12" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M10 12 L14 12 L14 8" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
           </button>
           {!showMoreFilters && hasActiveMoreFilters && (
             <div className="flex items-center gap-1.5 flex-wrap overflow-hidden">

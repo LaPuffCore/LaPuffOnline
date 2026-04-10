@@ -4,6 +4,7 @@ import { toggleFavorite, isFavorite, getFavoriteCount, getFavTrend } from '../li
 import { getUserTZOffset, utcToLocal } from '../lib/timezones';
 import { TAG_COLORS } from '../lib/tagColors';
 import { awardPoints, POINTS, isEligibleForPoints } from '../lib/pointsSystem';
+import { getValidSession } from '../lib/supabaseAuth';
 
 export default function EventTile({ event, onClick, onTagClick }) {
   const [fav, setFav] = useState(false);
@@ -20,20 +21,41 @@ export default function EventTile({ event, onClick, onTagClick }) {
   const showImage = event.photos?.length > 0 && !imgError && !isExpired;
 
   useEffect(() => {
-    setFav(isFavorite(event.id));
-    setFavCount(getFavoriteCount(event.id));
-    setTrend(getFavTrend(event.id));
+    let mounted = true;
+    const syncState = async () => {
+      const currentFav = isFavorite(event.id);
+      const [count, t] = await Promise.all([
+        getFavoriteCount(event.id),
+        getFavTrend(event.id),
+      ]);
+      if (!mounted) return;
+      setFav(currentFav);
+      setFavCount(count);
+      setTrend(t);
+    };
+    syncState();
+    window.addEventListener('favoritesChanged', syncState);
+    return () => {
+      mounted = false;
+      window.removeEventListener('favoritesChanged', syncState);
+    };
   }, [event.id]);
 
-  const handleFav = (e) => {
+  const handleFav = async (e) => {
     e.stopPropagation();
-    const newFav = toggleFavorite(event.id);
+    const newFav = await toggleFavorite(event.id);
     setFav(newFav);
-    setFavCount(getFavoriteCount(event.id));
-    setTrend(getFavTrend(event.id));
-    window.dispatchEvent(new Event('favoritesChanged'));
-    if (newFav && isEligibleForPoints(event.id, 'favorite')) {
-      awardPoints(POINTS.FAVORITE);
+    const [count, t] = await Promise.all([
+      getFavoriteCount(event.id),
+      getFavTrend(event.id),
+    ]);
+    setFavCount(count);
+    setTrend(t);
+    if (newFav) {
+      const session = await getValidSession();
+      if (isEligibleForPoints(session)) {
+        awardPoints(session, POINTS.EVENT_FAVORITED, 'Event Favorited');
+      }
     }
   };
 
