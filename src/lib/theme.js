@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, createElement, useContext, useEffect, useMemo, useState } from 'react';
 
 const STORAGE_KEY = 'lapuff_theme_overrides';
 
@@ -145,7 +145,7 @@ export function ThemeProvider({ children }) {
     },
   }), [overrides, resolvedTheme]);
 
-  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
+  return createElement(ThemeContext.Provider, { value }, children);
 }
 
 export function useSiteTheme() {
