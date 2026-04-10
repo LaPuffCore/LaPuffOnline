@@ -1,7 +1,12 @@
 import { Toaster } from "./components/ui/toaster" // Fixed @ alias
 import { useState, useEffect } from 'react';
-import { getApprovedEvents } from './lib/supabase';
+import { getApprovedEvents, syncSampleEvents } from './lib/supabase';
 import { SAMPLE_EVENTS } from './lib/sampleEvents';
+import {
+  SAMPLE_MODE,
+  SYNC_SAMPLE_EVENTS_TO_SUPABASE,
+  CLEAR_SUPABASE_SAMPLES_ON_DISABLE,
+} from './lib/sampleConfig';
 import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClientInstance } from './lib/query-client' // Fixed @ alias
 import { BrowserRouter as Router, Route, Routes } from 'react-router-dom';
@@ -14,15 +19,42 @@ import CalendarPage from './pages/CalendarPage';
 
 // Shared events state wrapper
 function AppWithEvents() {
-  const [events, setEvents] = useState(SAMPLE_EVENTS);
+  const [events, setEvents] = useState([]);
   
   useEffect(() => {
-    getApprovedEvents().then(dbEvents => {
-      if (dbEvents && dbEvents.length > 0) {
-        const ids = new Set(SAMPLE_EVENTS.map(e => e.id));
-        setEvents([...SAMPLE_EVENTS, ...dbEvents.filter(e => !ids.has(e.id))]);
+    let mounted = true;
+
+    async function loadEvents() {
+      try {
+        if (SYNC_SAMPLE_EVENTS_TO_SUPABASE) {
+          await syncSampleEvents(
+            SAMPLE_EVENTS,
+            SAMPLE_MODE,
+            CLEAR_SUPABASE_SAMPLES_ON_DISABLE
+          );
+        }
+
+        const dbEvents = await getApprovedEvents({ sampleOnly: SAMPLE_MODE });
+        if (!mounted) return;
+
+        if (dbEvents && dbEvents.length > 0) {
+          setEvents(dbEvents);
+          return;
+        }
+
+        // Safety fallback while developing if DB is unreachable.
+        if (SAMPLE_MODE) setEvents(SAMPLE_EVENTS);
+      } catch {
+        if (!mounted) return;
+        if (SAMPLE_MODE) setEvents(SAMPLE_EVENTS);
       }
-    });
+    }
+
+    loadEvents();
+
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   return (
