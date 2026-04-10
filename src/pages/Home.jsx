@@ -231,7 +231,7 @@ export default function Home({ events = [], eventsLoading = false }) {
                   className="relative w-full max-w-md animate-in fade-in zoom-in duration-200"
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <Leaderboard />
+                  <Leaderboard onClose={() => setShowLeaderboard(false)} />
                 </div>
               </div>
           </div>

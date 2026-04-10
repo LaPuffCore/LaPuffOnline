@@ -1,7 +1,8 @@
 // @ts-nocheck
 import { useState, useEffect } from 'react';
-import { supabase } from '../lib/supabaseAuth'; 
-import { Trophy, Zap, ChevronRight, ChevronLeft } from 'lucide-react';
+import { supabase } from '../lib/supabaseAuth';
+import { getValidSession } from '../lib/supabaseAuth';
+import { Trophy, Zap, ChevronRight, ChevronLeft, X } from 'lucide-react';
 
 // ============================================================
 // SAMPLE_MODE — set to false when done developing
@@ -23,13 +24,15 @@ const MOCK_USERS = Array.from({ length: 50 }, (_, i) => ({
   bio: "Sample bio for memetic visual testing."
 }));
 
-export default function Leaderboard() {
+export default function Leaderboard({ onClose }) {
   /** @type {[LeaderboardUser[], Function]} */
   const [allUsers, setAllUsers] = useState([]);
   const [currentPage, setCurrentPage] = useState(0);
   const [loading, setLoading] = useState(!SAMPLE_MODE);
   const [activeRow, setActiveRow] = useState(null);
   const [isMobile, setIsMobile] = useState(false);
+  const [signedInUser, setSignedInUser] = useState(null);
+  const [positionChanges, setPositionChanges] = useState({}); // trackId -> { oldRank, newRank }
   
   const USERS_PER_PAGE = 10;
 
@@ -41,10 +44,26 @@ export default function Leaderboard() {
   }, []);
 
   useEffect(() => {
+    async function getSignedInUser() {
+      const session = await getValidSession();
+      if (session?.user?.user_metadata?.username) {
+        setSignedInUser(session.user.user_metadata.username);
+      }
+    }
+    getSignedInUser();
+  }, []);
+
+  useEffect(() => {
     async function fetchLeaders() {
       if (SAMPLE_MODE) {
         const sortedMocks = [...MOCK_USERS].sort((a, b) => b.clout_points - a.clout_points);
         setAllUsers(sortedMocks);
+        // Initialize position change tracking (new users = neutral dash)
+        const changes = {};
+        sortedMocks.forEach((user) => {
+          changes[user.username] = 'neutral';
+        });
+        setPositionChanges(changes);
         setLoading(false);
         return;
       }
@@ -57,7 +76,15 @@ export default function Leaderboard() {
           .limit(50);
 
         if (error) throw error;
-        setAllUsers(data || []);
+        const newUsers = data || [];
+        setAllUsers(newUsers);
+        
+        // Initialize position change tracking (new users = neutral dash)
+        const changes = {};
+        newUsers.forEach((user) => {
+          changes[user.username] = 'neutral';
+        });
+        setPositionChanges(changes);
       } catch (err) {
         console.error("Leaderboard Sync Error:", err);
       } finally {
@@ -79,26 +106,29 @@ export default function Leaderboard() {
     return 'rgb';
   }
 
-  function tierActiveRowClass(tier) {
-    if (tier === 'gold') return 'bg-yellow-500/25 ring-2 ring-yellow-300/90 border-l-4 border-yellow-300';
+  function tierShadow(tier, active) {
+    if (!active) return 'none';
+    if (tier === 'gold') return '-2px 0 rgba(220,100,20,0.95), 2px 0 rgba(255,180,0,0.98), 0 0 18px rgba(255,200,20,0.92), 0 0 32px rgba(255,160,0,0.78), 0 0 45px rgba(255,200,50,0.55)';
+    if (tier === 'silver') return '-1px 0 rgba(140,180,255,0.85), 1px 0 rgba(255,255,255,0.9), 0 0 10px rgba(190,210,255,0.45)';
+    if (tier === 'bronze') return '-1px 0 rgba(255,120,80,0.85), 1px 0 rgba(255,190,140,0.9), 0 0 10px rgba(230,140,80,0.45)';
+    return '-1px 0 rgba(255,80,80,0.75), 1px 0 rgba(80,255,255,0.75), 0 0 8px rgba(170,120,255,0.4)';
+  }
+
+  function tierActiveRowClass(tier, isSignedInUser) {
+    if (tier === 'gold') {
+      const baseClass = 'bg-yellow-400/40 ring-2 ring-yellow-300/90 border-l-4 border-yellow-400';
+      return isSignedInUser ? `${baseClass} animated-flames` : baseClass;
+    }
     if (tier === 'silver') return 'bg-slate-700/90 ring-2 ring-slate-300/70 border-l-4 border-slate-300';
     if (tier === 'bronze') return 'bg-orange-900/85 ring-2 ring-orange-400/70 border-l-4 border-orange-400';
     return 'bg-violet-900/85 ring-2 ring-fuchsia-400/70 border-l-4 border-fuchsia-400';
   }
 
   function tierActiveTextClass(tier) {
-    if (tier === 'gold') return 'text-yellow-50';
+    if (tier === 'gold') return 'text-yellow-900';
     if (tier === 'silver') return 'text-slate-100';
     if (tier === 'bronze') return 'text-orange-100';
     return 'text-fuchsia-100';
-  }
-
-  function tierShadow(tier, active) {
-    if (!active) return 'none';
-    if (tier === 'gold') return '-1px 0 rgba(255,200,0,0.95), 1px 0 rgba(255,255,160,0.98), 0 0 14px rgba(255,235,80,0.85), 0 0 24px rgba(255,220,0,0.55)';
-    if (tier === 'silver') return '-1px 0 rgba(140,180,255,0.85), 1px 0 rgba(255,255,255,0.9), 0 0 10px rgba(190,210,255,0.45)';
-    if (tier === 'bronze') return '-1px 0 rgba(255,120,80,0.85), 1px 0 rgba(255,190,140,0.9), 0 0 10px rgba(230,140,80,0.45)';
-    return '-1px 0 rgba(255,80,80,0.75), 1px 0 rgba(80,255,255,0.75), 0 0 8px rgba(170,120,255,0.4)';
   }
 
   if (loading) return <div className="p-4 font-black text-xs animate-pulse text-center text-black">SYNCING_CLOUT_INDEX...</div>;
@@ -109,18 +139,23 @@ export default function Leaderboard() {
       <div className="bg-violet-600 p-2.5 md:p-3 border-b-2 border-black flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Trophy className="w-4 h-4 text-white" />
-          <h2 className="text-white font-black text-[10px] md:text-xs tracking-tighter uppercase">Clout Index — Top 50</h2>
+          <h2 className="text-white font-black text-[10px] md:text-xs tracking-tighter uppercase">The Clout Index — Top 50</h2>
         </div>
-        <div className="bg-black text-white text-[9px] px-2 py-0.5 rounded font-black">
-          PAGE {currentPage + 1}/{totalPages || 1}
-        </div>
+        <button
+          onClick={onClose}
+          className="bg-black text-white w-6 h-6 rounded flex items-center justify-center hover:bg-gray-800 transition-colors"
+          aria-label="Close leaderboard"
+        >
+          <X className="w-4 h-4" />
+        </button>
       </div>
 
-      <div className="bg-gray-100 border-b-2 border-black px-2.5 py-1 grid grid-cols-[22px_1fr_auto_62px] md:grid-cols-[22px_1fr_auto_72px] gap-2 text-[9px] md:text-[10px] font-black uppercase tracking-wide text-gray-600">
+      <div className="bg-gray-100 border-b-2 border-black px-2.5 py-1 grid grid-cols-[16px_20px_1fr_auto_62px] md:grid-cols-[16px_20px_1fr_auto_72px] gap-2 text-[9px] md:text-[10px] font-black uppercase tracking-wide text-gray-600">
+        <span>△</span>
         <span>#</span>
         <span>Name</span>
         <span className="justify-self-end">Pts</span>
-        <span className="justify-self-end">Zip</span>
+        <span className="justify-self-end">Colony</span>
       </div>
 
       {/* List */}
@@ -131,37 +166,53 @@ export default function Leaderboard() {
             const tier = tierFromRank(rank);
             const rowKey = `${currentPage}-${user.username}`;
             const active = activeRow === rowKey;
+            const isSignedInUser = signedInUser === user.username;
+            const posChange = positionChanges[user.username] || 'neutral';
+            
+            // If signed-in user, always show as hovered
+            const shouldShowActive = active || isSignedInUser;
+
+            const getTrackingIcon = () => {
+              if (posChange === 'up') return <span className="text-green-600 font-black">▲</span>;
+              if (posChange === 'down') return <span className="text-red-600 font-black">▼</span>;
+              return <span className="text-blue-500 font-black">−</span>;
+            };
 
             return (
           <div
             key={user.username}
             onMouseEnter={() => { if (!isMobile) setActiveRow(rowKey); }}
-            onMouseLeave={() => { if (!isMobile) setActiveRow(null); }}
+            onMouseLeave={() => { if (!isMobile && !isSignedInUser) setActiveRow(null); }}
             onTouchStart={() => { if (isMobile) setActiveRow(rowKey); }}
             onClick={() => { if (isMobile) setActiveRow(prev => prev === rowKey ? null : rowKey); }}
-            className={`px-2.5 py-2 md:p-3 grid grid-cols-[22px_1fr_auto_62px] md:grid-cols-[22px_1fr_auto_72px] items-center gap-2 transition-all duration-200 ${active ? tierActiveRowClass(tier) : 'hover:bg-violet-50'}`}
+            className={`px-2.5 py-2 md:p-3 grid grid-cols-[16px_20px_1fr_auto_62px] md:grid-cols-[16px_20px_1fr_auto_72px] items-center gap-2 transition-all duration-200 ${shouldShowActive ? tierActiveRowClass(tier, isSignedInUser) : 'hover:bg-violet-50'}`}
           >
-            <span className={`font-black text-[10px] md:text-[11px] w-5 ${active ? 'text-white/85' : 'text-gray-400'}`}>{rank}</span>
+            {/* Tracking column */}
+            <span className="text-xs font-black w-4 h-4 flex items-center justify-center">
+              {getTrackingIcon()}
+            </span>
+
+            <span className={`font-black text-[10px] md:text-[11px] w-5 ${shouldShowActive ? 'text-white/85' : 'text-gray-400'}`}>{rank}</span>
 
             <div className="min-w-0">
               <p
-                className={`relative font-extrabold text-[12px] md:text-sm leading-none uppercase tracking-[0.06em] truncate ${active ? `chroma-glitch ${tierActiveTextClass(tier)}` : 'text-black'}`}
+                className={`relative font-extrabold text-[12px] md:text-sm leading-none uppercase tracking-[0.06em] truncate ${shouldShowActive ? `chroma-glitch ${tierActiveTextClass(tier)}` : 'text-black'}`}
                 style={{
                   fontFamily: "'Orbitron','Rajdhani','Audiowide',monospace",
-                  textShadow: tierShadow(tier, active),
-                  transform: active ? 'translateX(0.2px)' : 'none',
+                  textShadow: tierShadow(tier, shouldShowActive),
+                  transform: shouldShowActive ? 'translateX(0.2px)' : 'none',
                 }}
               >
                 {user.username}
               </p>
             </div>
 
-            <div className={`flex items-center gap-1.5 px-2 py-1 rounded-lg border justify-self-end ${active ? 'bg-black/25 border-white/25' : 'bg-gray-100 border-black/5'}`}>
+            <div className={`flex items-center gap-1.5 px-2 py-1 rounded-lg border justify-self-end ${shouldShowActive ? 'bg-black/25 border-white/25' : 'bg-gray-100 border-black/5'}`}>
               <Zap className="w-3 h-3 text-yellow-500 fill-yellow-500" />
-              <span className={`font-black text-xs md:text-sm ${active ? 'text-white' : 'text-black'}`}>{user.clout_points.toLocaleString()}</span>
+              <span className={`font-black text-xs md:text-sm ${shouldShowActive ? 'text-white' : 'text-black'}`}>{user.clout_points.toLocaleString()}</span>
             </div>
 
-            <div className={`justify-self-end text-[10px] md:text-[11px] font-black ${active ? 'text-white/90' : 'text-gray-600'}`}>
+            <div className={`justify-self-end text-[10px] md:text-[11px] font-black ${shouldShowActive ? 'text-white/90' : 'text-gray-600'}`}>
               {user.home_zip ? user.home_zip : <span className="italic font-bold">[NULL]</span>}
             </div>
           </div>
@@ -200,6 +251,32 @@ export default function Leaderboard() {
           60% { transform: translateX(-0.4px); }
           80% { transform: translateX(0.5px); }
           100% { transform: translateX(0); }
+        }
+        
+        .animated-flames {
+          animation: flame-pulse 2s ease-in-out infinite, flame-zoom 2.5s ease-in-out infinite;
+          box-shadow: 
+            0 0 0 3px rgba(255, 100, 0, 0.4),
+            0 0 0 6px rgba(255, 150, 0, 0.25),
+            0 0 0 9px rgba(255, 200, 0, 0.15);
+        }
+        @keyframes flame-pulse {
+          0%, 100% { 
+            box-shadow: 
+              0 0 0 3px rgba(255, 100, 0, 0.4),
+              0 0 0 6px rgba(255, 150, 0, 0.25),
+              0 0 0 9px rgba(255, 200, 0, 0.15);
+          }
+          50% {
+            box-shadow:
+              0 0 0 4px rgba(255, 140, 0, 0.6),
+              0 0 0 8px rgba(255, 180, 0, 0.35),
+              0 0 0 12px rgba(255, 220, 0, 0.2);
+          }
+        }
+        @keyframes flame-zoom {
+          0%, 100% { transform: scale(1); }
+          50% { transform: scale(1.02); }
         }
       `}</style>
     </div>
