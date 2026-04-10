@@ -196,6 +196,16 @@ export default function ParticipantDot({ onStatusChange }) {
           onMouseEnter={() => setHoverOpen(true)}
           className="absolute top-10 right-0 sm:right-auto sm:left-1/2 sm:-translate-x-1/2 z-50 bg-black text-white text-[11px] rounded-2xl px-3 py-3 w-72 max-w-[calc(100vw-1rem)] text-center font-bold shadow-lg whitespace-normal leading-snug"
         >
+          {stage === 'result' && (
+            <button
+              onClick={closePopup}
+              className="absolute -top-2 -right-2 w-7 h-7 rounded-full border-2 border-black bg-white text-black hover:bg-gray-100 flex items-center justify-center text-xs font-black leading-none z-30 shadow-[2px_2px_0px_black]"
+              aria-label="Close"
+            >
+              X
+            </button>
+          )}
+
           {stage === 'prompt' && (
             <>
               <p>{renderPromptText()}</p>
@@ -236,16 +246,7 @@ export default function ParticipantDot({ onStatusChange }) {
             </div>
           )}
 
-          {stage === 'result' && (
-            <div className="relative">
-              <button
-                onClick={closePopup}
-                className="absolute top-1 right-1 w-5 h-5 rounded-full bg-white/20 hover:bg-white/40 flex items-center justify-center text-white text-[10px] font-black leading-none z-10"
-                aria-label="Close"
-              >✕</button>
-              {renderResult()}
-            </div>
-          )}
+          {stage === 'result' && renderResult()}
         </div>
       )}
     </div>
