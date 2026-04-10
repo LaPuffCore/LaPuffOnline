@@ -62,20 +62,23 @@ export default function Home({ events = [], eventsLoading = false }) {
   // Handle mobile scroll to hide/show header
   const handleScroll = (e) => {
     if (window.innerWidth >= 768) return; // Only mobile
-    const currentScrollY = e.currentTarget.scrollTop;
+    const scrollContainer = e.currentTarget;
+    const currentScrollY = scrollContainer.scrollTop;
+    const atTopOfTileViewport = currentScrollY <= 2;
 
     // Hysteresis tuning: reduce jitter from tiny touch scroll fluctuations.
     const MIN_DELTA = 4;
     const HIDE_AFTER_Y = 96;
     const HIDE_SCROLL_DISTANCE = 18;
-    const TOP_REVEAL_ZONE = 20; // thin zone near top where reveal is immediate
 
     const delta = currentScrollY - lastScrollY.current;
     if (Math.abs(delta) < MIN_DELTA) {
+      // Keep top-state authoritative even for tiny movements.
+      if (atTopOfTileViewport && !showHeader) setShowHeader(true);
       return;
     }
 
-    if (currentScrollY <= TOP_REVEAL_ZONE) {
+    if (atTopOfTileViewport) {
       if (!showHeader) setShowHeader(true);
       downScrollAccum.current = 0;
       lastScrollY.current = currentScrollY;
@@ -89,8 +92,8 @@ export default function Home({ events = [], eventsLoading = false }) {
         downScrollAccum.current = 0;
       }
     } else {
-      // Intentionally do not re-show on upward movement unless user reaches
-      // the top reveal zone above. This avoids jumpy mid-scroll header toggles.
+      // Intentionally do not re-show on upward movement unless the viewport
+      // actually reaches the top of the TileView scroll container.
       downScrollAccum.current = 0;
     }
 
@@ -113,7 +116,7 @@ export default function Home({ events = [], eventsLoading = false }) {
   return (
     <div className="h-[100dvh] bg-[#FAFAF8] flex flex-col overflow-hidden" style={{ fontFamily: "'Nunito', cursive, sans-serif" }}>
       {/* Header */}
-      <header className={`bg-white border-b-4 border-black z-50 shadow-[0_4px_0px_black] flex-shrink-0 transition-transform duration-500 ease-out will-change-transform ${!showHeader ? '-translate-y-full absolute w-full' : 'translate-y-0 relative'}`}>
+      <header className={`bg-white border-b-4 border-black z-50 shadow-[0_4px_0px_black] flex-shrink-0 transition-transform duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform ${!showHeader ? '-translate-y-full absolute w-full' : 'translate-y-0 relative'}`}>
         <div className="max-w-7xl mx-auto px-3 py-2 md:px-4 md:py-3">
           {/* Top Row: Logo, Nav, Menu */}
           <div className="flex items-center justify-between gap-2">

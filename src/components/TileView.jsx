@@ -424,6 +424,22 @@ export default function TileView({ events, eventsLoading = false }) {
                 {opt.label}
               </button>
             ))}
+
+            {!isMobile && (
+              <>
+                <span className="ml-2 text-xs font-black whitespace-nowrap text-gray-400 uppercase tracking-tighter">Source</span>
+                {SOURCE_MODES.map(s => (
+                  <button
+                    key={s.key}
+                    onClick={() => { setSourceMode(s.key); resetPage(); }}
+                    title={s.title}
+                    className={`px-2.5 py-1 rounded-xl text-xs font-black border-[2.5px] border-black transition-colors whitespace-nowrap ${sourceMode === s.key ? 'bg-[#7C3AED] text-white border-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </>
+            )}
           </div>
 
           {!isMobile && (
@@ -437,6 +453,7 @@ export default function TileView({ events, eventsLoading = false }) {
         </div>
 
         {/* ROW 3: Source mode (+ Mobile-only Favorites) */}
+        {isMobile && (
         <div className="flex items-center gap-2 w-full">
           <div className={`flex items-center gap-1.5 ${isMobile ? 'flex-1' : ''} overflow-x-auto no-scrollbar`}>
             <span className="text-xs font-black text-gray-400 uppercase tracking-tighter mr-1">Source</span>
@@ -461,8 +478,10 @@ export default function TileView({ events, eventsLoading = false }) {
             )}
           </div>
         </div>
+        )}
 
         {/* ROW 4: RSVP + Tag filter */}
+        {isMobile && (
         <div className="flex items-center gap-2 flex-wrap">
           <button
             onClick={() => { setRsvpOnly(v => !v); resetPage(); }}
@@ -508,6 +527,7 @@ export default function TileView({ events, eventsLoading = false }) {
             </div>
           )}
         </div>
+        )}
 
         {/* ROW 5: More Filters Toggle + Trend Filter Pills */}
         <div className="flex items-center gap-2">
@@ -538,6 +558,55 @@ export default function TileView({ events, eventsLoading = false }) {
           >
             <TrendIcon trend="down" size="sm" />
           </button>
+
+          {!isMobile && (
+            <>
+              <button
+                onClick={() => { setRsvpOnly(v => !v); resetPage(); }}
+                className={`flex items-center gap-1 px-3 py-1.5 rounded-2xl text-xs font-black border-[2.5px] border-black transition-colors whitespace-nowrap ${rsvpOnly ? 'bg-[#7C3AED] text-white border-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
+              >
+                🤫 RSVP only
+              </button>
+
+              {tagFilters.map(tag => (
+                <span
+                  key={tag}
+                  className="flex items-center gap-1 bg-[#7C3AED] text-white text-xs font-black px-2.5 py-1.5 rounded-full border-[2.5px] border-[#7C3AED]"
+                >
+                  {tag}
+                  <button onClick={() => removeTagFilter(tag)} className="ml-0.5 hover:text-red-200">✕</button>
+                </span>
+              ))}
+
+              {tagFilters.length < MAX_TAG_FILTERS && (
+                <div ref={tagDropdownRef} className="relative">
+                  <button
+                    onClick={() => setTagDropdownOpen(v => !v)}
+                    className={`flex items-center gap-1 px-3 py-1.5 rounded-2xl text-xs font-black border-[2.5px] border-black transition-colors ${tagDropdownOpen ? 'bg-violet-100 border-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
+                  >
+                    + tag
+                    <span className="text-[10px]">{tagDropdownOpen ? '▲' : '▼'}</span>
+                  </button>
+                  {tagDropdownOpen && (
+                    <div className="absolute top-full left-0 mt-1 z-50 bg-white border-3 border-black rounded-2xl shadow-[4px_4px_0px_black] p-2 w-56 max-h-64 overflow-y-auto">
+                      <div className="flex flex-wrap gap-1.5">
+                        {availableTags.map(tag => (
+                          <button
+                            key={tag}
+                            onClick={() => addTagFilter(tag)}
+                            className="px-2.5 py-1 rounded-xl text-xs font-black border-[2.5px] border-black bg-white hover:bg-[#7C3AED] hover:text-white hover:border-[#7C3AED] transition-colors"
+                          >
+                            {tag}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+
           {!showMoreFilters && hasActiveMoreFilters && (
             <div className="flex items-center gap-1.5 flex-wrap overflow-hidden">
               {priceFilter !== 'all' && (

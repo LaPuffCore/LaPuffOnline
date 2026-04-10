@@ -79,11 +79,18 @@ export default function Leaderboard() {
     return 'rgb';
   }
 
-  function tierTextClass(tier) {
-    if (tier === 'gold') return 'text-amber-200';
-    if (tier === 'silver') return 'text-slate-200';
-    if (tier === 'bronze') return 'text-orange-200';
-    return 'text-violet-100';
+  function tierActiveRowClass(tier) {
+    if (tier === 'gold') return 'bg-amber-900/85 ring-2 ring-amber-500/70 border-l-4 border-amber-500';
+    if (tier === 'silver') return 'bg-slate-700/90 ring-2 ring-slate-300/70 border-l-4 border-slate-300';
+    if (tier === 'bronze') return 'bg-orange-900/85 ring-2 ring-orange-400/70 border-l-4 border-orange-400';
+    return 'bg-violet-900/85 ring-2 ring-fuchsia-400/70 border-l-4 border-fuchsia-400';
+  }
+
+  function tierActiveTextClass(tier) {
+    if (tier === 'gold') return 'text-amber-100';
+    if (tier === 'silver') return 'text-slate-100';
+    if (tier === 'bronze') return 'text-orange-100';
+    return 'text-fuchsia-100';
   }
 
   function tierShadow(tier, active) {
@@ -132,13 +139,13 @@ export default function Leaderboard() {
             onMouseLeave={() => { if (!isMobile) setActiveRow(null); }}
             onTouchStart={() => { if (isMobile) setActiveRow(rowKey); }}
             onClick={() => { if (isMobile) setActiveRow(prev => prev === rowKey ? null : rowKey); }}
-            className={`px-2.5 py-2 md:p-3 grid grid-cols-[22px_1fr_auto_62px] md:grid-cols-[22px_1fr_auto_72px] items-center gap-2 transition-colors ${active ? 'bg-violet-100' : 'hover:bg-violet-50'}`}
+            className={`px-2.5 py-2 md:p-3 grid grid-cols-[22px_1fr_auto_62px] md:grid-cols-[22px_1fr_auto_72px] items-center gap-2 transition-all duration-200 ${active ? tierActiveRowClass(tier) : 'hover:bg-violet-50'}`}
           >
-            <span className="font-black text-[10px] md:text-[11px] text-gray-400 w-5">{rank}</span>
+            <span className={`font-black text-[10px] md:text-[11px] w-5 ${active ? 'text-white/85' : 'text-gray-400'}`}>{rank}</span>
 
             <div className="min-w-0">
               <p
-                className={`relative font-black text-[12px] md:text-sm leading-none uppercase tracking-[0.06em] ${tierTextClass(tier)} truncate`}
+                className={`relative font-extrabold text-[12px] md:text-sm leading-none uppercase tracking-[0.06em] truncate ${active ? `chroma-glitch ${tierActiveTextClass(tier)}` : 'text-black'}`}
                 style={{
                   fontFamily: "'Orbitron','Rajdhani','Audiowide',monospace",
                   textShadow: tierShadow(tier, active),
@@ -149,12 +156,12 @@ export default function Leaderboard() {
               </p>
             </div>
 
-            <div className="flex items-center gap-1.5 bg-gray-100 px-2 py-1 rounded-lg border border-black/5 justify-self-end">
+            <div className={`flex items-center gap-1.5 px-2 py-1 rounded-lg border justify-self-end ${active ? 'bg-black/25 border-white/25' : 'bg-gray-100 border-black/5'}`}>
               <Zap className="w-3 h-3 text-yellow-500 fill-yellow-500" />
-              <span className="font-black text-xs md:text-sm">{user.clout_points.toLocaleString()}</span>
+              <span className={`font-black text-xs md:text-sm ${active ? 'text-white' : 'text-black'}`}>{user.clout_points.toLocaleString()}</span>
             </div>
 
-            <div className="justify-self-end text-[10px] md:text-[11px] font-black text-gray-600">
+            <div className={`justify-self-end text-[10px] md:text-[11px] font-black ${active ? 'text-white/90' : 'text-gray-600'}`}>
               {user.home_zip ? user.home_zip : <span className="italic font-bold">[NULL]</span>}
             </div>
           </div>
@@ -181,6 +188,20 @@ export default function Leaderboard() {
           Show More <ChevronRight className="w-4 h-4" />
         </button>
       </div>
+
+      <style>{`
+        .chroma-glitch {
+          animation: clout-glitch 420ms steps(2, end) infinite;
+        }
+        @keyframes clout-glitch {
+          0% { transform: translateX(0); }
+          20% { transform: translateX(-0.6px); }
+          40% { transform: translateX(0.7px); }
+          60% { transform: translateX(-0.4px); }
+          80% { transform: translateX(0.5px); }
+          100% { transform: translateX(0); }
+        }
+      `}</style>
     </div>
   );
 }
