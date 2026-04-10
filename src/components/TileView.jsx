@@ -3,7 +3,7 @@ import { generateAutoTags } from '../lib/autoTags';
 import EmojiPicker from './EmojiPicker';
 import EventTile from './EventTile';
 import EventDetailPopup from './EventDetailPopup';
-import { isFavorite } from '../lib/favorites';
+import { isFavorite, getFavoriteCount, getFavTrend } from '../lib/favorites';
 import { SAMPLE_MODE } from '../lib/sampleConfig';
 
 // ============================================================
@@ -134,6 +134,7 @@ export default function TileView({ events }) {
   const [favVersion, setFavVersion] = useState(0);
   const [showMoreFilters, setShowMoreFilters] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const [trendFilter, setTrendFilter] = useState(null);
 
   const tagDropdownRef = useRef(null);
   const emojiPickerRef = useRef(null);
@@ -246,12 +247,14 @@ export default function TileView({ events }) {
       });
     }
 
+    if (trendFilter) list = list.filter(e => getFavTrend(e.id) === trendFilter);
+
     list.sort((a, b) => showArchive
       ? new Date(b.event_date) - new Date(a.event_date)
       : new Date(a.event_date) - new Date(b.event_date));
 
     return list;
-  }, [events, search, timespanIdx, showArchive, borough, emojiFilters, priceFilter, rsvpOnly, favOnly, sourceMode, tagFilters, favVersion]);
+  }, [events, search, timespanIdx, showArchive, borough, emojiFilters, priceFilter, rsvpOnly, favOnly, sourceMode, tagFilters, favVersion, trendFilter]);
 
   // NAVIGATION LOGIC: Calculate index within the current filtered list
   const currentEventIndex = useMemo(() => {
@@ -404,7 +407,7 @@ export default function TileView({ events }) {
           )}
         </div>
 
-        {/* ROW 5: More Filters Toggle */}
+        {/* ROW 5: More Filters Toggle + Trend Filter Pills */}
         <div className="flex items-center gap-2">
           <button
             onClick={() => setShowMoreFilters(v => !v)}
@@ -414,6 +417,24 @@ export default function TileView({ events }) {
             {hasActiveMoreFilters && !showMoreFilters && (
               <span className="ml-1 w-2 h-2 rounded-full bg-[#7C3AED] inline-block" />
             )}
+          </button>
+          <button
+            onClick={() => { setTrendFilter(trendFilter === 'up' ? null : 'up'); resetPage(); }}
+            className={`px-2.5 py-1.5 rounded-2xl text-xs font-black border-2 border-black transition-colors ${trendFilter === 'up' ? 'bg-[#7C3AED] border-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
+          >
+            <span className={trendFilter === 'up' ? 'text-green-300' : 'text-green-400'}>▲</span>
+          </button>
+          <button
+            onClick={() => { setTrendFilter(trendFilter === 'neutral' ? null : 'neutral'); resetPage(); }}
+            className={`px-2.5 py-1.5 rounded-2xl text-xs font-black border-2 border-black transition-colors ${trendFilter === 'neutral' ? 'bg-[#7C3AED] border-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
+          >
+            <span className={trendFilter === 'neutral' ? 'text-blue-300' : 'text-blue-400'}>—</span>
+          </button>
+          <button
+            onClick={() => { setTrendFilter(trendFilter === 'down' ? null : 'down'); resetPage(); }}
+            className={`px-2.5 py-1.5 rounded-2xl text-xs font-black border-2 border-black transition-colors ${trendFilter === 'down' ? 'bg-[#7C3AED] border-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
+          >
+            <span className={trendFilter === 'down' ? 'text-red-300' : 'text-red-400'}>▼</span>
           </button>
           {!showMoreFilters && hasActiveMoreFilters && (
             <div className="flex items-center gap-1.5 flex-wrap overflow-hidden">

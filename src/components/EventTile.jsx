@@ -3,6 +3,7 @@ import { generateAutoTags } from '../lib/autoTags';
 import { toggleFavorite, isFavorite, getFavoriteCount, getFavTrend } from '../lib/favorites';
 import { getUserTZOffset, utcToLocal } from '../lib/timezones';
 import { TAG_COLORS } from '../lib/tagColors';
+import { awardPoints, POINTS, isEligibleForPoints } from '../lib/pointsSystem';
 
 export default function EventTile({ event, onClick, onTagClick }) {
   const [fav, setFav] = useState(false);
@@ -26,10 +27,14 @@ export default function EventTile({ event, onClick, onTagClick }) {
 
   const handleFav = (e) => {
     e.stopPropagation();
-    setFav(toggleFavorite(event.id));
+    const newFav = toggleFavorite(event.id);
+    setFav(newFav);
     setFavCount(getFavoriteCount(event.id));
     setTrend(getFavTrend(event.id));
     window.dispatchEvent(new Event('favoritesChanged'));
+    if (newFav && isEligibleForPoints(event.id, 'favorite')) {
+      awardPoints(POINTS.FAVORITE);
+    }
   };
 
   const handleTagClick = (e, tag) => {

@@ -4,6 +4,7 @@ import { toggleFavorite, isFavorite, getFavoriteCount, getFavTrend } from '../li
 import { TAG_COLORS } from '../lib/tagColors';
 import { getUserTZOffset, utcToLocal } from '../lib/timezones';
 import { useNavigate } from 'react-router-dom';
+import { awardPoints, POINTS, isEligibleForPoints } from '../lib/pointsSystem';
 
 function MiniMap({ lat, lng, address, city, borderColor }) {
   const mapUrl = (lat && lng)
@@ -58,6 +59,10 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
   const tags = generateAutoTags(event);
   const borderColor = event.hex_color || '#FF6B6B';
 
+  // 7-day expiry logic matching EventTile exactly
+  const isExpired = event.event_date && (Date.now() - new Date(event.event_date + 'T00:00:00').getTime()) > 7 * 86400000;
+  const showImage = event.photos?.length > 0 && !imgError && !isExpired;
+
   useEffect(() => {
     // FRESH LOOK AT POSITIONING: 
     // We target the main scrollable element if it exists, otherwise fallback to window.
@@ -99,9 +104,27 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
 
   const handleFavoriteClick = async (e) => {
     e.stopPropagation();
-    // This call updates the local storage/database and dispatches the 'favoritesChanged' event
-    // which our TileView and this Popup both listen to, ensuring 1:1 sync.
-    await toggleFavorite(event.id);
+    const newFav = await toggleFavorite(event.id);
+    setFav(isFavorite(event.id));
+    setFavCount(getFavoriteCount(event.id));
+    setTrend(getFavTrend(event.id));
+    window.dispatchEvent(new Event('favoritesChanged'));
+    if (newFav && isEligibleForPoints(event.id, 'favorite')) {
+      awardPoints(POINTS.FAVORITE);
+    }
+  };
+
+  const handleShare = async (e) => {
+    e.stopPropagation();
+    try {
+      const shareUrl = `${window.location.origin}${window.location.pathname}?event=${event.id}`;
+      await navigator.clipboard.writeText(shareUrl);
+      if (isEligibleForPoints(event.id, 'share')) {
+        awardPoints(POINTS.SHARE);
+      }
+    } catch {
+      // clipboard access denied — silently fail
+    }
   };
 
   const handleDateClick = () => {
@@ -150,7 +173,7 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
           <button onClick={onClose} className="absolute top-3 right-3 sm:top-4 sm:right-4 z-50 w-8 h-8 sm:w-10 sm:h-10 bg-black text-white rounded-full font-black flex items-center justify-center border-2 border-white hover:bg-red-500 transition-colors text-xs sm:text-base">✕</button>
 
           <div className="relative h-48 sm:h-56 flex-shrink-0 bg-gray-100 border-b-4 border-black overflow-hidden">
-            {(!imgError && event.photos?.length > 0) ? (
+            {showImage ? (
               <img 
                 src={event.photos[0]} 
                 alt="" 
@@ -245,6 +268,7 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
                 </div>
               </div>
             )}
+
           </div>
         </div>
 
