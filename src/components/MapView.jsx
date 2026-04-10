@@ -654,21 +654,25 @@ export default function MapView({ events }) {
     });
 
     // ── Borough outer outline (from borough.geo.json) — shown only in 3D modes ──
-    // Loaded async; falls back gracefully if fetch fails.
-    // Rendered as a line layer so it respects the fill-extrusion depth buffer:
-    // visible where no 3D block obstructs it, hidden where a block is in front.
+    // MUST be fill-extrusion (not line). Line layers render in a separate 2D pass
+    // with no depth buffer interaction with fill-extrusions — they always appear
+    // on top regardless. fill-extrusion layers share the same depth pass and are
+    // properly occluded by taller zip blocks (min 30m). Height=15 keeps it below
+    // all zip extrusions while making the outer coastline side-wall visible.
     fetch(BOROUGH_GEOJSON_URL)
       .then(r => r.json())
       .then(boroughData => {
-        if (map.getSource('borough-outline')) return; // already added (style reload)
+        if (map.getSource('borough-outline')) return; // guard against double-add on style reload
         map.addSource('borough-outline', { type: 'geojson', data: boroughData });
         map.addLayer({
-          id: 'borough-outline-line', type: 'line', source: 'borough-outline',
+          id: 'borough-outline-extrude', type: 'fill-extrusion', source: 'borough-outline',
           layout: { visibility: 'none' },
           paint: {
-            'line-color': OUTLINE_COLOR,
-            'line-width': 2.5,
-            'line-opacity': 0.9,
+            'fill-extrusion-color': OUTLINE_COLOR,
+            'fill-extrusion-height': 15,   // below minimum zip height of 30m → depth-occluded by blocks
+            'fill-extrusion-base': 0,
+            'fill-extrusion-opacity': 0,   // starts hidden; shown only in 3D modes
+            'fill-extrusion-vertical-gradient': false,
           },
         });
       })
@@ -703,6 +707,7 @@ export default function MapView({ events }) {
     map.addSource('zcta-outline', { type: 'geojson', data: { type: 'FeatureCollection', features: [] }, generateId: false });
     map.addLayer({
       id: 'zcta-outline', type: 'fill-extrusion', source: 'zcta-outline',
+      layout: { visibility: 'visible' },
       paint: {
         'fill-extrusion-color': OUTLINE_COLOR,
         'fill-extrusion-height': 0,
@@ -863,12 +868,12 @@ export default function MapView({ events }) {
       map.setLayoutProperty('zcta-line-glow2', 'visibility', 'none');
 
       // ── Show borough outer outline in 3D mode ──
-      // This is a line layer so it respects the depth buffer — it is occluded by
-      // 3D fill-extrusion blocks in front of it and visible only where no block
-      // obstructs the view. It outlines each borough island's outer perimeter only.
-      if (map.getLayer('borough-outline-line')) {
-        map.setLayoutProperty('borough-outline-line', 'visibility', 'visible');
-        map.setPaintProperty('borough-outline-line', 'line-opacity', satellite ? 0.7 : 0.9);
+      // fill-extrusion type: participates in the same depth-test pass as zip blocks.
+      // At height=15 it is always behind zip blocks (min 30m) — only the outer
+      // coastline side-wall is visible; internal edges are occluded by zip blocks.
+      if (map.getLayer('borough-outline-extrude')) {
+        map.setLayoutProperty('borough-outline-extrude', 'visibility', 'visible');
+        map.setPaintProperty('borough-outline-extrude', 'fill-extrusion-opacity', satellite ? 0.6 : 0.85);
       }
 
       // ── FIX (perimeter): Show outer borough boundary as a thin fill-extrusion
@@ -882,9 +887,11 @@ export default function MapView({ events }) {
       // ── FIX #5 (upper outline ring) ──
       // Show the zcta-outline extrusion ON TOP of each block.
       // base = block height, height = block height + zoom-delta.
-      // This is the ONLY outline visible in 3D mode — no 2D lines.
+      // Explicitly set layout visibility 'visible' as belt-and-suspenders to
+      // guarantee this layer is never accidentally suppressed.
       if (map.getSource('zcta-outline')) {
         const baseH = heatmap ? extrudeH : flatH;
+        map.setLayoutProperty('zcta-outline', 'visibility', 'visible');
         map.setPaintProperty('zcta-outline', 'fill-extrusion-color', OUTLINE_COLOR);
         map.setPaintProperty('zcta-outline', 'fill-extrusion-base', baseH);
         map.setPaintProperty('zcta-outline', 'fill-extrusion-height', ['+', baseH, outlineRingDelta]);
@@ -905,8 +912,9 @@ export default function MapView({ events }) {
       map.setLayoutProperty('zcta-line-glow',  'visibility', 'visible');
       map.setLayoutProperty('zcta-line-glow2', 'visibility', 'visible');
       map.setPaintProperty('zcta-perimeter-fill', 'fill-extrusion-opacity', 0);
-      if (map.getLayer('borough-outline-line')) {
-        map.setLayoutProperty('borough-outline-line', 'visibility', 'none');
+      if (map.getLayer('borough-outline-extrude')) {
+        map.setLayoutProperty('borough-outline-extrude', 'visibility', 'none');
+        map.setPaintProperty('borough-outline-extrude', 'fill-extrusion-opacity', 0);
       }
       if (map.getSource('zcta-outline')) {
         map.setPaintProperty('zcta-outline', 'fill-extrusion-base', 0);
