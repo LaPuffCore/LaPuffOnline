@@ -1,10 +1,31 @@
 import { useState, useEffect } from 'react';
 import { generateAutoTags } from '../lib/autoTags';
-import { toggleFavorite, isFavorite, getFavoriteCount, getFavTrend } from '../lib/favorites';
+import { toggleFavorite, isFavorite, getFavoriteCount, getFavTrend, subscribeToFavoriteCount } from '../lib/favorites';
 import { getUserTZOffset, utcToLocal } from '../lib/timezones';
 import { TAG_COLORS } from '../lib/tagColors';
 import { awardPoints, POINTS, isEligibleForPoints } from '../lib/pointsSystem';
 import { getValidSession } from '../lib/supabaseAuth';
+
+// ─── SHARED TREND ICON ─────────────────────────────────────────────────────
+// Used in EventTile, EventDetailPopup, and TileView filters for consistency.
+export function TrendIcon({ trend, size = 'sm' }) {
+  const sizeClass = size === 'sm' ? 'w-3.5 h-3.5' : 'w-4 h-4';
+  const textSizeClass = size === 'sm' ? 'text-[10px]' : 'text-xs';
+  
+  if (trend === 'up') return (
+    <svg className={`${sizeClass} text-green-400`} viewBox="0 0 16 16" fill="none">
+      <path d="M2 12 L6 7 L9 10 L14 4" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
+      <path d="M10 4 L14 4 L14 8" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+  if (trend === 'down') return (
+    <svg className={`${sizeClass} text-red-400`} viewBox="0 0 16 16" fill="none">
+      <path d="M2 4 L6 9 L9 6 L14 12" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
+      <path d="M10 12 L14 12 L14 8" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+  return <span className={`font-black text-blue-400 ${textSizeClass}`}>—</span>;
+}
 
 export default function EventTile({ event, onClick, onTagClick }) {
   const [fav, setFav] = useState(false);
@@ -22,6 +43,7 @@ export default function EventTile({ event, onClick, onTagClick }) {
 
   useEffect(() => {
     let mounted = true;
+    
     const syncState = async () => {
       const currentFav = isFavorite(event.id);
       const [count, t] = await Promise.all([
@@ -33,11 +55,22 @@ export default function EventTile({ event, onClick, onTagClick }) {
       setFavCount(count);
       setTrend(t);
     };
+    
     syncState();
+    
+    // Listen for local favorites toggle (one-way broadcast from toggleFavorite)
     window.addEventListener('favoritesChanged', syncState);
+    
+    // Listen for real-time count changes from other users/devices
+    const unsubscribe = subscribeToFavoriteCount(event.id, (newCount) => {
+      if (!mounted) return;
+      setFavCount(newCount);
+    });
+    
     return () => {
       mounted = false;
       window.removeEventListener('favoritesChanged', syncState);
+      unsubscribe?.();
     };
   }, [event.id]);
 

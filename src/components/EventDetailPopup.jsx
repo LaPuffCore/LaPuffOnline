@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { generateAutoTags } from '../lib/autoTags';
-import { toggleFavorite, isFavorite, getFavoriteCount, getFavTrend } from '../lib/favorites';
+import { toggleFavorite, isFavorite, getFavoriteCount, getFavTrend, subscribeToFavoriteCount } from '../lib/favorites';
+import { TrendIcon } from './EventTile';
 import { TAG_COLORS } from '../lib/tagColors';
 import { getUserTZOffset, utcToLocal } from '../lib/timezones';
 import { useNavigate } from 'react-router-dom';
@@ -93,6 +94,11 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
     window.addEventListener('favoritesChanged', syncFavorites);
     window.addEventListener('resize', calculateOffset); // Handle layout shifts
     
+    // Listen for real-time count changes from other users/devices
+    const unsubscribe = subscribeToFavoriteCount(event.id, (newCount) => {
+      setFavCount(newCount);
+    });
+    
     const handleKey = (e) => {
       if (e.key === 'Escape') onClose();
       if (e.key === 'ArrowRight' && onNext) onNext();
@@ -105,6 +111,7 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
       window.removeEventListener('favoritesChanged', syncFavorites);
       window.removeEventListener('resize', calculateOffset);
       window.removeEventListener('keydown', handleKey);
+      unsubscribe?.();
     };
   }, [event.id, onClose, onNext, onPrev]);
 
@@ -217,7 +224,7 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
                   {fav ? '⭐' : '☆'}
                 </button>
                 <div className="flex items-center gap-1 bg-black text-white px-2 py-0.5 rounded-md font-black text-[9px] sm:text-[10px]">
-                  {trend === 'up' ? <span className="text-green-400">▲</span> : trend === 'down' ? <span className="text-red-400">▼</span> : <span className="text-gray-400">—</span>} 
+                  <TrendIcon trend={trend} size="sm" />
                   {favCount}
                 </div>
               </div>

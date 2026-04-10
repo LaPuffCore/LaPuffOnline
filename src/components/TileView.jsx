@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { generateAutoTags } from '../lib/autoTags';
 import EmojiPicker from './EmojiPicker';
-import EventTile from './EventTile';
+import EventTile, { TrendIcon } from './EventTile';
 import EventDetailPopup from './EventDetailPopup';
 import { isFavorite, getFavoriteCount, getFavTrendsForEvents } from '../lib/favorites';
 import { SAMPLE_MODE } from '../lib/sampleConfig';
@@ -426,7 +426,7 @@ export default function TileView({ events }) {
             onClick={() => setShowMoreFilters(v => !v)}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-2xl text-xs font-black border-2 border-black transition-colors ${showMoreFilters ? 'bg-violet-100 border-[#7C3AED] text-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
           >
-            {showMoreFilters ? '▲' : '▼'} more
+            <TrendIcon trend={showMoreFilters ? 'up' : 'down'} size="sm" /> more
             {hasActiveMoreFilters && !showMoreFilters && (
               <span className="ml-1 w-2 h-2 rounded-full bg-[#7C3AED] inline-block" />
             )}
@@ -435,25 +435,19 @@ export default function TileView({ events }) {
             onClick={() => { setTrendFilter(trendFilter === 'up' ? null : 'up'); resetPage(); }}
             className={`px-2.5 py-1.5 rounded-2xl text-xs font-black border-2 border-black transition-colors flex items-center justify-center ${trendFilter === 'up' ? 'bg-[#7C3AED] border-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
           >
-            <svg className={`w-3.5 h-3.5 ${trendFilter === 'up' ? 'text-green-300' : 'text-green-400'}`} viewBox="0 0 16 16" fill="none">
-              <path d="M2 12 L6 7 L9 10 L14 4" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
-              <path d="M10 4 L14 4 L14 8" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
+            <TrendIcon trend="up" size="sm" />
           </button>
           <button
             onClick={() => { setTrendFilter(trendFilter === 'neutral' ? null : 'neutral'); resetPage(); }}
             className={`px-2.5 py-1.5 rounded-2xl text-xs font-black border-2 border-black transition-colors flex items-center justify-center ${trendFilter === 'neutral' ? 'bg-[#7C3AED] border-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
           >
-            <span className={`font-black text-[10px] ${trendFilter === 'neutral' ? 'text-blue-300' : 'text-blue-400'}`}>—</span>
+            <TrendIcon trend="neutral" size="sm" />
           </button>
           <button
             onClick={() => { setTrendFilter(trendFilter === 'down' ? null : 'down'); resetPage(); }}
             className={`px-2.5 py-1.5 rounded-2xl text-xs font-black border-2 border-black transition-colors flex items-center justify-center ${trendFilter === 'down' ? 'bg-[#7C3AED] border-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
           >
-            <svg className={`w-3.5 h-3.5 ${trendFilter === 'down' ? 'text-red-300' : 'text-red-400'}`} viewBox="0 0 16 16" fill="none">
-              <path d="M2 4 L6 9 L9 6 L14 12" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
-              <path d="M10 12 L14 12 L14 8" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
+            <TrendIcon trend="down" size="sm" />
           </button>
           {!showMoreFilters && hasActiveMoreFilters && (
             <div className="flex items-center gap-1.5 flex-wrap overflow-hidden">

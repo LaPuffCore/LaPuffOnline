@@ -155,18 +155,85 @@ export function isFavorite(eventId) {
 
 // ─── FAVORITE COUNT (async — reads events.fav_count for universal total) ──────
 // events.fav_count includes both anonymous and authenticated contributions.
+// IMPORTANT: No fallback to localStorage — if Supabase fails, we need to know about it.
 
 export async function getFavoriteCount(eventId) {
   try {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('events')
       .select('fav_count')
       .eq('id', String(eventId))
       .single();
+    
+    if (error) {
+      console.warn(`getFavoriteCount error for ${eventId}:`, error.message);
+      return 0; // Return 0, not localStorage fallback, so caller knows there was an issue
+    }
     return data?.fav_count ?? 0;
-  } catch {
-    return getCounts()[eventId] || 0;
+  } catch (error) {
+    console.warn(`getFavoriteCount exception for ${eventId}:`, error);
+    return 0; // Return 0 instead of silent fallback
   }
+}
+
+// ─── REAL-TIME FAVORITE COUNT SUBSCRIPTION ────────────────────────────────────
+// Allows EventTile / EventDetailPopup to listen for cross-device fav_count changes.
+// Subscription persists across page but auto-unsubscribes when all listeners removed.
+
+const favCountSubscriptions = new Map(); // eventId -> { unsubscribe, callback }
+
+export function subscribeToFavoriteCount(eventId, callback) {
+  const id = String(eventId);
+  
+  // Reuse existing subscription if present
+  if (favCountSubscriptions.has(id)) {
+    const existing = favCountSubscriptions.get(id);
+    existing.callbacks = existing.callbacks || [];
+    existing.callbacks.push(callback);
+    return () => {
+      existing.callbacks = existing.callbacks.filter(cb => cb !== callback);
+      if (existing.callbacks.length === 0) {
+        existing.unsubscribe?.();
+        favCountSubscriptions.delete(id);
+      }
+    };
+  }
+
+  // Create new real-time subscription
+  const subscription = supabase
+    .channel(`fav-count:${id}`)
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'events', filter: `id=eq.${id}` },
+      (payload) => {
+        // Broadcast to all listeners for this event
+        const entry = favCountSubscriptions.get(id);
+        if (entry?.callbacks) {
+          entry.callbacks.forEach(cb => {
+            try { cb(payload.new?.fav_count ?? 0); } catch (e) { console.warn('Subscription callback error:', e); }
+          });
+        }
+      }
+    )
+    .subscribe((status) => {
+      if (status === 'CLOSED') favCountSubscriptions.delete(id);
+    });
+
+  favCountSubscriptions.set(id, { 
+    unsubscribe: () => supabase.removeChannel(subscription),
+    callbacks: [callback]
+  });
+
+  // Return unsubscribe function
+  return () => {
+    const entry = favCountSubscriptions.get(id);
+    if (!entry) return;
+    entry.callbacks = entry.callbacks?.filter(cb => cb !== callback) ?? [];
+    if (entry.callbacks.length === 0) {
+      supabase.removeChannel(subscription);
+      favCountSubscriptions.delete(id);
+    }
+  };
 }
 
 // ─── FAV TREND (sync, unchanged — local history, fast for tile display) ───────
