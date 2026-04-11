@@ -208,14 +208,14 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
         <button 
           onClick={(e) => { e.stopPropagation(); onPrev?.(); }}
           className={`hidden sm:flex w-14 h-14 lg:w-16 lg:h-16 flex-shrink-0 items-center justify-center bg-white border-4 border-black rounded-full text-2xl lg:text-3xl shadow-[6px_6px_0px_black] transition-all
-            ${onPrev ? 'hover:bg-black hover:text-white hover:-translate-x-1 active:translate-x-0 cursor-pointer opacity-100' : 'opacity-20 grayscale cursor-not-allowed'}`}
+            ${onPrev ? 'lp-hover-invert hover:-translate-x-1 active:translate-x-0 cursor-pointer opacity-100' : 'opacity-20 grayscale cursor-not-allowed'}`}
         >
           ←
         </button>
 
         {/* Popup Card */}
         <div
-          className="bg-white border-[4px] sm:border-[6px] border-black rounded-[1.5rem] sm:rounded-[2rem] w-full max-w-xl shadow-[15px_15px_0px_rgba(0,0,0,0.2)] sm:shadow-[25px_25px_0px_rgba(0,0,0,0.2)] relative z-10 overflow-hidden flex flex-col mx-2 sm:mx-0"
+          className="bg-white border-[4px] sm:border-[6px] rounded-[1.5rem] sm:rounded-[2rem] w-full max-w-xl shadow-[15px_15px_0px_rgba(0,0,0,0.2)] sm:shadow-[25px_25px_0px_rgba(0,0,0,0.2)] relative z-10 overflow-hidden flex flex-col mx-2 sm:mx-0"
           style={{ borderColor: borderColor }}
           onClick={e => e.stopPropagation()}
           onTouchStart={handleTouchStart}
@@ -238,42 +238,45 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
               </div>
             )}
 
-            {/* WEB ONLY (sm+): Small image-area arrows for image navigation */}
-            {showImage && (
-              <div className="absolute inset-y-0 left-0 right-0 hidden sm:flex justify-between items-center px-2 pointer-events-none">
+            {/* WEB ONLY (sm+): Image navigation arrows */}
+            {showImage && photos.length > 1 && (
+              <div className="absolute inset-0 hidden sm:flex justify-between items-center px-2 pointer-events-none z-20">
                 {canImgPrev ? (
                   <button
                     onClick={goImgPrev}
-                    className="pointer-events-auto w-8 h-8 rounded-full border-[2px] flex items-center justify-center text-sm font-black shadow-[2px_2px_0px_rgba(0,0,0,0.3)] transition-all hover:scale-110 active:scale-95"
-                    style={{ backgroundColor: resolvedTheme.buttonFillColor || '#fff', borderColor: resolvedTheme.buttonOutlineColor || '#000', color: resolvedTheme.buttonTextColor || '#000' }}
+                    className="pointer-events-auto w-9 h-9 rounded-full border-2 border-white/60 flex items-center justify-center text-sm font-black shadow-lg transition-all hover:scale-110 active:scale-95 bg-black/55 text-white"
                   >←</button>
-                ) : <div className="w-8" />}
+                ) : <div className="w-9" />}
 
                 {canImgNext ? (
                   <button
                     onClick={goImgNext}
-                    className="pointer-events-auto w-8 h-8 rounded-full border-[2px] flex items-center justify-center text-sm font-black shadow-[2px_2px_0px_rgba(0,0,0,0.3)] transition-all hover:scale-110 active:scale-95"
-                    style={{ backgroundColor: resolvedTheme.buttonFillColor || '#fff', borderColor: resolvedTheme.buttonOutlineColor || '#000', color: resolvedTheme.buttonTextColor || '#000' }}
+                    className="pointer-events-auto w-9 h-9 rounded-full border-2 border-white/60 flex items-center justify-center text-sm font-black shadow-lg transition-all hover:scale-110 active:scale-95 bg-black/55 text-white"
                   >→</button>
-                ) : isSingleImg ? (
-                  <button disabled className="pointer-events-none w-8 h-8 rounded-full border-[2px] flex items-center justify-center text-sm font-black opacity-25"
-                    style={{ backgroundColor: resolvedTheme.buttonFillColor || '#fff', borderColor: resolvedTheme.buttonOutlineColor || '#000', color: resolvedTheme.buttonTextColor || '#000' }}
-                  >→</button>
-                ) : <div className="w-8" />}
+                ) : <div className="w-9" />}
+              </div>
+            )}
+            {/* Single image: faded disabled right arrow */}
+            {showImage && isSingleImg && (
+              <div className="absolute inset-0 hidden sm:flex justify-end items-center px-2 pointer-events-none z-20">
+                <button disabled className="w-9 h-9 rounded-full border-2 border-white/30 flex items-center justify-center text-sm font-black bg-black/25 text-white/40 opacity-40">→</button>
               </div>
             )}
 
-            {/* MOBILE ONLY (sm:hidden): Image navigation arrows (tile nav is via swipe) */}
-            {showImage && (
-              <div className="absolute inset-y-0 left-0 right-0 flex justify-between items-center px-2 sm:hidden pointer-events-none">
+            {/* MOBILE ONLY (<sm): Image navigation arrows (tile nav is via swipe) */}
+            {showImage && photos.length > 1 && (
+              <div className="absolute inset-0 flex sm:hidden justify-between items-center px-2 pointer-events-none z-20">
                 {canImgPrev ? (
-                  <button onClick={goImgPrev} className="pointer-events-auto w-10 h-10 bg-white/90 border-[2.5px] border-black rounded-full font-black text-sm flex items-center justify-center shadow-[2px_2px_0px_black]">←</button>
+                  <button onClick={goImgPrev} className="pointer-events-auto w-10 h-10 bg-black/55 border-2 border-white/60 rounded-full font-black text-sm text-white flex items-center justify-center shadow-lg">←</button>
                 ) : <div className="w-10" />}
                 {canImgNext ? (
-                  <button onClick={goImgNext} className="pointer-events-auto w-10 h-10 bg-white/90 border-[2.5px] border-black rounded-full font-black text-sm flex items-center justify-center shadow-[2px_2px_0px_black]">→</button>
-                ) : isSingleImg ? (
-                  <button disabled className="pointer-events-none w-10 h-10 bg-white/50 border-[2.5px] border-black rounded-full font-black text-sm flex items-center justify-center opacity-30">→</button>
+                  <button onClick={goImgNext} className="pointer-events-auto w-10 h-10 bg-black/55 border-2 border-white/60 rounded-full font-black text-sm text-white flex items-center justify-center shadow-lg">→</button>
                 ) : <div className="w-10" />}
+              </div>
+            )}
+            {showImage && isSingleImg && (
+              <div className="absolute inset-0 flex sm:hidden justify-end items-center px-2 pointer-events-none z-20">
+                <button disabled className="w-10 h-10 bg-black/25 border-2 border-white/30 rounded-full font-black text-sm text-white/40 flex items-center justify-center opacity-40">→</button>
               </div>
             )}
 
@@ -347,7 +350,7 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
               <div className="border-t-4 border-black pt-6">
                 <div className="grid grid-cols-1 gap-2">
                   {event.relevant_links.map((link, i) => (
-                    <a key={i} href={link} target="_blank" rel="noopener noreferrer" className="flex items-center justify-between p-3 sm:p-4 bg-gray-50 border-[2.5px] border-black rounded-xl hover:bg-black hover:text-white transition-all group shadow-[4px_4px_0px_black] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none">
+                    <a key={i} href={link} target="_blank" rel="noopener noreferrer" className="flex items-center justify-between p-3 sm:p-4 bg-gray-50 border-[2.5px] border-black rounded-xl lp-hover-invert transition-all group shadow-[4px_4px_0px_black] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none">
                       <span className="text-[9px] sm:text-[10px] font-black truncate max-w-[85%] uppercase tracking-tighter">{link.replace(/^https?:\/\/(www\.)?/, '')}</span>
                       <span className="text-lg sm:text-xl group-hover:translate-x-1 transition-transform">→</span>
                     </a>
@@ -362,7 +365,7 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
         <button 
           onClick={(e) => { e.stopPropagation(); onNext?.(); }}
           className={`hidden sm:flex w-14 h-14 lg:w-16 lg:h-16 flex-shrink-0 items-center justify-center bg-white border-4 border-black rounded-full text-2xl lg:text-3xl shadow-[6px_6px_0px_black] transition-all
-            ${onNext ? 'hover:bg-black hover:text-white hover:translate-x-1 active:translate-x-0 cursor-pointer opacity-100' : 'opacity-20 grayscale cursor-not-allowed'}`}
+            ${onNext ? 'lp-hover-invert hover:translate-x-1 active:translate-x-0 cursor-pointer opacity-100' : 'opacity-20 grayscale cursor-not-allowed'}`}
         >
           →
         </button>

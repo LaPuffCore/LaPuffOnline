@@ -133,6 +133,18 @@
 .lp-accent-hover:hover { background-color: var(--lp-accent) !important; color: #fff !important; }
 .lp-accent-shadow { box-shadow: 3px 3px 0 var(--lp-accent) !important; }
 
+/* Theme-aware button hover inversion: bg ↔ text, beats !important scope overrides at higher specificity */
+.lp-theme-scope .lp-hover-invert:hover,
+.lp-hover-invert:hover {
+  background-color: var(--lp-button-text, #000000) !important;
+  color: var(--lp-button-fill, #ffffff) !important;
+  border-color: var(--lp-button-text, #000000) !important;
+}
+.lp-theme-scope .lp-hover-invert:hover *,
+.lp-hover-invert:hover * {
+  color: var(--lp-button-fill, #ffffff) !important;
+}
+
 /* ThemeRow hover label — fluorescent yellow-green only when section bg is dark, normal otherwise */
 .theme-row-label {
   transition: color 0.1s;

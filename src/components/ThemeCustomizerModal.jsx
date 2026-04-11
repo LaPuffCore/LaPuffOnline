@@ -4,7 +4,24 @@ import ColorPicker from './ColorPicker';
 import EmojiPicker from './EmojiPicker';
 import { CURSOR_TRAILS, THEME_FIELDS, useSiteTheme, WINDOWS_CURSOR_PRESETS } from '../lib/theme';
 
-function ThemeRow({ field, value, onChange, onReset }) {
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function hexLuminance(hex) {
+  const h = (hex || '#ffffff').replace('#', '').padEnd(6, '0');
+  const r = parseInt(h.slice(0,2), 16) / 255;
+  const g = parseInt(h.slice(2,4), 16) / 255;
+  const b = parseInt(h.slice(4,6), 16) / 255;
+  const c2l = c => c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  return 0.2126 * c2l(r) + 0.7152 * c2l(g) + 0.0722 * c2l(b);
+}
+function contrastColor(hex) {
+  return hexLuminance(hex) > 0.3 ? '#000000' : '#ffffff';
+}
+
+// ── ThemeRow ──────────────────────────────────────────────────────────────────
+function ThemeRow({ field, value, onChange, onReset, accentColor, buttonFillColor }) {
+  const [containerHovered, setContainerHovered] = useState(false);
+  const [resetHovered, setResetHovered] = useState(false);
+
   if (field.type === 'sectionLabel') {
     return (
       <div className="pt-4 pb-0.5 px-1">
@@ -13,18 +30,57 @@ function ThemeRow({ field, value, onChange, onReset }) {
       </div>
     );
   }
+
+  // Container hover: bg = selection accent, text = readable contrast
+  const rowHoverBg = accentColor || '#7C3AED';
+  // Text on hover: if custom buttonFill set → opposite of fill; else → contrast vs accent
+  const rowHoverText = buttonFillColor
+    ? (hexLuminance(buttonFillColor) > 0.4 ? '#000000' : '#ffffff')
+    : contrastColor(rowHoverBg);
+
+  // Reset button own hover: always black bg; icon = white (readable on black)
+  // Edge case: if fill is also black-ish, use accent for icon
+  const resetBtnHoverBg = '#000000';
+  const resetBtnHoverIcon = hexLuminance(buttonFillColor || '#ffffff') <= 0.15
+    ? (accentColor || '#a3e635')
+    : '#ffffff';
+
+  const containerStyle = {
+    backgroundColor: containerHovered ? rowHoverBg : '#ffffff',
+    borderColor: containerHovered ? rowHoverBg : '#000000',
+    borderWidth: '3px',
+    borderStyle: 'solid',
+    transition: 'background-color 0.15s, border-color 0.15s',
+  };
+  const labelStyle = { color: containerHovered ? rowHoverText : undefined };
+  const noteStyle = { color: containerHovered ? `${rowHoverText}bb` : undefined, opacity: containerHovered ? 1 : 0.7 };
+
+  const resetStyle = {
+    backgroundColor: resetHovered ? resetBtnHoverBg : containerHovered ? rowHoverBg : '#ffffff',
+    borderColor: resetHovered ? resetBtnHoverBg : containerHovered ? rowHoverBg : '#000000',
+    borderWidth: '3px',
+    borderStyle: 'solid',
+    color: resetHovered ? resetBtnHoverIcon : containerHovered ? rowHoverText : undefined,
+    transition: 'background-color 0.12s, border-color 0.12s, color 0.12s',
+  };
+
   return (
-    <div className="group rounded-2xl border-3 border-black bg-white p-3 md:p-4 shadow-[4px_4px_0px_black] hover:border-[var(--lp-accent)] transition-colors">
+    <div
+      className="rounded-2xl p-3 md:p-4 shadow-[4px_4px_0px_black]"
+      style={containerStyle}
+      onMouseEnter={() => setContainerHovered(true)}
+      onMouseLeave={() => { setContainerHovered(false); setResetHovered(false); }}
+    >
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <p className="theme-row-label font-black text-sm md:text-base leading-tight text-black transition-none">
+          <p className="font-black text-sm md:text-base leading-tight" style={labelStyle}>
             {field.label}
           </p>
           {field.subtitle && (
             <p className="text-[10px] font-bold text-amber-600 mt-0.5 leading-tight">{field.subtitle}</p>
           )}
           {field.note && (
-            <p className="text-[9px] text-gray-400 font-medium mt-0.5 leading-tight italic opacity-70">{field.note}</p>
+            <p className="text-[9px] font-medium mt-0.5 leading-tight italic" style={noteStyle}>{field.note}</p>
           )}
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
@@ -32,7 +88,10 @@ function ThemeRow({ field, value, onChange, onReset }) {
           <button
             type="button"
             onClick={onReset}
-            className="w-11 h-11 rounded-2xl border-3 border-black bg-white shadow-[3px_3px_0px_black] transition group-hover:bg-[var(--lp-accent)] group-hover:border-[var(--lp-accent)] group-hover:text-white group-hover:shadow-[3px_3px_0px_var(--lp-tile-shadow)] flex items-center justify-center text-lg font-black"
+            className="w-11 h-11 rounded-2xl shadow-[3px_3px_0px_black] flex items-center justify-center text-lg font-black"
+            style={resetStyle}
+            onMouseEnter={(e) => { e.stopPropagation(); setResetHovered(true); }}
+            onMouseLeave={(e) => { e.stopPropagation(); setResetHovered(false); }}
             aria-label={`Reset ${field.label}`}
             title={`Reset ${field.label}`}
           >
@@ -55,31 +114,19 @@ export default function ThemeCustomizerModal({ onClose }) {
   } = useSiteTheme();
   const [draftOverrides, setDraftOverrides] = useState(() => ({ ...overrides }));
 
-  // Compute if section fill is dark to decide hover label color
-  function hexLuminance(hex) {
-    const h = hex?.replace('#', '') || 'ffffff';
-    const r = parseInt(h.slice(0,2), 16) / 255;
-    const g = parseInt(h.slice(2,4), 16) / 255;
-    const b = parseInt(h.slice(4,6), 16) / 255;
-    const toL = (c) => c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-    return 0.2126 * toL(r) + 0.7152 * toL(g) + 0.0722 * toL(b);
-  }
-  // Pick a hover text color that contrasts with the section bg and differs from accent + buttonFill
-  function pickHoverTextColor(sectionHex, accentHex, buttonFillHex) {
-    const candidates = ['#ccff00', '#ff6ac1', '#00ffff', '#ff4400', '#ffff00', '#ffffff'];
-    const avoid = [sectionHex, accentHex, buttonFillHex].map(hexLuminance);
-    for (const c of candidates) {
-      const cl = hexLuminance(c);
-      const tooClose = avoid.some(al => Math.abs(cl - al) < 0.12);
-      if (!tooClose) return c;
-    }
-    return '#ccff00';
-  }
-  const sectionColor = draftOverrides.surfaceBackgroundColor ?? resolvedTheme?.surfaceBackgroundColor ?? '#FFFFFF';
   const accentColor = draftOverrides.accentColor ?? resolvedTheme?.accentColor ?? '#7C3AED';
-  const buttonFillColor = draftOverrides.buttonFillColor ?? resolvedTheme?.buttonFillColor ?? '#FFFFFF';
-  const isDarkSection = hexLuminance(sectionColor) < 0.35;
-  const hoverTextColor = isDarkSection ? pickHoverTextColor(sectionColor, accentColor, buttonFillColor) : null;
+  const buttonFillColor = draftOverrides.buttonFillColor ?? resolvedTheme?.buttonFillColor ?? null;
+
+  // Footer button hover: always black bg, text contrasts against button fill
+  const [footerHover, setFooterHover] = useState(null); // 'resetAll'|'cancel'|'apply'
+  const footerHoverBg = '#000000';
+  const footerHoverText = buttonFillColor && hexLuminance(buttonFillColor) <= 0.15
+    ? (accentColor || '#a3e635')
+    : '#ffffff';
+  const footerBtnStyle = (id) => footerHover === id
+    ? { backgroundColor: footerHoverBg, color: footerHoverText, borderColor: footerHoverBg }
+    : {};
+
   const [isDesktopCursorCapable, setIsDesktopCursorCapable] = useState(false);
   const [cursorExpanded, setCursorExpanded] = useState(false);
   // All trail groups start collapsed
@@ -192,8 +239,7 @@ export default function ThemeCustomizerModal({ onClose }) {
 
   return createPortal(
     <div
-      className={`lp-theme-scope fixed inset-0 z-[200000] flex items-center justify-center bg-white/50 backdrop-blur-sm p-3 md:p-6${isDarkSection ? ' lp-dark-section' : ''}`}
-      style={hoverTextColor ? { '--lp-hover-text': hoverTextColor } : undefined}
+      className="lp-theme-scope fixed inset-0 z-[200000] flex items-center justify-center bg-white/50 backdrop-blur-sm p-3 md:p-6"
     >
       <div
         ref={ref}
@@ -429,6 +475,8 @@ export default function ThemeCustomizerModal({ onClose }) {
                 value={draftOverrides[field.key] ?? null}
                 onChange={(next) => setDraftOverride(field.key, next)}
                 onReset={() => resetDraftKey(field.key)}
+                accentColor={accentColor}
+                buttonFillColor={buttonFillColor}
               />
             ))}
           </div>
@@ -439,21 +487,30 @@ export default function ThemeCustomizerModal({ onClose }) {
           <button
             type="button"
             onClick={handleResetAll}
-            className="px-3 py-2 rounded-xl border-3 border-black bg-white text-black text-xs md:text-sm font-black shadow-[3px_3px_0px_black] hover:bg-gray-100 transition hover:invert"
+            className="px-3 py-2 rounded-xl border-3 border-black bg-white text-black text-xs md:text-sm font-black shadow-[3px_3px_0px_black] transition"
+            style={footerBtnStyle('resetAll')}
+            onMouseEnter={() => setFooterHover('resetAll')}
+            onMouseLeave={() => setFooterHover(null)}
           >
             Reset All
           </button>
           <button
             type="button"
             onClick={handleCancel}
-            className="px-3 py-2 rounded-xl border-3 border-black bg-white text-black text-xs md:text-sm font-black shadow-[3px_3px_0px_black] hover:bg-gray-100 transition hover:invert"
+            className="px-3 py-2 rounded-xl border-3 border-black bg-white text-black text-xs md:text-sm font-black shadow-[3px_3px_0px_black] transition"
+            style={footerBtnStyle('cancel')}
+            onMouseEnter={() => setFooterHover('cancel')}
+            onMouseLeave={() => setFooterHover(null)}
           >
             Cancel
           </button>
           <button
             type="button"
             onClick={handleApply}
-            className="px-3 py-2 rounded-xl border-3 border-black bg-[#7C3AED] text-white text-xs md:text-sm font-black shadow-[3px_3px_0px_black] hover:bg-[#6D28D9] transition hover:invert"
+            className="px-3 py-2 rounded-xl border-3 border-black bg-[#7C3AED] text-white text-xs md:text-sm font-black shadow-[3px_3px_0px_black] transition"
+            style={footerBtnStyle('apply')}
+            onMouseEnter={() => setFooterHover('apply')}
+            onMouseLeave={() => setFooterHover(null)}
           >
             Apply
           </button>
