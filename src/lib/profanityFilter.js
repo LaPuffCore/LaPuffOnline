@@ -15,7 +15,7 @@ const BAD_WORDS = [
   // General severe profanity (contextual but block in names/descriptions)
 
   // Nazi / extremist
-  'nazi','nazis','nsdap','1488','heil','swastika','kkk','aryan', 'hitler', 'gorillion', '6million' '6_million', 'six_million', 'sixmillion',
+  'nazi','nazis','nsdap','1488','heil','swastika','kkk','aryan', 'hitler', 'gorillion', '6million', '6_million', 'six_million', 'sixmillion',
   // Violence / threats
   'kill yourself','kys','die faggot','rope yourself', 'killer',
 ];
