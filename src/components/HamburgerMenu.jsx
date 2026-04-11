@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { getFavorites } from '../lib/favorites';
 import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabaseAuth';
-import { useSiteTheme } from '../lib/theme';
+import { hexToRgba, useSiteTheme } from '../lib/theme';
 import ReferralModal from './ReferralModal';
 import ThemeCustomizerModal from './ThemeCustomizerModal';
 
@@ -89,7 +89,7 @@ export default function HamburgerMenu({ events, user, onAuthClick }) {
               to="/favorites"
               onClick={() => setOpen(false)}
               className="w-full text-left px-4 py-3 rounded-2xl font-bold flex items-center gap-3 transition-colors"
-              style={{ color: resolvedTheme.buttonTextColor || resolvedTheme.bodyTextColor || resolvedTheme.microIconColor }}
+              style={{ color: resolvedTheme.buttonTextColor || resolvedTheme.bodyTextColor || resolvedTheme.microIconColor, backgroundColor: hexToRgba(resolvedTheme.buttonFillColor || "#ffffff", 0.22) }}
               onMouseEnter={(event) => { event.currentTarget.style.backgroundColor = resolvedTheme.accentColor + '14'; }}
               onMouseLeave={(event) => { event.currentTarget.style.backgroundColor = 'transparent'; }}
             >
@@ -101,7 +101,7 @@ export default function HamburgerMenu({ events, user, onAuthClick }) {
               to="/calendar"
               onClick={() => setOpen(false)}
               className="w-full text-left px-4 py-3 rounded-2xl font-bold flex items-center gap-3 transition-colors"
-              style={{ color: resolvedTheme.buttonTextColor || resolvedTheme.bodyTextColor || resolvedTheme.microIconColor }}
+              style={{ color: resolvedTheme.buttonTextColor || resolvedTheme.bodyTextColor || resolvedTheme.microIconColor, backgroundColor: hexToRgba(resolvedTheme.buttonFillColor || "#ffffff", 0.22) }}
               onMouseEnter={(event) => { event.currentTarget.style.backgroundColor = resolvedTheme.accentColor + '14'; }}
               onMouseLeave={(event) => { event.currentTarget.style.backgroundColor = 'transparent'; }}
             >
@@ -115,7 +115,7 @@ export default function HamburgerMenu({ events, user, onAuthClick }) {
                 setShowCustomizer(true);
               }}
               className="w-full text-left px-4 py-3 rounded-2xl font-bold flex items-center gap-3 transition-colors"
-              style={{ color: resolvedTheme.buttonTextColor || resolvedTheme.bodyTextColor || resolvedTheme.microIconColor }}
+              style={{ color: resolvedTheme.buttonTextColor || resolvedTheme.bodyTextColor || resolvedTheme.microIconColor, backgroundColor: hexToRgba(resolvedTheme.buttonFillColor || "#ffffff", 0.22) }}
               onMouseEnter={(event) => { event.currentTarget.style.backgroundColor = resolvedTheme.accentColor + '14'; }}
               onMouseLeave={(event) => { event.currentTarget.style.backgroundColor = 'transparent'; }}
             >
@@ -133,7 +133,7 @@ export default function HamburgerMenu({ events, user, onAuthClick }) {
                 }
               }}
               className="w-full text-left px-4 py-3 rounded-2xl font-bold flex items-center gap-3 transition-colors group"
-              style={{ color: resolvedTheme.buttonTextColor || resolvedTheme.bodyTextColor || resolvedTheme.microIconColor }}
+              style={{ color: resolvedTheme.buttonTextColor || resolvedTheme.bodyTextColor || resolvedTheme.microIconColor, backgroundColor: hexToRgba(resolvedTheme.buttonFillColor || "#ffffff", 0.22) }}
               onMouseEnter={(event) => { event.currentTarget.style.backgroundColor = resolvedTheme.accentColor + '14'; }}
               onMouseLeave={(event) => { event.currentTarget.style.backgroundColor = 'transparent'; }}
             >

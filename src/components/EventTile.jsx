@@ -36,6 +36,8 @@ export default function EventTile({ event, onClick, onTagClick }) {
   const [trend, setTrend] = useState('neutral');
   const [hovered, setHovered] = useState(false);
   
+  const bodyTextColor = resolvedTheme?.bodyTextColor || '#374151';
+
   const tags = generateAutoTags(event);
   const tzOffset = getUserTZOffset();
   const baseBorderColor = getTileAccentColor(event.hex_color, resolvedTheme);
@@ -159,10 +161,10 @@ export default function EventTile({ event, onClick, onTagClick }) {
         
         <div className="flex flex-col gap-1 mb-3">
           <div className="flex items-center justify-between text-[11px] font-bold">
-            <span className="text-gray-700">📅 {displayDate}</span>
-            {displayTime && <span className="text-gray-500">🕐 {displayTime}</span>}
+            <span style={{ color: bodyTextColor }}>📅 {displayDate}</span>
+            {displayTime && <span style={{ color: bodyTextColor, opacity: 0.75 }}>🕐 {displayTime}</span>}
           </div>
-          <div className="text-[11px] text-gray-400 font-bold truncate">
+          <div className="text-[11px] font-bold truncate" style={{ color: bodyTextColor, opacity: 0.7 }}>
              {event.location_data?.rsvp_link ? '🔒 RSVP REQUIRED' : `📍 ${event.location_data?.city || 'NYC'}`}
           </div>
         </div>

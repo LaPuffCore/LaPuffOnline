@@ -191,7 +191,7 @@
 .lp-theme-scope .text-gray-600 { color: var(--lp-subtext) !important; }
 .lp-theme-scope .text-gray-500 { color: var(--lp-subtext) !important; }
 .lp-theme-scope .text-gray-400 { color: var(--lp-calendar-day-text) !important; }
-.lp-theme-scope .bg-gray-50 { background-color: color-mix(in srgb, var(--lp-surface-bg) 88%, #f3f4f6 12%) !important; }
+.lp-theme-scope .bg-gray-50 { background-color: var(--lp-button-fill) !important; }
 .lp-theme-scope .bg-gray-100 { background-color: var(--lp-calendar-day-bg) !important; }
 .lp-theme-scope .bg-\[\#7C3AED\] { background-color: var(--lp-accent) !important; }
 .lp-theme-scope .text-\[\#7C3AED\] { color: var(--lp-accent) !important; }
@@ -205,9 +205,16 @@
 .lp-theme-scope .bg-violet-200 { background-color: color-mix(in srgb, var(--lp-accent) 24%, var(--lp-button-fill) 76%) !important; }
 .lp-theme-scope .text-violet-600 { color: var(--lp-accent) !important; }
 .lp-theme-scope .hover\:text-violet-600:hover { color: var(--lp-accent) !important; }
+/* Button-fill background utility (for non-button containers that semantically ARE button areas) */
+.lp-btn-fill-bg { background-color: var(--lp-button-fill) !important; }
 /* Buttons/links using bg-gray-50 (e.g. date tile, link rows) also get button fill */
 .lp-theme-scope button.bg-gray-50,
 .lp-theme-scope a.bg-gray-50 { background-color: var(--lp-button-fill) !important; }
+/* All buttons in theme scope that have bg-white get button-text color for their text */
+.lp-theme-scope button.bg-white,
+.lp-theme-scope a.bg-white,
+.lp-theme-scope button.bg-gray-50,
+.lp-theme-scope a.bg-gray-50 { color: var(--lp-button-text) !important; }
 /* Tile shadow — only event tile cards use the lp-tile-card class */
 .lp-tile-card { box-shadow: 6px 6px 0px var(--lp-tile-shadow) !important; }
 /* Button-specific shadows use --lp-button-shadow; non-button containers use tile-shadow */

@@ -16,6 +16,10 @@ function hexLuminance(hex) {
 function contrastColor(hex) {
   return hexLuminance(hex) > 0.3 ? '#000000' : '#ffffff';
 }
+function hasContrast(textHex, bgHex, minRatio = 3.0) {
+  const t = hexLuminance(textHex), b = hexLuminance(bgHex);
+  return (Math.max(t, b) + 0.05) / (Math.min(t, b) + 0.05) >= minRatio;
+}
 
 // ── ThemeRow ──────────────────────────────────────────────────────────────────
 function ThemeRow({ field, value, onChange, onReset, accentColor, buttonFillColor, buttonOutlineColor, buttonShadowColor, subtextColor, buttonTextColor }) {
@@ -125,6 +129,14 @@ export default function ThemeCustomizerModal({ onClose }) {
 
   // Footer hover: ALWAYS black fill + white text + white border — no exceptions
   const [footerHover, setFooterHover] = useState(null);
+
+  // Idle text for Reset All + Cancel: use buttonTextColor if it passes contrast, else auto-contrast
+  const idleFillBg = buttonFillColor || '#ffffff';
+  const idleText = buttonTextColor && hasContrast(buttonTextColor, idleFillBg)
+    ? buttonTextColor
+    : contrastColor(idleFillBg);
+  const idleBorder = buttonOutlineColor || '#000000';
+
   const footerBtnStyle = (id) => {
     const isApplyIdle = id === 'apply' && footerHover !== id;
     if (isApplyIdle) {
@@ -132,6 +144,10 @@ export default function ThemeCustomizerModal({ onClose }) {
     }
     if (footerHover === id) {
       return { backgroundColor: '#000000', color: '#ffffff', borderColor: '#ffffff' };
+    }
+    // Idle for Reset All / Cancel
+    if (id !== 'apply') {
+      return { backgroundColor: idleFillBg, color: idleText, borderColor: idleBorder };
     }
     return {};
   };

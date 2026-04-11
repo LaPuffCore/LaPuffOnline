@@ -10,7 +10,7 @@ import { awardPoints, POINTS, isEligibleForPoints } from '../lib/pointsSystem';
 import { getValidSession } from '../lib/supabaseAuth';
 import { getTileAccentColor, useSiteTheme } from '../lib/theme';
 
-function MiniMap({ lat, lng, address, city, borderColor }) {
+function MiniMap({ lat, lng, address, city, borderColor, textColor }) {
   const [loaded, setLoaded] = useState(false);
 
   const mapUrl = (lat && lng)
@@ -61,7 +61,7 @@ function MiniMap({ lat, lng, address, city, borderColor }) {
         title="Location Map"
       />
       <div className="absolute bottom-0 left-0 right-0 bg-white border-t-2 border-black p-1.5 flex items-center gap-2 z-20 transition-colors duration-300">
-        <p className="text-[9px] font-black uppercase tracking-tighter w-full truncate">{address || city || 'NYC GRID'}</p>
+        <p className="text-[9px] font-black uppercase tracking-tighter w-full truncate" style={{ color: textColor || '#000000' }}>{address || city || 'NYC GRID'}</p>
       </div>
     </a>
   );
@@ -80,6 +80,9 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
 
   const tags = generateAutoTags(event);
   const borderColor = getTileAccentColor(event.hex_color, resolvedTheme);
+  const buttonTextColor = resolvedTheme?.buttonTextColor || '#000000';
+  const bodyTextColor = resolvedTheme?.bodyTextColor || '#374151';
+  const buttonShadowColor = resolvedTheme?.buttonShadowColor || '#000000';
 
   const isExpired = event.event_date && (Date.now() - new Date(event.event_date + 'T00:00:00').getTime()) > 7 * 86400000;
   const photos = event.photos?.length > 0 && !isExpired ? event.photos : [];
@@ -313,8 +316,8 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
               >
                 <span className="text-2xl sm:text-3xl">📅</span>
                 <div>
-                  <p className="text-xs sm:text-sm font-black leading-tight">{displayDate}</p>
-                  <p className="text-[9px] sm:text-[10px] font-bold text-gray-400 uppercase">{displayTime}</p>
+                  <p className="text-xs sm:text-sm font-black leading-tight" style={{ color: buttonTextColor }}>{displayDate}</p>
+                  <p className="text-[9px] sm:text-[10px] font-bold uppercase" style={{ color: buttonTextColor, opacity: 0.65 }}>{displayTime}</p>
                 </div>
               </button>
               
@@ -325,6 +328,7 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
                   address={event.location_data?.address}
                   city={event.location_data?.city}
                   borderColor={borderColor}
+                  textColor={buttonTextColor}
                 />
               </div>
             </div>
@@ -332,7 +336,10 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
             {event.description && (
               <div className="mb-6">
                 <p className="text-[9px] font-black uppercase text-gray-400 mb-2 tracking-widest">Protocol Intel</p>
-                <div className="text-xs sm:text-sm font-bold leading-relaxed bg-gray-50 border-[2.5px] border-black p-3 sm:p-4 rounded-xl shadow-[inset_4px_4px_0px_rgba(0,0,0,0.05)]">
+                <div
+                  className="text-xs sm:text-sm font-bold leading-relaxed bg-gray-50 border-[2.5px] border-black p-3 sm:p-4 rounded-xl"
+                  style={{ color: bodyTextColor, boxShadow: `4px 4px 0px ${buttonShadowColor}` }}
+                >
                   {event.description}
                 </div>
               </div>

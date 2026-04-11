@@ -208,21 +208,59 @@ export function hexToRgba(hex, alpha = 1) {
   return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
 }
 
+// Returns '#000000' or '#ffffff' — whichever contrasts better against hex
+export function contrastHex(hex) {
+  const h = (hex || '#ffffff').replace('#', '').padEnd(6, '0');
+  const r = parseInt(h.slice(0,2), 16) / 255;
+  const g = parseInt(h.slice(2,4), 16) / 255;
+  const b = parseInt(h.slice(4,6), 16) / 255;
+  const c2l = c => c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  const L = 0.2126 * c2l(r) + 0.7152 * c2l(g) + 0.0722 * c2l(b);
+  return L > 0.3 ? '#000000' : '#ffffff';
+}
+
 export function getTileAccentColor(eventColor, resolvedTheme) {
   return resolvedTheme.tileAccentOverride || eventColor || resolvedTheme.accentColor;
 }
 
-function applyThemeToDocument(theme) {
+// Luminance + contrast helpers — used for auto-contrast fallback
+function _hexLum(hex) {
+  const h = (hex || '#ffffff').replace('#', '').padEnd(6, '0');
+  const r = parseInt(h.slice(0,2), 16) / 255;
+  const g = parseInt(h.slice(2,4), 16) / 255;
+  const b = parseInt(h.slice(4,6), 16) / 255;
+  const l = c => c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  return 0.2126 * l(r) + 0.7152 * l(g) + 0.0722 * l(b);
+}
+function _contrastRatio(a, b) {
+  const [lo, hi] = [_hexLum(a), _hexLum(b)].sort((x, y) => x - y);
+  return (hi + 0.05) / (lo + 0.05);
+}
+// Returns textColor if contrast is ≥3:1 vs bgColor, else returns #000 or #fff
+function safeText(textColor, bgColor) {
+  if (!textColor || !bgColor) return textColor || '#000000';
+  if (_contrastRatio(textColor, bgColor) >= 3.0) return textColor;
+  return _hexLum(bgColor) > 0.3 ? '#000000' : '#ffffff';
+}
+
+function applyThemeToDocument(theme, overrides = {}) {
   const root = document.documentElement;
+  // Auto-contrast: when a fill is customized but text isn't explicitly set,
+  // compute a readable fallback so text is never invisible on its background.
+  const titleText   = overrides.titleTextColor   ? theme.titleTextColor   : safeText(theme.titleTextColor,   theme.surfaceBackgroundColor);
+  const subtextVal  = overrides.subtextColor      ? theme.subtextColor     : safeText(theme.subtextColor,     theme.surfaceBackgroundColor);
+  const bodyText    = overrides.bodyTextColor     ? theme.bodyTextColor    : safeText(theme.bodyTextColor,    theme.surfaceBackgroundColor);
+  const buttonText  = overrides.buttonTextColor   ? theme.buttonTextColor  : safeText(theme.buttonTextColor,  theme.buttonFillColor);
+
   root.style.setProperty('--lp-accent', theme.accentColor);
   root.style.setProperty('--lp-accent-soft', hexToRgba(theme.accentColor, 0.14));
   root.style.setProperty('--lp-accent-softer', hexToRgba(theme.accentColor, 0.08));
-  root.style.setProperty('--lp-title-text', theme.titleTextColor);
-  root.style.setProperty('--lp-subtext', theme.subtextColor);
-  root.style.setProperty('--lp-body-text', theme.bodyTextColor || '#374151');
+  root.style.setProperty('--lp-title-text', titleText);
+  root.style.setProperty('--lp-subtext', subtextVal);
+  root.style.setProperty('--lp-body-text', bodyText);
   root.style.setProperty('--lp-button-outline', theme.buttonOutlineColor);
   root.style.setProperty('--lp-button-fill', theme.buttonFillColor);
-  root.style.setProperty('--lp-button-text', theme.buttonTextColor || '#000000');
+  root.style.setProperty('--lp-button-text', buttonText);
   root.style.setProperty('--lp-button-shadow', theme.buttonShadowColor || '#000000');
   root.style.setProperty('--lp-page-bg', theme.pageBackgroundColor);
   root.style.setProperty('--lp-surface-bg', theme.surfaceBackgroundColor);
@@ -271,8 +309,8 @@ export function ThemeProvider({ children }) {
   }, [overrides]);
 
   useEffect(() => {
-    applyThemeToDocument(resolvedTheme);
-  }, [resolvedTheme]);
+    applyThemeToDocument(resolvedTheme, previewOverrides ?? overrides);
+  }, [resolvedTheme, overrides, previewOverrides]);
 
   const value = useMemo(() => ({
     overrides,
