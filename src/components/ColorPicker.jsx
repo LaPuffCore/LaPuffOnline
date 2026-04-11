@@ -69,10 +69,10 @@ export default function ColorPicker({ value, onChange, compact = false }) {
   const swatchStyle = value
     ? { backgroundColor: value }
     : {
-        backgroundImage: 'linear-gradient(45deg, #ececec 25%, transparent 25%), linear-gradient(-45deg, #ececec 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #ececec 75%), linear-gradient(-45deg, transparent 75%, #ececec 75%)',
+        backgroundImage: 'linear-gradient(45deg, #a0a0a0 25%, transparent 25%), linear-gradient(-45deg, #a0a0a0 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #a0a0a0 75%), linear-gradient(-45deg, transparent 75%, #a0a0a0 75%)',
         backgroundSize: '14px 14px',
         backgroundPosition: '0 0, 0 7px, 7px -7px, -7px 0px',
-        backgroundColor: '#fafafa',
+        backgroundColor: '#e0e0e0',
       };
 
   return (

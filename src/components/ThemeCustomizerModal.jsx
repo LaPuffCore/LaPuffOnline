@@ -18,7 +18,7 @@ function contrastColor(hex) {
 }
 
 // ── ThemeRow ──────────────────────────────────────────────────────────────────
-function ThemeRow({ field, value, onChange, onReset, accentColor, buttonFillColor }) {
+function ThemeRow({ field, value, onChange, onReset, accentColor, buttonFillColor, subtextColor }) {
   const [containerHovered, setContainerHovered] = useState(false);
   const [resetHovered, setResetHovered] = useState(false);
 
@@ -31,7 +31,7 @@ function ThemeRow({ field, value, onChange, onReset, accentColor, buttonFillColo
     );
   }
 
-  // Container hover: bg = selection accent, text = readable contrast
+  // Container hover: bg = selection accent, outline stays black/accent (not hidden)
   const rowHoverBg = accentColor || '#7C3AED';
   // Text on hover: if custom buttonFill set → opposite of fill; else → contrast vs accent
   const rowHoverText = buttonFillColor
@@ -47,21 +47,22 @@ function ThemeRow({ field, value, onChange, onReset, accentColor, buttonFillColo
 
   const containerStyle = {
     backgroundColor: containerHovered ? rowHoverBg : '#ffffff',
-    borderColor: containerHovered ? rowHoverBg : '#000000',
+    borderColor: '#000000',
     borderWidth: '3px',
     borderStyle: 'solid',
-    transition: 'background-color 0.15s, border-color 0.15s',
+    transition: 'background-color 0.15s',
   };
+  const noteDefaultColor = subtextColor || accentColor || '#7C3AED';
   const labelStyle = { color: containerHovered ? rowHoverText : undefined };
-  const noteStyle = { color: containerHovered ? `${rowHoverText}bb` : undefined, opacity: containerHovered ? 1 : 0.7 };
+  const noteStyle = { color: containerHovered ? `${rowHoverText}cc` : noteDefaultColor };
 
   const resetStyle = {
     backgroundColor: resetHovered ? resetBtnHoverBg : containerHovered ? rowHoverBg : '#ffffff',
-    borderColor: resetHovered ? resetBtnHoverBg : containerHovered ? rowHoverBg : '#000000',
+    borderColor: '#000000',
     borderWidth: '3px',
     borderStyle: 'solid',
     color: resetHovered ? resetBtnHoverIcon : containerHovered ? rowHoverText : undefined,
-    transition: 'background-color 0.12s, border-color 0.12s, color 0.12s',
+    transition: 'background-color 0.12s, color 0.12s',
   };
 
   return (
@@ -80,7 +81,7 @@ function ThemeRow({ field, value, onChange, onReset, accentColor, buttonFillColo
             <p className="text-[10px] font-bold text-amber-600 mt-0.5 leading-tight">{field.subtitle}</p>
           )}
           {field.note && (
-            <p className="text-[9px] font-medium mt-0.5 leading-tight italic" style={noteStyle}>{field.note}</p>
+            <p className="text-[11px] font-bold mt-1 leading-snug italic" style={noteStyle}>{field.note}</p>
           )}
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
@@ -116,16 +117,38 @@ export default function ThemeCustomizerModal({ onClose }) {
 
   const accentColor = draftOverrides.accentColor ?? resolvedTheme?.accentColor ?? '#7C3AED';
   const buttonFillColor = draftOverrides.buttonFillColor ?? resolvedTheme?.buttonFillColor ?? null;
+  const subtextColor = draftOverrides.subtextColor ?? resolvedTheme?.subtextColor ?? null;
+  // Detect whether the user has actually set a custom accent (not just inherited default)
+  const hasCustomAccent = !!(draftOverrides.accentColor ?? resolvedTheme?.accentColor);
+  const hasCustomButtonFill = !!(draftOverrides.buttonFillColor ?? resolvedTheme?.buttonFillColor);
 
-  // Footer button hover: always black bg, text contrasts against button fill
-  const [footerHover, setFooterHover] = useState(null); // 'resetAll'|'cancel'|'apply'
-  const footerHoverBg = '#000000';
-  const footerHoverText = buttonFillColor && hexLuminance(buttonFillColor) <= 0.15
-    ? (accentColor || '#a3e635')
+  // Footer button hover logic:
+  //  - Default: black fill, white text
+  //  - Custom button fill set: text changes to opposite of buttonFill (bg stays black)
+  //  - Apply button: if selection color set, its idle bg = accentColor; hover text = opposite of accentColor
+  const [footerHover, setFooterHover] = useState(null);
+
+  const footerDefaultHoverBg = '#000000';
+  const footerDefaultHoverText = hasCustomButtonFill
+    ? contrastColor(buttonFillColor)
     : '#ffffff';
-  const footerBtnStyle = (id) => footerHover === id
-    ? { backgroundColor: footerHoverBg, color: footerHoverText, borderColor: footerHoverBg }
-    : {};
+
+  const footerBtnStyle = (id) => {
+    if (footerHover !== id) {
+      // Idle style for Apply: use accent as bg if selection color is set
+      if (id === 'apply') {
+        return { backgroundColor: accentColor, color: contrastColor(accentColor), borderColor: accentColor };
+      }
+      return {};
+    }
+    // Hovered
+    if (id === 'apply') {
+      const hoverBg = footerDefaultHoverBg;
+      const hoverText = hasCustomButtonFill ? contrastColor(buttonFillColor) : contrastColor(accentColor);
+      return { backgroundColor: hoverBg, color: hoverText, borderColor: hoverBg };
+    }
+    return { backgroundColor: footerDefaultHoverBg, color: footerDefaultHoverText, borderColor: footerDefaultHoverBg };
+  };
 
   const [isDesktopCursorCapable, setIsDesktopCursorCapable] = useState(false);
   const [cursorExpanded, setCursorExpanded] = useState(false);
@@ -477,6 +500,7 @@ export default function ThemeCustomizerModal({ onClose }) {
                 onReset={() => resetDraftKey(field.key)}
                 accentColor={accentColor}
                 buttonFillColor={buttonFillColor}
+                subtextColor={subtextColor}
               />
             ))}
           </div>
@@ -487,8 +511,8 @@ export default function ThemeCustomizerModal({ onClose }) {
           <button
             type="button"
             onClick={handleResetAll}
-            className="px-3 py-2 rounded-xl border-3 border-black bg-white text-black text-xs md:text-sm font-black shadow-[3px_3px_0px_black] transition"
-            style={footerBtnStyle('resetAll')}
+            className="px-3 py-2 rounded-xl border-3 border-black text-black text-xs md:text-sm font-black shadow-[3px_3px_0px_black]"
+            style={{ backgroundColor: '#ffffff', transition: 'background-color 0.15s, color 0.15s, border-color 0.15s', ...footerBtnStyle('resetAll') }}
             onMouseEnter={() => setFooterHover('resetAll')}
             onMouseLeave={() => setFooterHover(null)}
           >
@@ -497,8 +521,8 @@ export default function ThemeCustomizerModal({ onClose }) {
           <button
             type="button"
             onClick={handleCancel}
-            className="px-3 py-2 rounded-xl border-3 border-black bg-white text-black text-xs md:text-sm font-black shadow-[3px_3px_0px_black] transition"
-            style={footerBtnStyle('cancel')}
+            className="px-3 py-2 rounded-xl border-3 border-black text-black text-xs md:text-sm font-black shadow-[3px_3px_0px_black]"
+            style={{ backgroundColor: '#ffffff', transition: 'background-color 0.15s, color 0.15s, border-color 0.15s', ...footerBtnStyle('cancel') }}
             onMouseEnter={() => setFooterHover('cancel')}
             onMouseLeave={() => setFooterHover(null)}
           >
@@ -507,8 +531,8 @@ export default function ThemeCustomizerModal({ onClose }) {
           <button
             type="button"
             onClick={handleApply}
-            className="px-3 py-2 rounded-xl border-3 border-black bg-[#7C3AED] text-white text-xs md:text-sm font-black shadow-[3px_3px_0px_black] transition"
-            style={footerBtnStyle('apply')}
+            className="px-3 py-2 rounded-xl border-3 text-xs md:text-sm font-black shadow-[3px_3px_0px_black]"
+            style={{ transition: 'background-color 0.15s, color 0.15s, border-color 0.15s', ...footerBtnStyle('apply') }}
             onMouseEnter={() => setFooterHover('apply')}
             onMouseLeave={() => setFooterHover(null)}
           >
