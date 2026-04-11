@@ -132,6 +132,9 @@ export const DEFAULT_THEME = {
   cursorTrail: 'none',
   cursorColor: '#FFFFFF',
   cursorEffectColor: null,
+  cursorOutlineEnabled: true,
+  cursorOutlineColor: '#000000',
+  cursorOutlineWidth: 2,
 };
 
 const ThemeContext = createContext(null);

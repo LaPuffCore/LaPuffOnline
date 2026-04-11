@@ -607,6 +607,9 @@ export default function CustomCursorOverlay() {
   const showWindows = cursorType === 'windows';
   const cursorColor = resolvedTheme.cursorColor || '#FFFFFF';
   const cursorEffectColor = resolvedTheme.cursorEffectColor || null;
+  const cursorOutlineEnabled = resolvedTheme.cursorOutlineEnabled ?? true;
+  const cursorOutlineColor = resolvedTheme.cursorOutlineColor || '#000000';
+  const cursorOutlineWidth = Number(resolvedTheme.cursorOutlineWidth ?? 2);
 
   const trail = resolvedTheme.cursorTrail || 'none';
   const effectColor = resolveEffectColor(trail, cursorColor, cursorEffectColor);
@@ -805,6 +808,8 @@ export default function CustomCursorOverlay() {
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           transition: 'transform 90ms linear',
           filter: trail === 'vaporwave' ? 'drop-shadow(0 0 10px rgba(255,77,228,0.65)) saturate(1.18)' : 'none',
+          outline: cursorOutlineEnabled ? `${cursorOutlineWidth}px solid ${cursorOutlineColor}` : 'none',
+          borderRadius: (showEmoji || showWindows || isDefault) ? '2px' : '50%',
         }}
       >
         {/* ── Cursor head overlays ── */}

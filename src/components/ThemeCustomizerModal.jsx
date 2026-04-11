@@ -93,7 +93,7 @@ export default function ThemeCustomizerModal({ onClose }) {
     setDraftOverrides({});
   }
 
-  const CURSOR_KEYS = ['cursorType', 'cursorPreset', 'cursorEmoji', 'cursorImageData', 'cursorSize', 'cursorTrail', 'cursorColor', 'cursorEffectColor'];
+  const CURSOR_KEYS = ['cursorType', 'cursorPreset', 'cursorEmoji', 'cursorImageData', 'cursorSize', 'cursorTrail', 'cursorColor', 'cursorEffectColor', 'cursorOutlineEnabled', 'cursorOutlineColor', 'cursorOutlineWidth'];
 
   function resetCursorSettings() {
     setDraftOverrides((prev) => {
@@ -125,6 +125,7 @@ export default function ThemeCustomizerModal({ onClose }) {
       if (event.key === 'Escape') onClose();
     }
     function handleClick(event) {
+      if (event.target.closest('[data-theme-modal-portal]')) return;
       if (ref.current && !ref.current.contains(event.target)) onClose();
     }
 
@@ -282,25 +283,53 @@ export default function ThemeCustomizerModal({ onClose }) {
                         />
                       </div>
 
-                      {/* Cursor Color + Effect Color in one row */}
-                      <div className="mt-3 grid grid-cols-2 gap-3">
-                        {cursorType !== 'emoji' && cursorType !== 'image' && (
-                          <div>
-                            <p className="text-[10px] font-black uppercase tracking-wide text-gray-500 mb-1.5">Cursor Color</p>
-                            <ColorPicker
-                              compact
-                              value={draftOverrides.cursorColor || '#FFFFFF'}
-                              onChange={(next) => setDraftOverride('cursorColor', next || '#FFFFFF')}
-                            />
+                      {/* Cursor Color, Effect Color, Outline — compact single row */}
+                      <div className="mt-3">
+                        <div className="flex items-end gap-2 flex-wrap">
+                          {/* Cursor Color */}
+                          {cursorType !== 'emoji' && cursorType !== 'image' && (
+                            <div className="flex flex-col items-center gap-1">
+                              <p className="text-[9px] font-black uppercase tracking-wide text-gray-500">Cursor</p>
+                              <ColorPicker compact value={draftOverrides.cursorColor || '#FFFFFF'} onChange={(next) => setDraftOverride('cursorColor', next || '#FFFFFF')} />
+                            </div>
+                          )}
+                          {/* Effect Color */}
+                          <div className="flex flex-col items-center gap-1">
+                            <p className="text-[9px] font-black uppercase tracking-wide text-gray-500">Effect</p>
+                            <ColorPicker compact value={draftOverrides.cursorEffectColor || null} onChange={(next) => setDraftOverride('cursorEffectColor', next || null)} />
                           </div>
-                        )}
-                        <div>
-                          <p className="text-[10px] font-black uppercase tracking-wide text-gray-500 mb-1.5">Effect Color</p>
-                          <ColorPicker
-                            compact
-                            value={draftOverrides.cursorEffectColor || null}
-                            onChange={(next) => setDraftOverride('cursorEffectColor', next || null)}
-                          />
+                          {/* Outline toggle + Outline color */}
+                          <div className="flex flex-col items-center gap-1">
+                            <p className="text-[9px] font-black uppercase tracking-wide text-gray-500">Outline</p>
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => setDraftOverride('cursorOutlineEnabled', !(draftOverrides.cursorOutlineEnabled ?? true))}
+                                className={`w-9 h-9 rounded-xl border-2 text-[10px] font-black transition-colors ${(draftOverrides.cursorOutlineEnabled ?? true) ? 'bg-black text-white border-black' : 'bg-white text-gray-400 border-gray-300'}`}
+                                title="Toggle cursor outline"
+                              >
+                                {(draftOverrides.cursorOutlineEnabled ?? true) ? 'ON' : 'OFF'}
+                              </button>
+                              {(draftOverrides.cursorOutlineEnabled ?? true) && (
+                                <ColorPicker compact value={draftOverrides.cursorOutlineColor || '#000000'} onChange={(next) => setDraftOverride('cursorOutlineColor', next || '#000000')} />
+                              )}
+                            </div>
+                          </div>
+                          {/* Outline width */}
+                          {(draftOverrides.cursorOutlineEnabled ?? true) && (
+                            <div className="flex flex-col gap-1 flex-1 min-w-[80px]">
+                              <div className="flex items-center justify-between">
+                                <p className="text-[9px] font-black uppercase tracking-wide text-gray-500">Width</p>
+                                <span className="text-[9px] font-black">{Number(draftOverrides.cursorOutlineWidth ?? 2)}px</span>
+                              </div>
+                              <input
+                                type="range" min="1" max="8" step="0.5"
+                                value={Number(draftOverrides.cursorOutlineWidth ?? 2)}
+                                onChange={(e) => setDraftOverride('cursorOutlineWidth', Number(e.target.value))}
+                                className="w-full"
+                              />
+                            </div>
+                          )}
                         </div>
                       </div>
 

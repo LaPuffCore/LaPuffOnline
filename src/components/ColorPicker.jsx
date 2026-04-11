@@ -87,6 +87,7 @@ export default function ColorPicker({ value, onChange, compact = false }) {
       {open && createPortal(
         <div
           ref={panelRef}
+          data-theme-modal-portal="true"
           className="fixed z-[9999999] bg-white border-3 border-black rounded-3xl shadow-[5px_5px_0px_black] p-4 w-[min(16rem,calc(100vw-1rem))]"
           style={panelStyle || { top: 8, left: 8, visibility: 'hidden' }}
         >
