@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { generateAutoTags } from '../lib/autoTags';
 import { toggleFavorite, isFavorite, getFavoriteCount, getFavTrend, subscribeToFavoriteCount } from '../lib/favorites';
 import { TrendIcon } from './EventTile';
@@ -58,7 +59,6 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
   const [favCount, setFavCount] = useState(0);
   const [trend, setTrend] = useState('neutral');
   const [imgError, setImgError] = useState(false);
-  const [scrollOffset, setScrollOffset] = useState(0);
   const [isMobile, setIsMobile] = useState(false);
 
   const tags = generateAutoTags(event);
@@ -71,17 +71,6 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
   useEffect(() => {
     const mobile = window.innerWidth < 768;
     setIsMobile(mobile);
-
-    // FRESH LOOK AT POSITIONING: 
-    // We target the main scrollable element if it exists, otherwise fallback to window.
-    // This handles the "Totalizing" scroll count by checking the actual displacement.
-    const calculateOffset = () => {
-      const scrollEl = document.querySelector('main.overflow-y-auto') || document.documentElement;
-      setScrollOffset(scrollEl.scrollTop || window.pageYOffset);
-    };
-
-    // Mobile should use a fixed overlay and keep initial position stable.
-    if (!mobile) calculateOffset();
     
     const originalOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
@@ -159,10 +148,9 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
     ? new Date(event.event_date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) 
     : '';
 
-  return (
+  return createPortal(
     <div 
-      className={`lp-theme-scope ${isMobile ? 'fixed inset-0 overflow-y-auto overscroll-contain' : 'absolute inset-x-0'} z-[100000] min-h-screen flex flex-col items-center p-2 sm:p-4`}
-      style={isMobile ? undefined : { top: `${scrollOffset}px` }}
+      className={`lp-theme-scope fixed inset-0 overflow-y-auto overscroll-contain z-[100000] min-h-screen flex flex-col items-center p-2 sm:p-4`}
     >
       <div 
         className={`${isMobile ? 'fixed inset-0 z-[-1] bg-black/45' : 'fixed inset-0 z-[-1] backdrop-blur-xl bg-white/40 transform-gpu'}`} 
@@ -299,5 +287,5 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
         </button>
       </div>
     </div>
-  );
+  , document.body);
 }

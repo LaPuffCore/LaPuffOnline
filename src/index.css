@@ -41,10 +41,14 @@
     --lp-accent: #7C3AED;
     --lp-accent-soft: rgba(124, 58, 237, 0.14);
     --lp-accent-softer: rgba(124, 58, 237, 0.08);
+    --lp-title-text: #000000;
+    --lp-subtext: #6B7280;
     --lp-button-outline: #000000;
     --lp-button-fill: #FFFFFF;
     --lp-page-bg: #FAFAF8;
     --lp-surface-bg: #FFFFFF;
+    --lp-topbar-fill: #FFFFFF;
+    --lp-topbar-outline: #000000;
     --lp-micro-icon: #000000;
     --lp-tile-shadow: #000000;
     --lp-logo-fill: #000000;
@@ -122,6 +126,24 @@
 .lp-accent-color-text { color: var(--lp-accent) !important; }
 .lp-accent-hover:hover { background-color: var(--lp-accent) !important; color: #fff !important; }
 .lp-accent-shadow { box-shadow: 3px 3px 0 var(--lp-accent) !important; }
+
+/* ThemeRow bubble-letter hover — triggers on card hover, always readable */
+.group:hover .theme-row-label {
+  color: #fff !important;
+  text-shadow:
+    -2px -2px 0 #000,
+     2px -2px 0 #000,
+    -2px  2px 0 #000,
+     2px  2px 0 #000,
+    -2px  0   0 #000,
+     2px  0   0 #000,
+     0   -2px 0 #000,
+     0    2px 0 #000,
+    -3px -3px 0 #000,
+     3px -3px 0 #000,
+    -3px  3px 0 #000,
+     3px  3px 0 #000 !important;
+}
 .lp-muted-icon { color: var(--lp-micro-icon) !important; }
 .lp-button-base {
   background-color: var(--lp-button-fill);
@@ -147,14 +169,19 @@
   background-color: #fafafa;
 }
 
-.lp-theme-scope .bg-white { background-color: var(--lp-surface-bg) !important; }
+.lp-theme-scope .bg-white:not(button):not([type="button"]):not([type="submit"]):not([type="reset"]):not([role="button"]) { background-color: var(--lp-surface-bg) !important; }
+.lp-theme-scope button.bg-white,
+.lp-theme-scope [type="button"].bg-white,
+.lp-theme-scope [role="button"].bg-white { background-color: var(--lp-button-fill) !important; }
 .lp-theme-scope .border-black { border-color: var(--lp-button-outline) !important; }
 .lp-theme-scope .text-black { color: var(--lp-micro-icon) !important; }
+.lp-theme-scope h1, .lp-theme-scope h2, .lp-theme-scope h3 { color: var(--lp-title-text) !important; }
+.lp-theme-scope .font-black:not(button):not([type="button"]):not([role="button"]):not(.lp-no-title) { color: var(--lp-title-text) !important; }
+.lp-theme-scope .text-gray-600 { color: var(--lp-subtext) !important; }
+.lp-theme-scope .text-gray-500 { color: var(--lp-subtext) !important; }
+.lp-theme-scope .text-gray-400 { color: var(--lp-calendar-day-text) !important; }
 .lp-theme-scope .bg-gray-50 { background-color: color-mix(in srgb, var(--lp-surface-bg) 88%, #f3f4f6 12%) !important; }
 .lp-theme-scope .bg-gray-100 { background-color: var(--lp-calendar-day-bg) !important; }
-.lp-theme-scope .text-gray-600 { color: color-mix(in srgb, var(--lp-micro-icon) 72%, #ffffff 28%) !important; }
-.lp-theme-scope .text-gray-500 { color: color-mix(in srgb, var(--lp-micro-icon) 58%, #ffffff 42%) !important; }
-.lp-theme-scope .text-gray-400 { color: var(--lp-calendar-day-text) !important; }
 .lp-theme-scope .bg-\[\#7C3AED\] { background-color: var(--lp-accent) !important; }
 .lp-theme-scope .text-\[\#7C3AED\] { color: var(--lp-accent) !important; }
 .lp-theme-scope .border-\[\#7C3AED\] { border-color: var(--lp-accent) !important; }
@@ -167,6 +194,9 @@
 .lp-theme-scope .bg-violet-200 { background-color: color-mix(in srgb, var(--lp-accent) 24%, var(--lp-button-fill) 76%) !important; }
 .lp-theme-scope .text-violet-600 { color: var(--lp-accent) !important; }
 .lp-theme-scope .hover\:text-violet-600:hover { color: var(--lp-accent) !important; }
+/* Tile shadow — only event tile cards use the lp-tile-card class */
+.lp-tile-card { box-shadow: 6px 6px 0px var(--lp-tile-shadow) !important; }
+/* UI card shadows use tile-shadow for consistency */
 .lp-theme-scope [class*='shadow-[1px_1px_0px_#333]'] { box-shadow: 1px 1px 0px var(--lp-tile-shadow) !important; }
 .lp-theme-scope [class*='shadow-[2px_2px_0px_black]'] { box-shadow: 2px 2px 0px var(--lp-tile-shadow) !important; }
 .lp-theme-scope [class*='shadow-[3px_3px_0px_black]'] { box-shadow: 3px 3px 0px var(--lp-tile-shadow) !important; }
@@ -177,6 +207,8 @@
 .lp-theme-scope [class*='shadow-[6px_6px_0px_black]'] { box-shadow: 6px 6px 0px var(--lp-tile-shadow) !important; }
 .lp-theme-scope [class*='shadow-[8px_8px_0px_black]'] { box-shadow: 8px 8px 0px var(--lp-tile-shadow) !important; }
 .lp-theme-scope [class*='shadow-[12px_12px_0px_black]'] { box-shadow: 12px 12px 0px var(--lp-tile-shadow) !important; }
+/* Top bar */
+.lp-topbar { background-color: var(--lp-topbar-fill) !important; border-color: var(--lp-topbar-outline) !important; }
 
 html.lp-force-custom-cursor,
 html.lp-force-custom-cursor * {

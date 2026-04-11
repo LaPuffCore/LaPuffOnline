@@ -157,7 +157,7 @@ export function getCachedFavoriteEvents() {
 
 export function mergeFavoriteEventsWithCache(events = []) {
   const liveMap = new Map((Array.isArray(events) ? events : []).map((event) => [normalizeEventId(event.id), event]));
-  const favIds = getFavorites().map(normalizeEventId);
+  const favIds = [...new Set(getFavorites().map(normalizeEventId))]; // deduplicate IDs
   const cache = getFavoriteEventCacheMap();
 
   return favIds
@@ -181,7 +181,9 @@ function migrateAnonymousSyncState() {
 export function getFavorites() {
   try {
     const parsed = JSON.parse(localStorage.getItem(FAVS_KEY) || '[]');
-    return Array.isArray(parsed) ? parsed.map(normalizeEventId) : [];
+    const arr = Array.isArray(parsed) ? parsed.map(normalizeEventId) : [];
+    // Deduplicate to prevent double entries in local storage
+    return [...new Set(arr)];
   } catch {
     return [];
   }

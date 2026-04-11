@@ -127,7 +127,7 @@ export default function AuthModal({ onClose, onSuccess }) {
                       )}
                     </div>
                     <div>
-                      <label className="block text-xs font-black uppercase mb-1">Username *</label>
+                      <label className="block text-xs font-black uppercase mb-1">Clout Alias *</label>
                       <input value={form.username} onChange={e => setField('username', e.target.value)}
                         placeholder="your_handle"
                         className="w-full border-3 border-black rounded-2xl px-3 py-2.5 text-sm font-medium focus:outline-none focus:bg-violet-50 shadow-[3px_3px_0px_black]" />
@@ -156,7 +156,7 @@ export default function AuthModal({ onClose, onSuccess }) {
                   </div>
                   <div className="bg-violet-50 border-2 border-[#7C3AED] rounded-2xl p-3">
                     <p className="text-xs font-black text-[#7C3AED]">💜 Expansion Protocol</p>
-                    <p className="text-xs text-gray-600 mt-1">Verified recruits via referral links award the referrer +50 Clout Points once email is confirmed.</p>
+                    <p className="text-xs text-gray-600 mt-1">Your zip code is your colony: if you don't want to choose it now you can make a one time choice in your account settings later. Earn points by attending events and checking in with location, referring others to join, submitting events that get favorites... and more!</p>
                   </div>
                 </div>
               )}

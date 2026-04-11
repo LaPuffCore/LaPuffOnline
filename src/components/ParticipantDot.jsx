@@ -187,7 +187,6 @@ export default function ParticipantDot({ onStatusChange }) {
             openPrompt();
           }
         }}
-        onTouchStart={() => openPrompt()}
         onMouseEnter={() => { setHoverOpen(true); setBtnHovered(true); }}
         onMouseLeave={() => setBtnHovered(false)}
         className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border-2 transition-colors shadow-[2px_2px_0px_black]"
@@ -218,7 +217,7 @@ export default function ParticipantDot({ onStatusChange }) {
         <div
           ref={popupRef}
           onMouseEnter={() => setHoverOpen(true)}
-          className="absolute top-10 right-0 sm:right-auto sm:left-1/2 sm:-translate-x-1/2 z-50 bg-black text-white text-[11px] rounded-2xl px-3 py-3 w-72 max-w-[calc(100vw-1rem)] text-center font-bold shadow-lg whitespace-normal leading-snug"
+          className="absolute top-10 left-0 sm:left-auto sm:right-0 md:right-auto md:left-1/2 md:-translate-x-1/2 z-50 bg-black text-white text-[11px] rounded-2xl px-3 py-3 w-72 max-w-[calc(100vw-0.5rem)] text-center font-bold shadow-lg whitespace-normal leading-snug"
         >
           {stage === 'result' && (
             <button

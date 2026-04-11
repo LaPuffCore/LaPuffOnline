@@ -9,12 +9,7 @@ function ThemeRow({ field, value, onChange, onReset }) {
     <div className="group rounded-2xl border-3 border-black bg-white p-3 md:p-4 shadow-[4px_4px_0px_black]">
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <p
-            className="font-black text-sm md:text-base leading-tight text-black group-hover:text-white"
-            style={{ WebkitTextStroke: '0px' }}
-            onMouseEnter={(e) => { e.currentTarget.style.WebkitTextStroke = '3px #000'; e.currentTarget.style.color = '#fff'; }}
-            onMouseLeave={(e) => { e.currentTarget.style.WebkitTextStroke = '0px'; e.currentTarget.style.color = ''; }}
-          >
+          <p className="theme-row-label font-black text-sm md:text-base leading-tight text-black transition-none">
             {field.label}
           </p>
           {field.subtitle && (
@@ -211,7 +206,7 @@ export default function ThemeCustomizerModal({ onClose }) {
                   </div>
 
                   {!isDesktopCursorCapable ? (
-                    <p className="text-xs font-bold text-gray-500">Custom Cursor is only available on web pointer devices.</p>
+                    <p className="text-xs font-bold text-gray-700">Custom Cursor is only available on web pointer devices.</p>
                   ) : (
                     <>
                       {/* Cursor type selector */}
@@ -235,7 +230,7 @@ export default function ThemeCustomizerModal({ onClose }) {
 
                       {cursorType === 'windows' && (
                         <div className="mt-3">
-                          <p className="text-[11px] font-black uppercase tracking-wide text-gray-500 mb-1.5">Windows Classic</p>
+                          <p className="text-[11px] font-black uppercase tracking-wide text-gray-700 mb-1.5">Windows Classic</p>
                           <div className="grid grid-cols-3 md:grid-cols-6 gap-1.5">
                             {WINDOWS_CURSOR_PRESETS.map((preset) => (
                               <button
@@ -253,7 +248,7 @@ export default function ThemeCustomizerModal({ onClose }) {
 
                       {cursorType === 'emoji' && (
                         <div className="mt-3">
-                          <p className="text-[11px] font-black uppercase tracking-wide text-gray-500 mb-1">Emoji Cursor</p>
+                          <p className="text-[11px] font-black uppercase tracking-wide text-gray-700 mb-1">Emoji Cursor</p>
                           <EmojiPicker
                             value={draftOverrides.cursorEmoji || '✨'}
                             onChange={(next) => setDraftOverride('cursorEmoji', next || '✨')}
@@ -264,15 +259,16 @@ export default function ThemeCustomizerModal({ onClose }) {
 
                       {cursorType === 'image' && (
                         <div className="mt-3">
-                          <p className="text-[11px] font-black uppercase tracking-wide text-gray-500 mb-1">Upload Image Cursor</p>
+                          <p className="text-[11px] font-black uppercase tracking-wide text-gray-700 mb-1">Upload Image Cursor</p>
                           <input type="file" accept="image/*" onChange={handleCursorImageUpload} className="block w-full text-xs font-bold" />
                         </div>
                       )}
 
-                      {/* Size */}
+                      {/* Size — hidden for windows (native cursor, size n/a) */}
+                      {cursorType !== 'windows' && (
                       <div className="mt-3">
                         <div className="flex items-center justify-between gap-2">
-                          <p className="text-[11px] font-black uppercase tracking-wide text-gray-500">Cursor Size</p>
+                          <p className="text-[11px] font-black uppercase tracking-wide text-gray-700">Cursor Size</p>
                           <span className="text-xs font-black">{Number(draftOverrides.cursorSize || 28)}px</span>
                         </div>
                         <input
@@ -282,6 +278,7 @@ export default function ThemeCustomizerModal({ onClose }) {
                           className="w-full mt-1.5"
                         />
                       </div>
+                      )}
 
                       {/* Cursor Color, Effect Color, Outline — compact single row */}
                       <div className="mt-3">
@@ -289,18 +286,18 @@ export default function ThemeCustomizerModal({ onClose }) {
                           {/* Cursor Color */}
                           {cursorType !== 'emoji' && cursorType !== 'image' && (
                             <div className="flex flex-col items-center gap-1">
-                              <p className="text-[9px] font-black uppercase tracking-wide text-gray-500">Cursor</p>
+                              <p className="text-[9px] font-black uppercase tracking-wide text-gray-700">Cursor</p>
                               <ColorPicker compact value={draftOverrides.cursorColor || '#FFFFFF'} onChange={(next) => setDraftOverride('cursorColor', next || '#FFFFFF')} />
                             </div>
                           )}
                           {/* Effect Color */}
                           <div className="flex flex-col items-center gap-1">
-                            <p className="text-[9px] font-black uppercase tracking-wide text-gray-500">Effect</p>
+                            <p className="text-[9px] font-black uppercase tracking-wide text-gray-700">Effect</p>
                             <ColorPicker compact value={draftOverrides.cursorEffectColor || null} onChange={(next) => setDraftOverride('cursorEffectColor', next || null)} />
                           </div>
                           {/* Outline toggle + Outline color */}
                           <div className="flex flex-col items-center gap-1">
-                            <p className="text-[9px] font-black uppercase tracking-wide text-gray-500">Outline</p>
+                            <p className="text-[9px] font-black uppercase tracking-wide text-gray-700">Outline</p>
                             <div className="flex items-center gap-1">
                               <button
                                 type="button"
@@ -319,7 +316,7 @@ export default function ThemeCustomizerModal({ onClose }) {
                           {(draftOverrides.cursorOutlineEnabled ?? true) && (
                             <div className="flex flex-col gap-1 flex-1 min-w-[80px]">
                               <div className="flex items-center justify-between">
-                                <p className="text-[9px] font-black uppercase tracking-wide text-gray-500">Width</p>
+                                <p className="text-[9px] font-black uppercase tracking-wide text-gray-700">Width</p>
                                 <span className="text-[9px] font-black">{Number(draftOverrides.cursorOutlineWidth ?? 2)}px</span>
                               </div>
                               <input
@@ -335,7 +332,7 @@ export default function ThemeCustomizerModal({ onClose }) {
 
                       {/* Cursor Trail — collapsible groups */}
                       <div className="mt-3">
-                        <p className="text-[11px] font-black uppercase tracking-wide text-gray-500 mb-1.5">Cursor Trail</p>
+                        <p className="text-[11px] font-black uppercase tracking-wide text-gray-700 mb-1.5">Cursor Trail</p>
                         <div className="space-y-1.5">
                           {/* None button */}
                           <div className="flex flex-wrap gap-1.5">
@@ -355,8 +352,8 @@ export default function ThemeCustomizerModal({ onClose }) {
                                   onClick={() => toggleGroup(group)}
                                   className="w-full flex items-center justify-between px-2.5 py-1.5 hover:bg-white/80 transition-colors"
                                 >
-                                  <span className="text-[10px] font-black uppercase tracking-widest text-gray-500">{group}</span>
-                                  <span className={`text-gray-400 text-xs font-black transition-transform duration-150 ${isOpen ? 'rotate-180' : ''}`}>⌄</span>
+                                  <span className="text-[10px] font-black uppercase tracking-widest text-gray-700">{group}</span>
+                                  <span className={`text-gray-600 text-xs font-black transition-transform duration-150 ${isOpen ? 'rotate-180' : ''}`}>⌄</span>
                                 </button>
                                 {isOpen && (
                                   <div className="grid grid-cols-2 md:grid-cols-4 gap-1.5 px-2.5 pb-2">

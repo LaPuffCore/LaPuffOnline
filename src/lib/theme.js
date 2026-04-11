@@ -4,20 +4,24 @@ const STORAGE_KEY = 'lapuff_theme_overrides';
 
 export const THEME_FIELDS = [
   { key: 'accentColor', label: 'Selection Accent' },
+  { key: 'titleTextColor', label: 'Title Text' },
+  { key: 'subtextColor', label: 'Subtext Color' },
   { key: 'buttonOutlineColor', label: 'Button Outline' },
   { key: 'buttonFillColor', label: 'Button Fill' },
   { key: 'pageBackgroundColor', label: 'Page Background' },
   { key: 'surfaceBackgroundColor', label: 'Section Fill' },
+  { key: 'topBarFillColor', label: 'Top Bar Fill' },
+  { key: 'topBarOutlineColor', label: 'Top Bar Outline' },
   { key: 'microIconColor', label: 'Micro Icons' },
   { key: 'tileShadowColor', label: 'Tile Shadow' },
   { key: 'tileAccentOverride', label: 'Tile Accent Override', subtitle: "Note: this will turn off other users' selected event tile colors" },
   { key: 'logoFillColor', label: 'Logo Fill' },
   { key: 'logoShadowColor', label: 'Logo Shadow' },
-  { key: 'leaderboardHeaderColor', label: 'Board Header' },
-  { key: 'leaderboardHeaderTextColor', label: 'Board Header Text' },
-  { key: 'leaderboardBackgroundColor', label: 'Board Background' },
-  { key: 'leaderboardTextColor', label: 'Board Text' },
-  { key: 'leaderboardFlameColor', label: 'Board Flames' },
+  { key: 'leaderboardHeaderColor', label: 'Leaderboard Header' },
+  { key: 'leaderboardHeaderTextColor', label: 'Leaderboard Header Text' },
+  { key: 'leaderboardBackgroundColor', label: 'Leaderboard Background' },
+  { key: 'leaderboardTextColor', label: 'Leaderboard Text' },
+  { key: 'leaderboardFlameColor', label: 'Leaderboard Flames', subtitle: 'Reach top 50 to see this effect' },
   { key: 'calendarBackgroundColor', label: 'Calendar Background' },
   { key: 'calendarDayBackgroundColor', label: 'Calendar Day Fill' },
   { key: 'calendarDayTextColor', label: 'Calendar Day Text' },
@@ -107,10 +111,14 @@ export const CURSOR_TRAILS = [
 
 export const DEFAULT_THEME = {
   accentColor: '#7C3AED',
+  titleTextColor: '#000000',
+  subtextColor: '#6B7280',
   buttonOutlineColor: '#000000',
   buttonFillColor: '#FFFFFF',
   pageBackgroundColor: '#FAFAF8',
   surfaceBackgroundColor: '#FFFFFF',
+  topBarFillColor: '#FFFFFF',
+  topBarOutlineColor: '#000000',
   microIconColor: '#000000',
   tileShadowColor: '#000000',
   tileAccentOverride: null,
@@ -175,10 +183,14 @@ function applyThemeToDocument(theme) {
   root.style.setProperty('--lp-accent', theme.accentColor);
   root.style.setProperty('--lp-accent-soft', hexToRgba(theme.accentColor, 0.14));
   root.style.setProperty('--lp-accent-softer', hexToRgba(theme.accentColor, 0.08));
+  root.style.setProperty('--lp-title-text', theme.titleTextColor);
+  root.style.setProperty('--lp-subtext', theme.subtextColor);
   root.style.setProperty('--lp-button-outline', theme.buttonOutlineColor);
   root.style.setProperty('--lp-button-fill', theme.buttonFillColor);
   root.style.setProperty('--lp-page-bg', theme.pageBackgroundColor);
   root.style.setProperty('--lp-surface-bg', theme.surfaceBackgroundColor);
+  root.style.setProperty('--lp-topbar-fill', theme.topBarFillColor);
+  root.style.setProperty('--lp-topbar-outline', theme.topBarOutlineColor);
   root.style.setProperty('--lp-micro-icon', theme.microIconColor);
   root.style.setProperty('--lp-tile-shadow', theme.tileShadowColor);
   root.style.setProperty('--lp-logo-fill', theme.logoFillColor);

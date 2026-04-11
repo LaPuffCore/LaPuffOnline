@@ -125,12 +125,14 @@ export default function Home({ events = [], eventsLoading = false }) {
     setShowHeader(true);
     setShowUserMenu(false);
     setTileViewKey((prev) => prev + 1);
+    // Force a full page refresh to clear any stuck UI state (e.g. location popup)
+    window.location.reload();
   }
 
   return (
     <div className="h-[100dvh] lp-page-bg flex flex-col overflow-hidden" style={{ fontFamily: "'Nunito', cursive, sans-serif" }}>
       {/* Header */}
-      <header className={`bg-white border-b-4 border-black z-50 shadow-[0_4px_0px_black] flex-shrink-0 transition-transform duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform ${!showHeader ? '-translate-y-full absolute w-full' : 'translate-y-0 relative'}`}>
+      <header className={`lp-topbar bg-white border-b-4 border-black z-50 shadow-[0_4px_0px_black] flex-shrink-0 transition-transform duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform ${!showHeader ? '-translate-y-full absolute w-full' : 'translate-y-0 relative'}`}>
         <div className="max-w-7xl mx-auto px-3 py-2 md:px-4 md:py-3">
           {/* Top Row: Logo, Nav, Menu */}
           <div className="flex items-center justify-between gap-2">
@@ -181,7 +183,7 @@ export default function Home({ events = [], eventsLoading = false }) {
                 style={showLeaderboard ? { backgroundColor: accentColor, color: '#fff', boxShadow: '1px 1px 0px #333' } : {}}
                 onMouseEnter={e => { if (!showLeaderboard) e.currentTarget.style.backgroundColor = accentColor + '30'; }}
                 onMouseLeave={e => { if (!showLeaderboard) e.currentTarget.style.backgroundColor = ''; }}>
-                🏆 Top
+                🏆 Leaderboard
               </button>
             </div>
 

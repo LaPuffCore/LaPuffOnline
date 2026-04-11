@@ -5,7 +5,7 @@ import { getFavorites, mergeFavoriteEventsWithCache, hydrateFavoriteEventCache }
 import { getUserTZOffset, utcToLocal } from '../lib/timezones';
 import { generateAutoTags } from '../lib/autoTags';
 import { TAG_COLORS } from '../lib/tagColors';
-import { useSiteTheme } from '../lib/theme';
+import { getTileAccentColor, useSiteTheme } from '../lib/theme';
 
 function getDaysInMonth(year, month) { return new Date(year, month + 1, 0).getDate(); }
 function getFirstDay(year, month) { return new Date(year, month, 1).getDay(); }
@@ -225,6 +225,7 @@ export default function CalendarPage({ events = [] }) {
                 key={date.toDateString()}
                 onClick={() => drillToWeek(date)}
                 className={`rounded-2xl border-2 cursor-pointer transition-all min-h-0 overflow-hidden p-1 md:p-2 hover:border-[#7C3AED] hover:shadow-md ${isToday ? 'border-[#7C3AED] bg-violet-50' : 'border-gray-200 bg-white'} ${evs.length > 0 ? 'ring-1 ring-[#7C3AED]/20' : ''}`}
+                style={{ minHeight: isMobile ? '62px' : undefined }}
               >
                 <div className="flex h-full min-h-0 flex-col">
                   <div className="mb-1 flex items-start justify-between">
@@ -239,20 +240,22 @@ export default function CalendarPage({ events = [] }) {
                   </div>
 
                   <div className={`flex-1 min-h-0 ${isMobile ? 'space-y-1' : 'space-y-1.5 md:min-h-0'}`}>
-                    {showEvents.map((e) => (
+                    {showEvents.map((e) => {
+                      const tileColor = getTileAccentColor(e.hex_color, resolvedTheme);
+                      return (
                       <button
                         key={e.id}
                         onClick={(ev) => {
                           ev.stopPropagation();
-                          setSelectedEvent(e);
+                          if (isMobile) { drillToWeek(date); } else { setSelectedEvent(e); }
                         }}
-                        className={isMobile ? 'flex h-6 w-full items-center rounded-lg px-1.5' : 'w-full text-left text-[9px] md:text-[10px] rounded-lg px-1.5 py-1 font-bold cursor-pointer hover:opacity-85 leading-tight line-clamp-2'}
-                        style={{ backgroundColor: `${e.hex_color || '#7C3AED'}33`, color: e.hex_color || '#7C3AED' }}
+                        className={isMobile ? 'flex h-5 w-full items-center rounded-lg px-1' : 'w-full text-left text-[9px] md:text-[10px] rounded-lg px-1.5 py-1 font-bold cursor-pointer hover:opacity-85 leading-tight line-clamp-2'}
+                        style={{ backgroundColor: `${tileColor}33`, color: tileColor }}
                       >
                         {isMobile ? (
                           <>
-                            <span className="text-sm leading-none">{e.representative_emoji || '🎉'}</span>
-                            <span className="ml-auto h-2.5 w-2.5 rounded-full border border-black/10" style={{ backgroundColor: e.hex_color || '#7C3AED' }} />
+                            <span className="text-[10px] leading-none">{e.representative_emoji || '🎉'}</span>
+                            <span className="ml-auto h-2 w-2 rounded-full border border-black/10 flex-shrink-0" style={{ backgroundColor: tileColor }} />
                           </>
                         ) : (
                           <>
@@ -261,7 +264,8 @@ export default function CalendarPage({ events = [] }) {
                           </>
                         )}
                       </button>
-                    ))}
+                      );
+                    })}
 
                     {hasMore && (
                       <button
@@ -322,11 +326,13 @@ export default function CalendarPage({ events = [] }) {
                     const tags = generateAutoTags(e).slice(0, 2);
                     const time = e.event_time_utc ? utcToLocal(e.event_time_utc, getUserTZOffset()) : '';
                     const loc = e.location_data?.city || 'NYC';
+                    const tileColor = getTileAccentColor(e.hex_color, resolvedTheme);
                     return (
                       <button
                         key={e.id}
                         onClick={() => setSelectedEvent(e)}
-                        className="min-w-[190px] md:min-w-[235px] max-w-[190px] md:max-w-[235px] text-left rounded-xl border-2 border-black bg-gray-50 p-2.5 md:p-3 shadow-[2px_2px_0px_black] hover:bg-violet-50 transition-colors"
+                        className="min-w-[190px] md:min-w-[235px] max-w-[190px] md:max-w-[235px] text-left rounded-xl border-2 bg-gray-50 p-2.5 md:p-3 shadow-[2px_2px_0px_black] hover:bg-opacity-80 transition-colors"
+                        style={{ borderColor: tileColor }}
                       >
                         <div className="flex items-start gap-2">
                           <span className="text-2xl md:text-3xl leading-none">{e.representative_emoji || '🎉'}</span>
@@ -437,7 +443,7 @@ export default function CalendarPage({ events = [] }) {
       : curDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
 
   return (
-    <div className="h-[100dvh] overflow-hidden bg-[#FAFAF8] lp-theme-scope" style={{ backgroundColor: resolvedTheme.calendarBackgroundColor }}>
+    <div className="h-[100dvh] overflow-hidden lp-page-bg lp-theme-scope">
       <div className="max-w-7xl mx-auto h-full px-3 md:px-4 py-4 md:py-5 flex flex-col min-h-0">
         <div className="grid grid-cols-[72px_minmax(0,1fr)_72px] md:grid-cols-[88px_minmax(0,1fr)_88px] items-start md:items-center mb-3 md:mb-4 gap-2 md:gap-4">
           <Link to="/" className="w-[72px] md:w-[88px] flex flex-col items-center justify-start text-black hover:text-[#7C3AED] transition-colors">
@@ -476,7 +482,7 @@ export default function CalendarPage({ events = [] }) {
           <button onClick={() => nav(1)} className="w-9 h-9 bg-white border-3 border-black rounded-xl font-black hover:bg-[#7C3AED] hover:text-white transition-colors shadow-[2px_2px_0px_black]">→</button>
         </div>
 
-        <div className={`bg-white border-3 border-black rounded-3xl shadow-[5px_5px_0px_black] p-2.5 md:p-4 flex-1 min-h-0 ${view === 'monthly' ? 'overflow-hidden' : 'overflow-hidden'}`}>
+        <div className={`border-3 border-black rounded-3xl shadow-[5px_5px_0px_black] p-2.5 md:p-4 flex-1 min-h-0 ${view === 'monthly' ? 'overflow-hidden' : 'overflow-hidden'}`} style={{ backgroundColor: resolvedTheme.calendarBackgroundColor }}>
           {view === 'monthly' && <MonthGrid />}
           {view === 'weekly' && <WeekList />}
           {view === 'daily' && <DayView />}

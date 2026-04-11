@@ -108,8 +108,8 @@ export default function EventTile({ event, onClick, onTagClick }) {
       onClick={onClick}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      className="group bg-white rounded-[2rem] cursor-pointer hover:scale-[1.02] hover:-translate-y-1 transition-all duration-200 overflow-hidden isolate"
-      style={{ border: `3px solid ${borderColor}`, boxShadow: `6px 6px 0px black` }}
+      className="lp-tile-card group bg-white rounded-[2rem] cursor-pointer hover:scale-[1.02] hover:-translate-y-1 transition-all duration-200 overflow-hidden isolate"
+      style={{ border: `3px solid ${borderColor}`, boxShadow: `6px 6px 0px ${resolvedTheme.tileShadowColor || '#000000'}` }}
     >
       {/* Media Header: Height normalized for mobile density */}
       <div className="h-40 sm:h-44 relative overflow-hidden bg-gray-50 border-b-2 border-black [transform:translateZ(0)]">

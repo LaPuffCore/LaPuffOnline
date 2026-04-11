@@ -800,6 +800,21 @@ export default function CustomCursorOverlay() {
         </div>
       ))}
 
+      {/* Echo cursor — shape-following outline rendered behind main cursor */}
+      {cursorOutlineEnabled && !showImage && (() => {
+        const ow = Math.max(1, cursorOutlineWidth);
+        // Build 8-direction drop-shadow at ow pixels, 0 blur — follows transparent glyph shape exactly
+        const ds = (x, y) => `drop-shadow(${x}px ${y}px 0px ${cursorOutlineColor})`;
+        const echoFilter = [ds(ow,0), ds(-ow,0), ds(0,ow), ds(0,-ow), ds(ow,ow), ds(-ow,-ow), ds(ow,-ow), ds(-ow,ow)].join(' ');
+        return (
+          <div style={{ position: 'fixed', left: pos.x, top: pos.y, transform: `translate(-50%, -50%) scale(${isDown ? 0.92 : 1})`, width: glyphSize, height: glyphSize, display: 'flex', alignItems: 'center', justifyContent: 'center', filter: echoFilter, pointerEvents: 'none', zIndex: 1 }}>
+            {showWindows && <WindowsGlyph preset={resolvedTheme.cursorPreset || 'default'} size={glyphSize} color={hoveringInteractive ? '#000000' : cursorColor} interactive={hoveringInteractive} />}
+            {showEmoji && <span style={{ fontSize: glyphSize, lineHeight: 1 }}>{resolvedTheme.cursorEmoji || '✨'}</span>}
+            {!showWindows && !showEmoji && <span style={{ fontSize: glyphSize, lineHeight: 1, color: cursorColor }}>{'●'}</span>}
+          </div>
+        );
+      })()}
+
       <div
         style={{
           position: 'fixed', left: pos.x, top: pos.y,
@@ -808,8 +823,7 @@ export default function CustomCursorOverlay() {
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           transition: 'transform 90ms linear',
           filter: trail === 'vaporwave' ? 'drop-shadow(0 0 10px rgba(255,77,228,0.65)) saturate(1.18)' : 'none',
-          outline: cursorOutlineEnabled ? `${cursorOutlineWidth}px solid ${cursorOutlineColor}` : 'none',
-          borderRadius: (showEmoji || showWindows || isDefault) ? '2px' : '50%',
+          zIndex: 2,
         }}
       >
         {/* ── Cursor head overlays ── */}
@@ -862,7 +876,7 @@ export default function CustomCursorOverlay() {
           <div style={{ position: 'absolute', inset: -Math.max(10, glyphSize * 0.45), borderRadius: '9999px', background: 'transparent', boxShadow: `0 0 ${Math.max(22, glyphSize * 0.85)}px ${withAlpha(effectColor, 0.72)}, 0 0 ${Math.max(11, glyphSize * 0.44)}px rgba(255,255,255,0.65)`, border: `1px solid ${withAlpha(effectColor, 0.45)}` }} />
         )}
         {trail === 'rainbow' && (
-          <div style={{ position: 'absolute', inset: -Math.max(6, glyphSize * 0.3), borderRadius: '9999px', background: 'transparent', boxShadow: `0 0 ${Math.max(14, glyphSize * 0.58)}px rgba(255,80,80,0.7), 0 0 ${Math.max(10, glyphSize * 0.4)}px rgba(80,255,80,0.6), 0 0 ${Math.max(8, glyphSize * 0.32)}px rgba(80,80,255,0.6)`, outline: `1px solid rgba(255,160,200,0.5)` }} />
+          <div style={{ position: 'absolute', inset: -Math.max(6, glyphSize * 0.3), borderRadius: '9999px', background: 'transparent', boxShadow: `0 0 ${Math.max(14, glyphSize * 0.58)}px rgba(255,80,80,0.7), 0 0 ${Math.max(10, glyphSize * 0.4)}px rgba(80,255,80,0.6), 0 0 ${Math.max(8, glyphSize * 0.32)}px rgba(80,80,255,0.6)` }} />
         )}
         {trail === 'kawaii' && (
           <div style={{ position: 'absolute', inset: -Math.max(8, glyphSize * 0.38), borderRadius: '9999px', background: 'transparent', boxShadow: `0 0 ${Math.max(16, glyphSize * 0.65)}px rgba(255,179,222,0.72), 0 0 ${Math.max(8, glyphSize * 0.32)}px rgba(179,212,255,0.6)`, border: `1px dashed rgba(255,179,222,0.6)` }} />
