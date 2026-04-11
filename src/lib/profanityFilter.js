@@ -6,18 +6,18 @@ const BAD_WORDS = [
   'nigger','niggers','nigga','niggas','nigger','niggr','nigr','niga','nigar','nigg','n1gger','n1gga',
   'ngr','n-word','nword','niger','kike','kikes','chink','chinks','gook','gooks','spick','spic','spics',
   'wetback','wetbacks','beaner','beaners','towelhead','raghead','coon','coons','jigaboo','sambo',
-  'cracker','honky','gringo','zipperhead','slope','slopehead',
+  'honky','gringo','zipperhead','slope','slopehead',
   // Homophobic slurs
   'faggot','faggots','fag','fags','faggo','fagg','fago','fagot','fagots','dyke','dykes',
   'homo','tranny','trannies','shemale',
   // Sexist / misogynistic
-  'cunt','cunts',
+  'cunt','cunts', 'rape', 'raper', 'rapist', 'rapiest', 'rapely', 
   // General severe profanity (contextual but block in names/descriptions)
 
   // Nazi / extremist
-  'nazi','nazis','nsdap','1488','heil','swastika','kkk','aryan', 'hitler',
+  'nazi','nazis','nsdap','1488','heil','swastika','kkk','aryan', 'hitler', 'gorillion', '6million' '6_million', 'six_million', 'sixmillion',
   // Violence / threats
-  'kill yourself','kys','die faggot','rope yourself',
+  'kill yourself','kys','die faggot','rope yourself', 'killer',
 ];
 
 // Leet speak and common substitutions map
