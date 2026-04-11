@@ -52,7 +52,9 @@ function MiniMap({ lat, lng, address, city, borderColor }) {
 }
 
 function DayEventDetails({ event }) {
-  const borderColor = event.hex_color || '#7C3AED';
+  const { resolvedTheme } = useSiteTheme();
+  // Inherit tileAccentOverride + theme exactly like EventTile/EventDetailPopup
+  const borderColor = getTileAccentColor(event.hex_color, resolvedTheme);
   const tags = generateAutoTags(event);
   const displayTime = event.event_time_utc ? utcToLocal(event.event_time_utc, getUserTZOffset()) : '';
   const displayDate = event.event_date
@@ -391,10 +393,10 @@ export default function CalendarPage({ events = [] }) {
               >
                 <div
                   className="relative z-10 bg-white border-3 border-black rounded-3xl shadow-[4px_4px_0px_black]"
-                  style={{ borderLeftColor: e.hex_color || '#7C3AED', borderLeftWidth: 6 }}
+                  style={{ borderLeftColor: getTileAccentColor(e.hex_color, resolvedTheme), borderLeftWidth: 6 }}
                 >
                   <div className="p-4 flex items-center gap-3 md:gap-4">
-                    <div className="w-14 h-14 md:w-16 md:h-16 rounded-2xl overflow-hidden flex-shrink-0" style={{ backgroundColor: `${e.hex_color || '#7C3AED'}22` }}>
+                    <div className="w-14 h-14 md:w-16 md:h-16 rounded-2xl overflow-hidden flex-shrink-0" style={{ backgroundColor: `${getTileAccentColor(e.hex_color, resolvedTheme)}22` }}>
                       {e.photos?.[0]
                         ? <img src={e.photos[0]} className="w-full h-full object-cover" alt="" onError={(ev) => { ev.currentTarget.style.display = 'none'; }} />
                         : <div className="w-full h-full flex items-center justify-center text-3xl">{e.representative_emoji || '🎉'}</div>}

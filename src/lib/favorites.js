@@ -231,6 +231,17 @@ function isLikelyUuid(value) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
+/**
+ * Detect whether an event is auto-scraped (from auto_events table).
+ * First checks the provided snapshot, then falls back to the local event cache.
+ * Auto events must not write to event_favorites (FK references events.id only).
+ */
+function isAutoEvent(id, snapshot = null) {
+  if (snapshot?._auto) return true;
+  const cache = getFavoriteEventCacheMap();
+  return !!(cache[id]?._auto);
+}
+
 async function fetchEventCountAndTrendThreshold(id) {
   const withThreshold = await supabase
     .from('events')
@@ -301,6 +312,13 @@ export async function toggleFavorite(eventId, eventSnapshot = null) {
   window.dispatchEvent(new Event('favoritesChanged'));
 
   // ── 2. SUPABASE SYNC ───────────────────────────────────────────────────────
+  // Auto-scraped events (_auto:true) live in auto_events table, not events.
+  // event_favorites has a FK → events.id so skip DB sync for them entirely.
+  // Local star/count still works perfectly for auto events.
+  if (isAutoEvent(id, eventSnapshot)) {
+    return adding;
+  }
+
   try {
     const session = await getValidSession();
     const userId = session?.user?.id ?? null;

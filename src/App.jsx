@@ -1,6 +1,6 @@
 import { Toaster } from "./components/ui/toaster" // Fixed @ alias
 import { useState, useEffect } from 'react';
-import { getApprovedEvents, syncSampleEvents } from './lib/supabase';
+import { getApprovedEvents, syncSampleEvents, getAutoEvents } from './lib/supabase';
 import { SAMPLE_EVENTS } from './lib/sampleEvents';
 import {
   SAMPLE_MODE,
@@ -50,7 +50,11 @@ function AppWithEvents() {
             )
           : Promise.resolve(true);
 
-        let dbEvents = await getApprovedEvents({ sampleOnly: SAMPLE_MODE });
+        // Fetch user/sample events and auto-scraped events in parallel
+        let [dbEvents, autoEvents] = await Promise.all([
+          getApprovedEvents({ sampleOnly: SAMPLE_MODE }),
+          getAutoEvents(),
+        ]);
 
         if (SAMPLE_MODE && (!dbEvents || dbEvents.length === 0)) {
           await syncPromise;
@@ -61,10 +65,16 @@ function AppWithEvents() {
 
         if (!mounted) return;
 
-        if (dbEvents && dbEvents.length > 0) {
-          setEvents(dbEvents);
+        // Merge: user/sample events first, auto-scraped events appended
+        const baseEvents = dbEvents && dbEvents.length > 0
+          ? dbEvents
+          : SAMPLE_MODE ? SAMPLE_EVENTS : [];
+        const merged = [...baseEvents, ...(autoEvents || [])];
+
+        if (merged.length > 0) {
+          setEvents(merged);
           try {
-            sessionStorage.setItem(EVENTS_CACHE_KEY, JSON.stringify(dbEvents));
+            sessionStorage.setItem(EVENTS_CACHE_KEY, JSON.stringify(merged));
           } catch {}
           setEventsLoading(false);
           return;

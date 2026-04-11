@@ -48,6 +48,43 @@ export async function getApprovedEvents(options = {}) {
   } catch { return []; }
 }
 
+/**
+ * Fetch auto-scraped events from the auto_events table.
+ * Returns events in a ±30d past / +6mo future window so both
+ * the default (upcoming) view and archive mode work correctly.
+ * Adds _auto:true so TileView sourceMode filter recognises them immediately.
+ *
+ * @returns {Promise<Array<any>>}
+ */
+export async function getAutoEvents() {
+  try {
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/auto_events?is_approved=eq.true&event_date=gte.${thirtyDaysAgo}&select=*&order=event_date.asc`,
+      { headers: baseHeaders }
+    );
+    if (!res.ok) return [];
+    const rows = await res.json();
+    // Map each row so it slots into the existing TileView source filter
+    // (sourceMode==='auto' checks e._auto) and the EventDetailPopup
+    // (name field shows the originating site, source_url appears as a link).
+    return rows.map((row) => ({
+      ...row,
+      _auto: true,
+      // Show source site as the "organizer" label in EventDetailPopup
+      name: row.name || (row.source_site
+        ? row.source_site.charAt(0).toUpperCase() + row.source_site.slice(1)
+        : 'Auto'),
+      // Inject source_url into relevant_links so the popup renders it
+      relevant_links: Array.from(
+        new Set([...(row.relevant_links || []), ...(row.source_url ? [row.source_url] : [])])
+      ),
+    }));
+  } catch { return []; }
+}
+
 export async function syncSampleEvents(sampleEvents = [], enabled = true, clearOnDisable = true) {
   if (!enabled) {
     if (!clearOnDisable) return true;

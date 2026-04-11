@@ -147,6 +147,12 @@ export default function EventTile({ event, onClick, onTagClick }) {
           {event.price_category || 'FREE'}
         </div>
 
+        {event._auto && (
+          <div className="absolute bottom-2 right-2 bg-black/70 text-white text-[9px] font-black px-1.5 py-0.5 rounded-md border border-white/10 uppercase tracking-wider">
+            🤖 AUTO
+          </div>
+        )}
+
         <div className="absolute top-2 left-2 w-9 h-9 bg-white rounded-full border-[2.5px] border-black flex items-center justify-center text-base shadow-[2px_2px_0px_black] select-none">
           {event.representative_emoji || '🎉'}
         </div>

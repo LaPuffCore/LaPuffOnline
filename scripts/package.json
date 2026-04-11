@@ -1,0 +1,14 @@
+{
+  "name": "lapuff-event-scraper",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Daily NYC event scraper for LaPuff Online",
+  "scripts": {
+    "scrape": "node scrape-events.js",
+    "scrape:dry": "DRY_RUN=true node scrape-events.js"
+  },
+  "dependencies": {
+    "cheerio": "^1.0.0",
+    "rss-parser": "^3.13.0"
+  }
+}

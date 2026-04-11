@@ -12,6 +12,7 @@ import {
   hydrateFavoriteEventCache,
 } from '../lib/favorites';
 import { getUserTZOffset, utcToLocal } from '../lib/timezones';
+import { getTileAccentColor, useSiteTheme } from '../lib/theme';
 
 function formatDayTitle(dateKey) {
   if (!dateKey) return 'Undated';
@@ -44,11 +45,13 @@ function DateSeparator({ title }) {
 }
 
 function FavoriteCard({ event, tzOffset, onOpen, onUnfavorite }) {
+  const { resolvedTheme } = useSiteTheme();
   const [imgError, setImgError] = useState(false);
   const [favCount, setFavCount] = useState(0);
   const [trend, setTrend] = useState('neutral');
 
-  const borderColor = event.hex_color || '#7C3AED';
+  // Inherit tileAccentOverride + theme just like EventTile and EventDetailPopup
+  const borderColor = getTileAccentColor(event.hex_color, resolvedTheme);
   const displayTime = event.event_time_utc ? utcToLocal(event.event_time_utc, tzOffset) : '';
   const displayDate = event.event_date
     ? new Date(`${event.event_date}T00:00:00`).toLocaleDateString('en-US', {
