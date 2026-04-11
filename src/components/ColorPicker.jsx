@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 const PRESET_COLORS = [
@@ -7,7 +8,7 @@ const PRESET_COLORS = [
   '#FFEB3B', '#8BC34A', '#03A9F4', '#FF4081', '#7C4DFF',
 ];
 
-export default function ColorPicker({ value, onChange }) {
+export default function ColorPicker({ value, onChange, compact = false }) {
   const [open, setOpen] = useState(false);
   const [custom, setCustom] = useState(value || '#FF6B6B');
   const [panelStyle, setPanelStyle] = useState(null);
@@ -20,12 +21,16 @@ export default function ColorPicker({ value, onChange }) {
 
   useEffect(() => {
     function handleClick(event) {
-      if (wrapperRef.current && !wrapperRef.current.contains(event.target)) {
+      if (wrapperRef.current && !wrapperRef.current.contains(event.target) && !panelRef.current?.contains(event.target)) {
         setOpen(false);
       }
     }
 
-    if (open) document.addEventListener('mousedown', handleClick);
+    if (open) {
+      document.addEventListener('mousedown', handleClick);
+    } else {
+      setPanelStyle(null);
+    }
     return () => document.removeEventListener('mousedown', handleClick);
   }, [open]);
 
@@ -46,7 +51,7 @@ export default function ColorPicker({ value, onChange }) {
         ? Math.max(8, triggerRect.top - panelRect.height - 8)
         : preferredTop;
 
-      setPanelStyle({ left: `${left}px`, top: `${top}px` });
+      setPanelStyle({ left: `${left}px`, top: `${top}px`, visibility: 'visible' });
     }
 
     updatePosition();
@@ -75,15 +80,15 @@ export default function ColorPicker({ value, onChange }) {
       <button
         type="button"
         onClick={() => setOpen((prev) => !prev)}
-        className="w-11 h-11 md:w-14 md:h-14 rounded-2xl border-3 border-black shadow-[3px_3px_0px_black] hover:scale-105 transition-transform overflow-hidden"
+        className={`${compact ? 'w-9 h-9' : 'w-11 h-11 md:w-14 md:h-14'} rounded-2xl border-3 border-black shadow-[3px_3px_0px_black] hover:scale-105 transition-transform overflow-hidden`}
         style={swatchStyle}
         aria-label="Choose a color"
       />
-      {open && (
+      {open && createPortal(
         <div
           ref={panelRef}
-          className="fixed z-[1200] bg-white border-3 border-black rounded-3xl shadow-[5px_5px_0px_black] p-4 w-[min(16rem,calc(100vw-1rem))]"
-          style={panelStyle || { top: 8, left: 8 }}
+          className="fixed z-[9999999] bg-white border-3 border-black rounded-3xl shadow-[5px_5px_0px_black] p-4 w-[min(16rem,calc(100vw-1rem))]"
+          style={panelStyle || { top: 8, left: 8, visibility: 'hidden' }}
         >
           <p className="text-xs font-black mb-2 uppercase">Pick a color</p>
           <div className="grid grid-cols-5 gap-2 mb-3">
@@ -119,7 +124,8 @@ export default function ColorPicker({ value, onChange }) {
               OK
             </button>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

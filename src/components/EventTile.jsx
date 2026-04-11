@@ -5,6 +5,7 @@ import { getUserTZOffset, utcToLocal } from '../lib/timezones';
 import { TAG_COLORS } from '../lib/tagColors';
 import { awardPoints, POINTS, isEligibleForPoints } from '../lib/pointsSystem';
 import { getValidSession } from '../lib/supabaseAuth';
+import { getTileAccentColor, useSiteTheme } from '../lib/theme';
 
 // ─── SHARED TREND ICON ─────────────────────────────────────────────────────
 // Used in EventTile, EventDetailPopup, and TileView filters for consistency.
@@ -28,6 +29,7 @@ export function TrendIcon({ trend, size = 'sm' }) {
 }
 
 export default function EventTile({ event, onClick, onTagClick }) {
+  const { resolvedTheme } = useSiteTheme();
   const [fav, setFav] = useState(false);
   const [imgError, setImgError] = useState(false);
   const [favCount, setFavCount] = useState(0);
@@ -35,7 +37,7 @@ export default function EventTile({ event, onClick, onTagClick }) {
   
   const tags = generateAutoTags(event);
   const tzOffset = getUserTZOffset();
-  const borderColor = event.hex_color || '#7C3AED';
+  const borderColor = getTileAccentColor(event.hex_color, resolvedTheme);
 
   // Normalization: 7-day expiry logic matches Popup exactly
   const isExpired = event.event_date && (Date.now() - new Date(event.event_date + 'T00:00:00').getTime()) > 7 * 86400000;

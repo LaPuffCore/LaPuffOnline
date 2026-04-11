@@ -124,7 +124,7 @@ export default function Home({ events = [], eventsLoading = false }) {
   }
 
   return (
-    <div className="h-[100dvh] bg-[#FAFAF8] flex flex-col overflow-hidden" style={{ fontFamily: "'Nunito', cursive, sans-serif" }}>
+    <div className="h-[100dvh] lp-page-bg flex flex-col overflow-hidden" style={{ fontFamily: "'Nunito', cursive, sans-serif" }}>
       {/* Header */}
       <header className={`bg-white border-b-4 border-black z-50 shadow-[0_4px_0px_black] flex-shrink-0 transition-transform duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform ${!showHeader ? '-translate-y-full absolute w-full' : 'translate-y-0 relative'}`}>
         <div className="max-w-7xl mx-auto px-3 py-2 md:px-4 md:py-3">

@@ -7,6 +7,7 @@ import { getUserTZOffset, utcToLocal } from '../lib/timezones';
 import { useNavigate } from 'react-router-dom';
 import { awardPoints, POINTS, isEligibleForPoints } from '../lib/pointsSystem';
 import { getValidSession } from '../lib/supabaseAuth';
+import { getTileAccentColor, useSiteTheme } from '../lib/theme';
 
 function MiniMap({ lat, lng, address, city, borderColor }) {
   const mapUrl = (lat && lng)
@@ -51,6 +52,7 @@ function MiniMap({ lat, lng, address, city, borderColor }) {
 }
 
 export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
+  const { resolvedTheme } = useSiteTheme();
   const navigate = useNavigate();
   const [fav, setFav] = useState(false);
   const [favCount, setFavCount] = useState(0);
@@ -60,7 +62,7 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
   const [isMobile, setIsMobile] = useState(false);
 
   const tags = generateAutoTags(event);
-  const borderColor = event.hex_color || '#FF6B6B';
+  const borderColor = getTileAccentColor(event.hex_color, resolvedTheme);
 
   // 7-day expiry logic matching EventTile exactly
   const isExpired = event.event_date && (Date.now() - new Date(event.event_date + 'T00:00:00').getTime()) > 7 * 86400000;

@@ -10,7 +10,7 @@ export const THEME_FIELDS = [
   { key: 'surfaceBackgroundColor', label: 'Section Fill' },
   { key: 'microIconColor', label: 'Micro Icons' },
   { key: 'tileShadowColor', label: 'Tile Shadow' },
-  { key: 'tileAccentOverride', label: 'Tile Accent' },
+  { key: 'tileAccentOverride', label: 'Tile Accent Override', subtitle: "Note: this will turn off other users' selected event tile colors" },
   { key: 'logoFillColor', label: 'Logo Fill' },
   { key: 'logoShadowColor', label: 'Logo Shadow' },
   { key: 'leaderboardHeaderColor', label: 'Board Header' },
