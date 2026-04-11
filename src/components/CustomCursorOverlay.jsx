@@ -579,7 +579,6 @@ function WindowsGlyph({ preset, size, color, interactive }) {
     <span
       style={{
         fontSize: Math.max(16, size), lineHeight: 1, color,
-        filter: interactive ? 'invert(1)' : 'none',
         textShadow: `0 0 ${Math.max(6, size * 0.3)}px ${color}66`,
         transform: preset === 'wait' ? 'rotate(20deg)' : 'none',
       }}

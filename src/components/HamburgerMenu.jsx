@@ -81,7 +81,7 @@ export default function HamburgerMenu({ events, user, onAuthClick }) {
           }}
         >
           <div className="px-5 pt-4 pb-2 border-b-2" style={{ borderColor: resolvedTheme.buttonOutlineColor }}>
-            <h3 className="font-black text-base uppercase tracking-tight" style={{ color: resolvedTheme.microIconColor }}>System Menu</h3>
+            <h3 className="font-black text-base uppercase tracking-tight" style={{ color: resolvedTheme.titleTextColor }}>System Menu</h3>
           </div>
 
           <div className="p-2">
@@ -89,11 +89,11 @@ export default function HamburgerMenu({ events, user, onAuthClick }) {
               to="/favorites"
               onClick={() => setOpen(false)}
               className="w-full text-left px-4 py-3 rounded-2xl font-bold flex items-center gap-3 transition-colors"
-              style={{ color: resolvedTheme.microIconColor }}
+              style={{ color: resolvedTheme.bodyTextColor || resolvedTheme.microIconColor }}
               onMouseEnter={(event) => { event.currentTarget.style.backgroundColor = resolvedTheme.accentColor + '14'; }}
               onMouseLeave={(event) => { event.currentTarget.style.backgroundColor = 'transparent'; }}
             >
-              <span className="text-xl">⭐</span>
+              <span className="text-xl lp-emoji">⭐</span>
               <span>My Favorites <span className="text-sm font-black" style={{ color: resolvedTheme.accentColor }}>({favCount})</span></span>
             </Link>
 
@@ -101,11 +101,11 @@ export default function HamburgerMenu({ events, user, onAuthClick }) {
               to="/calendar"
               onClick={() => setOpen(false)}
               className="w-full text-left px-4 py-3 rounded-2xl font-bold flex items-center gap-3 transition-colors"
-              style={{ color: resolvedTheme.microIconColor }}
+              style={{ color: resolvedTheme.bodyTextColor || resolvedTheme.microIconColor }}
               onMouseEnter={(event) => { event.currentTarget.style.backgroundColor = resolvedTheme.accentColor + '14'; }}
               onMouseLeave={(event) => { event.currentTarget.style.backgroundColor = 'transparent'; }}
             >
-              <span className="text-xl">📅</span>
+              <span className="text-xl lp-emoji">📅</span>
               <span>Favorites Calendar</span>
             </Link>
 
@@ -115,11 +115,11 @@ export default function HamburgerMenu({ events, user, onAuthClick }) {
                 setShowCustomizer(true);
               }}
               className="w-full text-left px-4 py-3 rounded-2xl font-bold flex items-center gap-3 transition-colors"
-              style={{ color: resolvedTheme.microIconColor }}
+              style={{ color: resolvedTheme.bodyTextColor || resolvedTheme.microIconColor }}
               onMouseEnter={(event) => { event.currentTarget.style.backgroundColor = resolvedTheme.accentColor + '14'; }}
               onMouseLeave={(event) => { event.currentTarget.style.backgroundColor = 'transparent'; }}
             >
-              <span className="text-xl">🎨</span>
+              <span className="text-xl lp-emoji">🎨</span>
               <span>Theme Customizer</span>
             </button>
 
@@ -133,11 +133,11 @@ export default function HamburgerMenu({ events, user, onAuthClick }) {
                 }
               }}
               className="w-full text-left px-4 py-3 rounded-2xl font-bold flex items-center gap-3 transition-colors group"
-              style={{ color: resolvedTheme.microIconColor }}
+              style={{ color: resolvedTheme.bodyTextColor || resolvedTheme.microIconColor }}
               onMouseEnter={(event) => { event.currentTarget.style.backgroundColor = resolvedTheme.accentColor + '14'; }}
               onMouseLeave={(event) => { event.currentTarget.style.backgroundColor = 'transparent'; }}
             >
-              <span className="text-xl group-hover:rotate-12 transition-transform">👥</span>
+              <span className="text-xl group-hover:rotate-12 transition-transform lp-emoji">👥</span>
               <div className="flex flex-col">
                 <span className="leading-none">Refer A User</span>
                 <span className="text-[9px] font-black mt-1 uppercase" style={{ color: resolvedTheme.accentColor }}>Expand The Network</span>
@@ -147,9 +147,9 @@ export default function HamburgerMenu({ events, user, onAuthClick }) {
             {user && (
               <div className="mt-2 rounded-2xl border-3 px-4 py-3" style={{ backgroundColor: resolvedTheme.surfaceBackgroundColor, borderColor: resolvedTheme.buttonOutlineColor, boxShadow: `3px 3px 0px ${resolvedTheme.tileShadowColor}` }}>
                 <div className="flex items-start gap-3">
-                  <span className="text-xl">⚡</span>
+                  <span className="text-xl lp-emoji">⚡</span>
                   <div>
-                    <p className="text-[11px] font-black uppercase tracking-wide" style={{ color: resolvedTheme.microIconColor }}>Clout Points</p>
+                    <p className="text-[11px] font-black uppercase tracking-wide" style={{ color: resolvedTheme.titleTextColor }}>Clout Points</p>
                     <p className="mt-1 pl-2 text-lg font-black" style={{ color: resolvedTheme.accentColor }}>{cloutPoints.toLocaleString()}</p>
                   </div>
                 </div>

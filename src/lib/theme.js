@@ -2,29 +2,54 @@ import { createContext, createElement, useContext, useEffect, useMemo, useState 
 
 const STORAGE_KEY = 'lapuff_theme_overrides';
 
+const TEXT_CLARITY_NOTE = "Note: making these either brighter or darker than your other theme colors is the best way to preserve clarity";
+
 export const THEME_FIELDS = [
   { key: 'accentColor', label: 'Selection Accent' },
-  { key: 'titleTextColor', label: 'Title Text' },
-  { key: 'subtextColor', label: 'Subtext Color' },
+
+  { key: '_sec_text', type: 'sectionLabel', label: 'Text Colors' },
+  { key: 'titleTextColor', label: 'Title Text', note: TEXT_CLARITY_NOTE },
+  { key: 'subtextColor', label: 'Subtext Color', note: TEXT_CLARITY_NOTE },
+  { key: 'bodyTextColor', label: 'Body Text', note: TEXT_CLARITY_NOTE },
+
+  { key: '_sec_buttons', type: 'sectionLabel', label: 'Buttons' },
   { key: 'buttonOutlineColor', label: 'Button Outline' },
   { key: 'buttonFillColor', label: 'Button Fill' },
+  { key: 'buttonTextColor', label: 'Button Text', note: TEXT_CLARITY_NOTE },
+
+  { key: '_sec_surfaces', type: 'sectionLabel', label: 'Surfaces & Backgrounds' },
   { key: 'pageBackgroundColor', label: 'Page Background' },
   { key: 'surfaceBackgroundColor', label: 'Section Fill' },
   { key: 'topBarFillColor', label: 'Top Bar Fill' },
   { key: 'topBarOutlineColor', label: 'Top Bar Outline' },
+
+  { key: '_sec_icons', type: 'sectionLabel', label: 'Icons & Tiles' },
   { key: 'microIconColor', label: 'Micro Icons' },
   { key: 'tileShadowColor', label: 'Tile Shadow' },
   { key: 'tileAccentOverride', label: 'Tile Accent Override', subtitle: "Note: this will turn off other users' selected event tile colors" },
   { key: 'logoFillColor', label: 'Logo Fill' },
   { key: 'logoShadowColor', label: 'Logo Shadow' },
+
+  { key: '_sec_emoji', type: 'sectionLabel', label: 'Emoji' },
+  { key: 'emojiStainColor', label: 'Emoji Stain Override', subtitle: 'Note: this is an experimental override to stain the colors of all emojis' },
+
+  { key: '_sec_search', type: 'sectionLabel', label: 'Search Bar' },
+  { key: 'searchBarFillColor', label: 'Search Bar Fill' },
+  { key: 'searchBarOutlineColor', label: 'Search Bar Outline' },
+  { key: 'searchBarShadowColor', label: 'Search Bar Shadow' },
+  { key: 'searchBarTextColor', label: 'Search Bar Text', note: TEXT_CLARITY_NOTE },
+
+  { key: '_sec_leaderboard', type: 'sectionLabel', label: 'Leaderboard' },
   { key: 'leaderboardHeaderColor', label: 'Leaderboard Header' },
-  { key: 'leaderboardHeaderTextColor', label: 'Leaderboard Header Text' },
+  { key: 'leaderboardHeaderTextColor', label: 'Leaderboard Header Text', note: TEXT_CLARITY_NOTE },
   { key: 'leaderboardBackgroundColor', label: 'Leaderboard Background' },
-  { key: 'leaderboardTextColor', label: 'Leaderboard Text' },
+  { key: 'leaderboardTextColor', label: 'Leaderboard Text', note: TEXT_CLARITY_NOTE },
   { key: 'leaderboardFlameColor', label: 'Leaderboard Flames', subtitle: 'Reach top 50 to see this effect' },
+
+  { key: '_sec_calendar', type: 'sectionLabel', label: 'Calendar' },
   { key: 'calendarBackgroundColor', label: 'Calendar Background' },
   { key: 'calendarDayBackgroundColor', label: 'Calendar Day Fill' },
-  { key: 'calendarDayTextColor', label: 'Calendar Day Text' },
+  { key: 'calendarDayTextColor', label: 'Calendar Day Text', note: TEXT_CLARITY_NOTE },
 ];
 
 export const WINDOWS_CURSOR_PRESETS = [
@@ -113,8 +138,10 @@ export const DEFAULT_THEME = {
   accentColor: '#7C3AED',
   titleTextColor: '#000000',
   subtextColor: '#6B7280',
+  bodyTextColor: '#374151',
   buttonOutlineColor: '#000000',
   buttonFillColor: '#FFFFFF',
+  buttonTextColor: '#000000',
   pageBackgroundColor: '#FAFAF8',
   surfaceBackgroundColor: '#FFFFFF',
   topBarFillColor: '#FFFFFF',
@@ -124,6 +151,11 @@ export const DEFAULT_THEME = {
   tileAccentOverride: null,
   logoFillColor: '#000000',
   logoShadowColor: '#7C3AED',
+  emojiStainColor: null,
+  searchBarFillColor: '#FFFFFF',
+  searchBarOutlineColor: '#000000',
+  searchBarShadowColor: '#000000',
+  searchBarTextColor: '#111827',
   leaderboardHeaderColor: '#7C3AED',
   leaderboardHeaderTextColor: '#FFFFFF',
   leaderboardBackgroundColor: '#FFFFFF',
@@ -185,8 +217,10 @@ function applyThemeToDocument(theme) {
   root.style.setProperty('--lp-accent-softer', hexToRgba(theme.accentColor, 0.08));
   root.style.setProperty('--lp-title-text', theme.titleTextColor);
   root.style.setProperty('--lp-subtext', theme.subtextColor);
+  root.style.setProperty('--lp-body-text', theme.bodyTextColor || '#374151');
   root.style.setProperty('--lp-button-outline', theme.buttonOutlineColor);
   root.style.setProperty('--lp-button-fill', theme.buttonFillColor);
+  root.style.setProperty('--lp-button-text', theme.buttonTextColor || '#000000');
   root.style.setProperty('--lp-page-bg', theme.pageBackgroundColor);
   root.style.setProperty('--lp-surface-bg', theme.surfaceBackgroundColor);
   root.style.setProperty('--lp-topbar-fill', theme.topBarFillColor);
@@ -195,6 +229,10 @@ function applyThemeToDocument(theme) {
   root.style.setProperty('--lp-tile-shadow', theme.tileShadowColor);
   root.style.setProperty('--lp-logo-fill', theme.logoFillColor);
   root.style.setProperty('--lp-logo-shadow', theme.logoShadowColor);
+  root.style.setProperty('--lp-search-fill', theme.searchBarFillColor || '#FFFFFF');
+  root.style.setProperty('--lp-search-outline', theme.searchBarOutlineColor || '#000000');
+  root.style.setProperty('--lp-search-shadow', theme.searchBarShadowColor || '#000000');
+  root.style.setProperty('--lp-search-text', theme.searchBarTextColor || '#111827');
   root.style.setProperty('--lp-leaderboard-header', theme.leaderboardHeaderColor);
   root.style.setProperty('--lp-leaderboard-header-text', theme.leaderboardHeaderTextColor);
   root.style.setProperty('--lp-leaderboard-bg', theme.leaderboardBackgroundColor);
@@ -206,6 +244,14 @@ function applyThemeToDocument(theme) {
   root.style.setProperty('--lp-calendar-bg', theme.calendarBackgroundColor);
   root.style.setProperty('--lp-calendar-day-bg', theme.calendarDayBackgroundColor);
   root.style.setProperty('--lp-calendar-day-text', theme.calendarDayTextColor);
+  // Emoji stain: set/remove CSS var and html class
+  if (theme.emojiStainColor) {
+    root.style.setProperty('--lp-emoji-stain', theme.emojiStainColor);
+    root.classList.add('lp-emoji-stain-active');
+  } else {
+    root.style.removeProperty('--lp-emoji-stain');
+    root.classList.remove('lp-emoji-stain-active');
+  }
 }
 
 export function ThemeProvider({ children }) {

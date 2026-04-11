@@ -402,7 +402,7 @@ export default function TileView({ events, eventsLoading = false }) {
               value={search}
               onChange={e => { setSearch(e.target.value); resetPage(); }}
               placeholder="Search events, venues..."
-              className="w-full border-3 border-black rounded-2xl pl-10 pr-4 py-2 font-medium text-sm focus:outline-none focus:bg-violet-50 shadow-[3px_3px_0px_black]"
+              className="w-full border-3 border-black rounded-2xl pl-10 pr-4 py-2 font-medium text-sm focus:outline-none focus:bg-violet-50 shadow-[3px_3px_0px_black] lp-search-input"
             />
           </div>
           <button

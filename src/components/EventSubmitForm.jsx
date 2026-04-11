@@ -190,7 +190,7 @@ export default function EventSubmitForm({ onClose }) {
 
                 {/* Photos */}
                 <div>
-                  <label className="block text-xs font-black uppercase mb-1">Photos ({photoFiles.length}/5, max 1MB)</label>
+                  <label className="block text-xs font-black uppercase mb-1">Photos ({photoFiles.length}/5, Max 1MB Each)</label>
                   <div className="flex flex-wrap gap-2">
                     {photos.map((p, i) => (
                       <div key={i} className="relative w-16 h-16">

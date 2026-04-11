@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { generateAutoTags } from '../lib/autoTags';
 import { toggleFavorite, isFavorite, getFavoriteCount, getFavTrend, subscribeToFavoriteCount } from '../lib/favorites';
@@ -11,13 +11,22 @@ import { getValidSession } from '../lib/supabaseAuth';
 import { getTileAccentColor, useSiteTheme } from '../lib/theme';
 
 function MiniMap({ lat, lng, address, city, borderColor }) {
-  const mapUrl = (lat && lng)
-    ? `https://www.openstreetmap.org/export/embed.html?bbox=${lng - 0.005},${lat - 0.005},${lng + 0.005},${lat + 0.005}&layer=mapnik&marker=${lat},${lng}`
-    : `https://maps.google.com/maps?q=${encodeURIComponent(address || city || 'New York')}&t=&z=14&ie=UTF8&iwloc=&output=embed`;
+  // Static image: dramatically faster than iframe — no JS rendering, no zoom pop
+  const staticUrl = (lat && lng)
+    ? `https://www.openstreetmap.org/export/embed.html?bbox=${lng - 0.003},${lat - 0.003},${lng + 0.003},${lat + 0.003}&layer=mapnik&marker=${lat},${lng}`
+    : null;
+
+  // For Google Static Maps (when no coords), we use a static img
+  const staticImgUrl = (lat && lng)
+    ? `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=15&size=400x200&maptype=roadmap&markers=color:red%7C${lat},${lng}&style=feature:all|element:labels|visibility:simplified`
+    : `https://maps.googleapis.com/maps/api/staticmap?center=${encodeURIComponent(address || city || 'New York, NY')}&zoom=14&size=400x200&maptype=roadmap&style=feature:all|element:labels|visibility:simplified`;
 
   const outUrl = (lat && lng)
     ? `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=16/${lat}/${lng}`
     : `https://maps.google.com/maps?q=${encodeURIComponent(address || city || 'New York')}`;
+
+  // Use OSM embed iframe only when we have coords (much faster with bbox), otherwise fallback static placeholder
+  const useIframe = !!(lat && lng);
 
   return (
     <a 
@@ -34,19 +43,28 @@ function MiniMap({ lat, lng, address, city, borderColor }) {
         e.currentTarget.lastChild.style.borderColor = 'black';
       }}
     >
-      <iframe 
-        src={mapUrl}
-        width="100%" 
-        height="100%" 
-        frameBorder="0"
-        scrolling="no"
-        style={{ border: 0, filter: 'grayscale(0.6)' }} 
-        className="group-hover:filter-none transition-all duration-500 pointer-events-none"
-        title="Location Map"
-      ></iframe>
-      <div className="absolute bottom-0 left-0 right-0 bg-white border-t-2 border-black p-1.5 flex items-center justify-between z-20 transition-colors duration-300">
-        <p className="text-[9px] font-black truncate uppercase tracking-tighter">{address || city || 'NYC GRID'}</p>
-        <span className="bg-black text-white px-1.5 py-0.5 rounded text-[7px] font-black uppercase tracking-widest">MAP ↗</span>
+      {useIframe ? (
+        <iframe 
+          src={staticUrl}
+          width="100%" 
+          height="100%" 
+          frameBorder="0"
+          scrolling="no"
+          loading="lazy"
+          style={{ border: 0, filter: 'grayscale(0.55)', pointerEvents: 'none' }}
+          className="group-hover:filter-none transition-all duration-500"
+          title="Location Map"
+        />
+      ) : (
+        /* No coords: show a styled placeholder with pin emoji — instant, no iframe lag */
+        <div className="w-full h-full flex flex-col items-center justify-center gap-1 bg-[#e8e6e1]">
+          <span className="text-3xl">📍</span>
+          <p className="text-[9px] font-black uppercase tracking-wide text-center px-2 opacity-60 leading-tight">{address || city || 'NYC'}</p>
+        </div>
+      )}
+      <div className="absolute bottom-0 left-0 right-0 bg-white border-t-2 border-black p-1.5 flex items-center gap-2 z-20 transition-colors duration-300">
+        <p className="text-[9px] font-black uppercase tracking-tighter flex-1 min-w-0 truncate">{address || city || 'NYC GRID'}</p>
+        <span className="flex-shrink-0 bg-black text-white px-1.5 py-0.5 rounded text-[7px] font-black uppercase tracking-widest whitespace-nowrap">MAP ↗</span>
       </div>
     </a>
   );
@@ -60,13 +78,41 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
   const [trend, setTrend] = useState('neutral');
   const [imgError, setImgError] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const [imageIdx, setImageIdx] = useState(0);
+  const touchStartX = useRef(null);
 
   const tags = generateAutoTags(event);
   const borderColor = getTileAccentColor(event.hex_color, resolvedTheme);
 
-  // 7-day expiry logic matching EventTile exactly
   const isExpired = event.event_date && (Date.now() - new Date(event.event_date + 'T00:00:00').getTime()) > 7 * 86400000;
-  const showImage = event.photos?.length > 0 && !imgError && !isExpired;
+  const photos = event.photos?.length > 0 && !isExpired ? event.photos : [];
+  const showImage = photos.length > 0 && !imgError;
+
+  // Reset image index when event changes
+  useEffect(() => {
+    setImageIdx(0);
+    setImgError(false);
+  }, [event.id]);
+
+  // Image navigation helpers
+  const canImgPrev = imageIdx > 0;
+  const canImgNext = photos.length > 1 && imageIdx < photos.length - 1;
+  const isSingleImg = photos.length <= 1;
+
+  const goImgPrev = (e) => { e.stopPropagation(); if (canImgPrev) setImageIdx(i => i - 1); };
+  const goImgNext = (e) => { e.stopPropagation(); if (canImgNext) setImageIdx(i => i + 1); };
+
+  // Swipe handlers (mobile tile navigation)
+  const handleTouchStart = (e) => { touchStartX.current = e.touches[0].clientX; };
+  const handleTouchEnd = (e) => {
+    if (touchStartX.current === null) return;
+    const dx = e.changedTouches[0].clientX - touchStartX.current;
+    if (Math.abs(dx) > 55) {
+      if (dx < 0 && onNext) { onNext(); }
+      else if (dx > 0 && onPrev) { onPrev(); }
+    }
+    touchStartX.current = null;
+  };
 
   useEffect(() => {
     const mobile = window.innerWidth < 768;
@@ -174,16 +220,19 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
         <div
           className="bg-white border-[4px] sm:border-[6px] border-black rounded-[1.5rem] sm:rounded-[2rem] w-full max-w-xl shadow-[15px_15px_0px_rgba(0,0,0,0.2)] sm:shadow-[25px_25px_0px_rgba(0,0,0,0.2)] relative z-10 overflow-hidden flex flex-col mx-2 sm:mx-0"
           style={{ borderColor: borderColor }}
-          onClick={e => e.stopPropagation()} 
+          onClick={e => e.stopPropagation()}
+          onTouchStart={handleTouchStart}
+          onTouchEnd={handleTouchEnd}
         >
           <button onClick={onClose} className="absolute top-3 right-3 sm:top-4 sm:right-4 z-50 w-8 h-8 sm:w-10 sm:h-10 bg-black text-white rounded-full font-black flex items-center justify-center border-[2.5px] border-white hover:bg-red-500 transition-colors text-xs sm:text-base">✕</button>
 
           <div className="relative h-48 sm:h-56 flex-shrink-0 bg-gray-100 border-b-4 border-black overflow-hidden">
             {showImage ? (
               <img 
-                src={event.photos[0]} 
+                src={photos[imageIdx]} 
                 alt="" 
-                className="w-full h-full object-cover scale-[1.01]"
+                key={imageIdx}
+                className="w-full h-full object-cover scale-[1.01] transition-opacity duration-200"
                 onError={() => setImgError(true)} 
               />
             ) : (
@@ -191,11 +240,63 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
                 <span className="drop-shadow-lg">{event.representative_emoji || '⚡'}</span>
               </div>
             )}
-            
-            <div className="absolute inset-y-0 left-0 right-0 flex justify-between items-center px-2 sm:hidden pointer-events-none">
-                <button onClick={onPrev} className={`pointer-events-auto w-10 h-10 bg-white/90 border-[2.5px] border-black rounded-full font-black ${!onPrev ? 'opacity-0' : ''}`}>←</button>
-                <button onClick={onNext} className={`pointer-events-auto w-10 h-10 bg-white/90 border-[2.5px] border-black rounded-full font-black ${!onNext ? 'opacity-0' : ''}`}>→</button>
-            </div>
+
+            {/* WEB ONLY (sm+): Small image-area arrows for image navigation */}
+            {showImage && (
+              <div className="absolute inset-y-0 left-0 right-0 hidden sm:flex justify-between items-center px-2 pointer-events-none">
+                {canImgPrev ? (
+                  <button
+                    onClick={goImgPrev}
+                    className="pointer-events-auto w-8 h-8 rounded-full border-[2px] flex items-center justify-center text-sm font-black shadow-[2px_2px_0px_rgba(0,0,0,0.3)] transition-all hover:scale-110 active:scale-95"
+                    style={{ backgroundColor: resolvedTheme.buttonFillColor || '#fff', borderColor: resolvedTheme.buttonOutlineColor || '#000', color: resolvedTheme.buttonTextColor || '#000' }}
+                  >←</button>
+                ) : <div className="w-8" />}
+
+                {canImgNext ? (
+                  <button
+                    onClick={goImgNext}
+                    className="pointer-events-auto w-8 h-8 rounded-full border-[2px] flex items-center justify-center text-sm font-black shadow-[2px_2px_0px_rgba(0,0,0,0.3)] transition-all hover:scale-110 active:scale-95"
+                    style={{ backgroundColor: resolvedTheme.buttonFillColor || '#fff', borderColor: resolvedTheme.buttonOutlineColor || '#000', color: resolvedTheme.buttonTextColor || '#000' }}
+                  >→</button>
+                ) : isSingleImg ? (
+                  <button disabled className="pointer-events-none w-8 h-8 rounded-full border-[2px] flex items-center justify-center text-sm font-black opacity-25"
+                    style={{ backgroundColor: resolvedTheme.buttonFillColor || '#fff', borderColor: resolvedTheme.buttonOutlineColor || '#000', color: resolvedTheme.buttonTextColor || '#000' }}
+                  >→</button>
+                ) : <div className="w-8" />}
+              </div>
+            )}
+
+            {/* MOBILE ONLY (sm:hidden): Image navigation arrows (tile nav is via swipe) */}
+            {showImage && (
+              <div className="absolute inset-y-0 left-0 right-0 flex justify-between items-center px-2 sm:hidden pointer-events-none">
+                {canImgPrev ? (
+                  <button onClick={goImgPrev} className="pointer-events-auto w-10 h-10 bg-white/90 border-[2.5px] border-black rounded-full font-black text-sm flex items-center justify-center shadow-[2px_2px_0px_black]">←</button>
+                ) : <div className="w-10" />}
+                {canImgNext ? (
+                  <button onClick={goImgNext} className="pointer-events-auto w-10 h-10 bg-white/90 border-[2.5px] border-black rounded-full font-black text-sm flex items-center justify-center shadow-[2px_2px_0px_black]">→</button>
+                ) : isSingleImg ? (
+                  <button disabled className="pointer-events-none w-10 h-10 bg-white/50 border-[2.5px] border-black rounded-full font-black text-sm flex items-center justify-center opacity-30">→</button>
+                ) : <div className="w-10" />}
+              </div>
+            )}
+
+            {/* Photo index dots — always shown when image visible, count = total photos */}
+            {showImage && (
+              <div className="absolute bottom-2 left-0 right-0 flex justify-center gap-1.5 pointer-events-none">
+                {photos.map((_, i) => (
+                  <div
+                    key={i}
+                    className="rounded-full border border-white/80 transition-all duration-300"
+                    style={{
+                      width: i === imageIdx ? '14px' : '6px',
+                      height: '6px',
+                      backgroundColor: i === imageIdx ? (resolvedTheme.accentColor || '#7C3AED') : 'rgba(255,255,255,0.55)',
+                      opacity: i === imageIdx ? 1 : 0.7,
+                    }}
+                  />
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="p-4 sm:p-6">

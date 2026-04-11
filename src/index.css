@@ -50,6 +50,12 @@
     --lp-topbar-fill: #FFFFFF;
     --lp-topbar-outline: #000000;
     --lp-micro-icon: #000000;
+    --lp-body-text: #374151;
+    --lp-button-text: #000000;
+    --lp-search-fill: #FFFFFF;
+    --lp-search-outline: #000000;
+    --lp-search-shadow: #000000;
+    --lp-search-text: #111827;
     --lp-tile-shadow: #000000;
     --lp-logo-fill: #000000;
     --lp-logo-shadow: #7C3AED;
@@ -133,13 +139,13 @@
 }
 /* .lp-dark-section is set in JS when surfaceBackgroundColor luminance < 0.35 */
 .lp-dark-section .group:hover .theme-row-label {
-  color: #ccff00 !important;
+  color: var(--lp-hover-text, #ccff00) !important;
 }
 .lp-muted-icon { color: var(--lp-micro-icon) !important; }
 .lp-button-base {
   background-color: var(--lp-button-fill);
   border-color: var(--lp-button-outline) !important;
-  color: var(--lp-micro-icon);
+  color: var(--lp-button-text);
 }
 .lp-button-base:hover {
   background-color: var(--lp-accent-soft);
@@ -165,7 +171,8 @@
 .lp-theme-scope [type="button"].bg-white,
 .lp-theme-scope [role="button"].bg-white { background-color: var(--lp-button-fill) !important; }
 .lp-theme-scope .border-black { border-color: var(--lp-button-outline) !important; }
-.lp-theme-scope .text-black { color: var(--lp-micro-icon) !important; }
+.lp-theme-scope .text-black { color: var(--lp-body-text) !important; }
+.lp-theme-scope button.text-black, .lp-theme-scope [role="button"].text-black { color: var(--lp-button-text) !important; }
 .lp-theme-scope h1, .lp-theme-scope h2, .lp-theme-scope h3 { color: var(--lp-title-text) !important; }
 .lp-theme-scope .text-gray-600 { color: var(--lp-subtext) !important; }
 .lp-theme-scope .text-gray-500 { color: var(--lp-subtext) !important; }
@@ -203,4 +210,21 @@
 html.lp-force-custom-cursor,
 html.lp-force-custom-cursor * {
   cursor: none !important;
+}
+
+/* Search bar theming */
+.lp-search-input {
+  background-color: var(--lp-search-fill) !important;
+  border-color: var(--lp-search-outline) !important;
+  box-shadow: 3px 3px 0px var(--lp-search-shadow) !important;
+  color: var(--lp-search-text) !important;
+}
+.lp-search-input::placeholder {
+  color: color-mix(in srgb, var(--lp-search-text) 55%, transparent) !important;
+}
+
+/* Emoji stain override (experimental) */
+html.lp-emoji-stain-active .lp-emoji {
+  color: transparent !important;
+  text-shadow: 0 0 0 var(--lp-emoji-stain) !important;
 }

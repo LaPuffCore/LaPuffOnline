@@ -5,15 +5,26 @@ import EmojiPicker from './EmojiPicker';
 import { CURSOR_TRAILS, THEME_FIELDS, useSiteTheme, WINDOWS_CURSOR_PRESETS } from '../lib/theme';
 
 function ThemeRow({ field, value, onChange, onReset }) {
+  if (field.type === 'sectionLabel') {
+    return (
+      <div className="pt-4 pb-0.5 px-1">
+        <p className="text-[11px] font-black uppercase tracking-widest opacity-50 select-none">{field.label}</p>
+        <div className="mt-1 h-px bg-black/20" />
+      </div>
+    );
+  }
   return (
-    <div className="group rounded-2xl border-3 border-black bg-white p-3 md:p-4 shadow-[4px_4px_0px_black]">
+    <div className="group rounded-2xl border-3 border-black bg-white p-3 md:p-4 shadow-[4px_4px_0px_black] hover:border-[var(--lp-accent)] transition-colors">
       <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <p className="theme-row-label font-black text-sm md:text-base leading-tight text-black transition-none">
             {field.label}
           </p>
           {field.subtitle && (
             <p className="text-[10px] font-bold text-amber-600 mt-0.5 leading-tight">{field.subtitle}</p>
+          )}
+          {field.note && (
+            <p className="text-[9px] text-gray-400 font-medium mt-0.5 leading-tight italic opacity-70">{field.note}</p>
           )}
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
@@ -21,7 +32,7 @@ function ThemeRow({ field, value, onChange, onReset }) {
           <button
             type="button"
             onClick={onReset}
-            className="w-11 h-11 rounded-2xl border-3 border-black bg-white shadow-[3px_3px_0px_black] hover:bg-gray-50 transition hover:invert flex items-center justify-center text-lg font-black"
+            className="w-11 h-11 rounded-2xl border-3 border-black bg-white shadow-[3px_3px_0px_black] transition group-hover:bg-[var(--lp-accent)] group-hover:border-[var(--lp-accent)] group-hover:text-white group-hover:shadow-[3px_3px_0px_var(--lp-tile-shadow)] flex items-center justify-center text-lg font-black"
             aria-label={`Reset ${field.label}`}
             title={`Reset ${field.label}`}
           >
@@ -53,8 +64,22 @@ export default function ThemeCustomizerModal({ onClose }) {
     const toL = (c) => c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
     return 0.2126 * toL(r) + 0.7152 * toL(g) + 0.0722 * toL(b);
   }
+  // Pick a hover text color that contrasts with the section bg and differs from accent + buttonFill
+  function pickHoverTextColor(sectionHex, accentHex, buttonFillHex) {
+    const candidates = ['#ccff00', '#ff6ac1', '#00ffff', '#ff4400', '#ffff00', '#ffffff'];
+    const avoid = [sectionHex, accentHex, buttonFillHex].map(hexLuminance);
+    for (const c of candidates) {
+      const cl = hexLuminance(c);
+      const tooClose = avoid.some(al => Math.abs(cl - al) < 0.12);
+      if (!tooClose) return c;
+    }
+    return '#ccff00';
+  }
   const sectionColor = draftOverrides.surfaceBackgroundColor ?? resolvedTheme?.surfaceBackgroundColor ?? '#FFFFFF';
+  const accentColor = draftOverrides.accentColor ?? resolvedTheme?.accentColor ?? '#7C3AED';
+  const buttonFillColor = draftOverrides.buttonFillColor ?? resolvedTheme?.buttonFillColor ?? '#FFFFFF';
   const isDarkSection = hexLuminance(sectionColor) < 0.35;
+  const hoverTextColor = isDarkSection ? pickHoverTextColor(sectionColor, accentColor, buttonFillColor) : null;
   const [isDesktopCursorCapable, setIsDesktopCursorCapable] = useState(false);
   const [cursorExpanded, setCursorExpanded] = useState(false);
   // All trail groups start collapsed
@@ -166,7 +191,10 @@ export default function ThemeCustomizerModal({ onClose }) {
   const trailGroups = allGroups;
 
   return createPortal(
-    <div className={`lp-theme-scope fixed inset-0 z-[200000] flex items-center justify-center bg-white/50 backdrop-blur-sm p-3 md:p-6${isDarkSection ? ' lp-dark-section' : ''}`}>
+    <div
+      className={`lp-theme-scope fixed inset-0 z-[200000] flex items-center justify-center bg-white/50 backdrop-blur-sm p-3 md:p-6${isDarkSection ? ' lp-dark-section' : ''}`}
+      style={hoverTextColor ? { '--lp-hover-text': hoverTextColor } : undefined}
+    >
       <div
         ref={ref}
         className="relative w-full max-w-5xl rounded-[2rem] border-4 border-black bg-[#FAFAF8] shadow-[12px_12px_0px_black] animate-in fade-in zoom-in duration-200 flex flex-col"

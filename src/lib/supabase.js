@@ -129,7 +129,7 @@ export async function uploadEventPhoto(file) {
   const ext = file.name.split('.').pop();
   const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}.${ext}`;
   const res = await fetch(
-    `${SUPABASE_URL}/storage/v1/object/event-photos/${fileName}`,
+    `${SUPABASE_URL}/storage/v1/object/event-images/${fileName}`,
     {
       method: 'POST',
       headers: {
@@ -141,7 +141,7 @@ export async function uploadEventPhoto(file) {
     }
   );
   if (!res.ok) throw new Error('Photo upload failed');
-  return `${SUPABASE_URL}/storage/v1/object/public/event-photos/${fileName}`;
+  return `${SUPABASE_URL}/storage/v1/object/public/event-images/${fileName}`;
 }
 
 export async function sendSubmissionEmail() {
