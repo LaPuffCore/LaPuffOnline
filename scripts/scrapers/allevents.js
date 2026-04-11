@@ -1,6 +1,5 @@
 // scrapers/allevents.js
 // Scrapes allevents.in NYC for additional volume.
-// Allevents has structured JSON embeds and covers a wide range of categories.
 import { load as cheerioLoad } from 'cheerio';
 import { cleanDescription, dateToUTC, makeExternalId, makeHashId, extractZip, sleep, httpGet } from '../utils/normalize.js';
 import { getBorough, isNYCAddress } from '../utils/nyc-validate.js';
@@ -11,45 +10,63 @@ const SOURCE_SITE = 'allevents';
 const DELAY_MS = 2000;
 const BASE_URL = 'https://allevents.in';
 
+/** Rough lat/lng bounding boxes per borough. */
+function getBoroughByCoords(lat, lng) {
+  if (lat >= 40.7 && lat <= 40.88 && lng >= -74.02 && lng <= -73.9) return 'Manhattan';
+  if (lat >= 40.57 && lat <= 40.74 && lng >= -74.05 && lng <= -73.83) return 'Brooklyn';
+  if (lat >= 40.49 && lat <= 40.65 && lng >= -74.26 && lng <= -74.05) return 'Staten Island';
+  if (lat >= 40.49 && lat <= 40.80 && lng >= -73.96 && lng <= -73.70) return 'Queens';
+  if (lat >= 40.79 && lat <= 40.92 && lng >= -73.94 && lng <= -73.79) return 'Bronx';
+  return null;
+}
+
 const BROWSE_URLS = [
-  'https://allevents.in/new-york/all-events',
+  'https://allevents.in/new-york',
   'https://allevents.in/new-york/music',
-  'https://allevents.in/new-york/arts',
-  'https://allevents.in/new-york/food-drink',
+  'https://allevents.in/new-york/art',
+  'https://allevents.in/new-york/food',
   'https://allevents.in/new-york/sports',
   'https://allevents.in/new-york/community',
+  'https://allevents.in/new-york/nightlife',
 ];
 
 function normalizeAlleventsEvent(raw, sourceUrl) {
   try {
-    const name = raw.name || raw.title || '';
+    const name = raw.name || raw.title || raw.eventName || '';
     if (!name) return null;
 
     const descRaw = raw.description || raw.event_description || '';
     const description = cleanDescription(descRaw);
 
-    const dateStr = raw.startDate || raw.start_time || raw.start;
+    const dateStr = raw.startDate || raw.start_time || raw.start || raw.date;
     if (!dateStr) return null;
     const dateInfo = dateToUTC(dateStr);
     if (!dateInfo) return null;
 
-    const loc = raw.location || {};
+    const locRaw = raw.location || raw.venue || {};
+    // JSON-LD Place → PostalAddress nesting: loc.address is a PostalAddress object
+    const addrObj = (locRaw.address && typeof locRaw.address === 'object') ? locRaw.address : {};
     const address = [
-      loc.streetAddress || loc.address || '',
-      loc.addressLocality || loc.city || '',
-      loc.addressRegion || loc.state || '',
-      loc.postalCode || '',
+      addrObj.streetAddress || locRaw.name || '',
+      addrObj.addressLocality || '',
+      addrObj.addressRegion || '',
+      addrObj.postalCode || '',
     ].filter(Boolean).join(', ');
 
-    const zipcode = loc.postalCode || extractZip(address);
-    if (!isNYCAddress(zipcode, address)) return null;
-    const borough = getBorough(zipcode, address) || 'Manhattan';
+    const zipcode = addrObj.postalCode || extractZip(address) || extractZip(locRaw.name || '');
+    const lat = parseFloat(locRaw.geo?.latitude || addrObj.latitude) || null;
+    const lng = parseFloat(locRaw.geo?.longitude || addrObj.longitude) || null;
 
-    const price = detectPrice(raw.offers?.price ?? raw.ticket_price, description);
+    // Accept if zip matches NYC OR address text has NYC signals OR coords in NYC bounding box
+    const nycByCoords = lat && lng && lat >= 40.4 && lat <= 41.0 && lng >= -74.3 && lng <= -73.6;
+    if (!isNYCAddress(zipcode, address) && !nycByCoords) return null;
+    const borough = getBorough(zipcode, address) || (lat ? getBoroughByCoords(lat, lng) : null) || 'Manhattan';
+
+    const price = detectPrice(raw.offers?.price ?? raw.ticket_price ?? raw.price, description);
 
     const photos = [];
-    const img = raw.image?.url || raw.image || raw.thumb || '';
-    if (img && typeof img === 'string' && img.startsWith('http')) photos.push(img);
+    const img = raw.image?.url || (typeof raw.image === 'string' ? raw.image : '') || raw.thumb || raw.cover || '';
+    if (img && img.startsWith('http')) photos.push(img);
 
     const eventUrl = raw.url || raw['@id'] || sourceUrl || '';
     const eventId = raw.id || raw['@id']?.split('/').filter(Boolean).pop() ||
@@ -66,8 +83,8 @@ function normalizeAlleventsEvent(raw, sourceUrl) {
         city: borough,
         address: address || 'New York, NY',
         zipcode,
-        lat: parseFloat(loc.latitude || loc.lat) || null,
-        lng: parseFloat(loc.longitude || loc.lng) || null,
+        lat,
+        lng,
       },
       event_date: dateInfo.event_date,
       event_time_utc: dateInfo.event_time_utc,
@@ -90,13 +107,13 @@ function extractFromHTML(html, sourceUrl) {
   const $ = cheerioLoad(html);
   const results = [];
 
-  // JSON-LD (Allevents uses schema.org events)
+  // JSON-LD arrays and single events
   $('script[type="application/ld+json"]').each((_, el) => {
     try {
-      const data = JSON.parse($(el).html() || '{}');
-      const items = data['@type'] === 'ItemList'
-        ? (data.itemListElement || []).map(i => i.item || i)
-        : data['@type'] === 'Event' ? [data] : [];
+      const raw = JSON.parse($(el).html() || '{}');
+      const items = Array.isArray(raw) ? raw :
+        raw['@type'] === 'ItemList' ? (raw.itemListElement || []).map(i => i.item || i) :
+        raw['@type'] === 'Event' ? [raw] : [];
       items.forEach(item => {
         const ev = normalizeAlleventsEvent(item, sourceUrl);
         if (ev) results.push(ev);
@@ -104,22 +121,43 @@ function extractFromHTML(html, sourceUrl) {
     } catch { /* skip */ }
   });
 
-  // Also try __NEXT_DATA__
+  // __NEXT_DATA__ / server-side props
   if (results.length === 0) {
     const nextDataEl = $('script#__NEXT_DATA__').first();
     if (nextDataEl.length) {
       try {
         const nextData = JSON.parse(nextDataEl.html() || '{}');
-        const eventsList =
-          nextData?.props?.pageProps?.events ||
-          nextData?.props?.pageProps?.data?.events ||
-          [];
+        const lists = [
+          nextData?.props?.pageProps?.events,
+          nextData?.props?.pageProps?.data?.events,
+          nextData?.props?.pageProps?.initialData,
+        ].filter(Array.isArray);
+        for (const list of lists) {
+          list.forEach(raw => {
+            const ev = normalizeAlleventsEvent(raw, sourceUrl);
+            if (ev) results.push(ev);
+          });
+        }
+      } catch { /* skip */ }
+    }
+  }
+
+  // Embedded JSON blobs in page scripts
+  if (results.length === 0) {
+    $('script:not([src])').each((_, el) => {
+      const text = $(el).html() || '';
+      const match = text.match(/window\.__INITIAL_STATE__\s*=\s*(\{.+?\});/s) ||
+                    text.match(/window\.__data__\s*=\s*(\{.+?\});/s);
+      if (!match) return;
+      try {
+        const data = JSON.parse(match[1]);
+        const eventsList = data?.events || data?.data?.events || [];
         eventsList.forEach(raw => {
           const ev = normalizeAlleventsEvent(raw, sourceUrl);
           if (ev) results.push(ev);
         });
       } catch { /* skip */ }
-    }
+    });
   }
 
   return results;
@@ -132,7 +170,7 @@ export async function scrapeAllevents() {
   for (const url of BROWSE_URLS) {
     try {
       await sleep(DELAY_MS);
-      const res = await httpGet(url);
+      const res = await httpGet(url, { Referer: 'https://allevents.in/' });
       if (!res.ok) {
         console.warn(`  Allevents ${url} → HTTP ${res.status}`);
         continue;
@@ -153,3 +191,4 @@ export async function scrapeAllevents() {
 
   return allEvents;
 }
+

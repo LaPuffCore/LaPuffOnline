@@ -1,65 +1,83 @@
 // scrapers/ra.js
-// Scrapes Resident Advisor NYC events page via __NEXT_DATA__ embedded JSON.
+// Resident Advisor — switches to their public GraphQL API instead of HTML scraping.
 // RA is NYC's most comprehensive music/nightlife event listing.
-import { load as cheerioLoad } from 'cheerio';
-import { cleanDescription, dateToUTC, makeExternalId, makeHashId, extractZip, sleep, httpGet } from '../utils/normalize.js';
+import { cleanDescription, dateToUTC, makeExternalId, makeHashId, extractZip, sleep } from '../utils/normalize.js';
 import { getBorough, isNYCAddress } from '../utils/nyc-validate.js';
 import { assignEmojiAndColor } from '../utils/emoji-color.js';
 import { detectPrice } from '../utils/price-detect.js';
 
 const SOURCE_SITE = 'ra';
-const DELAY_MS = 2000;
 const BASE_URL = 'https://ra.co';
+const GRAPHQL_URL = 'https://ra.co/graphql';
+// RA area ID 13 = New York, area ID 18 = Brooklyn (both covered under NYC)
+const NYC_AREA_IDS = [13];
 
-const BROWSE_URLS = [
-  'https://ra.co/events/us/newyork',
-  'https://ra.co/events/us/newyork?page=2',
-];
+// GraphQL query for event listings
+const EVENTS_QUERY = `
+  query GetListings($areaIds: [ID!]!, $startDate: String!, $endDate: String!) {
+    listing(
+      filters: { areas: { in: $areaIds }, listingDate: { gte: $startDate, lte: $endDate } }
+      pageSize: 100
+    ) {
+      data {
+        id
+        title
+        date
+        startTime
+        contentUrl
+        images { filename type }
+        venue {
+          name
+          address
+          area { name }
+          postalCode
+          lat
+          lng
+        }
+        cost
+        lineup { displayName }
+      }
+    }
+  }
+`;
 
 function normalizeRAEvent(raw) {
   try {
     const name = raw.title || raw.name || '';
     if (!name) return null;
 
-    const descRaw = raw.contentUrl || raw.description || raw.blurb || '';
+    const lineupNames = (raw.lineup || []).map(l => l.displayName).filter(Boolean).join(', ');
+    const descRaw = lineupNames ? `Lineup: ${lineupNames}` : '';
     const description = cleanDescription(descRaw);
 
-    // Date/time — RA uses ISO strings with offset
-    const dateStr = raw.date || raw.startTime || raw.startDate;
+    const dateStr = raw.date || raw.startDate;
     if (!dateStr) return null;
     const dateInfo = dateToUTC(dateStr);
     if (!dateInfo) return null;
 
-    // Venue / location
-    const venue = raw.venue || raw.club || raw.location || {};
-    let address = venue.address || venue.fullAddress || '';
+    const venue = raw.venue || {};
+    let address = venue.address || '';
+    if (!address && venue.name) address = `${venue.name}, New York, NY`;
     let zipcode = venue.postalCode || extractZip(address);
-    let lat = parseFloat(venue.lat || venue.latitude) || null;
-    let lng = parseFloat(venue.lng || venue.longitude) || null;
+    let lat = parseFloat(venue.lat) || null;
+    let lng = parseFloat(venue.lng) || null;
 
-    if (!address && venue.name) {
-      address = `${venue.name}, New York, NY`;
-    }
-
-    if (!isNYCAddress(zipcode, address)) return null;
-
+    // RA NYC events are definitionally NYC — accept them without strict ZIP check
     const borough = getBorough(zipcode, address) || 'Manhattan';
 
-    // RA events are almost always ticketed
-    const priceVal = raw.minimumCost || raw.ticketPrice || raw.cost;
+    const priceVal = raw.cost;
     const price = detectPrice(priceVal, description);
 
-    // Image
     const photos = [];
-    const img = raw.flyer?.image?.url || raw.images?.[0]?.url || raw.image || '';
-    if (img && typeof img === 'string') {
-      photos.push(img.startsWith('http') ? img : `${BASE_URL}${img}`);
+    const img = (raw.images || []).find(i => i.type === 'flyer' || i.filename)?.filename;
+    if (img) {
+      const imgUrl = img.startsWith('http') ? img : `https://ra.co${img}`;
+      photos.push(imgUrl);
     }
 
-    const eventPath = raw.contentUrl || raw.href || raw.url || '';
+    const eventPath = raw.contentUrl || '';
     const eventUrl = eventPath.startsWith('http') ? eventPath : `${BASE_URL}${eventPath}`;
-    const eventId = raw.id || raw.contentId || makeHashId(name, dateInfo.event_date, address);
-    const externalId = makeExternalId(SOURCE_SITE, String(eventId));
+    const externalId = makeExternalId(SOURCE_SITE, String(raw.id || makeHashId(name, dateInfo.event_date, address)));
 
     const { emoji, color } = assignEmojiAndColor(name, description);
 
@@ -85,90 +103,52 @@ function normalizeRAEvent(raw) {
   }
 }
 
-function extractFromHTML(html) {
-  const $ = cheerioLoad(html);
-  const results = [];
-
-  // RA uses Next.js: look for __NEXT_DATA__
-  const nextDataEl = $('script#__NEXT_DATA__').first();
-  if (nextDataEl.length) {
-    try {
-      const nextData = JSON.parse(nextDataEl.html() || '{}');
-      const props = nextData?.props?.pageProps;
-
-      const eventsList =
-        props?.listing?.events ||
-        props?.events ||
-        props?.data?.listing?.events ||
-        props?.initialData?.events ||
-        [];
-
-      for (const raw of eventsList) {
-        if (!raw) continue;
-        const ev = normalizeRAEvent(raw);
-        if (ev) results.push(ev);
-      }
-    } catch { /* skip */ }
-  }
-
-  // Fallback: JSON-LD
-  if (results.length === 0) {
-    $('script[type="application/ld+json"]').each((_, el) => {
-      try {
-        const data = JSON.parse($(el).html() || '{}');
-        const items = data['@type'] === 'ItemList'
-          ? (data.itemListElement || []).map(i => i.item || i)
-          : data['@type'] === 'Event' ? [data] : [];
-
-        items.forEach(item => {
-          const ev = normalizeRAEvent({
-            name: item.name,
-            description: item.description,
-            date: item.startDate,
-            venue: item.location ? {
-              address: item.location.streetAddress,
-              postalCode: item.location.postalCode,
-              lat: item.location.geo?.latitude,
-              lng: item.location.geo?.longitude,
-            } : null,
-            contentUrl: item.url,
-            id: item['@id'],
-            image: item.image,
-          });
-          if (ev) results.push(ev);
-        });
-      } catch { /* skip */ }
-    });
-  }
-
-  return results;
-}
-
 export async function scrapeRA() {
+  const now = new Date();
+  const startDate = now.toISOString().slice(0, 10);
+  const endDate = new Date(now.getTime() + 180 * 86400000).toISOString().slice(0, 10);
+
   const allEvents = [];
   const seenIds = new Set();
 
-  for (const url of BROWSE_URLS) {
+  for (const areaId of NYC_AREA_IDS) {
     try {
-      await sleep(DELAY_MS);
-      const res = await httpGet(url);
+      await sleep(2000);
+      const res = await fetch(GRAPHQL_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Origin': 'https://ra.co',
+          'Referer': 'https://ra.co/events/us/newyork',
+        },
+        body: JSON.stringify({
+          query: EVENTS_QUERY,
+          variables: { areaIds: [String(areaId)], startDate, endDate },
+        }),
+      });
+
       if (!res.ok) {
-        console.warn(`  RA ${url} → HTTP ${res.status}`);
+        console.warn(`  RA GraphQL area ${areaId} → HTTP ${res.status}`);
         continue;
       }
-      const html = await res.text();
-      const events = extractFromHTML(html);
 
-      for (const ev of events) {
-        if (!seenIds.has(ev.external_id)) {
-          seenIds.add(ev.external_id);
-          allEvents.push(ev);
-        }
+      const json = await res.json();
+      const events = json?.data?.listing?.data || [];
+
+      for (const raw of events) {
+        if (!raw) continue;
+        const ev = normalizeRAEvent(raw);
+        if (!ev || seenIds.has(ev.external_id)) continue;
+        seenIds.add(ev.external_id);
+        allEvents.push(ev);
       }
     } catch (err) {
-      console.warn(`  RA scrape error: ${err.message}`);
+      console.warn(`  RA GraphQL error (area ${areaId}): ${err.message}`);
     }
   }
 
   return allEvents;
 }
+

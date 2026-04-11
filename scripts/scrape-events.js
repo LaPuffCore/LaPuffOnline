@@ -7,6 +7,8 @@ import { scrapeRA } from './scrapers/ra.js';
 import { scrapeTimeOut } from './scrapers/timeout.js';
 import { scrapeDice } from './scrapers/dice.js';
 import { scrapeAllevents } from './scrapers/allevents.js';
+import { scrapeSongkick } from './scrapers/songkick.js';
+import { scrapeNYCData } from './scrapers/nycdata.js';
 import { getExistingExternalIds, filterNewEvents } from './utils/dedup.js';
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://gazuabyyugbbthonqnsp.supabase.co';
@@ -26,13 +28,15 @@ const supabaseHeaders = {
 
 // Ordered by reliability / expected volume
 const SCRAPERS = [
-  { name: 'NYC Parks (RSS)', fn: scrapeNYCParks },
-  { name: 'Eventbrite', fn: scrapeEventbrite },
-  { name: 'Meetup', fn: scrapeMeetup },
-  { name: 'Resident Advisor', fn: scrapeRA },
-  { name: 'TimeOut NYC', fn: scrapeTimeOut },
-  { name: 'Dice.fm', fn: scrapeDice },
-  { name: 'Allevents.in', fn: scrapeAllevents },
+  { name: 'NYC Open Data', fn: scrapeNYCData },     // Gov API — no blocks, most reliable
+  { name: 'Songkick', fn: scrapeSongkick },         // Concerts — confirmed working
+  { name: 'NYC Parks (RSS)', fn: scrapeNYCParks },  // Parks events — try RSS
+  { name: 'Resident Advisor', fn: scrapeRA },       // Music/nightlife GraphQL
+  { name: 'Meetup', fn: scrapeMeetup },             // Community events GraphQL
+  { name: 'Eventbrite', fn: scrapeEventbrite },     // General events (capped at 20 fetches)
+  { name: 'TimeOut NYC', fn: scrapeTimeOut },       // Curated editorial events
+  { name: 'Dice.fm', fn: scrapeDice },              // Music venue events
+  { name: 'Allevents.in', fn: scrapeAllevents },   // Volume aggregator
 ];
 
 const UPSERT_CHUNK_SIZE = 50;
@@ -123,11 +127,19 @@ async function main() {
     }
   }
 
-  // Global dedup by external_id (some sources might produce duplicate IDs)
+  // Global dedup by external_id, source_url, AND event_name+date (user requirement: no repeated titles or links)
   const seenIds = new Set();
+  const seenUrls = new Set();
+  const seenTitleDates = new Set();
   const deduped = allScraped.filter(ev => {
-    if (!ev.external_id || seenIds.has(ev.external_id)) return false;
-    seenIds.add(ev.external_id);
+    if (ev.external_id && seenIds.has(ev.external_id)) return false;
+    if (ev.source_url && seenUrls.has(ev.source_url)) return false;
+    const tdKey = `${(ev.event_name || '').toLowerCase().trim()}|${ev.event_date}`;
+    if (seenTitleDates.has(tdKey)) return false;
+
+    if (ev.external_id) seenIds.add(ev.external_id);
+    if (ev.source_url) seenUrls.add(ev.source_url);
+    seenTitleDates.add(tdKey);
     return true;
   });
 
@@ -137,11 +149,12 @@ async function main() {
   const newEvents = filterNewEvents(deduped, existingIds);
   console.log(`🆕 New events to insert: ${newEvents.length}`);
 
-  // Only keep events in a reasonable window (30 days past → 6 months future)
+  // Only keep events in window: from 30 days ago (archive) up to 6 months ahead
   const now = new Date();
   const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
   const sixMonthsOut = new Date(now.getTime() + 180 * 24 * 60 * 60 * 1000);
   const windowed = newEvents.filter(ev => {
+    if (!ev.event_date) return false;
     const d = new Date(ev.event_date + 'T00:00:00');
     return d >= thirtyDaysAgo && d <= sixMonthsOut;
   });

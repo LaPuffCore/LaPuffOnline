@@ -1,7 +1,7 @@
 // scrapers/eventbrite.js
-// Scrapes Eventbrite NYC browse & category pages.
-// Strategy: Extract JSON-LD from page source, then fall back to
-//           parsing embedded __SERVER_DATA__ JSON blobs.
+// Scrapes Eventbrite NYC browse pages.
+// Strategy: extract event links via img[alt$=" primary image"] pattern visible in HTML,
+// then batch-fetch individual event pages for their JSON-LD (complete structured data).
 import { load as cheerioLoad } from 'cheerio';
 import { cleanDescription, dateToUTC, makeExternalId, makeHashId, extractZip, sleep, httpGet } from '../utils/normalize.js';
 import { getBorough, isNYCAddress, isNYCZip } from '../utils/nyc-validate.js';
@@ -9,19 +9,17 @@ import { assignEmojiAndColor } from '../utils/emoji-color.js';
 import { detectPrice } from '../utils/price-detect.js';
 
 const SOURCE_SITE = 'eventbrite';
-const DELAY_MS = 2000;
+const DELAY_MS = 1500;
+const MAX_EVENTS_PER_PAGE = 12; // Limit event-page fetches per category
 
-// Category pages to scrape — each yields different event types for volume
 const BROWSE_URLS = [
   'https://www.eventbrite.com/d/ny--new-york/events/',
   'https://www.eventbrite.com/d/ny--new-york/music--events/',
   'https://www.eventbrite.com/d/ny--new-york/food-and-drink--events/',
   'https://www.eventbrite.com/d/ny--new-york/arts--events/',
   'https://www.eventbrite.com/d/ny--new-york/community--events/',
-  'https://www.eventbrite.com/d/ny--new-york/film-media-and-entertainment--events/',
   'https://www.eventbrite.com/d/ny--new-york/health--events/',
   'https://www.eventbrite.com/d/ny--new-york/sports-and-fitness--events/',
-  'https://www.eventbrite.com/d/ny--new-york/science-and-technology--events/',
 ];
 
 function normalizeEventbriteEvent(raw, sourceUrl) {
@@ -32,12 +30,10 @@ function normalizeEventbriteEvent(raw, sourceUrl) {
     const descRaw = raw.description || raw.summary || '';
     const description = cleanDescription(descRaw);
 
-    // Date/time
     const dateStr = raw.startDate || raw.start_date || raw.start?.utc || raw.starts_at;
     const dateInfo = dateToUTC(dateStr);
     if (!dateInfo) return null;
 
-    // Location
     let address = '';
     let zipcode = null;
     let lat = null;
@@ -63,29 +59,21 @@ function normalizeEventbriteEvent(raw, sourceUrl) {
       lng = parseFloat(v.longitude) || null;
     }
 
-    // NYC validation
     if (!isNYCAddress(zipcode, address)) return null;
-
     const borough = getBorough(zipcode, address) || 'Manhattan';
 
-    // Price
     const priceVal = raw.offers?.price ?? raw.ticket_availability?.minimum_ticket_price?.major_value ?? null;
     const price = detectPrice(priceVal, description);
 
-    // Image
     const photos = [];
-    const imgUrl = raw.image?.url || raw.logo?.url || raw.image || '';
-    if (imgUrl && typeof imgUrl === 'string' && imgUrl.startsWith('http')) {
-      photos.push(imgUrl);
-    }
+    const imgUrl = raw.image?.url || raw.logo?.url || (typeof raw.image === 'string' ? raw.image : '');
+    if (imgUrl && imgUrl.startsWith('http')) photos.push(imgUrl);
 
-    // Link
-    const eventUrl = raw.url || raw['@id'] || sourceUrl || '';
+    const eventUrl = (raw.url || raw['@id'] || sourceUrl || '').split('?')[0];
 
-    // External ID from Eventbrite event ID (in URL or raw.id)
     let eventId = raw['@id']?.split('/')?.find(s => /^\d{10,}$/.test(s)) ||
       raw.id || raw.event_id ||
-      eventUrl.match(/\/e\/[^/]+-(\d+)/)?.[1];
+      eventUrl.match(/tickets-(\d+)/)?.[1];
     const externalId = eventId
       ? makeExternalId(SOURCE_SITE, eventId)
       : makeExternalId(SOURCE_SITE, makeHashId(name, dateInfo.event_date, address));
@@ -102,7 +90,7 @@ function normalizeEventbriteEvent(raw, sourceUrl) {
       representative_emoji: emoji,
       hex_color: color,
       photos,
-      relevant_links: eventUrl ? [eventUrl] : [],
+      relevant_links: [eventUrl],
       borough,
       is_approved: true,
       source_site: SOURCE_SITE,
@@ -114,136 +102,183 @@ function normalizeEventbriteEvent(raw, sourceUrl) {
   }
 }
 
-/**
- * Extract events from an Eventbrite browse page HTML.
- * Tries JSON-LD ItemList first, then __SERVER_DATA__ embedded JSON.
- */
-function extractFromHTML(html, sourceUrl) {
+/** Extract event links from a browse page (img[alt$=" primary image"] pattern). */
+function extractEventLinksFromBrowse(html) {
   const $ = cheerioLoad(html);
-  const results = [];
+  const links = new Map();
 
-  // Strategy 1: JSON-LD tags (schema.org Event or ItemList)
+  // First: JSON-LD / __SERVER_DATA__ fast path
   $('script[type="application/ld+json"]').each((_, el) => {
     try {
       const data = JSON.parse($(el).html() || '{}');
       const items = data['@type'] === 'ItemList'
         ? (data.itemListElement || []).map(i => i.item || i)
-        : data['@type'] === 'Event'
-          ? [data]
-          : [];
+        : data['@type'] === 'Event' ? [data] : [];
       items.forEach(item => {
-        const ev = normalizeEventbriteEvent(item, sourceUrl);
-        if (ev) results.push(ev);
+        const url = (item.url || item['@id'] || '').split('?')[0];
+        const idMatch = url.match(/tickets-(\d+)/);
+        if (idMatch) links.set(idMatch[1], { url, name: item.name || '', img: item.image?.url || '' });
       });
-    } catch { /* skip malformed */ }
+    } catch { /* skip */ }
   });
 
-  if (results.length > 0) return results;
+  // Second: find event links via img alt "primary image" convention
+  $('img').each((_, el) => {
+    const alt = $(el).attr('alt') || '';
+    if (!alt.endsWith(' primary image')) return;
+    const name = alt.replace(/ primary image$/, '').trim();
+    if (!name) return;
 
-  // Strategy 2: Look for embedded JSON blobs in script tags
-  $('script:not([src])').each((_, el) => {
-    const text = $(el).html() || '';
-    if (!text.includes('"events"') && !text.includes('"EventList"') && !text.includes('"start"')) return;
-
-    // Try to find the component data JSON
-    const patterns = [
-      // window.__SERVER_DATA__ = {...}
-      /window\.__SERVER_DATA__\s*=\s*(\{.+\});?\s*(?:<\/script>|window\.)/s,
-      // __data__ = {...}
-      /__data__\s*=\s*(\{.+?\});/s,
-    ];
-
-    for (const pattern of patterns) {
-      const match = text.match(pattern);
-      if (match) {
-        try {
-          const data = JSON.parse(match[1]);
-          const eventList =
-            data?.components?.EventsByLocation?.events ||
-            data?.search?.events ||
-            data?.events ||
-            [];
-          eventList.forEach(raw => {
-            const ev = normalizeEventbriteEvent(raw, sourceUrl);
-            if (ev) results.push(ev);
-          });
-        } catch { /* skip */ }
+    const $a = $(el).closest('a[href]');
+    let href = $a.attr('href') || '';
+    if (!href) {
+      // Try parent containers
+      let $parent = $(el).parent();
+      for (let i = 0; i < 5 && !href; i++) {
+        href = $parent.closest('a[href*="/e/"]').attr('href') || '';
+        $parent = $parent.parent();
       }
+    }
+    if (!href || !href.includes('/e/')) return;
+
+    const fullUrl = (href.startsWith('http') ? href : `https://www.eventbrite.com${href}`).split('?')[0];
+    const idMatch = fullUrl.match(/tickets-(\d+)/);
+    if (!idMatch) return;
+    const id = idMatch[1];
+
+    const imgSrc = $(el).attr('src') || $(el).attr('data-src') || '';
+    if (!links.has(id)) {
+      links.set(id, { url: fullUrl, name, img: imgSrc });
     }
   });
 
-  // Strategy 3: Find event card links and parse what we can from markup
-  if (results.length === 0) {
-    $('[data-event-id], [data-testid="event-card"], article[class*="event"]').each((_, el) => {
-      try {
-        const $el = $(el);
-        const eventId = $el.attr('data-event-id') || '';
-        const name = $el.find('h2, h3, [class*="event-name"], [class*="title"]').first().text().trim();
-        const link = $el.find('a[href*="/e/"]').first().attr('href') || '';
-        const dateText = $el.find('[class*="date"], time, [datetime]').first().text().trim();
-        const location = $el.find('[class*="location"], [class*="venue"], [class*="address"]').first().text().trim();
-
-        if (!name || !link) return;
-
-        const fullLink = link.startsWith('http') ? link : `https://www.eventbrite.com${link}`;
-        const dateInfo = dateToUTC(dateText) || dateToUTC(new Date().toISOString());
-        const zipcode = extractZip(location);
-        const borough = getBorough(zipcode, location) || 'Manhattan';
-
-        if (!isNYCAddress(zipcode, location) && !location.toLowerCase().includes('new york')) return;
-
-        const { emoji, color } = assignEmojiAndColor(name, '');
-        const externalId = eventId
-          ? makeExternalId(SOURCE_SITE, eventId)
-          : makeExternalId(SOURCE_SITE, makeHashId(name, dateInfo?.event_date || '', location));
-
-        results.push({
-          event_name: name,
-          description: '',
-          price_category: '$',
-          location_data: { city: borough, address: location || 'New York, NY', zipcode, lat: null, lng: null },
-          event_date: dateInfo?.event_date || new Date().toISOString().slice(0, 10),
-          event_time_utc: dateInfo?.event_time_utc || null,
-          representative_emoji: emoji,
-          hex_color: color,
-          photos: [],
-          relevant_links: [fullLink],
-          borough,
-          is_approved: true,
-          source_site: SOURCE_SITE,
-          source_url: fullLink,
-          external_id: externalId,
-        });
-      } catch { /* skip */ }
+  // Third: any remaining /e/ links
+  if (links.size < 3) {
+    $('a[href*="/e/"]').each((_, el) => {
+      const href = $(el).attr('href') || '';
+      const fullUrl = (href.startsWith('http') ? href : `https://www.eventbrite.com${href}`).split('?')[0];
+      const idMatch = fullUrl.match(/tickets-(\d+)/);
+      if (!idMatch) return;
+      const id = idMatch[1];
+      if (!links.has(id)) {
+        const name = $(el).find('img').attr('alt')?.replace(/ primary image$/, '') || $(el).text().trim().slice(0, 80);
+        const img = $(el).find('img').attr('src') || '';
+        links.set(id, { url: fullUrl, name, img });
+      }
     });
   }
 
-  return results;
+  return Array.from(links.values()).filter(l => l.url && l.name).slice(0, MAX_EVENTS_PER_PAGE);
+}
+
+/** Fetch an individual event page and extract JSON-LD. */
+async function fetchEventDetails(eventUrl) {
+  try {
+    await sleep(DELAY_MS);
+    const res = await httpGet(eventUrl, {
+      Referer: 'https://www.eventbrite.com/',
+    });
+    if (!res.ok) return null;
+    const html = await res.text();
+    const $ = cheerioLoad(html);
+
+    let eventData = null;
+    $('script[type="application/ld+json"]').each((_, el) => {
+      if (eventData) return;
+      try {
+        const data = JSON.parse($(el).html() || '{}');
+        if (data['@type'] === 'Event') eventData = data;
+      } catch { /* skip */ }
+    });
+    return eventData;
+  } catch {
+    return null;
+  }
 }
 
 export async function scrapeEventbrite() {
   const allEvents = [];
   const seenIds = new Set();
+  // Hard limit: max total event-page fetches across all browse pages (to avoid 120s+ runs)
+  let totalEventFetches = 0;
+  const MAX_TOTAL_FETCHES = 20;
 
-  for (const url of BROWSE_URLS) {
+  for (const browseUrl of BROWSE_URLS) {
+    if (totalEventFetches >= MAX_TOTAL_FETCHES) break;
     try {
       await sleep(DELAY_MS);
-      const res = await httpGet(url);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 15000);
+      let res;
+      try {
+        res = await fetch(browseUrl, {
+          signal: controller.signal,
+          redirect: 'follow',
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Referer': 'https://www.eventbrite.com/',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'same-origin',
+          },
+        });
+      } finally {
+        clearTimeout(timer);
+      }
       if (!res.ok) {
-        console.warn(`  Eventbrite ${url} → HTTP ${res.status}`);
+        console.warn(`  Eventbrite ${browseUrl} → HTTP ${res.status}`);
         continue;
       }
       const html = await res.text();
-      const events = extractFromHTML(html, url);
 
-      for (const ev of events) {
-        if (!seenIds.has(ev.external_id)) {
-          seenIds.add(ev.external_id);
-          allEvents.push(ev);
+      // Try fast JSON-LD parse first (no extra requests needed)
+      let fastEvents = [];
+      const $ = cheerioLoad(html);
+      $('script[type="application/ld+json"]').each((_, el) => {
+        try {
+          const data = JSON.parse($(el).html() || '{}');
+          const items = data['@type'] === 'ItemList'
+            ? (data.itemListElement || []).map(i => i.item || i)
+            : data['@type'] === 'Event' ? [data] : [];
+          items.forEach(item => {
+            const ev = normalizeEventbriteEvent(item, browseUrl);
+            if (ev && !seenIds.has(ev.external_id)) {
+              seenIds.add(ev.external_id);
+              fastEvents.push(ev);
+            }
+          });
+        } catch { /* skip */ }
+      });
+
+      if (fastEvents.length > 0) {
+        allEvents.push(...fastEvents);
+        continue;
+      }
+
+      // Fallback: extract links then fetch each event page for JSON-LD
+      const remaining = MAX_TOTAL_FETCHES - totalEventFetches;
+      const eventLinks = extractEventLinksFromBrowse(html).slice(0, Math.min(4, remaining));
+      for (const { url, name } of eventLinks) {
+        if (totalEventFetches >= MAX_TOTAL_FETCHES) break;
+        const idMatch = url.match(/tickets-(\d+)/);
+        if (!idMatch) continue;
+        const candidateExtId = makeExternalId(SOURCE_SITE, idMatch[1]);
+        if (seenIds.has(candidateExtId)) continue;
+
+        totalEventFetches++;
+        const jsonLd = await fetchEventDetails(url);
+        if (jsonLd) {
+          const ev = normalizeEventbriteEvent(jsonLd, url);
+          if (ev && !seenIds.has(ev.external_id)) {
+            seenIds.add(ev.external_id);
+            allEvents.push(ev);
+          }
         }
       }
     } catch (err) {
-      console.warn(`  Eventbrite scrape error on ${url}: ${err.message}`);
+      console.warn(`  Eventbrite error on ${browseUrl}: ${err.message}`);
     }
   }
 

@@ -58,11 +58,10 @@ export async function getApprovedEvents(options = {}) {
  */
 export async function getAutoEvents() {
   try {
-    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
-      .toISOString()
-      .slice(0, 10);
+    // Fetch all approved auto events — no lower bound so archive mode works fully.
+    // The scraper already limits what gets stored (30d past → 6mo future window).
     const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/auto_events?is_approved=eq.true&event_date=gte.${thirtyDaysAgo}&select=*&order=event_date.asc`,
+      `${SUPABASE_URL}/rest/v1/auto_events?is_approved=eq.true&select=*&order=event_date.asc`,
       { headers: baseHeaders }
     );
     if (!res.ok) return [];

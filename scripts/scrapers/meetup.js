@@ -1,71 +1,93 @@
 // scrapers/meetup.js
-// Scrapes Meetup.com NYC events via their __NEXT_DATA__ embedded JSON.
-import { load as cheerioLoad } from 'cheerio';
-import { cleanDescription, dateToUTC, makeExternalId, makeHashId, extractZip, sleep, httpGet } from '../utils/normalize.js';
+// Meetup.com NYC events via their public GraphQL API.
+import { cleanDescription, dateToUTC, makeExternalId, makeHashId, extractZip, sleep } from '../utils/normalize.js';
 import { getBorough, isNYCAddress } from '../utils/nyc-validate.js';
 import { assignEmojiAndColor } from '../utils/emoji-color.js';
 import { detectPrice } from '../utils/price-detect.js';
 
 const SOURCE_SITE = 'meetup';
-const DELAY_MS = 2500;
+const GRAPHQL_URL = 'https://api.meetup.com/gql2';
 
-const BROWSE_URLS = [
-  'https://www.meetup.com/find/?location=us--ny--New+York&source=EVENTS&sortField=DATETIME',
-  'https://www.meetup.com/find/events/?allMeetups=false&keywords=&radius=5&userFreeform=New+York%2C+NY&mcId=z10004&change=yes&eventFilter=mysugg',
+// Lat/lng center points for each NYC borough + radius
+const SEARCH_POINTS = [
+  { name: 'Manhattan', lat: 40.7831, lon: -73.9712 },
+  { name: 'Brooklyn', lat: 40.6782, lon: -73.9442 },
+  { name: 'Queens', lat: 40.7282, lon: -73.7949 },
+  { name: 'Bronx', lat: 40.8448, lon: -73.8648 },
 ];
+
+const SEARCH_QUERY = `
+  query SearchEvents($lat: Float!, $lon: Float!) {
+    keywordSearch(
+      input: { first: 60, query: "" }
+      filter: { lat: $lat, lon: $lon, radius: 12, source: EVENTS, startDateRange: "TODAY" }
+    ) {
+      edges {
+        node {
+          result {
+            ... on Event {
+              id
+              title
+              dateTime
+              eventUrl
+              isOnline
+              venue {
+                address
+                city
+                state
+                postalCode
+                lat
+                lng
+              }
+              group { name }
+              description
+              feeSettings { fee { amount } }
+              featuredEventPhoto { highResUrl }
+            }
+          }
+        }
+      }
+    }
+  }
+`;
 
 function normalizeMeetupEvent(raw) {
   try {
-    const name = raw.name || raw.title || '';
+    const name = raw.title || raw.name || '';
     if (!name) return null;
+    if (raw.isOnline) return null;
 
     const descRaw = raw.description || raw.shortDescription || '';
     const description = cleanDescription(descRaw);
 
-    // Date/time
-    const dateStr = raw.dateTime || raw.eventTime || raw.time;
+    const dateStr = raw.dateTime || raw.eventTime;
     if (!dateStr) return null;
     const dateInfo = dateToUTC(typeof dateStr === 'number' ? new Date(dateStr).toISOString() : dateStr);
     if (!dateInfo) return null;
 
-    // Location — only in-person events
-    const venue = raw.venue || raw.eventHosts?.[0] || null;
-    if (!venue && raw.isOnline) return null; // Skip online-only events
+    const venue = raw.venue || {};
+    let address = [
+      venue.address || venue.address1 || '',
+      venue.city || '',
+      venue.state || '',
+      venue.postalCode || venue.zip || '',
+    ].filter(Boolean).join(', ');
+    const zipcode = venue.postalCode || venue.zip || extractZip(address);
+    const lat = parseFloat(venue.lat) || null;
+    const lng = parseFloat(venue.lng) || null;
 
-    let address = '';
-    let zipcode = null;
-    let lat = null;
-    let lng = null;
-
-    if (venue) {
-      address = [
-        venue.address || venue.address1 || '',
-        venue.city || '',
-        venue.state || '',
-        venue.zip || venue.zipCode || '',
-      ].filter(Boolean).join(', ');
-      zipcode = venue.zip || venue.zipCode || extractZip(address);
-      lat = parseFloat(venue.lat) || null;
-      lng = parseFloat(venue.lng) || null;
-    }
-
-    if (!address && !raw.isOnline) {
-      address = 'New York, NY';
-    }
-
-    // NYC check
+    if (!address) address = 'New York, NY';
     if (!isNYCAddress(zipcode, address)) return null;
 
     const borough = getBorough(zipcode, address) || 'Manhattan';
-    const price = detectPrice(raw.feeSettings?.fee?.amount || raw.fee?.amount, description);
+    const price = detectPrice(raw.feeSettings?.fee?.amount, description);
 
     const photos = [];
-    const img = raw.featuredEventPhoto?.highResUrl || raw.featuredEventPhoto?.photo_link || raw.group?.keyPhoto?.highResUrl;
+    const img = raw.featuredEventPhoto?.highResUrl;
     if (img) photos.push(img);
 
-    const eventUrl = raw.eventUrl || raw.link || '';
-    const eventId = raw.id || raw.eventId || makeHashId(name, dateInfo.event_date, address);
-    const externalId = makeExternalId(SOURCE_SITE, String(eventId));
+    const eventUrl = raw.eventUrl || '';
+    const externalId = makeExternalId(SOURCE_SITE, String(raw.id || makeHashId(name, dateInfo.event_date, address)));
 
     const { emoji, color } = assignEmojiAndColor(name, description);
 
@@ -91,85 +113,46 @@ function normalizeMeetupEvent(raw) {
   }
 }
 
-function extractFromHTML(html) {
-  const $ = cheerioLoad(html);
-  const results = [];
-
-  // Primary: __NEXT_DATA__ embedded JSON
-  const nextDataEl = $('script#__NEXT_DATA__').first();
-  if (nextDataEl.length) {
-    try {
-      const nextData = JSON.parse(nextDataEl.html() || '{}');
-      const props = nextData?.props?.pageProps;
-
-      // Meetup stores events in various shapes depending on the page
-      const eventsList =
-        props?.events ||
-        props?.searchResult?.edges?.map(e => e?.node?.result) ||
-        props?.initialProps?.events ||
-        [];
-
-      for (const raw of eventsList) {
-        if (!raw) continue;
-        const ev = normalizeMeetupEvent(raw);
-        if (ev) results.push(ev);
-      }
-    } catch { /* skip */ }
-  }
-
-  // Fallback: JSON-LD
-  if (results.length === 0) {
-    $('script[type="application/ld+json"]').each((_, el) => {
-      try {
-        const data = JSON.parse($(el).html() || '{}');
-        if (data['@type'] === 'Event') {
-          const ev = normalizeMeetupEvent({
-            name: data.name,
-            description: data.description,
-            dateTime: data.startDate,
-            venue: data.location ? {
-              address: data.location.streetAddress,
-              city: data.location.addressLocality,
-              state: data.location.addressRegion,
-              zip: data.location.postalCode,
-            } : null,
-            eventUrl: data.url,
-            id: data['@id'],
-          });
-          if (ev) results.push(ev);
-        }
-      } catch { /* skip */ }
-    });
-  }
-
-  return results;
-}
-
 export async function scrapeMeetup() {
   const allEvents = [];
   const seenIds = new Set();
 
-  for (const url of BROWSE_URLS) {
+  for (const point of SEARCH_POINTS) {
     try {
-      await sleep(DELAY_MS);
-      const res = await httpGet(url);
+      await sleep(2000);
+      const res = await fetch(GRAPHQL_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Origin': 'https://www.meetup.com',
+          'Referer': 'https://www.meetup.com/',
+        },
+        body: JSON.stringify({ query: SEARCH_QUERY, variables: { lat: point.lat, lon: point.lon } }),
+      });
+
       if (!res.ok) {
-        console.warn(`  Meetup ${url} → HTTP ${res.status}`);
+        console.warn(`  Meetup GraphQL (${point.name}) → HTTP ${res.status}`);
         continue;
       }
-      const html = await res.text();
-      const events = extractFromHTML(html);
 
-      for (const ev of events) {
-        if (!seenIds.has(ev.external_id)) {
-          seenIds.add(ev.external_id);
-          allEvents.push(ev);
-        }
+      const json = await res.json();
+      const edges = json?.data?.keywordSearch?.edges || [];
+
+      for (const edge of edges) {
+        const raw = edge?.node?.result;
+        if (!raw) continue;
+        const ev = normalizeMeetupEvent(raw);
+        if (!ev || seenIds.has(ev.external_id)) continue;
+        seenIds.add(ev.external_id);
+        allEvents.push(ev);
       }
     } catch (err) {
-      console.warn(`  Meetup scrape error: ${err.message}`);
+      console.warn(`  Meetup GraphQL error (${point.name}): ${err.message}`);
     }
   }
 
   return allEvents;
 }
+

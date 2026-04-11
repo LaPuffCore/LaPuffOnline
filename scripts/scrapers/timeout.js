@@ -1,6 +1,5 @@
 // scrapers/timeout.js
-// Scrapes TimeOut NYC events via JSON-LD and og:meta tags.
-// TimeOut has curated editorial events with good descriptions and images.
+// TimeOut NYC — uses sitemap-driven individual article pages to extract events.
 import { load as cheerioLoad } from 'cheerio';
 import { cleanDescription, dateToUTC, makeExternalId, makeHashId, extractZip, sleep, httpGet } from '../utils/normalize.js';
 import { getBorough, isNYCAddress } from '../utils/nyc-validate.js';
@@ -11,13 +10,15 @@ const SOURCE_SITE = 'timeout';
 const DELAY_MS = 2000;
 const BASE_URL = 'https://www.timeout.com';
 
+// TimeOut category listing pages — more specific pages tend to return 200
 const BROWSE_URLS = [
-  'https://www.timeout.com/newyork/events',
-  'https://www.timeout.com/newyork/things-to-do',
+  // These return 200 from server IPs; others return 400
+  'https://www.timeout.com/newyork/comedy/best-comedy-shows-in-nyc',
+  'https://www.timeout.com/newyork/theater',
+  'https://www.timeout.com/newyork/dance',
   'https://www.timeout.com/newyork/music',
+  'https://www.timeout.com/newyork/things-to-do',
   'https://www.timeout.com/newyork/art',
-  'https://www.timeout.com/newyork/food-and-drink',
-  'https://www.timeout.com/newyork/nightlife',
 ];
 
 function normalizeTimeOutEvent(raw, sourceUrl) {
@@ -28,13 +29,11 @@ function normalizeTimeOutEvent(raw, sourceUrl) {
     const descRaw = raw.description || '';
     const description = cleanDescription(descRaw);
 
-    // TimeOut sometimes has date ranges
     const dateStr = raw.startDate || raw.date || raw.dateTime;
     if (!dateStr) return null;
     const dateInfo = dateToUTC(dateStr);
     if (!dateInfo) return null;
 
-    // Location
     const loc = raw.location || raw.address || {};
     const venueAddress = typeof loc === 'string'
       ? loc
@@ -43,7 +42,6 @@ function normalizeTimeOutEvent(raw, sourceUrl) {
     const zipcode = (typeof loc === 'object' && loc.postalCode) || extractZip(venueAddress);
     const borough = getBorough(zipcode, venueAddress) || 'Manhattan';
 
-    // Default NYC for TimeOut NYC articles
     if (venueAddress && !isNYCAddress(zipcode, venueAddress)) return null;
 
     const price = detectPrice(raw.offers?.price, description);
@@ -52,9 +50,9 @@ function normalizeTimeOutEvent(raw, sourceUrl) {
     const img = raw.image?.url || raw.image || raw.thumbnailUrl || '';
     if (img && typeof img === 'string' && img.startsWith('http')) photos.push(img);
 
-    const eventUrl = raw.url || raw['@id'] || sourceUrl || '';
+    const eventUrl = (raw.url || raw['@id'] || sourceUrl || '').split('?')[0];
     const eventId = raw['@id']?.split('/').filter(Boolean).pop() ||
-      makeHashId(name, dateInfo.event_date, venueAddress);
+      makeHashId(name, dateInfo.event_date, venueAddress || sourceUrl);
     const externalId = makeExternalId(SOURCE_SITE, eventId);
 
     const { emoji, color } = assignEmojiAndColor(name, description);
@@ -75,7 +73,7 @@ function normalizeTimeOutEvent(raw, sourceUrl) {
       representative_emoji: emoji,
       hex_color: color,
       photos,
-      relevant_links: eventUrl ? [eventUrl] : [],
+      relevant_links: [eventUrl],
       borough,
       is_approved: true,
       source_site: SOURCE_SITE,
@@ -91,35 +89,30 @@ function extractFromHTML(html, sourceUrl) {
   const $ = cheerioLoad(html);
   const results = [];
 
-  // Strategy 1: JSON-LD (TimeOut uses schema.org Events)
+  // JSON-LD (TimeOut uses schema.org Events and Articles)
   $('script[type="application/ld+json"]').each((_, el) => {
     try {
       const data = JSON.parse($(el).html() || '{}');
-      const items = data['@type'] === 'ItemList'
-        ? (data.itemListElement || []).map(i => i.item || i)
-        : data['@type'] === 'Event' ? [data] : [];
+      const items = Array.isArray(data) ? data :
+        data['@type'] === 'ItemList' ? (data.itemListElement || []).map(i => i.item || i) :
+        data['@type'] === 'Event' ? [data] : [];
 
       items.forEach(item => {
+        if (item['@type'] !== 'Event') return;
         const ev = normalizeTimeOutEvent(item, sourceUrl);
         if (ev) results.push(ev);
       });
     } catch { /* skip */ }
   });
 
-  // Strategy 2: __NEXT_DATA__ (TimeOut also uses Next.js)
+  // __NEXT_DATA__ (TimeOut Next.js)
   if (results.length === 0) {
     const nextDataEl = $('script#__NEXT_DATA__').first();
     if (nextDataEl.length) {
       try {
         const nextData = JSON.parse(nextDataEl.html() || '{}');
         const props = nextData?.props?.pageProps;
-        const eventsList =
-          props?.events ||
-          props?.articles ||
-          props?.items ||
-          props?.data?.events ||
-          [];
-
+        const eventsList = props?.events || props?.articles || props?.items || props?.data?.events || [];
         for (const raw of eventsList) {
           if (!raw) continue;
           const ev = normalizeTimeOutEvent({
@@ -136,26 +129,34 @@ function extractFromHTML(html, sourceUrl) {
     }
   }
 
-  // Strategy 3: Article cards with og:meta data (single page listing)
+  // OG tags fallback — only use for individual article pages (has a real date)
   if (results.length === 0) {
-    const ogTitle = $('meta[property="og:title"]').attr('content');
-    const ogDesc = $('meta[property="og:description"]').attr('content');
-    const ogImg = $('meta[property="og:image"]').attr('content');
+    const ogTitle = $('meta[property="og:title"]').attr('content') || '';
+    const ogDesc = $('meta[property="og:description"]').attr('content') || '';
+    const ogImg = $('meta[property="og:image"]').attr('content') || '';
+    const dateMatch = $('time[datetime]').first().attr('datetime');
 
-    if (ogTitle && sourceUrl.includes('/newyork/') && !sourceUrl.endsWith('/events') && !sourceUrl.endsWith('/newyork')) {
-      const dateMatch = $('time').first().attr('datetime');
-      const addressText = $('[class*="address"], [class*="venue"], [itemprop="address"]').first().text().trim();
+    // Reject category pages: real event titles don't contain pipe chars or NYC tourism phrases
+    const isGarbageTitle = !ogTitle ||
+      ogTitle.includes(' | ') ||
+      /best .+ in/i.test(ogTitle) ||
+      /events? (and|&) /i.test(ogTitle) ||
+      /New York (Music|Art|Events|Galleries|Theater|Comedy)/i.test(ogTitle);
 
-      const dateInfo = dateToUTC(dateMatch || new Date().toISOString());
-      if (dateInfo && ogTitle) {
+    // Only create an event if there's an actual date element on the page and title looks like an event
+    if (ogTitle && dateMatch && !isGarbageTitle) {
+      const dateInfo = dateToUTC(dateMatch);
+      if (dateInfo) {
+        const addressText = $('[class*="address"], [class*="venue"], [itemprop="address"]').first().text().trim();
         const zipcode = extractZip(addressText);
         const borough = getBorough(zipcode, addressText) || 'Manhattan';
-        const { emoji, color } = assignEmojiAndColor(ogTitle, ogDesc || '');
+        const { emoji, color } = assignEmojiAndColor(ogTitle, ogDesc);
+        const eventId = makeHashId(ogTitle, dateInfo.event_date, addressText || sourceUrl);
 
         results.push({
-          event_name: ogTitle.trim(),
-          description: cleanDescription(ogDesc || ''),
-          price_category: detectPrice(null, ogDesc || ''),
+          event_name: ogTitle.replace(/ \| Time Out New York$/, '').trim(),
+          description: cleanDescription(ogDesc),
+          price_category: detectPrice(null, ogDesc),
           location_data: { city: borough, address: addressText || 'New York, NY', zipcode, lat: null, lng: null },
           event_date: dateInfo.event_date,
           event_time_utc: dateInfo.event_time_utc,
@@ -167,7 +168,7 @@ function extractFromHTML(html, sourceUrl) {
           is_approved: true,
           source_site: SOURCE_SITE,
           source_url: sourceUrl,
-          external_id: makeExternalId(SOURCE_SITE, makeHashId(ogTitle, dateInfo.event_date, addressText)),
+          external_id: makeExternalId(SOURCE_SITE, eventId),
         });
       }
     }
@@ -183,7 +184,7 @@ export async function scrapeTimeOut() {
   for (const url of BROWSE_URLS) {
     try {
       await sleep(DELAY_MS);
-      const res = await httpGet(url);
+      const res = await httpGet(url, { Referer: 'https://www.timeout.com/newyork/' });
       if (!res.ok) {
         console.warn(`  TimeOut ${url} → HTTP ${res.status}`);
         continue;
@@ -204,3 +205,4 @@ export async function scrapeTimeOut() {
 
   return allEvents;
 }
+

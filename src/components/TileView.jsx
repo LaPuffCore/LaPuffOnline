@@ -4,13 +4,13 @@ import EmojiPicker from './EmojiPicker';
 import EventTile, { TrendIcon } from './EventTile';
 import EventDetailPopup from './EventDetailPopup';
 import { isFavorite, getFavoriteCount, getFavTrendsForEvents } from '../lib/favorites';
-import { SAMPLE_MODE } from '../lib/sampleConfig';
 import { useSiteTheme } from '../lib/theme';
 
 // ============================================================
-// SOURCE FILTER DEFAULT — 'all' while SAMPLE_MODE=true
+// SOURCE FILTER DEFAULT — always 'user' so site loads showing
+// user-submitted events; visitors switch to Auto or All manually.
 // ============================================================
-const DEFAULT_SOURCE = SAMPLE_MODE ? 'all' : 'user';
+const DEFAULT_SOURCE = 'user';
 
 const TIMESPAN_OPTIONS = [
   { label: '1d', days: 1 },
