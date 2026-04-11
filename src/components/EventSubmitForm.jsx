@@ -5,10 +5,13 @@ import { localToUTC, TIMEZONES, getUserTZOffset } from '../lib/timezones';
 import EmojiPicker from './EmojiPicker';
 import ColorPicker from './ColorPicker';
 import AddressSearch from './AddressSearch';
+import { useSiteTheme } from '../lib/theme';
 
 const PRICE_OPTIONS = ['free', '$', '$$', '$$$'];
 
 export default function EventSubmitForm({ onClose }) {
+  const { resolvedTheme } = useSiteTheme();
+  const accentColor = resolvedTheme?.accentColor || '#7C3AED';
   const userTz = TIMEZONES.find(t => t.offset === getUserTZOffset()) || TIMEZONES[0];
 
   const [form, setForm] = useState({
@@ -272,7 +275,8 @@ export default function EventSubmitForm({ onClose }) {
             )}
 
             <button type="submit" disabled={submitting}
-              className="mt-5 w-full bg-[#7C3AED] text-white font-black text-lg py-4 rounded-2xl hover:bg-[#6D28D9] transition-colors disabled:opacity-50 shadow-[4px_4px_0px_#333]">
+              className="mt-5 w-full text-white font-black text-lg py-4 rounded-2xl transition-colors disabled:opacity-50 shadow-[4px_4px_0px_#333]"
+              style={{ backgroundColor: accentColor }}>
               {submitting ? '✨ Submitting...' : '🚀 Submit Event'}
             </button>
           </form>

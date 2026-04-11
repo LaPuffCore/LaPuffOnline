@@ -43,11 +43,13 @@ export default function ParticipantDot({ onStatusChange }) {
     };
   }, []);
 
+  const [btnHovered, setBtnHovered] = useState(false);
   const popupOpen = manualOpen || hoverOpen;
   const isParticipant = status === 'participant';
   const statusLabel = isParticipant ? 'participant' : (isOffline ? 'offline' : 'orbiter');
   const dotColor = loading ? '#eab308' : isParticipant ? '#22c55e' : '#ef4444';
   const labelColor = loading ? '#ca8a04' : isParticipant ? '#16a34a' : '#dc2626';
+  const statusAccent = isParticipant ? '#22c55e' : '#ef4444'; // green or red
 
   function resetPromptState() {
     setStage('prompt');
@@ -186,14 +188,20 @@ export default function ParticipantDot({ onStatusChange }) {
           }
         }}
         onTouchStart={() => openPrompt()}
-        onMouseEnter={() => setHoverOpen(true)}
-        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border-2 border-black bg-white hover:bg-gray-50 transition-colors shadow-[2px_2px_0px_black]"
+        onMouseEnter={() => { setHoverOpen(true); setBtnHovered(true); }}
+        onMouseLeave={() => setBtnHovered(false)}
+        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border-2 transition-colors shadow-[2px_2px_0px_black]"
+        style={{
+          backgroundColor: btnHovered ? statusAccent : '#fff',
+          borderColor: btnHovered ? statusAccent : '#000',
+          color: btnHovered ? '#fff' : undefined,
+        }}
       >
         <span
           className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${loading ? 'animate-pulse' : ''}`}
-          style={{ background: dotColor, boxShadow: `0 0 6px ${dotColor}` }}
+          style={{ background: btnHovered ? '#fff' : dotColor, boxShadow: `0 0 6px ${btnHovered ? '#fff' : dotColor}` }}
         />
-        <span className="text-xs font-black uppercase tracking-tighter" style={{ color: labelColor }}>
+        <span className="text-xs font-black uppercase tracking-tighter" style={{ color: btnHovered ? '#fff' : labelColor }}>
           {loading && stage === 'validating' ? 'syncing' : statusLabel}
         </span>
       </button>

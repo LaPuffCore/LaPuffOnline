@@ -34,10 +34,12 @@ export default function EventTile({ event, onClick, onTagClick }) {
   const [imgError, setImgError] = useState(false);
   const [favCount, setFavCount] = useState(0);
   const [trend, setTrend] = useState('neutral');
+  const [hovered, setHovered] = useState(false);
   
   const tags = generateAutoTags(event);
   const tzOffset = getUserTZOffset();
-  const borderColor = getTileAccentColor(event.hex_color, resolvedTheme);
+  const baseBorderColor = getTileAccentColor(event.hex_color, resolvedTheme);
+  const borderColor = hovered ? (resolvedTheme?.accentColor || '#7C3AED') : baseBorderColor;
 
   // Normalization: 7-day expiry logic matches Popup exactly
   const isExpired = event.event_date && (Date.now() - new Date(event.event_date + 'T00:00:00').getTime()) > 7 * 86400000;
@@ -104,6 +106,8 @@ export default function EventTile({ event, onClick, onTagClick }) {
   return (
     <div
       onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       className="group bg-white rounded-[2rem] cursor-pointer hover:scale-[1.02] hover:-translate-y-1 transition-all duration-200 overflow-hidden isolate"
       style={{ border: `3px solid ${borderColor}`, boxShadow: `6px 6px 0px black` }}
     >

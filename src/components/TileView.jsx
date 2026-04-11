@@ -5,6 +5,7 @@ import EventTile, { TrendIcon } from './EventTile';
 import EventDetailPopup from './EventDetailPopup';
 import { isFavorite, getFavoriteCount, getFavTrendsForEvents } from '../lib/favorites';
 import { SAMPLE_MODE } from '../lib/sampleConfig';
+import { useSiteTheme } from '../lib/theme';
 
 // ============================================================
 // SOURCE FILTER DEFAULT — 'all' while SAMPLE_MODE=true
@@ -152,6 +153,8 @@ function expandSearchQuery(query) {
 }
 
 export default function TileView({ events, eventsLoading = false }) {
+  const { resolvedTheme } = useSiteTheme();
+  const accentColor = resolvedTheme?.accentColor || '#7C3AED';
   const [search, setSearch] = useState('');
   const [timespanIdx, setTimespanIdx] = useState(4);
   const [showArchive, setShowArchive] = useState(false);
@@ -772,9 +775,21 @@ export default function TileView({ events, eventsLoading = false }) {
         <div className="text-center pb-8 mt-4">
           <button
             onClick={() => setPage(p => p + 1)}
-            className="bg-[#7C3AED] text-white font-black px-8 py-3 rounded-2xl text-sm hover:bg-[#6D28D9] transition-colors shadow-[4px_4px_0px_#333]"
+            className="text-white font-black px-8 py-3 rounded-2xl text-sm transition-colors shadow-[4px_4px_0px_#333] hover:invert"
+            style={{ backgroundColor: accentColor }}
           >
             Show More
+          </button>
+        </div>
+      )}
+
+      {!hasMore && page > 1 && (
+        <div className="text-center pb-8 mt-4">
+          <button
+            onClick={() => setPage(1)}
+            className="bg-white text-black font-black px-8 py-3 rounded-2xl text-sm transition-colors shadow-[4px_4px_0px_#333] hover:invert border-3 border-black"
+          >
+            Show Less
           </button>
         </div>
       )}

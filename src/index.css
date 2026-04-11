@@ -117,6 +117,11 @@
 .lp-page-bg { background-color: var(--lp-page-bg) !important; }
 .lp-surface-bg { background-color: var(--lp-surface-bg) !important; }
 .lp-accent-text { color: var(--lp-accent) !important; }
+.lp-accent-bg { background-color: var(--lp-accent) !important; color: #fff !important; }
+.lp-accent-border { border-color: var(--lp-accent) !important; }
+.lp-accent-color-text { color: var(--lp-accent) !important; }
+.lp-accent-hover:hover { background-color: var(--lp-accent) !important; color: #fff !important; }
+.lp-accent-shadow { box-shadow: 3px 3px 0 var(--lp-accent) !important; }
 .lp-muted-icon { color: var(--lp-micro-icon) !important; }
 .lp-button-base {
   background-color: var(--lp-button-fill);

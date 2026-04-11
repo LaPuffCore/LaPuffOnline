@@ -8,8 +8,11 @@ import AuthModal from '../components/AuthModal';
 import ParticipantDot from '../components/ParticipantDot';
 import Leaderboard from '../components/Leaderboard'; 
 import { getValidSession, signOut } from '../lib/supabaseAuth';
+import { useSiteTheme } from '../lib/theme';
 
 export default function Home({ events = [], eventsLoading = false }) {
+  const { resolvedTheme } = useSiteTheme();
+  const accentColor = resolvedTheme?.accentColor || '#7C3AED';
   const [view, setView] = useState('tiles');
   const [tileViewKey, setTileViewKey] = useState(0);
   const [showForm, setShowForm] = useState(false);
@@ -18,6 +21,7 @@ export default function Home({ events = [], eventsLoading = false }) {
   const [user, setUser] = useState(null);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showHeader, setShowHeader] = useState(true);
+  const [logoHovered, setLogoHovered] = useState(false);
   const lastScrollY = useRef(0);
   const downScrollAccum = useRef(0);
   
@@ -133,10 +137,20 @@ export default function Home({ events = [], eventsLoading = false }) {
             {/* Logo - Scaled down for mobile */}
             <button
               onClick={handleLogoHomeReset}
+              onMouseEnter={() => setLogoHovered(true)}
+              onMouseLeave={() => setLogoHovered(false)}
               className="flex items-center gap-1.5 md:gap-2 scale-90 md:scale-100 origin-left text-left"
               aria-label="Go to Home tile view and reset filters"
             >
-              <div className="w-9 h-9 md:w-11 md:h-11 bg-black rounded-xl md:rounded-2xl flex items-center justify-center text-xl md:text-2xl shadow-[2px_2px_0px_#7C3AED] md:shadow-[3px_3px_0px_#7C3AED]">
+              <div
+                className="w-9 h-9 md:w-11 md:h-11 rounded-xl md:rounded-2xl flex items-center justify-center text-xl md:text-2xl transition-all duration-150"
+                style={{
+                  backgroundColor: logoHovered ? accentColor : '#000',
+                  boxShadow: logoHovered
+                    ? '2px 2px 0px #000, 3px 3px 0px #000'
+                    : `2px 2px 0px ${accentColor}`,
+                }}
+              >
                 💨
               </div>
               <div className="hidden xs:block">
@@ -149,15 +163,24 @@ export default function Home({ events = [], eventsLoading = false }) {
             {/* View Toggles - Scaled for mobile */}
             <div className="bg-gray-100 border-2 md:border-3 border-black rounded-xl md:rounded-2xl p-0.5 md:p-1 flex shadow-[2px_2px_0px_black] md:shadow-[3px_3px_0px_black] scale-90 md:scale-100">
               <button onClick={() => { setView('tiles'); setShowLeaderboard(false); setShowHeader(true); }}
-                className={`px-2.5 py-1.5 md:px-4 md:py-2 rounded-lg md:rounded-xl text-xs md:text-sm font-black transition-all ${view === 'tiles' && !showLeaderboard ? 'bg-[#7C3AED] text-white shadow-[1px_1px_0px_#333]' : 'hover:bg-gray-200'}`}>
+                className="px-2.5 py-1.5 md:px-4 md:py-2 rounded-lg md:rounded-xl text-xs md:text-sm font-black transition-all"
+                style={view === 'tiles' && !showLeaderboard ? { backgroundColor: accentColor, color: '#fff', boxShadow: '1px 1px 0px #333' } : {}}
+                onMouseEnter={e => { if (!(view === 'tiles' && !showLeaderboard)) e.currentTarget.style.backgroundColor = accentColor + '30'; }}
+                onMouseLeave={e => { if (!(view === 'tiles' && !showLeaderboard)) e.currentTarget.style.backgroundColor = ''; }}>
                 🎴 Tiles
               </button>
               <button onClick={() => { setView('map'); setShowLeaderboard(false); }}
-                className={`px-2.5 py-1.5 md:px-4 md:py-2 rounded-lg md:rounded-xl text-xs md:text-sm font-black transition-all ${view === 'map' && !showLeaderboard ? 'bg-[#7C3AED] text-white shadow-[1px_1px_0px_#333]' : 'hover:bg-gray-200'}`}>
+                className="px-2.5 py-1.5 md:px-4 md:py-2 rounded-lg md:rounded-xl text-xs md:text-sm font-black transition-all"
+                style={view === 'map' && !showLeaderboard ? { backgroundColor: accentColor, color: '#fff', boxShadow: '1px 1px 0px #333' } : {}}
+                onMouseEnter={e => { if (!(view === 'map' && !showLeaderboard)) e.currentTarget.style.backgroundColor = accentColor + '30'; }}
+                onMouseLeave={e => { if (!(view === 'map' && !showLeaderboard)) e.currentTarget.style.backgroundColor = ''; }}>
                 🗺️ Map
               </button>
-              <button onClick={() => setShowLeaderboard(v => !v)} 
-                className={`px-2.5 py-1.5 md:px-4 md:py-2 rounded-lg md:rounded-xl text-xs md:text-sm font-black transition-all flex items-center gap-1 ${showLeaderboard ? 'bg-violet-600 text-white shadow-[1px_1px_0px_#333]' : 'hover:bg-gray-200'}`}>
+              <button onClick={() => setShowLeaderboard(v => !v)}
+                className="px-2.5 py-1.5 md:px-4 md:py-2 rounded-lg md:rounded-xl text-xs md:text-sm font-black transition-all flex items-center gap-1"
+                style={showLeaderboard ? { backgroundColor: accentColor, color: '#fff', boxShadow: '1px 1px 0px #333' } : {}}
+                onMouseEnter={e => { if (!showLeaderboard) e.currentTarget.style.backgroundColor = accentColor + '30'; }}
+                onMouseLeave={e => { if (!showLeaderboard) e.currentTarget.style.backgroundColor = ''; }}>
                 🏆 Top
               </button>
             </div>
@@ -165,7 +188,8 @@ export default function Home({ events = [], eventsLoading = false }) {
             {/* Desktop Actions / Mobile Hamburger */}
             <div className="flex items-center gap-2">
               <button onClick={() => setShowForm(true)}
-                className="hidden md:block bg-[#7C3AED] text-white font-black px-5 py-2.5 rounded-full text-sm hover:bg-[#6D28D9] transition-all shadow-[3px_3px_0px_#333] hover:scale-105 whitespace-nowrap">
+                className="hidden md:block text-white font-black px-5 py-2.5 rounded-full text-sm transition-all shadow-[3px_3px_0px_#333] hover:scale-105 whitespace-nowrap"
+                style={{ backgroundColor: accentColor }}>
                 + Submit Event
               </button>
 
@@ -173,7 +197,7 @@ export default function Home({ events = [], eventsLoading = false }) {
                 {user ? (
                   <div className="relative">
                     <button onClick={() => setShowUserMenu(v => !v)}
-                      className="w-[136px] bg-white border-3 border-[#7C3AED] rounded-full px-4 py-2 font-black text-sm text-[#7C3AED] hover:bg-violet-50 transition-colors shadow-[3px_3px_0px_#333] truncate text-center">
+                      className="w-[136px] bg-white rounded-full px-4 py-2 font-black text-sm hover:bg-violet-50 transition-colors shadow-[3px_3px_0px_#333] truncate text-center border-3 lp-accent-border lp-accent-color-text">
                       {displayName}
                     </button>
                     {showUserMenu && (
@@ -190,7 +214,9 @@ export default function Home({ events = [], eventsLoading = false }) {
                   </div>
                 ) : (
                   <button onClick={() => setShowAuth(true)}
-                    className="w-[136px] bg-white border-3 border-black rounded-full px-4 py-2 font-black text-sm hover:bg-violet-50 transition-all shadow-[3px_3px_0px_black] whitespace-nowrap text-center">
+                    className="w-[136px] bg-white border-3 border-black rounded-full px-4 py-2 font-black text-sm transition-all shadow-[3px_3px_0px_black] whitespace-nowrap text-center"
+                    onMouseEnter={e => { e.currentTarget.style.backgroundColor = accentColor; e.currentTarget.style.color = '#fff'; e.currentTarget.style.borderColor = accentColor; }}
+                    onMouseLeave={e => { e.currentTarget.style.backgroundColor = ''; e.currentTarget.style.color = ''; e.currentTarget.style.borderColor = ''; }}>
                     Sign In / Up
                   </button>
                 )}
@@ -203,17 +229,20 @@ export default function Home({ events = [], eventsLoading = false }) {
           <div className="flex md:hidden items-center justify-center gap-3 mt-2 pb-1">
              {user ? (
                 <button onClick={() => setShowUserMenu(v => !v)}
-                className="w-[112px] bg-white border-2 border-[#7C3AED] rounded-full px-3 py-1.5 font-black text-[11px] text-[#7C3AED] shadow-[2px_2px_0px_#333] truncate text-center">
+                className="w-[112px] bg-white rounded-full px-3 py-1.5 font-black text-[11px] shadow-[2px_2px_0px_#333] truncate text-center border-2 lp-accent-border lp-accent-color-text">
                 {displayName}
                 </button>
              ) : (
                 <button onClick={() => setShowAuth(true)}
-                className="w-[112px] bg-white border-2 border-black rounded-full px-3 py-1.5 font-black text-[11px] shadow-[2px_2px_0px_black] text-center">
+                className="w-[112px] bg-white border-2 border-black rounded-full px-3 py-1.5 font-black text-[11px] shadow-[2px_2px_0px_black] text-center transition-all"
+                onMouseEnter={e => { e.currentTarget.style.backgroundColor = accentColor; e.currentTarget.style.color = '#fff'; e.currentTarget.style.borderColor = accentColor; }}
+                onMouseLeave={e => { e.currentTarget.style.backgroundColor = ''; e.currentTarget.style.color = ''; e.currentTarget.style.borderColor = ''; }}>
                   Sign In / Up
                 </button>
              )}
              <button onClick={() => setShowForm(true)}
-                className="bg-[#7C3AED] text-white font-black px-3 py-1.5 rounded-full text-[11px] shadow-[2px_2px_0px_#333]">
+                className="text-white font-black px-3 py-1.5 rounded-full text-[11px] shadow-[2px_2px_0px_#333]"
+                style={{ backgroundColor: accentColor }}>
                 + Submit Event
              </button>
           </div>
