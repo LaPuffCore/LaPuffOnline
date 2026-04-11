@@ -18,7 +18,7 @@ function contrastColor(hex) {
 }
 
 // ── ThemeRow ──────────────────────────────────────────────────────────────────
-function ThemeRow({ field, value, onChange, onReset, accentColor, buttonFillColor, subtextColor }) {
+function ThemeRow({ field, value, onChange, onReset, accentColor, buttonFillColor, buttonOutlineColor, buttonShadowColor, subtextColor, buttonTextColor }) {
   const [containerHovered, setContainerHovered] = useState(false);
   const [resetHovered, setResetHovered] = useState(false);
 
@@ -31,43 +31,43 @@ function ThemeRow({ field, value, onChange, onReset, accentColor, buttonFillColo
     );
   }
 
-  // Container hover: bg = selection accent, outline stays black/accent (not hidden)
-  const rowHoverBg = accentColor || '#7C3AED';
-  // Text on hover: if custom buttonFill set → opposite of fill; else → contrast vs accent
-  const rowHoverText = buttonFillColor
-    ? (hexLuminance(buttonFillColor) > 0.4 ? '#000000' : '#ffffff')
-    : contrastColor(rowHoverBg);
+  // Base styling — live-tests button fill/outline/shadow
+  const baseBg = buttonFillColor || '#ffffff';
+  const baseOutline = buttonOutlineColor || '#000000';
+  const baseShadow = buttonShadowColor || '#000000';
 
-  // Reset button own hover: always black bg; icon = white (readable on black)
-  // Edge case: if fill is also black-ish, use accent for icon
-  const resetBtnHoverBg = '#000000';
-  const resetBtnHoverIcon = hexLuminance(buttonFillColor || '#ffffff') <= 0.15
-    ? (accentColor || '#a3e635')
-    : '#ffffff';
+  // Base text: buttonTextColor → contrast vs fill → fallback black
+  const baseTextColor = buttonTextColor || contrastColor(baseBg);
+  const noteDefaultColor = subtextColor || (hexLuminance(baseBg) > 0.3 ? '#5b21b6' : '#c4b5fd');
+
+  // Hover: bg = accentColor, text = pure contrast so it's always readable
+  const rowHoverBg = accentColor || '#7C3AED';
+  const rowHoverText = contrastColor(rowHoverBg);
 
   const containerStyle = {
-    backgroundColor: containerHovered ? rowHoverBg : '#ffffff',
-    borderColor: '#000000',
+    backgroundColor: containerHovered ? rowHoverBg : baseBg,
+    borderColor: baseOutline,
     borderWidth: '3px',
     borderStyle: 'solid',
+    boxShadow: `4px 4px 0px ${baseShadow}`,
     transition: 'background-color 0.15s',
   };
-  const noteDefaultColor = subtextColor || accentColor || '#7C3AED';
-  const labelStyle = { color: containerHovered ? rowHoverText : undefined };
+  const labelStyle = { color: containerHovered ? rowHoverText : baseTextColor };
   const noteStyle = { color: containerHovered ? `${rowHoverText}cc` : noteDefaultColor };
 
   const resetStyle = {
-    backgroundColor: resetHovered ? resetBtnHoverBg : containerHovered ? rowHoverBg : '#ffffff',
-    borderColor: '#000000',
+    backgroundColor: resetHovered ? '#000000' : containerHovered ? rowHoverBg : baseBg,
+    borderColor: baseOutline,
     borderWidth: '3px',
     borderStyle: 'solid',
-    color: resetHovered ? resetBtnHoverIcon : containerHovered ? rowHoverText : undefined,
+    boxShadow: `3px 3px 0px ${baseShadow}`,
+    color: resetHovered ? '#ffffff' : containerHovered ? rowHoverText : baseTextColor,
     transition: 'background-color 0.12s, color 0.12s',
   };
 
   return (
     <div
-      className="rounded-2xl p-3 md:p-4 shadow-[4px_4px_0px_black]"
+      className="rounded-2xl p-3 md:p-4"
       style={containerStyle}
       onMouseEnter={() => setContainerHovered(true)}
       onMouseLeave={() => { setContainerHovered(false); setResetHovered(false); }}
@@ -89,7 +89,7 @@ function ThemeRow({ field, value, onChange, onReset, accentColor, buttonFillColo
           <button
             type="button"
             onClick={onReset}
-            className="w-11 h-11 rounded-2xl shadow-[3px_3px_0px_black] flex items-center justify-center text-lg font-black"
+            className="w-11 h-11 rounded-2xl flex items-center justify-center text-lg font-black"
             style={resetStyle}
             onMouseEnter={(e) => { e.stopPropagation(); setResetHovered(true); }}
             onMouseLeave={(e) => { e.stopPropagation(); setResetHovered(false); }}
@@ -117,37 +117,23 @@ export default function ThemeCustomizerModal({ onClose }) {
 
   const accentColor = draftOverrides.accentColor ?? resolvedTheme?.accentColor ?? '#7C3AED';
   const buttonFillColor = draftOverrides.buttonFillColor ?? resolvedTheme?.buttonFillColor ?? null;
+  const buttonOutlineColor = draftOverrides.buttonOutlineColor ?? resolvedTheme?.buttonOutlineColor ?? null;
+  const buttonShadowColor = draftOverrides.buttonShadowColor ?? resolvedTheme?.buttonShadowColor ?? null;
+  const buttonTextColor = draftOverrides.buttonTextColor ?? resolvedTheme?.buttonTextColor ?? null;
   const subtextColor = draftOverrides.subtextColor ?? resolvedTheme?.subtextColor ?? null;
-  // Detect whether the user has actually set a custom accent (not just inherited default)
-  const hasCustomAccent = !!(draftOverrides.accentColor ?? resolvedTheme?.accentColor);
-  const hasCustomButtonFill = !!(draftOverrides.buttonFillColor ?? resolvedTheme?.buttonFillColor);
+  const surfaceBgColor = draftOverrides.surfaceBackgroundColor ?? resolvedTheme?.surfaceBackgroundColor ?? '#FAFAF8';
 
-  // Footer button hover logic:
-  //  - Default: black fill, white text
-  //  - Custom button fill set: text changes to opposite of buttonFill (bg stays black)
-  //  - Apply button: if selection color set, its idle bg = accentColor; hover text = opposite of accentColor
+  // Footer hover: ALWAYS black fill + white text + white border — no exceptions
   const [footerHover, setFooterHover] = useState(null);
-
-  const footerDefaultHoverBg = '#000000';
-  const footerDefaultHoverText = hasCustomButtonFill
-    ? contrastColor(buttonFillColor)
-    : '#ffffff';
-
   const footerBtnStyle = (id) => {
-    if (footerHover !== id) {
-      // Idle style for Apply: use accent as bg if selection color is set
-      if (id === 'apply') {
-        return { backgroundColor: accentColor, color: contrastColor(accentColor), borderColor: accentColor };
-      }
-      return {};
+    const isApplyIdle = id === 'apply' && footerHover !== id;
+    if (isApplyIdle) {
+      return { backgroundColor: accentColor, color: contrastColor(accentColor), borderColor: accentColor };
     }
-    // Hovered
-    if (id === 'apply') {
-      const hoverBg = footerDefaultHoverBg;
-      const hoverText = hasCustomButtonFill ? contrastColor(buttonFillColor) : contrastColor(accentColor);
-      return { backgroundColor: hoverBg, color: hoverText, borderColor: hoverBg };
+    if (footerHover === id) {
+      return { backgroundColor: '#000000', color: '#ffffff', borderColor: '#ffffff' };
     }
-    return { backgroundColor: footerDefaultHoverBg, color: footerDefaultHoverText, borderColor: footerDefaultHoverBg };
+    return {};
   };
 
   const [isDesktopCursorCapable, setIsDesktopCursorCapable] = useState(false);
@@ -266,8 +252,8 @@ export default function ThemeCustomizerModal({ onClose }) {
     >
       <div
         ref={ref}
-        className="relative w-full max-w-5xl rounded-[2rem] border-4 border-black bg-[#FAFAF8] shadow-[12px_12px_0px_black] animate-in fade-in zoom-in duration-200 flex flex-col"
-        style={{ maxHeight: 'calc(100dvh - 2rem)' }}
+        className="relative w-full max-w-5xl rounded-[2rem] border-4 border-black shadow-[12px_12px_0px_black] animate-in fade-in zoom-in duration-200 flex flex-col"
+        style={{ maxHeight: 'calc(100dvh - 2rem)', backgroundColor: surfaceBgColor }}
       >
         {/* ── Fixed header ── */}
         <div className="flex-shrink-0 px-5 md:px-7 pt-5 md:pt-7 pb-4">
@@ -500,14 +486,17 @@ export default function ThemeCustomizerModal({ onClose }) {
                 onReset={() => resetDraftKey(field.key)}
                 accentColor={accentColor}
                 buttonFillColor={buttonFillColor}
+                buttonOutlineColor={buttonOutlineColor}
+                buttonShadowColor={buttonShadowColor}
                 subtextColor={subtextColor}
+                buttonTextColor={buttonTextColor}
               />
             ))}
           </div>
         </div>
 
         {/* ── Fixed footer ── */}
-        <div className="flex-shrink-0 px-5 md:px-7 py-3 bg-[#FAFAF8] border-t-2 border-black rounded-b-[2rem] flex items-center justify-end gap-2">
+        <div className="flex-shrink-0 px-5 md:px-7 py-3 border-t-2 border-black rounded-b-[2rem] flex items-center justify-end gap-2" style={{ backgroundColor: surfaceBgColor }}>
           <button
             type="button"
             onClick={handleResetAll}

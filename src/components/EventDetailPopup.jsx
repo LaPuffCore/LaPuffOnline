@@ -307,9 +307,9 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4 mb-6">
               <button 
                 onClick={handleDateClick}
-                className="bg-gray-50 border-[2.5px] border-black rounded-xl p-3 sm:p-4 flex items-center gap-3 shadow-[4px_4px_0px_black] transition-all hover:scale-[1.02] text-left group"
+                className="bg-gray-50 text-black border-[2.5px] border-black rounded-xl p-3 sm:p-4 flex items-center gap-3 shadow-[4px_4px_0px_black] transition-all hover:scale-[1.02] text-left group"
                 onMouseEnter={(e) => e.currentTarget.style.borderColor = borderColor}
-                onMouseLeave={(e) => e.currentTarget.style.borderColor = 'black'}
+                onMouseLeave={(e) => e.currentTarget.style.borderColor = ''}
               >
                 <span className="text-2xl sm:text-3xl">📅</span>
                 <div>

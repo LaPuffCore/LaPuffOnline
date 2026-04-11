@@ -16,6 +16,7 @@ export const THEME_FIELDS = [
   { key: 'buttonOutlineColor', label: 'Button Outline' },
   { key: 'buttonFillColor', label: 'Button Fill' },
   { key: 'buttonTextColor', label: 'Button Text', note: TEXT_CLARITY_NOTE },
+  { key: 'buttonShadowColor', label: 'Button Shadow' },
 
   { key: '_sec_surfaces', type: 'sectionLabel', label: 'Surfaces & Backgrounds' },
   { key: 'pageBackgroundColor', label: 'Page Background' },
@@ -142,6 +143,7 @@ export const DEFAULT_THEME = {
   buttonOutlineColor: '#000000',
   buttonFillColor: '#FFFFFF',
   buttonTextColor: '#000000',
+  buttonShadowColor: '#000000',
   pageBackgroundColor: '#FAFAF8',
   surfaceBackgroundColor: '#FFFFFF',
   topBarFillColor: '#FFFFFF',
@@ -221,6 +223,7 @@ function applyThemeToDocument(theme) {
   root.style.setProperty('--lp-button-outline', theme.buttonOutlineColor);
   root.style.setProperty('--lp-button-fill', theme.buttonFillColor);
   root.style.setProperty('--lp-button-text', theme.buttonTextColor || '#000000');
+  root.style.setProperty('--lp-button-shadow', theme.buttonShadowColor || '#000000');
   root.style.setProperty('--lp-page-bg', theme.pageBackgroundColor);
   root.style.setProperty('--lp-surface-bg', theme.surfaceBackgroundColor);
   root.style.setProperty('--lp-topbar-fill', theme.topBarFillColor);

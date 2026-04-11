@@ -45,6 +45,7 @@
     --lp-subtext: #6B7280;
     --lp-button-outline: #000000;
     --lp-button-fill: #FFFFFF;
+    --lp-button-shadow: #000000;
     --lp-page-bg: #FAFAF8;
     --lp-surface-bg: #FFFFFF;
     --lp-topbar-fill: #FFFFFF;
@@ -158,6 +159,7 @@
   background-color: var(--lp-button-fill);
   border-color: var(--lp-button-outline) !important;
   color: var(--lp-button-text);
+  box-shadow: 3px 3px 0px var(--lp-button-shadow) !important;
 }
 .lp-button-base:hover {
   background-color: var(--lp-accent-soft);
@@ -203,8 +205,22 @@
 .lp-theme-scope .bg-violet-200 { background-color: color-mix(in srgb, var(--lp-accent) 24%, var(--lp-button-fill) 76%) !important; }
 .lp-theme-scope .text-violet-600 { color: var(--lp-accent) !important; }
 .lp-theme-scope .hover\:text-violet-600:hover { color: var(--lp-accent) !important; }
+/* Buttons/links using bg-gray-50 (e.g. date tile, link rows) also get button fill */
+.lp-theme-scope button.bg-gray-50,
+.lp-theme-scope a.bg-gray-50 { background-color: var(--lp-button-fill) !important; }
 /* Tile shadow — only event tile cards use the lp-tile-card class */
 .lp-tile-card { box-shadow: 6px 6px 0px var(--lp-tile-shadow) !important; }
+/* Button-specific shadows use --lp-button-shadow; non-button containers use tile-shadow */
+.lp-theme-scope button[class*='shadow-[2px_2px_0px_black]'],
+.lp-theme-scope a[class*='shadow-[2px_2px_0px_black]'] { box-shadow: 2px 2px 0px var(--lp-button-shadow) !important; }
+.lp-theme-scope button[class*='shadow-[3px_3px_0px_black]'],
+.lp-theme-scope a[class*='shadow-[3px_3px_0px_black]'] { box-shadow: 3px 3px 0px var(--lp-button-shadow) !important; }
+.lp-theme-scope button[class*='shadow-[4px_4px_0px_black]'],
+.lp-theme-scope a[class*='shadow-[4px_4px_0px_black]'] { box-shadow: 4px 4px 0px var(--lp-button-shadow) !important; }
+.lp-theme-scope button[class*='shadow-[5px_5px_0px_black]'],
+.lp-theme-scope a[class*='shadow-[5px_5px_0px_black]'] { box-shadow: 5px 5px 0px var(--lp-button-shadow) !important; }
+.lp-theme-scope button[class*='shadow-[6px_6px_0px_black]'],
+.lp-theme-scope a[class*='shadow-[6px_6px_0px_black]'] { box-shadow: 6px 6px 0px var(--lp-button-shadow) !important; }
 /* UI card shadows use tile-shadow for consistency */
 .lp-theme-scope [class*='shadow-[1px_1px_0px_#333]'] { box-shadow: 1px 1px 0px var(--lp-tile-shadow) !important; }
 .lp-theme-scope [class*='shadow-[2px_2px_0px_black]'] { box-shadow: 2px 2px 0px var(--lp-tile-shadow) !important; }
