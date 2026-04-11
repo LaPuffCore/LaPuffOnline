@@ -61,8 +61,7 @@ function MiniMap({ lat, lng, address, city, borderColor }) {
         title="Location Map"
       />
       <div className="absolute bottom-0 left-0 right-0 bg-white border-t-2 border-black p-1.5 flex items-center gap-2 z-20 transition-colors duration-300">
-        <p className="text-[9px] font-black uppercase tracking-tighter flex-1 min-w-0 truncate">{address || city || 'NYC GRID'}</p>
-        <span className="flex-shrink-0 bg-black text-white px-1.5 py-0.5 rounded text-[7px] font-black uppercase tracking-widest whitespace-nowrap">MAP ↗</span>
+        <p className="text-[9px] font-black uppercase tracking-tighter w-full truncate">{address || city || 'NYC GRID'}</p>
       </div>
     </a>
   );

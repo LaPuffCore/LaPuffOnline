@@ -397,7 +397,15 @@ export default function TileView({ events, eventsLoading = false }) {
         {/* ROW 1: Search + archive toggle */}
         <div className="flex gap-2">
           <div className="flex-1 relative">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-lg">🔍</span>
+            <span
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-lg transition-all duration-200"
+              style={search.trim() ? {
+                filter: `drop-shadow(0 0 6px ${accentColor}) drop-shadow(0 0 3px ${accentColor})`,
+                cursor: 'pointer',
+              } : { cursor: 'default' }}
+              onClick={() => { if (search.trim()) { setSearch(''); resetPage(); } }}
+              title={search.trim() ? 'Clear search' : undefined}
+            >🔍</span>
             <input
               value={search}
               onChange={e => { setSearch(e.target.value); resetPage(); }}
