@@ -180,7 +180,8 @@ export default function ParticipantDot({ onStatusChange }) {
   return (
     <div className="relative" onMouseLeave={() => { if (!manualOpen) setHoverOpen(false); }}>
       <button
-        onClick={() => {
+        onClick={(e) => {
+          e.stopPropagation();
           if (manualOpen) {
             closePopup();
           } else {
@@ -221,7 +222,7 @@ export default function ParticipantDot({ onStatusChange }) {
         >
           {stage === 'result' && (
             <button
-              onClick={closePopup}
+              onClick={(e) => { e.stopPropagation(); closePopup(); }}
               className="absolute -top-2 -right-2 w-7 h-7 rounded-full border-2 border-black bg-white text-black hover:bg-gray-100 flex items-center justify-center text-xs font-black leading-none z-30 shadow-[2px_2px_0px_black]"
               aria-label="Close"
             >
@@ -235,13 +236,13 @@ export default function ParticipantDot({ onStatusChange }) {
               <div className="my-3 h-px bg-white/30" />
               <div className="grid grid-cols-2 gap-2">
                 <button
-                  onClick={closePopup}
+                  onClick={(e) => { e.stopPropagation(); closePopup(); }}
                   className="rounded-lg border border-white/40 bg-white/10 px-2 py-1.5 text-[11px] font-black uppercase tracking-tight hover:bg-white/20"
                 >
                   No
                 </button>
                 <button
-                  onClick={handleConfirm}
+                  onClick={(e) => { e.stopPropagation(); handleConfirm(); }}
                   className="rounded-lg border border-lime-300/70 bg-lime-500/20 px-2 py-1.5 text-[11px] font-black uppercase tracking-tight hover:bg-lime-500/35"
                 >
                   Yes

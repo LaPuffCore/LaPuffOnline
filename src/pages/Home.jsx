@@ -125,8 +125,6 @@ export default function Home({ events = [], eventsLoading = false }) {
     setShowHeader(true);
     setShowUserMenu(false);
     setTileViewKey((prev) => prev + 1);
-    // Force a full page refresh to clear any stuck UI state (e.g. location popup)
-    window.location.reload();
   }
 
   return (

@@ -187,7 +187,7 @@ export default function ThemeCustomizerModal({ onClose }) {
                 <span className="font-black text-base md:text-lg leading-tight text-left">Cursor Lab (Web Only)</span>
                 <div className="flex items-center gap-2 flex-shrink-0">
                   {cursorExpanded && (
-                    <span className="hidden md:inline text-[10px] md:text-xs font-black px-2 py-1 rounded-full bg-black text-white uppercase tracking-wide">Live Preview</span>
+                    <span className="hidden md:inline lp-no-title text-[10px] md:text-xs font-black px-2 py-1 rounded-full bg-black text-white uppercase tracking-wide" style={{ color: '#fff' }}>Live Preview</span>
                   )}
                   <span className={`text-lg font-black transition-transform duration-200 ${cursorExpanded ? 'rotate-180' : ''}`}>⌄</span>
                 </div>
@@ -264,8 +264,8 @@ export default function ThemeCustomizerModal({ onClose }) {
                         </div>
                       )}
 
-                      {/* Size — hidden for windows (native cursor, size n/a) */}
-                      {cursorType !== 'windows' && (
+                      {/* Size — hidden for standard/default cursor only */}
+                      {cursorType !== 'default' && (
                       <div className="mt-3">
                         <div className="flex items-center justify-between gap-2">
                           <p className="text-[11px] font-black uppercase tracking-wide text-gray-700">Cursor Size</p>
@@ -317,14 +317,19 @@ export default function ThemeCustomizerModal({ onClose }) {
                             <div className="flex flex-col gap-1 flex-1 min-w-[80px]">
                               <div className="flex items-center justify-between">
                                 <p className="text-[9px] font-black uppercase tracking-wide text-gray-700">Width</p>
-                                <span className="text-[9px] font-black">{Number(draftOverrides.cursorOutlineWidth ?? 2)}px</span>
+                                <span className="text-[9px] font-black">
+                                  {Number(draftOverrides.cursorOutlineWidth ?? 1) <= 1 ? 'Small' : Number(draftOverrides.cursorOutlineWidth ?? 1) <= 2 ? 'Medium' : 'Big'}
+                                </span>
                               </div>
                               <input
-                                type="range" min="1" max="8" step="0.5"
-                                value={Number(draftOverrides.cursorOutlineWidth ?? 2)}
+                                type="range" min="1" max="3" step="1"
+                                value={Number(draftOverrides.cursorOutlineWidth ?? 1)}
                                 onChange={(e) => setDraftOverride('cursorOutlineWidth', Number(e.target.value))}
                                 className="w-full"
                               />
+                              <div className="flex justify-between text-[8px] text-gray-500 font-bold -mt-0.5">
+                                <span>S</span><span>M</span><span>B</span>
+                              </div>
                             </div>
                           )}
                         </div>

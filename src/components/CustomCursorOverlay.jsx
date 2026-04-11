@@ -801,9 +801,11 @@ export default function CustomCursorOverlay() {
       ))}
 
       {/* Echo cursor — shape-following outline rendered behind main cursor */}
+      {/* ow scales relative to glyphSize: level 1=thin sliver, 2=medium, 3=big — no fixed px bleed */}
       {cursorOutlineEnabled && !showImage && (() => {
-        const ow = Math.max(1, cursorOutlineWidth);
-        // Build 8-direction drop-shadow at ow pixels, 0 blur — follows transparent glyph shape exactly
+        // Scale factor: 1→4%, 2→9%, 3→16% of glyph size — minimum is always "just bigger than cursor"
+        const scaleFactor = [0, 0.04, 0.09, 0.16][Math.min(3, Math.max(1, Math.round(cursorOutlineWidth)))];
+        const ow = Math.max(1, Math.round(glyphSize * scaleFactor));
         const ds = (x, y) => `drop-shadow(${x}px ${y}px 0px ${cursorOutlineColor})`;
         const echoFilter = [ds(ow,0), ds(-ow,0), ds(0,ow), ds(0,-ow), ds(ow,ow), ds(-ow,-ow), ds(ow,-ow), ds(-ow,ow)].join(' ');
         return (

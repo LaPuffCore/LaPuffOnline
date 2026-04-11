@@ -142,7 +142,7 @@ export const DEFAULT_THEME = {
   cursorEffectColor: null,
   cursorOutlineEnabled: true,
   cursorOutlineColor: '#000000',
-  cursorOutlineWidth: 2,
+  cursorOutlineWidth: 1,
 };
 
 const ThemeContext = createContext(null);

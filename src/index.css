@@ -127,22 +127,15 @@
 .lp-accent-hover:hover { background-color: var(--lp-accent) !important; color: #fff !important; }
 .lp-accent-shadow { box-shadow: 3px 3px 0 var(--lp-accent) !important; }
 
-/* ThemeRow bubble-letter hover — triggers on card hover, always readable */
+/* ThemeRow bubble-letter hover — white fill with black outline, always readable regardless of bg color */
+.theme-row-label {
+  transition: color 0.1s;
+}
 .group:hover .theme-row-label {
   color: #fff !important;
-  text-shadow:
-    -2px -2px 0 #000,
-     2px -2px 0 #000,
-    -2px  2px 0 #000,
-     2px  2px 0 #000,
-    -2px  0   0 #000,
-     2px  0   0 #000,
-     0   -2px 0 #000,
-     0    2px 0 #000,
-    -3px -3px 0 #000,
-     3px -3px 0 #000,
-    -3px  3px 0 #000,
-     3px  3px 0 #000 !important;
+  -webkit-text-stroke: 3px #000;
+  paint-order: stroke fill;
+  text-shadow: none !important;
 }
 .lp-muted-icon { color: var(--lp-micro-icon) !important; }
 .lp-button-base {
