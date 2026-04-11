@@ -11,22 +11,15 @@ import { getValidSession } from '../lib/supabaseAuth';
 import { getTileAccentColor, useSiteTheme } from '../lib/theme';
 
 function MiniMap({ lat, lng, address, city, borderColor }) {
-  // Static image: dramatically faster than iframe — no JS rendering, no zoom pop
-  const staticUrl = (lat && lng)
-    ? `https://www.openstreetmap.org/export/embed.html?bbox=${lng - 0.003},${lat - 0.003},${lng + 0.003},${lat + 0.003}&layer=mapnik&marker=${lat},${lng}`
-    : null;
+  const [loaded, setLoaded] = useState(false);
 
-  // For Google Static Maps (when no coords), we use a static img
-  const staticImgUrl = (lat && lng)
-    ? `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=15&size=400x200&maptype=roadmap&markers=color:red%7C${lat},${lng}&style=feature:all|element:labels|visibility:simplified`
-    : `https://maps.googleapis.com/maps/api/staticmap?center=${encodeURIComponent(address || city || 'New York, NY')}&zoom=14&size=400x200&maptype=roadmap&style=feature:all|element:labels|visibility:simplified`;
+  const mapUrl = (lat && lng)
+    ? `https://www.openstreetmap.org/export/embed.html?bbox=${lng - 0.003},${lat - 0.003},${lng + 0.003},${lat + 0.003}&layer=mapnik&marker=${lat},${lng}`
+    : `https://maps.google.com/maps?q=${encodeURIComponent(address || city || 'New York')}&t=&z=14&ie=UTF8&iwloc=&output=embed`;
 
   const outUrl = (lat && lng)
     ? `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=16/${lat}/${lng}`
     : `https://maps.google.com/maps?q=${encodeURIComponent(address || city || 'New York')}`;
-
-  // Use OSM embed iframe only when we have coords (much faster with bbox), otherwise fallback static placeholder
-  const useIframe = !!(lat && lng);
 
   return (
     <a 
@@ -43,25 +36,30 @@ function MiniMap({ lat, lng, address, city, borderColor }) {
         e.currentTarget.lastChild.style.borderColor = 'black';
       }}
     >
-      {useIframe ? (
-        <iframe 
-          src={staticUrl}
-          width="100%" 
-          height="100%" 
-          frameBorder="0"
-          scrolling="no"
-          loading="lazy"
-          style={{ border: 0, filter: 'grayscale(0.55)', pointerEvents: 'none' }}
-          className="group-hover:filter-none transition-all duration-500"
-          title="Location Map"
-        />
-      ) : (
-        /* No coords: show a styled placeholder with pin emoji — instant, no iframe lag */
-        <div className="w-full h-full flex flex-col items-center justify-center gap-1 bg-[#e8e6e1]">
-          <span className="text-3xl">📍</span>
-          <p className="text-[9px] font-black uppercase tracking-wide text-center px-2 opacity-60 leading-tight">{address || city || 'NYC'}</p>
+      {/* Placeholder visible while map loads — prevents blank white flash */}
+      {!loaded && (
+        <div className="absolute inset-0 flex items-center justify-center bg-[#e8e6e1]">
+          <span className="text-2xl opacity-30 animate-pulse">🗺️</span>
         </div>
       )}
+      <iframe 
+        src={mapUrl}
+        width="100%" 
+        height="100%" 
+        frameBorder="0"
+        scrolling="no"
+        loading="lazy"
+        onLoad={() => setLoaded(true)}
+        style={{
+          border: 0,
+          filter: 'grayscale(0.5)',
+          pointerEvents: 'none',
+          opacity: loaded ? 1 : 0,
+          transition: loaded ? 'opacity 0.4s ease' : 'none',
+        }}
+        className="group-hover:brightness-105 transition-all duration-300"
+        title="Location Map"
+      />
       <div className="absolute bottom-0 left-0 right-0 bg-white border-t-2 border-black p-1.5 flex items-center gap-2 z-20 transition-colors duration-300">
         <p className="text-[9px] font-black uppercase tracking-tighter flex-1 min-w-0 truncate">{address || city || 'NYC GRID'}</p>
         <span className="flex-shrink-0 bg-black text-white px-1.5 py-0.5 rounded text-[7px] font-black uppercase tracking-widest whitespace-nowrap">MAP ↗</span>
@@ -280,23 +278,6 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
               </div>
             )}
 
-            {/* Photo index dots — always shown when image visible, count = total photos */}
-            {showImage && (
-              <div className="absolute bottom-2 left-0 right-0 flex justify-center gap-1.5 pointer-events-none">
-                {photos.map((_, i) => (
-                  <div
-                    key={i}
-                    className="rounded-full border border-white/80 transition-all duration-300"
-                    style={{
-                      width: i === imageIdx ? '14px' : '6px',
-                      height: '6px',
-                      backgroundColor: i === imageIdx ? (resolvedTheme.accentColor || '#7C3AED') : 'rgba(255,255,255,0.55)',
-                      opacity: i === imageIdx ? 1 : 0.7,
-                    }}
-                  />
-                ))}
-              </div>
-            )}
           </div>
 
           <div className="p-4 sm:p-6">
