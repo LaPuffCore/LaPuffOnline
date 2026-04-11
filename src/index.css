@@ -127,15 +127,13 @@
 .lp-accent-hover:hover { background-color: var(--lp-accent) !important; color: #fff !important; }
 .lp-accent-shadow { box-shadow: 3px 3px 0 var(--lp-accent) !important; }
 
-/* ThemeRow bubble-letter hover — white fill with black outline, always readable regardless of bg color */
+/* ThemeRow hover label — fluorescent yellow-green only when section bg is dark, normal otherwise */
 .theme-row-label {
   transition: color 0.1s;
 }
-.group:hover .theme-row-label {
-  color: #fff !important;
-  -webkit-text-stroke: 3px #000;
-  paint-order: stroke fill;
-  text-shadow: none !important;
+/* .lp-dark-section is set in JS when surfaceBackgroundColor luminance < 0.35 */
+.lp-dark-section .group:hover .theme-row-label {
+  color: #ccff00 !important;
 }
 .lp-muted-icon { color: var(--lp-micro-icon) !important; }
 .lp-button-base {
@@ -169,7 +167,6 @@
 .lp-theme-scope .border-black { border-color: var(--lp-button-outline) !important; }
 .lp-theme-scope .text-black { color: var(--lp-micro-icon) !important; }
 .lp-theme-scope h1, .lp-theme-scope h2, .lp-theme-scope h3 { color: var(--lp-title-text) !important; }
-.lp-theme-scope .font-black:not(button):not([type="button"]):not([role="button"]):not(.lp-no-title) { color: var(--lp-title-text) !important; }
 .lp-theme-scope .text-gray-600 { color: var(--lp-subtext) !important; }
 .lp-theme-scope .text-gray-500 { color: var(--lp-subtext) !important; }
 .lp-theme-scope .text-gray-400 { color: var(--lp-calendar-day-text) !important; }

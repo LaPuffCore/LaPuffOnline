@@ -37,11 +37,24 @@ export default function ThemeCustomizerModal({ onClose }) {
   const ref = useRef(null);
   const {
     overrides,
+    resolvedTheme,
     applyThemeOverrides,
     setPreviewThemeOverrides,
     clearPreviewThemeOverrides,
   } = useSiteTheme();
   const [draftOverrides, setDraftOverrides] = useState(() => ({ ...overrides }));
+
+  // Compute if section fill is dark to decide hover label color
+  function hexLuminance(hex) {
+    const h = hex?.replace('#', '') || 'ffffff';
+    const r = parseInt(h.slice(0,2), 16) / 255;
+    const g = parseInt(h.slice(2,4), 16) / 255;
+    const b = parseInt(h.slice(4,6), 16) / 255;
+    const toL = (c) => c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    return 0.2126 * toL(r) + 0.7152 * toL(g) + 0.0722 * toL(b);
+  }
+  const sectionColor = draftOverrides.surfaceBackgroundColor ?? resolvedTheme?.surfaceBackgroundColor ?? '#FFFFFF';
+  const isDarkSection = hexLuminance(sectionColor) < 0.35;
   const [isDesktopCursorCapable, setIsDesktopCursorCapable] = useState(false);
   const [cursorExpanded, setCursorExpanded] = useState(false);
   // All trail groups start collapsed
@@ -153,7 +166,7 @@ export default function ThemeCustomizerModal({ onClose }) {
   const trailGroups = allGroups;
 
   return createPortal(
-    <div className="lp-theme-scope fixed inset-0 z-[200000] flex items-center justify-center bg-white/50 backdrop-blur-sm p-3 md:p-6">
+    <div className={`lp-theme-scope fixed inset-0 z-[200000] flex items-center justify-center bg-white/50 backdrop-blur-sm p-3 md:p-6${isDarkSection ? ' lp-dark-section' : ''}`}>
       <div
         ref={ref}
         className="relative w-full max-w-5xl rounded-[2rem] border-4 border-black bg-[#FAFAF8] shadow-[12px_12px_0px_black] animate-in fade-in zoom-in duration-200 flex flex-col"
