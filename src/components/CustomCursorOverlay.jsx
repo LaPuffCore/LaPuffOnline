@@ -614,6 +614,24 @@ export default function CustomCursorOverlay() {
   const trail = resolvedTheme.cursorTrail || 'none';
   const effectColor = resolveEffectColor(trail, cursorColor, cursorEffectColor);
   const trailEnabled = active && trail !== 'none';
+
+  // Compute hover color: invert cursorColor; if cursorColor is black use effectColor; if both black use lime
+  const hoverCursorColor = useMemo(() => {
+    const hex = (cursorColor || '#ffffff').replace('#', '').padStart(6, '0');
+    const r = parseInt(hex.slice(0, 2), 16);
+    const g = parseInt(hex.slice(2, 4), 16);
+    const b = parseInt(hex.slice(4, 6), 16);
+    const isBlack = r < 20 && g < 20 && b < 20;
+    if (isBlack) {
+      const eh = (effectColor || '#000000').replace('#', '').padStart(6, '0');
+      const er = parseInt(eh.slice(0, 2), 16);
+      const eg = parseInt(eh.slice(2, 4), 16);
+      const eb = parseInt(eh.slice(4, 6), 16);
+      const effectIsBlack = er < 20 && eg < 20 && eb < 20;
+      return effectIsBlack ? '#00ff00' : effectColor;
+    }
+    return `#${(255 - r).toString(16).padStart(2, '0')}${(255 - g).toString(16).padStart(2, '0')}${(255 - b).toString(16).padStart(2, '0')}`;
+  }, [cursorColor, effectColor]);
   const customEnabled = active && (!isDefault || trail !== 'none');
 
   const glyphSize = useMemo(() => Math.max(8, Number(resolvedTheme.cursorSize || 28)), [resolvedTheme.cursorSize]);
@@ -717,7 +735,7 @@ export default function CustomCursorOverlay() {
 
   if (!customEnabled) return null;
 
-  const glyphFilter = hoveringInteractive ? 'invert(1) hue-rotate(180deg)' : 'none';
+  const glyphFilter = 'none';
   const renderNow = Date.now();
 
   return (
@@ -727,7 +745,7 @@ export default function CustomCursorOverlay() {
 
         if (style.heart) {
           return (
-            <div key={`${point.t}-${idx}`} style={{ position: 'fixed', left: point.x, top: point.y, transform: style.transform, opacity: style.opacity, fontSize: Math.max(10, Math.round(glyphSize * 0.46)), color: hoveringInteractive ? '#7fffd4' : effectColor }}>
+            <div key={`${point.t}-${idx}`} style={{ position: 'fixed', left: point.x, top: point.y, transform: style.transform, opacity: style.opacity, fontSize: Math.max(10, Math.round(glyphSize * 0.46)), color: hoveringInteractive ? hoverCursorColor : effectColor }}>
               ❤
             </div>
           );
@@ -810,7 +828,7 @@ export default function CustomCursorOverlay() {
         const echoFilter = [ds(ow,0), ds(-ow,0), ds(0,ow), ds(0,-ow), ds(ow,ow), ds(-ow,-ow), ds(ow,-ow), ds(-ow,ow)].join(' ');
         return (
           <div style={{ position: 'fixed', left: pos.x, top: pos.y, transform: `translate(-50%, -50%) scale(${isDown ? 0.92 : 1})`, width: glyphSize, height: glyphSize, display: 'flex', alignItems: 'center', justifyContent: 'center', filter: echoFilter, pointerEvents: 'none', zIndex: 1 }}>
-            {showWindows && <WindowsGlyph preset={resolvedTheme.cursorPreset || 'default'} size={glyphSize} color={hoveringInteractive ? '#000000' : cursorColor} interactive={hoveringInteractive} />}
+            {showWindows && <WindowsGlyph preset={resolvedTheme.cursorPreset || 'default'} size={glyphSize} color={hoveringInteractive ? hoverCursorColor : cursorColor} interactive={hoveringInteractive} />}
             {showEmoji && <span style={{ fontSize: glyphSize, lineHeight: 1 }}>{resolvedTheme.cursorEmoji || '✨'}</span>}
             {!showWindows && !showEmoji && <span style={{ fontSize: glyphSize, lineHeight: 1, color: cursorColor }}>{'●'}</span>}
           </div>
@@ -909,7 +927,7 @@ export default function CustomCursorOverlay() {
           <WindowsGlyph
             preset={resolvedTheme.cursorPreset || 'default'}
             size={glyphSize}
-            color={hoveringInteractive ? '#000000' : cursorColor}
+            color={hoveringInteractive ? hoverCursorColor : cursorColor}
             interactive={hoveringInteractive}
           />
         )}

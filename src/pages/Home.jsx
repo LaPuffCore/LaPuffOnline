@@ -181,7 +181,7 @@ export default function Home({ events = [], eventsLoading = false }) {
                 style={showLeaderboard ? { backgroundColor: accentColor, color: '#fff', boxShadow: '1px 1px 0px #333' } : {}}
                 onMouseEnter={e => { if (!showLeaderboard) e.currentTarget.style.backgroundColor = accentColor + '30'; }}
                 onMouseLeave={e => { if (!showLeaderboard) e.currentTarget.style.backgroundColor = ''; }}>
-                🏆 Leaderboard
+                🏆 Top
               </button>
             </div>
 
