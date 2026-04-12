@@ -162,7 +162,7 @@
 - 3D = 3D is ON, Real3D is OFF. They are mutually exclusive toggles (one swaps off the other).
 - Real3D = Real3D is ON, 3D is OFF.
 - **Satellite and Heatmap are additive overlays** — they can both be ON simultaneously with any of 2D/3D/Real3D, creating combo modes (e.g., 3D + Heatmap + Satellite).
-- All conditionals must cleanly split 2D logic from 3D/Real3D logic and all additive combos.
+- All conditionals must cleanly split 2D logic from 3D which is split from Real3D logic and all additive combos for each.
 
 ### MapView — 2D Mode Rules
 - **2D is DONE and correct. DO NOT TOUCH 2D logic.** All 2D modes (standard, heatmap, satellite, and their combos) work perfectly and must remain exactly as-is unless the 2d mode is specifically asked to change and this will only be later with map theme color customization not during our map overhaul.
@@ -170,15 +170,10 @@
 ### MapView — 3D Mode Rules (Extruded ZIP Codes)
 - 3D mode extrudes the ZCTA zip polygons as colored blocks.
 - The **"Upper 3D Border"** is the top-edge ring of each extrusion, rendered as a separate red-tinted extrusion layer sitting on top of the zip block at a translated height. It traces the 2D zip boundary lines but elevated to the height of the block beneath it. In heatmap combos, the upper border height follows the heatmap extrusion height of each zip.
-- The upper 3D border structure and logic is currently working and should be maintained. Only the visual fixes below apply.
 - 3D extrusion heights per tier: 30, 200, 700, 1600, 2800.
-- Outline: neon red `#ff2200`, glow layers at varying widths. Current dynamic width formula: `14m + max(0, 13-zoom)*4.5m` (thickens as zoom decreases).
+- Outline: neon red `#ff2200`, glow layers at varying widths.
 
 ### MapView — 3D Known Issues & Desired Fixes
-- **GeoJSON sync**: All geographic vertices/features for ZCTA zip polygons, the upper 3D border, and 3D extrusions MUST be derived from the same cleaned `MODZCTA_2010_WGS1984.geo.json`. If any pre-generated data (e.g., in `nycZipGeoJSON.js` or other files) was built from an older GeoJSON, it must be regenerated from the cleaned version. Everything must be in sync. If needed then make all 3d extrusion and border layers pull directly from the same source GeoJSON to guarantee this - whatever is drawing the upper border 3d extrusions as we call them in 3d mode.
-- **Upper 3D border pixelation on zoom-out**: The thin top ring shimmers due to MSAA sub-pixel aliasing at low zooms (maybe). Potentially fix with zoom-interpolated thickness: as zoom decreases, thickness must increase to maintain visual mass - but try a number of solutions. Allow controlled bleed/overlap between adjacent borders at low zoom to smooth this visually. **DO NOT simplify geometry or reduce vertices** — zip boundaries must remain distinct and match the actual ZCTA shapes.
-- **2D line X-ray through 3D blocks**: Standard 2D line layers (zcta-line, zcta-line-glow, etc.) are visible "through" the 3D extrusions. Fix: hide ALL standard 2D line layers unconditionally when any 3D mode is active. Confirm this does NOT disable the upper 3D border (which is its own extrusion layer, not a 2D line).
-- **Borough outlines in 3D** (NEW): Introduce a `nyc_boroughs.geojson` source. In 3D modes, render borough boundary outlines at ground level. They must NOT be visible through 3D blocks (no x-ray). Preferred approach: use 2D lines (since 2D lines already render cleanly without pixelation) applied only to borough boundaries — if 2D lines can be occluded by 3D extrusions. If 2D lines cannot be occluded, use a fill-extrusion with height slightly below the coldest (shortest) tier height so the engine naturally hides it behind taller blocks. Apply the same anti-pixelation zoom-interpolation as the upper 3D border. Color: standard red when heatmap is off, or a darker differential of the borough's average heatmap color when heatmap is on. Make outlines thick enough to be visible at borough edges.
 - **Zip polygon glitching** (e.g., zip 11422): Random flat red vertices/caps appear at certain zoom levels. This is a GeoJSON triangulation issue — broken polygons or bad zoom-out simplification in the source data. Investigate the cleaned GeoJSON for broken polygon rings. If any derived zip data elsewhere in the codebase was generated from an older GeoJSON, regenerate it.
 
 ### MapView — Real3D Mode Rules (Individual Buildings)
