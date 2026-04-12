@@ -34,6 +34,7 @@
 - Update the section below while we are working on a fix or feature, so that you can capture insights in real time and ensure that the information is fresh and relevant to the task at hand. This will also help you internalize the conventions and logic as you work with them, making it easier to apply them in future tasks. 
 - Do not let this process slow you down or distract you from the task. Focus on the task first, and then take a moment to jot down any relevant insights or patterns in the section below after you have completed the task. This way, you can maintain your workflow while still building up a valuable reference for the future.
 - You do not need to read the full convention and logic section for every fix but instead you can start each fix by quickly scanning and searching within the section for any relevant information that might be helpful for the task at hand using a contextual search. This can help you quickly orient yourself and apply established patterns without having to re-derive them from scratch.
+- User commands or requests within the specific prompt take precedence over any conventions or logic documented below. Always follow the user's instructions explicitly, even if they conflict with established conventions. The user's requests are the primary source of truth for what changes should be made, and the conventions are there to provide guidance and context but should not override the user's explicit instructions.
 
 ## Known Conventions And Logic
 
@@ -46,7 +47,7 @@
 
 ### Event Data Model & Two-Source System
 - **User events**: Supabase `events` table. Fetched by `getApprovedEvents()`. No `_auto` flag.
-- **Auto events**: Supabase `auto_events` table. Fetched by `getAutoEvents()`. Injected with `_auto: true`.
+- **Auto events**: Supabase `auto_events` table. Fetched by `getAutoEvents()`. Injected with `_auto: true`. Also enriches: `name` defaults to capitalized `source_site` if missing; `source_url` merged into `relevant_links` array so the popup shows a clickable source link.
 - **Sample events**: Hardcoded in `sampleEvents.js`, flagged `_sample: true`, gated by `SAMPLE_MODE` in `sampleConfig.js`. Samples still on during development.
 - Merge order: user/sample events first, auto events appended at end.
 - Cached to `sessionStorage['lapuff_cached_events']` after merge. Fallback on error: `SAMPLE_EVENTS` if SAMPLE_MODE.
@@ -86,6 +87,7 @@
 - Expiry: events older than 7 days (`7 * 86400000` ms) are marked expired; images hidden.
 - `getTileAccentColor(event.hex_color, theme)` determines accent: tileAccentOverride > event hex > default.
 - Real-time fav count via `subscribeToFavoriteCount(event.id, callback)`.
+- Date, time, location text → `bodyTextColor` via inline style (not hardcoded Tailwind text-gray-*); opacity dimming 0.75/0.7 for secondary text.
 
 ### EventDetailPopup Conventions
 - Portal renders to `document.body`, z-index `100000`.
@@ -97,13 +99,23 @@
 - Links: removes protocol prefix `.replace(/^https?:\/\/(www\.)?/, '')`.
 - MiniMap: OpenStreetMap embed if lat/lng, else Google Maps. Grayscale default, color on hover.
 - Backdrop: mobile = `bg-black/45`, desktop = `backdrop-blur-xl bg-white/40`.
+- **Text color split**: date button and MiniMap address → `buttonTextColor`; event description → `bodyTextColor`. Both inherit `bg-gray-50` (= `--lp-button-fill`) and `buttonShadowColor` for consistent button styling.
+- `border-black` class must NOT be on the popup card or any element that needs `style={{ borderColor }}` inline — the CSS scope `!important` override will win. Remove the class and use only inline style.
+- Image carousel arrows: always `bg-black/55 text-white` with z-20 — never inherit fill color (would be invisible on light images).
 
 ### Theme System
 - 54 customizable fields via `THEME_FIELDS` in `src/lib/theme.js`.
 - Default accent: `#7C3AED` (purple). Page bg: `#FAFAF8`. Surface: `#FFFFFF`.
 - CSS variables applied to `:root` via `applyThemeToDocument()`: `--lp-accent`, `--lp-accent-soft` (14% opacity), `--lp-accent-softer` (8% opacity), `--lp-title-text`, `--lp-subtext`, `--lp-body-text`, `--lp-button-*`, `--lp-page-bg`, `--lp-surface-bg`, `--lp-topbar-*`, `--lp-micro-icon`, `--lp-tile-shadow`, `--lp-logo-*`, `--lp-search-*`, `--lp-leaderboard-*`, `--lp-calendar-*`, `--lp-emoji-stain`.
 - `.lp-theme-scope` wrapper remaps Tailwind classes to CSS variables (e.g., `.bg-white` → `--lp-surface-bg`).
-- Auto-contrast: when surface color changes but text not overridden, WCAG luminance auto-adjusts.
+- Auto-contrast: `applyThemeToDocument(theme, overrides)` takes overrides as 2nd arg. A text var is only auto-contrasted when its key is NOT in overrides (user hasn't set it). `safeText(text, bg)` uses contrast ratio ≥3:1.
+- `bg-gray-50` in `.lp-theme-scope` → `var(--lp-button-fill)`. This is semantic: gray-50 = button surface across all button-like elements.
+- `.lp-hover-invert:hover` uses `--lp-button-text` as bg and `--lp-button-fill` as text — correct inversion even with custom themes. Higher specificity than `!important` scope.
+- `--lp-button-shadow` CSS var drives all `shadow-[NpxNpx0pxblack]` Tailwind classes inside `.lp-theme-scope` via targeted rules.
+- ThemeCustomizerModal ThemeRow uses JS hover state (not CSS group-hover) so dynamic inline styles can override properly.
+- Anti-softlock: ThemeRow hover bg = accentColor, text = `contrastColor(accent)`. Footer Apply/Cancel/Reset All always hover to black fill + white text — no exceptions.
+- Footer idle for Cancel/ResetAll: uses `buttonTextColor` if it passes contrast check vs `idleFillBg`, else `contrastColor(buttonFill)`.
+- `buttonShadowColor` field under Buttons section in THEME_FIELDS.
 - Persistence: `localStorage['lapuff_theme_overrides']` as JSON.
 - Preview mode: `setPreviewThemeOverrides()` for live editing, `clearPreviewThemeOverrides()` to cancel.
 - Dark section hover: labels turn `--lp-hover-text` (#ccff00 fluorescent) when section bg luminance < 0.35.
@@ -339,6 +351,8 @@
 - Favorites count: only counts IDs that exist in loaded events list.
 - Shadow: `8px 8px 0px {tileShadowColor}`.
 - Animation: `fade-in slide-in-from-top-2 duration-200`.
+- Nav item text: `buttonTextColor → bodyTextColor → microIconColor` priority.
+- Nav item bg: always-on `hexToRgba(buttonFillColor, 0.22)` shading so items stay defined in all themes.
 
 ### React Query
 - `refetchOnWindowFocus: false`, `retry: 1`.
