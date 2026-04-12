@@ -17,12 +17,14 @@
 - Prefer focused, surgical edits over broad refactors unless the task explicitly requires one.
 - Do not inspect or search `node_modules`, `dist`, `.vite`, or other generated/vendor folders unless the task explicitly targets them.
 - Prefer searches scoped to `src`, `.github`, `public`, or a specific file path instead of repo-wide scans.
+- Follow the user's requests explicitly without adding extra features or changes that were not asked for, even if they seem beneficial. Focus on delivering exactly what was requested to maintain clarity and avoid unintended consequences.
 
 ## Project Notes
 - Stack: React + Vite + Tailwind CSS + Supabase.
-- Theme system uses CSS custom properties and `.lp-theme-scope`.
+- Theme system uses CSS custom properties and `.lp-theme-scope`, Cursor styling is managed via CSS variables and can be overridden per tile or globally.
 - `src/lib/theme.js` contains shared theme helpers.
 - `EventTile` and `EventDetailPopup` should stay visually and behaviorally aligned where they share event UI.
+- Map view uses Maplibre GL js and Maptiler API, with custom styling and theming applied via CSS variables.
 
 ## Archival Inertia Ability
 - You have the power to record known conventions and logic in the section below this for future reference. 
