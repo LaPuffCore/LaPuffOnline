@@ -218,7 +218,8 @@ function isNearlyCollinear(a, b, c) {
 }
 
 // Ramer-Douglas-Peucker simplification for pre-processing borough outer rings only.
-// Removes sub-pixel pier/jetty protrusions (tolerance ~0.0004° ≈ 40m) before offsetRing.
+// Removes pier/jetty protrusions (tolerance ~0.003° ≈ 333m) before offsetRing.
+// Manhattan west-side piers extend 100-300m into Hudson — needs aggressive threshold.
 // NEVER applied to ZCTA zip data — zip accuracy must be preserved exactly.
 function rdpSimplify(points, tolerance) {
   if (points.length < 3) return points;
@@ -432,7 +433,8 @@ function offsetRing(outerRing, widthMeters) {
 }
 
 // simplifyInputTolerance: degrees tolerance for RDP pre-simplification of the outer ring.
-// Pass 0.0004 (~40m) for borough outlines to strip sub-pixel pier/jetty protrusions.
+// Pass 0.003 (~333m) for borough outlines — strips Hudson/East River pier geometry.
+// Manhattan west-side piers extend 100-300m; 0.003° aggressively removes them before offsetRing.
 // ALWAYS pass 0 (default) for ZCTA zip outlines — zip accuracy must be preserved.
 function createOutlineGeoJSON(sourceGeoJSON, widthMeters = 12, minAreaSq = 0, simplifyInputTolerance = 0) {
   const maybeSimplify = (ring) => simplifyInputTolerance > 0 ? rdpSimplify(ring, simplifyInputTolerance) : ring;
@@ -1195,7 +1197,7 @@ export default function MapView({ events }) {
         const coloredBorough = buildColoredBoroughFeatures(boroughGeoDataRef.current, avgTiers, heatmap);
         boroughWithColorRef.current = coloredBorough;
         map.getSource('borough-source').setData(
-          createOutlineGeoJSON(coloredBorough, getZoomAwareOutlineWidth(map, 40), 0.003, 0.0004)
+          createOutlineGeoJSON(coloredBorough, getZoomAwareOutlineWidth(map, 40), 0.003, 0.003)
         );
         // T3: zoom-interpolated opacity on borough-outline — same anti-pixelation treatment
         const boroughOpacity = ['interpolate', ['linear'], ['zoom'], 9, 0.70, 13, 0.92];
@@ -1226,7 +1228,7 @@ export default function MapView({ events }) {
         map.getSource('zcta-outline').setData(createOutlineGeoJSON(withHeatRef.current, getZoomAwareOutlineWidth(map)));
       }
       if (boroughWithColorRef.current && map.getSource('borough-source')) {
-        map.getSource('borough-source').setData(createOutlineGeoJSON(boroughWithColorRef.current, getZoomAwareOutlineWidth(map, 40), 0.003, 0.0004));
+        map.getSource('borough-source').setData(createOutlineGeoJSON(boroughWithColorRef.current, getZoomAwareOutlineWidth(map, 40), 0.003, 0.003));
       }
     };
     map.on('zoom', onZoom);
