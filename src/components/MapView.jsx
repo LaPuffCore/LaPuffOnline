@@ -843,6 +843,25 @@ function buildColoredBoroughFeatures(boroughGeoData, avgTiers, isHeatmap) {
 const MEDALS = ['🥇', '🥈', '🥉'];
 const PAGE_SIZE = 6;
 
+// Build point features from zip centroids for the MapLibre native heatmap layer.
+// Each point carries a _weight (0–1) derived from the zip's tier so the Gaussian
+// blur produces smooth topographic heat gradients across the entire map.
+function buildHeatUnderlayPoints(geoData, tiers) {
+  const features = [];
+  geoData.features.forEach((f, i) => {
+    if (f.properties._special) return;
+    const tier = tiers[i];
+    if (tier < 0) return;
+    const [cx, cy] = getGeomCentroid(f.geometry);
+    features.push({
+      type: 'Feature',
+      properties: { _weight: tier / 4 },
+      geometry: { type: 'Point', coordinates: [cx, cy] },
+    });
+  });
+  return { type: 'FeatureCollection', features };
+}
+
 // ── Paginated list section ─────────────────────────────────────────────
 function PaginatedSection({ items, renderItem, emptyMsg, headerLabel, headerColor = 'text-white/30' }) {
   const [page, setPage] = useState(0);
@@ -1150,6 +1169,31 @@ export default function MapView({ events }) {
     const is3D = threeDRef.current;
     map.addSource('zcta', { type: 'geojson', data, generateId: false });
 
+    // Topographic heat underlay — MapLibre native heatmap layer from zip centroids.
+    // Smooth Gaussian-blurred gradient covers the entire map (bleeds into water/ocean).
+    // Sits at ground level UNDER all 3D blocks. Only visible in 3D+heatmap mode.
+    if (!map.getSource('heat-underlay')) {
+      map.addSource('heat-underlay', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+      map.addLayer({
+        id: 'heat-underlay', type: 'heatmap', source: 'heat-underlay',
+        paint: {
+          'heatmap-weight': ['coalesce', ['get', '_weight'], 0],
+          'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 8, 1.2, 13, 2.5],
+          'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 8, 40, 11, 70, 13, 100],
+          'heatmap-color': [
+            'interpolate', ['linear'], ['heatmap-density'],
+            0,    'rgba(0,0,0,0)',
+            0.15, '#00ccdd',
+            0.35, '#00dd66',
+            0.55, '#aadd00',
+            0.75, '#dd6600',
+            1.0,  '#cc0d00',
+          ],
+          'heatmap-opacity': 0,
+        },
+      });
+    }
+
     // Extrusion base — fully opaque, blocks everything below
     map.addLayer({
       id: 'zcta-extrude', type: 'fill-extrusion', source: 'zcta',
@@ -1363,6 +1407,17 @@ export default function MapView({ events }) {
       map.getSource('zcta-outline').setData(createZctaOutlineGeoJSON(withHeat, getZoomAwareOutlineWidth(map)));
     }
 
+    // Topographic heat underlay — update point data from zip centroids.
+    // Enabled only in 3D+heatmap; hidden otherwise.
+    if (map.getSource('heat-underlay')) {
+      if (heatmap && threeD) {
+        map.getSource('heat-underlay').setData(buildHeatUnderlayPoints(geoData, tiers));
+        map.setPaintProperty('heat-underlay', 'heatmap-opacity', 0.50);
+      } else {
+        map.setPaintProperty('heat-underlay', 'heatmap-opacity', 0);
+      }
+    }
+
     const heatColorExpr = [
       'case', ['boolean', ['get', '_special'], false], '#ffffff',
       ['step', ['get', '_tier'], HEAT_COLORS.cold, 1, HEAT_COLORS.cool, 2, HEAT_COLORS.warm, 3, HEAT_COLORS.orange, 4, HEAT_COLORS.hot],
@@ -1385,10 +1440,9 @@ export default function MapView({ events }) {
 
     if (heatmap) {
       map.setPaintProperty('zcta-fill', 'fill-color', heatColorExpr);
-      // Heat underlay: in 3D+heatmap, zcta-fill renders at ground level underneath
-      // semi-transparent 3D blocks — creates a topographic heat staining effect.
-      // Per-zip colors, time-bound via timespan slider.
-      map.setPaintProperty('zcta-fill', 'fill-opacity', threeD ? 0.50 : (satellite ? 0.5 : 0.9));
+      // FIX ADDITIVE STATE: heatmap fill — 0 when 3D is on (extrusion takes over),
+      // semi-transparent when satellite on, solid otherwise.
+      map.setPaintProperty('zcta-fill', 'fill-opacity', threeD ? 0 : (satellite ? 0.5 : 0.9));
 
       if (threeD) {
         map.setPaintProperty('zcta-safe-line', 'line-opacity', 0);
@@ -1444,7 +1498,7 @@ export default function MapView({ events }) {
       if (threeD) {
         map.setPaintProperty('zcta-safe-line', 'line-opacity', 0);
         // FIX SATELLITE: 3D no-heatmap extrusion is semi-transparent when satellite is on
-        const flatColorExpr = ['case', ['boolean', ['get', '_special'], false], '#111111', '#3a0505'];
+        const flatColorExpr = ['case', ['boolean', ['get', '_special'], false], '#111111', '#220202'];
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-color', withHoverColor(flatColorExpr));
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-height', flatH);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-base', 0);
