@@ -31,13 +31,13 @@ const OUTLINE_COLOR = '#ff2200';
 const OUTLINE_GLOW  = '#ff0000';
 
 // Darkened heatmap tier colors for upper 3D border and borough outlines.
-// Distinct enough from the bright fill colors to read as "themed but different".
+// Much darker than fill tier colors so the outline reads clearly as a distinct boundary.
 const HEAT_DARK_COLORS = {
-  cold:   '#005566',
-  cool:   '#006630',
-  warm:   '#667700',
-  orange: '#773300',
-  hot:    '#660600',
+  cold:   '#001f29',
+  cool:   '#002910',
+  warm:   '#333b00',
+  orange: '#3d1500',
+  hot:    '#2e0000',
 };
 
 // Tonal shades per tier (legacy, kept for compatibility)
@@ -328,10 +328,7 @@ function getZoomAwareOutlineWidth(map, baseMeters = 14) {
   return (baseMeters + extra) * pitchFactor;
 }
 
-// outwardOnly=true: inner ring = exact zip boundary, outer ring = boundary + fullWidth outward.
-// This makes the inner edge of the annular ring 1:1 with the ZCTA block top face.
-// outwardOnly=false (default): symmetric ±halfWidth — used for borough outlines.
-function offsetRing(outerRing, widthMeters, outwardOnly = false) {
+function offsetRing(outerRing, widthMeters) {
   const normalized = normalizeRing(outerRing);
   if (!normalized || normalized.length < 4) return null;
   let ring = normalized[0][0] === normalized[normalized.length - 1][0] && normalized[0][1] === normalized[normalized.length - 1][1]
@@ -346,10 +343,7 @@ function offsetRing(outerRing, widthMeters, outwardOnly = false) {
   const refLat = ring.reduce((sum, [, lat]) => sum + lat, 0) / ring.length;
   const pts = ring.map(coord => lngLatToMeters(coord, refLat));
   const orientation = signedArea([...pts, pts[0]]) >= 0 ? 1 : -1;
-
-  // outwardOnly: full width outward, zero inward (inner = original ring exactly)
-  const outerDist = outwardOnly ? widthMeters : widthMeters / 2;
-  const innerDist = outwardOnly ? 0 : widthMeters / 2;
+  const halfWidth = widthMeters / 2;
 
   const normals = pts.map((p, i) => {
     const next = pts[(i + 1) % pts.length];
@@ -362,16 +356,16 @@ function offsetRing(outerRing, widthMeters, outwardOnly = false) {
     const next = pts[(i + 1) % pts.length];
     const norm = normals[i];
     return {
-      p0: [p[0] + norm[0] * outerDist, p[1] + norm[1] * outerDist],
-      p1: [next[0] + norm[0] * outerDist, next[1] + norm[1] * outerDist],
+      p0: [p[0] + norm[0] * halfWidth, p[1] + norm[1] * halfWidth],
+      p1: [next[0] + norm[0] * halfWidth, next[1] + norm[1] * halfWidth],
     };
   });
   const innerEdges = pts.map((p, i) => {
     const next = pts[(i + 1) % pts.length];
     const norm = normals[i];
     return {
-      p0: [p[0] - norm[0] * innerDist, p[1] - norm[1] * innerDist],
-      p1: [next[0] - norm[0] * innerDist, next[1] - norm[1] * innerDist],
+      p0: [p[0] - norm[0] * halfWidth, p[1] - norm[1] * halfWidth],
+      p1: [next[0] - norm[0] * halfWidth, next[1] - norm[1] * halfWidth],
     };
   });
 
@@ -381,20 +375,17 @@ function offsetRing(outerRing, widthMeters, outwardOnly = false) {
     const intersection = lineIntersection(prev.p0, prev.p1, curr.p0, curr.p1);
     if (intersection) return intersection;
     const avg = normalize([normals[(i - 1 + normals.length) % normals.length][0] + normals[i][0], normals[(i - 1 + normals.length) % normals.length][1] + normals[i][1]]);
-    return [pts[i][0] + avg[0] * outerDist, pts[i][1] + avg[1] * outerDist];
+    return [pts[i][0] + avg[0] * halfWidth, pts[i][1] + avg[1] * halfWidth];
   });
 
-  const inner = outwardOnly
-    // outwardOnly: inner = original pts (exact zip boundary), no offset needed
-    ? pts.slice()
-    : pts.map((_, i) => {
-        const prev = innerEdges[(i - 1 + innerEdges.length) % innerEdges.length];
-        const curr = innerEdges[i];
-        const intersection = lineIntersection(prev.p0, prev.p1, curr.p0, curr.p1);
-        if (intersection) return intersection;
-        const avg = normalize([normals[(i - 1 + normals.length) % normals.length][0] + normals[i][0], normals[(i - 1 + normals.length) % normals.length][1] + normals[i][1]]);
-        return [pts[i][0] - avg[0] * innerDist, pts[i][1] - avg[1] * innerDist];
-      });
+  const inner = pts.map((_, i) => {
+    const prev = innerEdges[(i - 1 + innerEdges.length) % innerEdges.length];
+    const curr = innerEdges[i];
+    const intersection = lineIntersection(prev.p0, prev.p1, curr.p0, curr.p1);
+    if (intersection) return intersection;
+    const avg = normalize([normals[(i - 1 + normals.length) % normals.length][0] + normals[i][0], normals[(i - 1 + normals.length) % normals.length][1] + normals[i][1]]);
+    return [pts[i][0] - avg[0] * halfWidth, pts[i][1] - avg[1] * halfWidth];
+  });
 
   const outerGeo = closeRing(outer).map(coord => metersToLngLat(coord, refLat));
   const innerGeo = closeRing(inner.reverse()).map(coord => metersToLngLat(coord, refLat));
@@ -404,28 +395,86 @@ function offsetRing(outerRing, widthMeters, outwardOnly = false) {
   return [outerGeo, innerGeo];
 }
 
-// The cap shape IS the annular ring of the upper 3D outline — kept as a trivial passthrough.
-// (No longer used; zcta-outline and zcta-cap both use source: 'zcta' directly.)
-// Retained to avoid removal noise if referenced elsewhere.
-function createCapGeoJSON(outlineGeoJSON) { return outlineGeoJSON; }
-
-function createOutlineGeoJSON(sourceGeoJSON, widthMeters = 12, outwardOnly = false) {
+// Borough outlines: symmetric ±halfWidth offset ring (smoothing/subdivision OK for boroughs).
+function createOutlineGeoJSON(sourceGeoJSON, widthMeters = 12) {
   return {
     type: 'FeatureCollection',
     features: sourceGeoJSON.features.map(feature => {
       const normalizedGeom = normalizeFeatureGeometry(feature) || feature.geometry;
       if (!normalizedGeom) return null;
       if (normalizedGeom.type === 'Polygon') {
-        const outline = offsetRing(normalizedGeom.coordinates[0], widthMeters, outwardOnly);
+        const outline = offsetRing(normalizedGeom.coordinates[0], widthMeters);
         if (!outline) return null;
         return { ...feature, geometry: { type: 'Polygon', coordinates: outline } };
       }
       if (normalizedGeom.type === 'MultiPolygon') {
         const polygons = [];
         normalizedGeom.coordinates.forEach(polygon => {
-          const outline = offsetRing(polygon[0], widthMeters, outwardOnly);
+          const outline = offsetRing(polygon[0], widthMeters);
           if (outline) polygons.push(outline);
         });
+        if (polygons.length === 0) return null;
+        return { ...feature, geometry: { type: 'MultiPolygon', coordinates: polygons } };
+      }
+      return null;
+    }).filter(Boolean),
+  };
+}
+
+// ZCTA upper 3D border outline: inner ring = raw MODZCTA coordinates (no smoothing, no subdivision),
+// outer ring = fullWidth offset outward. Inner edge is pixel-perfect 1:1 with zcta-extrude blocks.
+function createZctaOutlineGeoJSON(sourceGeoJSON, widthMeters = 12) {
+  const buildZctaRing = (rawRing) => {
+    const normalized = normalizeRing(rawRing);
+    if (!normalized || normalized.length < 4) return null;
+    // Inner ring: raw MODZCTA coords exactly — same as what MapLibre uses for the 3D block.
+    // Reverse for CW hole winding required by GeoJSON polygon spec.
+    const innerGeo = closeRing([...normalized].reverse());
+    if (innerGeo.length < 4) return null;
+
+    // Outer ring: offset outward by fullWidth using the same normalized ring.
+    // We can still use subdivision/smoothing for the OUTER edge only (it's cosmetic, not a boundary match).
+    let ring = normalized[0][0] === normalized[normalized.length - 1][0] && normalized[0][1] === normalized[normalized.length - 1][1]
+      ? normalized.slice(0, -1) : normalized;
+    if (ring.length < 3) return null;
+    ring = subdivideRing(ring, 10);
+    ring = smoothRing(ring, 1);
+    const refLat = ring.reduce((sum, [, lat]) => sum + lat, 0) / ring.length;
+    const pts = ring.map(coord => lngLatToMeters(coord, refLat));
+    const orientation = signedArea([...pts, pts[0]]) >= 0 ? 1 : -1;
+    const normals = pts.map((p, i) => {
+      const next = pts[(i + 1) % pts.length];
+      const dx = next[0] - p[0]; const dy = next[1] - p[1];
+      return normalize(orientation > 0 ? [dy, -dx] : [-dy, dx]);
+    });
+    const outerEdges = pts.map((p, i) => {
+      const next = pts[(i + 1) % pts.length]; const norm = normals[i];
+      return { p0: [p[0] + norm[0] * widthMeters, p[1] + norm[1] * widthMeters], p1: [next[0] + norm[0] * widthMeters, next[1] + norm[1] * widthMeters] };
+    });
+    const outer = pts.map((_, i) => {
+      const prev = outerEdges[(i - 1 + outerEdges.length) % outerEdges.length];
+      const curr = outerEdges[i];
+      const intersection = lineIntersection(prev.p0, prev.p1, curr.p0, curr.p1);
+      if (intersection) return intersection;
+      const avg = normalize([normals[(i - 1 + normals.length) % normals.length][0] + normals[i][0], normals[(i - 1 + normals.length) % normals.length][1] + normals[i][1]]);
+      return [pts[i][0] + avg[0] * widthMeters, pts[i][1] + avg[1] * widthMeters];
+    });
+    const outerGeo = closeRing(outer).map(coord => metersToLngLat(coord, refLat));
+    if (outerGeo.length < 8) return null;
+    return [outerGeo, innerGeo];
+  };
+
+  return {
+    type: 'FeatureCollection',
+    features: sourceGeoJSON.features.map(feature => {
+      const geom = feature.geometry;
+      if (geom.type === 'Polygon') {
+        const ring = buildZctaRing(geom.coordinates[0]);
+        if (!ring) return null;
+        return { ...feature, geometry: { type: 'Polygon', coordinates: ring } };
+      }
+      if (geom.type === 'MultiPolygon') {
+        const polygons = geom.coordinates.map(p => buildZctaRing(p[0])).filter(Boolean);
         if (polygons.length === 0) return null;
         return { ...feature, geometry: { type: 'MultiPolygon', coordinates: polygons } };
       }
@@ -886,9 +935,8 @@ export default function MapView({ events }) {
       paint: { 'line-color': OUTLINE_COLOR, 'line-width': 0.5, 'line-opacity': is3D ? 0 : 1 },
     });
 
-    // Upper 3D border — annular ring (doughnut) geometry giving the outline-only appearance.
-    // Uses its own GeoJSON source populated via createOutlineGeoJSON (offset ring).
-    // The ring width is zoom+pitch aware. Heights/colors set dynamically in heatmap effect.
+    // Upper 3D border — annular ring using createZctaOutlineGeoJSON.
+    // Inner ring = raw MODZCTA coords (1:1 with zcta-extrude blocks). Outer ring = fullWidth outward.
     map.addSource('zcta-outline', { type: 'geojson', data: { type: 'FeatureCollection', features: [] }, generateId: false });
     map.addLayer({
       id: 'zcta-outline', type: 'fill-extrusion', source: 'zcta-outline',
@@ -1019,7 +1067,7 @@ export default function MapView({ events }) {
     // Store so zoom/pitch listener can regenerate outline width without full recompute
     withHeatRef.current = withHeat;
     if (map.getSource('zcta-outline')) {
-      map.getSource('zcta-outline').setData(createOutlineGeoJSON(withHeat, getZoomAwareOutlineWidth(map), true));
+      map.getSource('zcta-outline').setData(createZctaOutlineGeoJSON(withHeat, getZoomAwareOutlineWidth(map)));
     }
 
     const heatColorExpr = [
@@ -1187,7 +1235,7 @@ export default function MapView({ events }) {
     const onZoom = () => {
       if (!threeDRef.current) return;
       if (withHeatRef.current && map.getSource('zcta-outline')) {
-        map.getSource('zcta-outline').setData(createOutlineGeoJSON(withHeatRef.current, getZoomAwareOutlineWidth(map), true));
+        map.getSource('zcta-outline').setData(createZctaOutlineGeoJSON(withHeatRef.current, getZoomAwareOutlineWidth(map)));
       }
       if (boroughWithColorRef.current && map.getSource('borough-source')) {
         map.getSource('borough-source').setData(createOutlineGeoJSON(boroughWithColorRef.current, getZoomAwareOutlineWidth(map, 40)));
