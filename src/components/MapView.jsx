@@ -311,16 +311,17 @@ function normalizeFeatureGeometry(feature) {
 }
 
 // T3 3D PIXELIZATION: Zoom + pitch aware width scaling.
-// Each step below zoom 14 adds 12m (was 8) — 50% more ramp for the last 30-40% of zoom-out.
-// pitchFactor compensates for the horizontal compression at tilted angles:
-// at our 48° 3D pitch the far edge of the map is ~35% shorter on screen.
+// Our map is locked minZoom:9 (max zoom-out, all of NYC) to maxZoom:16 (street level).
+// Base width applies at zoom 13+ (close-in). Quadratic ramp kicks in as we zoom out:
+// zoom 13: +0m | 12: +5m | 11: +20m | 10: +45m | 9: +80m | (8: +125m, 7: +180m safety)
+// The steps anchor at 13 so mid-zoom stays gentle, then accelerates toward zoom 9.
+// pitchFactor boosts width at tilt — compensates horizontal compression on far-field geometry.
 function getZoomAwareOutlineWidth(map, baseMeters = 14) {
   if (!map || typeof map.getZoom !== 'function') return baseMeters;
   const zoom = map.getZoom();
-  const extra = Math.max(0, 14 - zoom) * 12;
+  const steps = Math.max(0, 13 - zoom);
+  const extra = steps * steps * 5; // quadratic: 0,5,20,45,80,125,180 for steps 0-6
   const pitch = map.getPitch ? map.getPitch() : 0;
-  // Up to 55% extra width at our max pitch (55°). cos(55°) ≈ 0.57 → 1/0.57 ≈ 1.75,
-  // but we clamp the boost at 0.55 so it's noticeable without looking broken at mid-pitch.
   const pitchFactor = 1 + (pitch / 90) * 0.55;
   return (baseMeters + extra) * pitchFactor;
 }
