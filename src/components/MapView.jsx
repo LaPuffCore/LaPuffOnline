@@ -393,13 +393,14 @@ function offsetRing(outerRing, widthMeters) {
   return [outerGeo, innerGeo];
 }
 
-function createOutlineGeoJSON(sourceGeoJSON, widthMeters = 12) {
+function createOutlineGeoJSON(sourceGeoJSON, widthMeters = 12, minAreaSq = 0) {
   return {
     type: 'FeatureCollection',
     features: sourceGeoJSON.features.map(feature => {
       const normalizedGeom = normalizeFeatureGeometry(feature) || feature.geometry;
       if (!normalizedGeom) return null;
       if (normalizedGeom.type === 'Polygon') {
+        if (minAreaSq > 0 && Math.abs(signedArea(normalizedGeom.coordinates[0])) < minAreaSq) return null;
         const outline = offsetRing(normalizedGeom.coordinates[0], widthMeters);
         if (!outline) return null;
         return { ...feature, geometry: { type: 'Polygon', coordinates: outline } };
@@ -407,6 +408,7 @@ function createOutlineGeoJSON(sourceGeoJSON, widthMeters = 12) {
       if (normalizedGeom.type === 'MultiPolygon') {
         const polygons = [];
         normalizedGeom.coordinates.forEach(polygon => {
+          if (minAreaSq > 0 && Math.abs(signedArea(polygon[0])) < minAreaSq) return;
           const outline = offsetRing(polygon[0], widthMeters);
           if (outline) polygons.push(outline);
         });
@@ -1111,7 +1113,7 @@ export default function MapView({ events }) {
         const coloredBorough = buildColoredBoroughFeatures(boroughGeoDataRef.current, avgTiers, heatmap);
         boroughWithColorRef.current = coloredBorough;
         map.getSource('borough-source').setData(
-          createOutlineGeoJSON(coloredBorough, getZoomAwareOutlineWidth(map, 40))
+          createOutlineGeoJSON(coloredBorough, getZoomAwareOutlineWidth(map, 40), 0.003)
         );
         // T3: zoom-interpolated opacity on borough-outline — same anti-pixelation treatment
         const boroughOpacity = ['interpolate', ['linear'], ['zoom'], 9, 0.70, 13, 0.92];
@@ -1142,7 +1144,7 @@ export default function MapView({ events }) {
         map.getSource('zcta-outline').setData(createOutlineGeoJSON(withHeatRef.current, getZoomAwareOutlineWidth(map)));
       }
       if (boroughWithColorRef.current && map.getSource('borough-source')) {
-        map.getSource('borough-source').setData(createOutlineGeoJSON(boroughWithColorRef.current, getZoomAwareOutlineWidth(map, 40)));
+        map.getSource('borough-source').setData(createOutlineGeoJSON(boroughWithColorRef.current, getZoomAwareOutlineWidth(map, 40), 0.003));
       }
     };
     map.on('zoom', onZoom);
