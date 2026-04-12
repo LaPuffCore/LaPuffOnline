@@ -65,6 +65,8 @@ function buildZipEventMap(events, days) {
   const maxDate = new Date(now.getTime() + days * 86400000);
   const zipMap = {};
   events.forEach(e => {
+    // Auto-scraped events do NOT affect heatmap — only user-submitted events count
+    if (e._auto || e._sample) return;
     const ed = new Date(e.event_date + 'T00:00:00');
     if (ed < now || ed > maxDate) return;
     const zip = (e.location_data?.zipcode || '').trim().replace(/\D/g, '').padStart(5, '0').slice(0, 5);

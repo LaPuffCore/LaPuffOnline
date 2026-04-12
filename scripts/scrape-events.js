@@ -1,14 +1,9 @@
 // scrape-events.js
 // Main orchestrator: runs all scrapers, deduplicates, upserts to auto_events table.
-import { scrapeEventbrite } from './scrapers/eventbrite.js';
-import { scrapeNYCParks } from './scrapers/nycparks.js';
-import { scrapeMeetup } from './scrapers/meetup.js';
-import { scrapeRA } from './scrapers/ra.js';
-import { scrapeTimeOut } from './scrapers/timeout.js';
-import { scrapeDice } from './scrapers/dice.js';
 import { scrapeAllevents } from './scrapers/allevents.js';
 import { scrapeSongkick } from './scrapers/songkick.js';
-import { scrapeNYCData } from './scrapers/nycdata.js';
+import { scrapeEventbrite } from './scrapers/eventbrite.js';
+import { scrapeLuma } from './scrapers/luma.js';
 import { getExistingExternalIds, filterNewEvents } from './utils/dedup.js';
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://gazuabyyugbbthonqnsp.supabase.co';
@@ -28,15 +23,10 @@ const supabaseHeaders = {
 
 // Ordered by reliability / expected volume
 const SCRAPERS = [
-  { name: 'NYC Open Data', fn: scrapeNYCData },     // Gov API — no blocks, most reliable
-  { name: 'Songkick', fn: scrapeSongkick },         // Concerts — confirmed working
-  { name: 'NYC Parks (RSS)', fn: scrapeNYCParks },  // Parks events — try RSS
-  { name: 'Resident Advisor', fn: scrapeRA },       // Music/nightlife GraphQL
-  { name: 'Meetup', fn: scrapeMeetup },             // Community events GraphQL
-  { name: 'Eventbrite', fn: scrapeEventbrite },     // General events (capped at 20 fetches)
-  { name: 'TimeOut NYC', fn: scrapeTimeOut },       // Curated editorial events
-  { name: 'Dice.fm', fn: scrapeDice },              // Music venue events
-  { name: 'Allevents.in', fn: scrapeAllevents },   // Volume aggregator
+  { name: 'Allevents.in', fn: scrapeAllevents },    // Volume aggregator — 130+ events, most reliable
+  { name: 'Songkick', fn: scrapeSongkick },          // Concerts — 50 events
+  { name: 'Eventbrite', fn: scrapeEventbrite },       // General events — __SERVER_DATA__ extraction
+  { name: 'Luma', fn: scrapeLuma },                   // Social/tech events — __NEXT_DATA__ extraction
 ];
 
 const UPSERT_CHUNK_SIZE = 50;
