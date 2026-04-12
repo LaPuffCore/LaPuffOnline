@@ -1018,7 +1018,14 @@ function ZipHologramMobile({ feature, color, onClose }) {
 
 // ── Main component ────────────────────────────────────────────────────────────
 export default function MapView({ events }) {
-  const [topoOn, setTopoOn] = useState(true);
+  const [topoOn, setTopoOn] = useState(() => {
+    try {
+      const v = localStorage.getItem('lapuff_topo_on');
+      return v === null ? true : v === '1';
+    } catch (e) {
+      return true;
+    }
+  });
   const containerRef    = useRef(null);
   const mapContainerRef = useRef(null);
   const mapRef          = useRef(null);
@@ -1042,6 +1049,11 @@ export default function MapView({ events }) {
   const boroughWithColorRef = useRef(null);
   const zctaSkeletonRef    = useRef(null);
   const boroughSkeletonRef = useRef(null);
+
+  // Persist topo toggle across sessions
+  useEffect(() => {
+    try { localStorage.setItem('lapuff_topo_on', topoOn ? '1' : '0'); } catch (e) { /* ignore */ }
+  }, [topoOn]);
 
   const [timespanIdx,   setTimespanIdx]   = useState(4);
   const [heatmap,       setHeatmap]       = useState(false);
@@ -1895,15 +1907,20 @@ export default function MapView({ events }) {
             </div>
             <div className="flex gap-2 flex-wrap justify-center">
               <div className="flex flex-col items-center gap-2">
-                <button onClick={() => { setHeatmap(v => { const nv = !v; if (nv) setTopoOn(true); return nv; }); }}
-                  className={`px-4 py-2 rounded-2xl font-black text-sm border-2 transition-all ${heatmap ? 'bg-gradient-to-r from-cyan-500 via-yellow-400 to-red-500 border-yellow-300 text-white' : 'bg-black/70 border-white/30 text-white hover:border-orange-400'}`}>
-                  🌡️ Heatmap
-                </button>
-                {heatmap && (
-                  <button onClick={() => setTopoOn(v => !v)} className={`w-10 h-10 rounded-2xl border-2 p-1 bg-black/60 flex items-center justify-center ${topoOn ? 'ring-2 ring-yellow-300' : 'opacity-50'}`} title="Topo Heatmap Toggle">
-                    <img src="/data/topo.jpg" alt="Topo" className="w-8 h-8 object-cover rounded-sm" />
+                <div className="relative flex flex-col items-center gap-2">
+                  <button onClick={() => { setHeatmap(v => { const nv = !v; if (nv) setTopoOn(true); return nv; }); }}
+                    className={`px-4 py-2 rounded-2xl font-black text-sm border-2 transition-all ${heatmap ? 'bg-gradient-to-r from-cyan-500 via-yellow-400 to-red-500 border-yellow-300 text-white' : 'bg-black/70 border-white/30 text-white hover:border-orange-400'}`}>
+                    🌡️ Heatmap
                   </button>
-                )}
+                  {heatmap && (
+                    <button onClick={() => setTopoOn(v => !v)}
+                      className={`w-10 h-10 rounded-2xl border-2 p-0 bg-black/60 flex items-center justify-center ${topoOn ? 'ring-2 ring-yellow-300' : 'opacity-50'}`}
+                      title="Topo Heatmap Toggle"
+                      style={{ position: 'absolute', top: 'calc(100% + 8px)', left: '50%', transform: 'translateX(-50%)' }}>
+                      <div style={{ width: 36, height: 36, borderRadius: 8, backgroundImage: "url('/data/topo.jpg')", backgroundSize: 'cover', backgroundPosition: 'center' }} />
+                    </button>
+                  )}
+                </div>
               </div>
               <button onClick={() => setSatellite(v => !v)}
                 className={`px-4 py-2 rounded-2xl font-black text-sm border-2 transition-all ${satellite ? 'bg-[#7C3AED] border-[#7C3AED] text-white' : 'bg-black/70 border-white/30 text-white hover:border-violet-400'}`}>
