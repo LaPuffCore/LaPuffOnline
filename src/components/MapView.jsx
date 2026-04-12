@@ -312,22 +312,21 @@ function normalizeFeatureGeometry(feature) {
   return null;
 }
 
-// T3 3D PIXELIZATION: Zoom + pitch aware width scaling.
-// Our map is locked minZoom:9 (max zoom-out, all of NYC) to maxZoom:16 (street level).
-// Base width applies at zoom 13+ (close-in). Quadratic ramp kicks in as we zoom out:
-// zoom 13: +0m | 12: +5m | 11: +20m | 10: +45m | 9: +80m | (8: +125m, 7: +180m safety)
-// The steps anchor at 13 so mid-zoom stays gentle, then accelerates toward zoom 9.
-// pitchFactor boosts width at tilt — compensates horizontal compression on far-field geometry.
+// T3 3D PIXELIZATION: Smooth continuous zoom-aware width scaling.
+// Shared multiplier so ZCTA outline (base 14m) and borough outline (base 40m)
+// scale at the same proportional rate — visually synced at every zoom level.
+// Continuous exponential ramp: no hard breakpoints, no jumpiness.
+// zoom 13+ = 1× (base only) | 12 ≈ 1.4× | 11 ≈ 2× | 10 ≈ 3.5× | 9 ≈ 6.5× | 7 ≈ 13×
+// pitchFactor boosts width at tilt — compensates horizontal compression.
 function getZoomAwareOutlineWidth(map, baseMeters = 14) {
   if (!map || typeof map.getZoom !== 'function') return baseMeters;
   const zoom = map.getZoom();
-  const steps = Math.max(0, 13 - zoom);
-  // Gentler at medium zooms (12-11), ramps up toward far zooms (10-9).
-  // step 1 (zoom 12): 2m | step 2 (zoom 11): 8m | step 3 (zoom 10): 45m | step 4 (zoom 9): 80m
-  const extra = steps <= 2 ? steps * steps * 2 : steps * steps * 5;
+  const t = Math.max(0, 13 - zoom);  // 0 at zoom 13+, 4 at zoom 9, 6 at zoom 7
+  // Smooth exponential: multiplier = 1.65^t → continuous curve, no step jumps.
+  const multiplier = Math.pow(1.65, t);
   const pitch = map.getPitch ? map.getPitch() : 0;
   const pitchFactor = 1 + (pitch / 90) * 0.55;
-  return (baseMeters + extra) * pitchFactor;
+  return baseMeters * multiplier * pitchFactor;
 }
 
 function offsetRing(outerRing, widthMeters) {
@@ -397,30 +396,98 @@ function offsetRing(outerRing, widthMeters) {
   return [outerGeo, innerGeo];
 }
 
-// Borough outlines: symmetric ±halfWidth offset ring (smoothing/subdivision OK for boroughs).
+// Borough outlines: quad strip decomposition with outward-only offset.
+// Inner edge = raw borough boundary (zero math). Outer edge = outward offset by widthMeters.
+// Same anti-artifact approach as ZCTA outline but expanding outward from the boundary.
 function createOutlineGeoJSON(sourceGeoJSON, widthMeters = 12) {
-  return {
-    type: 'FeatureCollection',
-    features: sourceGeoJSON.features.map(feature => {
-      const normalizedGeom = normalizeFeatureGeometry(feature) || feature.geometry;
-      if (!normalizedGeom) return null;
-      if (normalizedGeom.type === 'Polygon') {
-        const outline = offsetRing(normalizedGeom.coordinates[0], widthMeters);
-        if (!outline) return null;
-        return { ...feature, geometry: { type: 'Polygon', coordinates: outline } };
+  const MITER_LIMIT = 2.5;
+
+  const buildBoroughQuads = (rawRing, featureProps) => {
+    const normalized = normalizeRing(rawRing);
+    if (!normalized || normalized.length < 4) return [];
+    const ring = normalized[0][0] === normalized[normalized.length - 1][0] && normalized[0][1] === normalized[normalized.length - 1][1]
+      ? normalized.slice(0, -1) : normalized;
+    if (ring.length < 3) return [];
+
+    const refLat = ring.reduce((sum, [, lat]) => sum + lat, 0) / ring.length;
+    const pts = ring.map(coord => lngLatToMeters(coord, refLat));
+    const orientation = signedArea([...pts, pts[0]]) >= 0 ? 1 : -1;
+
+    // Per-edge outward normals (away from polygon interior)
+    const normals = pts.map((p, i) => {
+      const next = pts[(i + 1) % pts.length];
+      const dx = next[0] - p[0]; const dy = next[1] - p[1];
+      return normalize(orientation > 0 ? [dy, -dx] : [-dy, dx]);
+    });
+
+    // Parallel outward edges at widthMeters from the boundary
+    const outerEdges = pts.map((p, i) => {
+      const next = pts[(i + 1) % pts.length]; const n = normals[i];
+      return {
+        p0: [p[0] + n[0] * widthMeters, p[1] + n[1] * widthMeters],
+        p1: [next[0] + n[0] * widthMeters, next[1] + n[1] * widthMeters],
+      };
+    });
+
+    // Resolve outer corner vertices — clamped miter, 1 vertex per corner always.
+    const outerPts = pts.map((_, i) => {
+      const prev = outerEdges[(i - 1 + outerEdges.length) % outerEdges.length];
+      const curr = outerEdges[i];
+      const avgNorm = normalize([
+        normals[(i - 1 + normals.length) % normals.length][0] + normals[i][0],
+        normals[(i - 1 + normals.length) % normals.length][1] + normals[i][1],
+      ]);
+      const intersection = lineIntersection(prev.p0, prev.p1, curr.p0, curr.p1);
+      if (intersection) {
+        const dx = intersection[0] - pts[i][0];
+        const dy = intersection[1] - pts[i][1];
+        if (Math.sqrt(dx * dx + dy * dy) > MITER_LIMIT * widthMeters) {
+          return [pts[i][0] + avgNorm[0] * MITER_LIMIT * widthMeters, pts[i][1] + avgNorm[1] * MITER_LIMIT * widthMeters];
+        }
+        return intersection;
       }
-      if (normalizedGeom.type === 'MultiPolygon') {
-        const polygons = [];
-        normalizedGeom.coordinates.forEach(polygon => {
-          const outline = offsetRing(polygon[0], widthMeters);
-          if (outline) polygons.push(outline);
-        });
-        if (polygons.length === 0) return null;
-        return { ...feature, geometry: { type: 'MultiPolygon', coordinates: polygons } };
-      }
-      return null;
-    }).filter(Boolean),
+      return [pts[i][0] + avgNorm[0] * widthMeters, pts[i][1] + avgNorm[1] * widthMeters];
+    });
+
+    // Convert outer points back to lng/lat
+    const outerGeo = outerPts.map(coord => metersToLngLat(coord, refLat));
+
+    // Emit one quad feature per edge segment: [outer_i, outer_i+1, inner_i+1, inner_i]
+    // Inner = raw borough coords (unchanged), Outer = offset outward
+    const quads = [];
+    const n = ring.length;
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      const quadRing = [
+        outerGeo[i],   // outer corner i
+        outerGeo[j],   // outer corner i+1
+        ring[j],       // inner (raw boundary) corner i+1
+        ring[i],       // inner (raw boundary) corner i
+        outerGeo[i],   // close ring
+      ];
+      quads.push({
+        type: 'Feature',
+        properties: { ...featureProps },
+        geometry: { type: 'Polygon', coordinates: [quadRing] },
+      });
+    }
+    return quads;
   };
+
+  const features = [];
+  for (const feature of sourceGeoJSON.features) {
+    const normalizedGeom = normalizeFeatureGeometry(feature) || feature.geometry;
+    if (!normalizedGeom) continue;
+    const props = feature.properties || {};
+    if (normalizedGeom.type === 'Polygon') {
+      features.push(...buildBoroughQuads(normalizedGeom.coordinates[0], props));
+    } else if (normalizedGeom.type === 'MultiPolygon') {
+      for (const poly of normalizedGeom.coordinates) {
+        features.push(...buildBoroughQuads(poly[0], props));
+      }
+    }
+  }
+  return { type: 'FeatureCollection', features };
 }
 
 // ZCTA upper 3D border outline — quad strip decomposition.
@@ -991,7 +1058,7 @@ export default function MapView({ events }) {
     // Only visible at the outer NYC perimeter; zip blocks occlude internal borough borders.
     // Color is data-driven via _color property set on each feature before source update.
     if (!map.getSource('borough-source')) {
-      map.addSource('borough-source', { type: 'geojson', data: { type: 'FeatureCollection', features: [] }, generateId: false });
+      map.addSource('borough-source', { type: 'geojson', data: { type: 'FeatureCollection', features: [] }, generateId: false, tolerance: 0.001 });
       map.addLayer({
         id: 'borough-outline', type: 'fill-extrusion', source: 'borough-source',
         paint: {
@@ -1266,21 +1333,27 @@ export default function MapView({ events }) {
   // T3 3D PIXELIZATION: re-generate outline ring width on zoom AND pitch so it stays visible.
   // Uses withHeatRef so it doesn't need to recompute tiers/zip data.
   // Also regenerates borough-outline width with baseMeters=40.
+  // RAF debounce: coalesces rapid zoom ticks to one rebuild per animation frame for smoothness.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
+    let rafId = null;
     const onZoom = () => {
       if (!threeDRef.current) return;
-      if (withHeatRef.current && map.getSource('zcta-outline')) {
-        map.getSource('zcta-outline').setData(createZctaOutlineGeoJSON(withHeatRef.current, getZoomAwareOutlineWidth(map)));
-      }
-      if (boroughWithColorRef.current && map.getSource('borough-source')) {
-        map.getSource('borough-source').setData(createOutlineGeoJSON(boroughWithColorRef.current, getZoomAwareOutlineWidth(map, 40)));
-      }
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        rafId = null;
+        if (withHeatRef.current && map.getSource('zcta-outline')) {
+          map.getSource('zcta-outline').setData(createZctaOutlineGeoJSON(withHeatRef.current, getZoomAwareOutlineWidth(map)));
+        }
+        if (boroughWithColorRef.current && map.getSource('borough-source')) {
+          map.getSource('borough-source').setData(createOutlineGeoJSON(boroughWithColorRef.current, getZoomAwareOutlineWidth(map, 40)));
+        }
+      });
     };
     map.on('zoom', onZoom);
     map.on('pitch', onZoom);
-    return () => { map.off('zoom', onZoom); map.off('pitch', onZoom); };
+    return () => { map.off('zoom', onZoom); map.off('pitch', onZoom); if (rafId) cancelAnimationFrame(rafId); };
   }, [mapReady]);
 
   // FIX ADDITIVE STATE: Satellite is additive — does NOT touch heatmap/3D/real3D state.
