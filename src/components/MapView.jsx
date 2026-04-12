@@ -465,23 +465,15 @@ function createZctaOutlineGeoJSON(sourceGeoJSON, widthMeters = 12) {
       const next = pts[(i + 1) % pts.length]; const norm = normals[i];
       return { p0: [p[0] + norm[0] * widthMeters, p[1] + norm[1] * widthMeters], p1: [next[0] + norm[0] * widthMeters, next[1] + norm[1] * widthMeters] };
     });
-    // Miter limit: if the miter spike exceeds 2.5× widthMeters, bevel instead (emit 2 points).
-    // This clips coastal notch/pier spikes that grow huge at zoom-out when widthMeters is large.
-    const MITER_LIMIT = 2.5;
-    const outer = pts.flatMap((_, i) => {
+    // Width is always fixed (never rebuilt on zoom) so vertex count is always stable.
+    // Simple miter join — no bevel needed since the topology never changes mid-animation.
+    const outer = pts.map((_, i) => {
       const prev = outerEdges[(i - 1 + outerEdges.length) % outerEdges.length];
       const curr = outerEdges[i];
       const intersection = lineIntersection(prev.p0, prev.p1, curr.p0, curr.p1);
-      if (intersection) {
-        const dx = intersection[0] - pts[i][0];
-        const dy = intersection[1] - pts[i][1];
-        if (Math.sqrt(dx * dx + dy * dy) > MITER_LIMIT * widthMeters) {
-          return [prev.p1, curr.p0]; // bevel: two clipped points instead of spike
-        }
-        return [intersection];
-      }
+      if (intersection) return intersection;
       const avg = normalize([normals[(i - 1 + normals.length) % normals.length][0] + normals[i][0], normals[(i - 1 + normals.length) % normals.length][1] + normals[i][1]]);
-      return [[pts[i][0] + avg[0] * widthMeters, pts[i][1] + avg[1] * widthMeters]];
+      return [pts[i][0] + avg[0] * widthMeters, pts[i][1] + avg[1] * widthMeters];
     });
     const outerGeo = closeRing(outer).map(coord => metersToLngLat(coord, refLat));
     if (outerGeo.length < 8) return null;
@@ -1091,7 +1083,9 @@ export default function MapView({ events }) {
     // Store so zoom/pitch listener can regenerate outline width without full recompute
     withHeatRef.current = withHeat;
     if (map.getSource('zcta-outline')) {
-      map.getSource('zcta-outline').setData(createZctaOutlineGeoJSON(withHeat, getZoomAwareOutlineWidth(map)));
+      // Fixed 14m width — geometry is static, never rebuilt on zoom. Visual weight
+      // at zoom-out is handled by the fill-extrusion-height zoom expression instead.
+      map.getSource('zcta-outline').setData(createZctaOutlineGeoJSON(withHeat, 14));
     }
 
     const heatColorExpr = [
@@ -1213,7 +1207,10 @@ export default function MapView({ events }) {
       if (threeD) {
         map.setPaintProperty('zcta-outline', 'fill-extrusion-color', upperBorderColorExpr);
         map.setPaintProperty('zcta-outline', 'fill-extrusion-base', heatmap ? extrudeH : flatH);
-        map.setPaintProperty('zcta-outline', 'fill-extrusion-height', ['+', heatmap ? extrudeH : flatH, 18]);
+        // Zoom expression: ring height grows at zoom-out so it stays visually prominent.
+        // At zoom 13+ (close): 18m. At zoom 9 (max out): 120m. Geometry is static — only height changes.
+        const ringH = ['interpolate', ['linear'], ['zoom'], 9, 120, 11, 55, 13, 18];
+        map.setPaintProperty('zcta-outline', 'fill-extrusion-height', ['+', heatmap ? extrudeH : flatH, ringH]);
       } else {
         map.setPaintProperty('zcta-outline', 'fill-extrusion-base', 0);
         map.setPaintProperty('zcta-outline', 'fill-extrusion-height', 0);
@@ -1250,17 +1247,13 @@ export default function MapView({ events }) {
     map.easeTo({ pitch: threeD ? 48 : 0, bearing: threeD ? -17 : 0, duration: 700 });
   }, [threeD, mapReady]);
 
-  // T3 3D PIXELIZATION: re-generate outline ring width on zoom AND pitch so it stays visible.
-  // Uses withHeatRef so it doesn't need to recompute tiers/zip data.
-  // Also regenerates borough-outline width with baseMeters=40.
+  // Borough outline width regenerated on zoom/pitch — borough shapes are simpler and benefit from wider rings at zoom-out.
+  // ZCTA outline geometry is fixed (14m static) — its visual weight scales via fill-extrusion-height zoom expression instead.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
     const onZoom = () => {
       if (!threeDRef.current) return;
-      if (withHeatRef.current && map.getSource('zcta-outline')) {
-        map.getSource('zcta-outline').setData(createZctaOutlineGeoJSON(withHeatRef.current, getZoomAwareOutlineWidth(map)));
-      }
       if (boroughWithColorRef.current && map.getSource('borough-source')) {
         map.getSource('borough-source').setData(createOutlineGeoJSON(boroughWithColorRef.current, getZoomAwareOutlineWidth(map, 40)));
       }
