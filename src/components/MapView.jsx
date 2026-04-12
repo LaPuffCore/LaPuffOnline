@@ -369,22 +369,37 @@ function offsetRing(outerRing, widthMeters) {
     };
   });
 
-  const outer = pts.map((_, i) => {
+  const MITER_LIMIT = 2.5;
+  const outer = pts.flatMap((_, i) => {
     const prev = outerEdges[(i - 1 + outerEdges.length) % outerEdges.length];
     const curr = outerEdges[i];
     const intersection = lineIntersection(prev.p0, prev.p1, curr.p0, curr.p1);
-    if (intersection) return intersection;
+    if (intersection) {
+      const dx = intersection[0] - pts[i][0];
+      const dy = intersection[1] - pts[i][1];
+      if (Math.sqrt(dx * dx + dy * dy) > MITER_LIMIT * halfWidth) {
+        return [prev.p1, curr.p0];
+      }
+      return [intersection];
+    }
     const avg = normalize([normals[(i - 1 + normals.length) % normals.length][0] + normals[i][0], normals[(i - 1 + normals.length) % normals.length][1] + normals[i][1]]);
-    return [pts[i][0] + avg[0] * halfWidth, pts[i][1] + avg[1] * halfWidth];
+    return [[pts[i][0] + avg[0] * halfWidth, pts[i][1] + avg[1] * halfWidth]];
   });
 
-  const inner = pts.map((_, i) => {
+  const inner = pts.flatMap((_, i) => {
     const prev = innerEdges[(i - 1 + innerEdges.length) % innerEdges.length];
     const curr = innerEdges[i];
     const intersection = lineIntersection(prev.p0, prev.p1, curr.p0, curr.p1);
-    if (intersection) return intersection;
+    if (intersection) {
+      const dx = intersection[0] - pts[i][0];
+      const dy = intersection[1] - pts[i][1];
+      if (Math.sqrt(dx * dx + dy * dy) > MITER_LIMIT * halfWidth) {
+        return [prev.p1, curr.p0];
+      }
+      return [intersection];
+    }
     const avg = normalize([normals[(i - 1 + normals.length) % normals.length][0] + normals[i][0], normals[(i - 1 + normals.length) % normals.length][1] + normals[i][1]]);
-    return [pts[i][0] - avg[0] * halfWidth, pts[i][1] - avg[1] * halfWidth];
+    return [[pts[i][0] - avg[0] * halfWidth, pts[i][1] - avg[1] * halfWidth]];
   });
 
   const outerGeo = closeRing(outer).map(coord => metersToLngLat(coord, refLat));
@@ -450,13 +465,23 @@ function createZctaOutlineGeoJSON(sourceGeoJSON, widthMeters = 12) {
       const next = pts[(i + 1) % pts.length]; const norm = normals[i];
       return { p0: [p[0] + norm[0] * widthMeters, p[1] + norm[1] * widthMeters], p1: [next[0] + norm[0] * widthMeters, next[1] + norm[1] * widthMeters] };
     });
-    const outer = pts.map((_, i) => {
+    // Miter limit: if the miter spike exceeds 2.5× widthMeters, bevel instead (emit 2 points).
+    // This clips coastal notch/pier spikes that grow huge at zoom-out when widthMeters is large.
+    const MITER_LIMIT = 2.5;
+    const outer = pts.flatMap((_, i) => {
       const prev = outerEdges[(i - 1 + outerEdges.length) % outerEdges.length];
       const curr = outerEdges[i];
       const intersection = lineIntersection(prev.p0, prev.p1, curr.p0, curr.p1);
-      if (intersection) return intersection;
+      if (intersection) {
+        const dx = intersection[0] - pts[i][0];
+        const dy = intersection[1] - pts[i][1];
+        if (Math.sqrt(dx * dx + dy * dy) > MITER_LIMIT * widthMeters) {
+          return [prev.p1, curr.p0]; // bevel: two clipped points instead of spike
+        }
+        return [intersection];
+      }
       const avg = normalize([normals[(i - 1 + normals.length) % normals.length][0] + normals[i][0], normals[(i - 1 + normals.length) % normals.length][1] + normals[i][1]]);
-      return [pts[i][0] + avg[0] * widthMeters, pts[i][1] + avg[1] * widthMeters];
+      return [[pts[i][0] + avg[0] * widthMeters, pts[i][1] + avg[1] * widthMeters]];
     });
     const outerGeo = closeRing(outer).map(coord => metersToLngLat(coord, refLat));
     if (outerGeo.length < 8) return null;
