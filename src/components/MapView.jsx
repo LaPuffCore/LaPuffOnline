@@ -313,16 +313,16 @@ function normalizeFeatureGeometry(feature) {
 }
 
 // T3 3D PIXELIZATION: Smooth continuous zoom-aware width scaling.
-// Scaling starts at zoom 11 — flat base from zoom 13 to 11.
-// From zoom 11→9: continuous exponential ramp to prevent pixelization.
-// ZCTA (base 14m): 14m flat until zoom 11, then ramps to 40m at zoom 9.
-// Borough (base 24m): 24m flat until zoom 11, then ramps to 167m at zoom 9.
-function getZoomAwareOutlineWidth(map, baseMeters = 14) {
+// Scaling starts at zoom 10.5 — flat base from zoom 13 to 10.5.
+// From zoom 10.5→9: continuous exponential ramp to prevent pixelization.
+// ZCTA (base 10m): 10m flat until zoom 10.5, then ramps to 40m at zoom 9.
+// Borough (base 48m): 48m flat until zoom 10.5, then ramps to 167m at zoom 9.
+function getZoomAwareOutlineWidth(map, baseMeters = 10) {
   if (!map || typeof map.getZoom !== 'function') return baseMeters;
   const zoom = map.getZoom();
-  const t = Math.max(0, 11 - zoom); // 0 at zoom 11+, 2 at zoom 9
-  const targetAt9 = baseMeters === 24 ? 167 : 40;
-  const scale = Math.pow(targetAt9 / baseMeters, 0.5); // per-step factor over 2 zoom steps
+  const t = Math.max(0, 10.5 - zoom); // 0 at zoom 10.5+, 1.5 at zoom 9
+  const targetAt9 = baseMeters === 48 ? 167 : 40;
+  const scale = Math.pow(targetAt9 / baseMeters, 1 / 1.5); // per-step factor over 1.5 zoom steps
   const multiplier = Math.pow(scale, t);
   const pitch = map.getPitch ? map.getPitch() : 0;
   const pitchFactor = 1 + (pitch / 90) * 0.55;
@@ -813,14 +813,19 @@ function computeBoroughAvgTiers(tiers, zipBoroughMap, boroughCount) {
 function buildColoredBoroughFeatures(boroughGeoData, avgTiers, isHeatmap) {
   return {
     ...boroughGeoData,
-    features: boroughGeoData.features.map((f, i) => ({
-      ...f,
-      properties: {
-        ...f.properties,
-        _tier: isHeatmap ? Math.round(avgTiers[i] ?? 0) : 0,
-        _color: isHeatmap ? darkTierColor(avgTiers[i] ?? 0) : OUTLINE_COLOR,
-      },
-    })),
+    features: boroughGeoData.features.map((f, i) => {
+      const roundedTier = Math.round(avgTiers[i] ?? 0);
+      return {
+        ...f,
+        properties: {
+          ...f.properties,
+          _tier: isHeatmap ? roundedTier : 0,
+          // Use rounded tier so _color exactly matches the same HEAT_DARK_COLORS
+          // that ZCTA upper outlines use — no float→threshold discrepancy.
+          _color: isHeatmap ? darkTierColor(roundedTier) : OUTLINE_COLOR,
+        },
+      };
+    }),
   };
 }
 
@@ -1370,7 +1375,7 @@ export default function MapView({ events }) {
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-color', withHoverColor(extrudeColorExpr));
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-height', extrudeH);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-base', 0);
-        map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', satellite ? 0.88 : 0.92);
+        map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', satellite ? 0.85 : 0.72);
 
         // Cap: flat slab 1m above block top — glows purple on hover, aligns with zcta-outline boundary
         map.setPaintProperty('zcta-cap', 'fill-extrusion-height', extrudeHCap);
@@ -1471,15 +1476,13 @@ export default function MapView({ events }) {
         const coloredBorough = buildColoredBoroughFeatures(boroughGeoDataRef.current, avgTiers, heatmap);
         boroughWithColorRef.current = coloredBorough;
         map.getSource('borough-source').setData(
-          createOutlineGeoJSON(coloredBorough, getZoomAwareOutlineWidth(map, 24))
+          createOutlineGeoJSON(coloredBorough, getZoomAwareOutlineWidth(map, 48))
         );
-        // Same dark color step expression as ZCTA upper outline — ensures identical color system
-        const boroughColorExpr = heatmap ? [
-          'step', ['get', '_tier'], HEAT_DARK_COLORS.cold, 1, HEAT_DARK_COLORS.cool, 2, HEAT_DARK_COLORS.warm, 3, HEAT_DARK_COLORS.orange, 4, HEAT_DARK_COLORS.hot,
-        ] : OUTLINE_COLOR;
-        map.setPaintProperty('borough-outline', 'fill-extrusion-color', boroughColorExpr);
-        // T3: zoom-interpolated opacity on borough-outline — same anti-pixelation treatment
-        const boroughOpacity = ['interpolate', ['linear'], ['zoom'], 9, 0.70, 13, 0.92];
+        // Borough color: read baked _color from features — guaranteed to be the exact
+        // same HEAT_DARK_COLORS hex value as ZCTA upper outlines (via rounded tier).
+        map.setPaintProperty('borough-outline', 'fill-extrusion-color', ['coalesce', ['get', '_color'], OUTLINE_COLOR]);
+        // T3: zoom-interpolated opacity on borough-outline — matches ZCTA outline opacity
+        const boroughOpacity = ['interpolate', ['linear'], ['zoom'], 9, 0.70, 13, 0.98];
         map.setPaintProperty('borough-outline', 'fill-extrusion-opacity', boroughOpacity);
       } else {
         map.setPaintProperty('borough-outline', 'fill-extrusion-opacity', 0);
@@ -1525,10 +1528,10 @@ export default function MapView({ events }) {
           if (boroughSkeletonRef.current && boroughWithColorRef.current) {
             const overrides = boroughWithColorRef.current.features.map(f => f.properties);
             map.getSource('borough-source').setData(
-              generateBoroughQuadsFromSkeleton(boroughSkeletonRef.current, getZoomAwareOutlineWidth(map, 24), overrides)
+              generateBoroughQuadsFromSkeleton(boroughSkeletonRef.current, getZoomAwareOutlineWidth(map, 48), overrides)
             );
           } else if (boroughWithColorRef.current) {
-            map.getSource('borough-source').setData(createOutlineGeoJSON(boroughWithColorRef.current, getZoomAwareOutlineWidth(map, 24)));
+            map.getSource('borough-source').setData(createOutlineGeoJSON(boroughWithColorRef.current, getZoomAwareOutlineWidth(map, 48)));
           }
         }
       });
