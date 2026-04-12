@@ -217,43 +217,6 @@ function isNearlyCollinear(a, b, c) {
   return Math.abs(cross) < 1e-12;
 }
 
-// Ramer-Douglas-Peucker simplification for pre-processing borough outer rings only.
-// Removes pier/jetty protrusions (tolerance ~0.003° ≈ 333m) before offsetRing.
-// Manhattan west-side piers extend 100-300m into Hudson — needs aggressive threshold.
-// NEVER applied to ZCTA zip data — zip accuracy must be preserved exactly.
-function rdpSimplify(points, tolerance) {
-  if (points.length < 3) return points;
-  const perpendicularDist = (pt, lineStart, lineEnd) => {
-    const dx = lineEnd[0] - lineStart[0];
-    const dy = lineEnd[1] - lineStart[1];
-    const lenSq = dx * dx + dy * dy;
-    if (lenSq === 0) {
-      const ex = pt[0] - lineStart[0]; const ey = pt[1] - lineStart[1];
-      return Math.sqrt(ex * ex + ey * ey);
-    }
-    const t = Math.max(0, Math.min(1, ((pt[0] - lineStart[0]) * dx + (pt[1] - lineStart[1]) * dy) / lenSq));
-    const px = lineStart[0] + t * dx - pt[0]; const py = lineStart[1] + t * dy - pt[1];
-    return Math.sqrt(px * px + py * py);
-  };
-  const rdp = (pts, start, end, tol, keep) => {
-    if (end <= start + 1) return;
-    let maxDist = 0; let maxIdx = start;
-    for (let i = start + 1; i < end; i++) {
-      const d = perpendicularDist(pts[i], pts[start], pts[end]);
-      if (d > maxDist) { maxDist = d; maxIdx = i; }
-    }
-    if (maxDist > tol) {
-      keep[maxIdx] = true;
-      rdp(pts, start, maxIdx, tol, keep);
-      rdp(pts, maxIdx, end, tol, keep);
-    }
-  };
-  const keep = new Array(points.length).fill(false);
-  keep[0] = true; keep[points.length - 1] = true;
-  rdp(points, 0, points.length - 1, tolerance, keep);
-  return points.filter((_, i) => keep[i]);
-}
-
 function simplifyRing(ring) {
   if (ring.length < 4) return ring;
   const simplified = [ring[0]];
@@ -432,12 +395,43 @@ function offsetRing(outerRing, widthMeters) {
   return [outerGeo, innerGeo];
 }
 
-// simplifyInputTolerance: degrees tolerance for RDP pre-simplification of the outer ring.
-// Pass 0.003 (~333m) for borough outlines — strips Hudson/East River pier geometry.
-// Manhattan west-side piers extend 100-300m; 0.003° aggressively removes them before offsetRing.
-// ALWAYS pass 0 (default) for ZCTA zip outlines — zip accuracy must be preserved.
-function createOutlineGeoJSON(sourceGeoJSON, widthMeters = 12, minAreaSq = 0, simplifyInputTolerance = 0) {
-  const maybeSimplify = (ring) => simplifyInputTolerance > 0 ? rdpSimplify(ring, simplifyInputTolerance) : ring;
+// Extract inner rings from an outline GeoJSON (annular ring polygons) as standalone fill polygons.
+// Each annular ring has coordinates[0]=outerRing and coordinates[1]=innerRing(hole).
+// The inner ring, reversed to CCW winding, defines the "inside" face of the upper 3D border.
+// This is used as the zcta-cap source — giving the cap the shape of the inner boundary of
+// the upper 3D outline extrusion, NOT the zip block's own top face.
+function createCapGeoJSON(outlineGeoJSON) {
+  return {
+    type: 'FeatureCollection',
+    features: outlineGeoJSON.features.map(feature => {
+      const geom = feature.geometry;
+      if (geom.type === 'Polygon') {
+        if (geom.coordinates.length < 2) return null;
+        // coordinates[1] = inner ring (CW hole) — reverse to CCW for outer ring
+        const innerRing = geom.coordinates[1].slice().reverse();
+        if (innerRing.length < 4) return null;
+        return { ...feature, geometry: { type: 'Polygon', coordinates: [innerRing] } };
+      }
+      if (geom.type === 'MultiPolygon') {
+        const polys = geom.coordinates
+          .filter(p => p.length >= 2)
+          .map(p => {
+            const innerRing = p[1].slice().reverse();
+            return innerRing.length >= 4 ? [innerRing] : null;
+          })
+          .filter(Boolean);
+        if (polys.length === 0) return null;
+        return { ...feature, geometry: { type: 'MultiPolygon', coordinates: polys } };
+      }
+      return null;
+    }).filter(Boolean),
+  };
+}
+
+// simplifyInputTolerance param removed — no geometry simplification allowed in this project.
+// Borough outlines pass minAreaSq=0.003 to filter floating sub-polygon islands only.
+// ZCTA zip outlines always pass minAreaSq=0 (no filter, no simplification).
+function createOutlineGeoJSON(sourceGeoJSON, widthMeters = 12, minAreaSq = 0) {
   return {
     type: 'FeatureCollection',
     features: sourceGeoJSON.features.map(feature => {
@@ -445,8 +439,7 @@ function createOutlineGeoJSON(sourceGeoJSON, widthMeters = 12, minAreaSq = 0, si
       if (!normalizedGeom) return null;
       if (normalizedGeom.type === 'Polygon') {
         if (minAreaSq > 0 && Math.abs(signedArea(normalizedGeom.coordinates[0])) < minAreaSq) return null;
-        const inputRing = maybeSimplify(normalizedGeom.coordinates[0]);
-        const outline = offsetRing(inputRing, widthMeters);
+        const outline = offsetRing(normalizedGeom.coordinates[0], widthMeters);
         if (!outline) return null;
         return { ...feature, geometry: { type: 'Polygon', coordinates: outline } };
       }
@@ -454,8 +447,7 @@ function createOutlineGeoJSON(sourceGeoJSON, widthMeters = 12, minAreaSq = 0, si
         const polygons = [];
         normalizedGeom.coordinates.forEach(polygon => {
           if (minAreaSq > 0 && Math.abs(signedArea(polygon[0])) < minAreaSq) return;
-          const inputRing = maybeSimplify(polygon[0]);
-          const outline = offsetRing(inputRing, widthMeters);
+          const outline = offsetRing(polygon[0], widthMeters);
           if (outline) polygons.push(outline);
         });
         if (polygons.length === 0) return null;
@@ -880,12 +872,12 @@ export default function MapView({ events }) {
       paint: { 'fill-color': '#7C3AED', 'fill-opacity': ['case', ['boolean', ['feature-state', 'hovered'], false], 0.5, 0] },
     });
 
-    // Cap — invisible flat slab sitting 1m above the zip block top surface.
-    // In 3D mode: glows purple on hover (same feature-state), aligning the hover glow
-    // precisely with the zcta-outline annular ring boundary. Both effects fire together.
-    // Heights are set dynamically in the heatmap update effect to match zcta-extrude.
+    // Cap — invisible flat slab shaped like the INNER ring of the zcta-outline annular ring.
+    // NOT the zip block top face — slightly inset, matching the inner boundary of the upper 3D border.
+    // In 3D mode: glows purple on hover, visually bridging the gap between the border extrusion
+    // and the underlying zip block extrusion. Heights set dynamically to match zcta-extrude.
     map.addLayer({
-      id: 'zcta-cap', type: 'fill-extrusion', source: 'zcta',
+      id: 'zcta-cap', type: 'fill-extrusion', source: 'zcta-cap-source',
       paint: {
         'fill-extrusion-color': '#9F67FF',
         'fill-extrusion-height': 1,
@@ -920,6 +912,9 @@ export default function MapView({ events }) {
     });
 
     map.addSource('zcta-outline', { type: 'geojson', data: { type: 'FeatureCollection', features: [] }, generateId: false });
+    // Cap source: inner-ring polygons of the zcta-outline annular rings.
+    // Shape = the inward face of the upper 3D border, NOT the zip block top face.
+    map.addSource('zcta-cap-source', { type: 'geojson', data: { type: 'FeatureCollection', features: [] }, generateId: false });
     map.addLayer({
       id: 'zcta-outline', type: 'fill-extrusion', source: 'zcta-outline',
       paint: {
@@ -960,10 +955,13 @@ export default function MapView({ events }) {
     const handleZctaHover = e => {
       if (!e.features.length) return;
       const f = e.features[0];
-      if (hoveredIdRef.current !== null && hoveredIdRef.current !== f.id)
+      if (hoveredIdRef.current !== null && hoveredIdRef.current !== f.id) {
         map.setFeatureState({ source: 'zcta', id: hoveredIdRef.current }, { hovered: false });
+        if (map.getSource('zcta-cap-source')) map.setFeatureState({ source: 'zcta-cap-source', id: hoveredIdRef.current }, { hovered: false });
+      }
       hoveredIdRef.current = f.id;
       map.setFeatureState({ source: 'zcta', id: f.id }, { hovered: true });
+      if (map.getSource('zcta-cap-source')) map.setFeatureState({ source: 'zcta-cap-source', id: f.id }, { hovered: true });
       map.getCanvas().style.cursor = 'pointer';
       setHoveredZip(String(f.properties.MODZCTA || ''));
       setTooltipPos({ x: e.point.x, y: e.point.y });
@@ -972,6 +970,7 @@ export default function MapView({ events }) {
     const handleZctaLeave = () => {
       if (hoveredIdRef.current !== null) {
         map.setFeatureState({ source: 'zcta', id: hoveredIdRef.current }, { hovered: false });
+        if (map.getSource('zcta-cap-source')) map.setFeatureState({ source: 'zcta-cap-source', id: hoveredIdRef.current }, { hovered: false });
         hoveredIdRef.current = null;
       }
       map.getCanvas().style.cursor = '';
@@ -1057,7 +1056,11 @@ export default function MapView({ events }) {
     if (map.getSource('zcta')) map.getSource('zcta').setData(withHeat);
     // FIX REAL3D: store so zoom listener can regenerate outline width without full recompute
     withHeatRef.current = withHeat;
-    if (map.getSource('zcta-outline')) map.getSource('zcta-outline').setData(createOutlineGeoJSON(withHeat, getZoomAwareOutlineWidth(map)));
+    if (map.getSource('zcta-outline')) {
+      const outlineData = createOutlineGeoJSON(withHeat, getZoomAwareOutlineWidth(map));
+      map.getSource('zcta-outline').setData(outlineData);
+      if (map.getSource('zcta-cap-source')) map.getSource('zcta-cap-source').setData(createCapGeoJSON(outlineData));
+    }
 
     const heatColorExpr = [
       'case', ['boolean', ['get', '_special'], false], '#ffffff',
@@ -1197,7 +1200,7 @@ export default function MapView({ events }) {
         const coloredBorough = buildColoredBoroughFeatures(boroughGeoDataRef.current, avgTiers, heatmap);
         boroughWithColorRef.current = coloredBorough;
         map.getSource('borough-source').setData(
-          createOutlineGeoJSON(coloredBorough, getZoomAwareOutlineWidth(map, 40), 0.003, 0.003)
+          createOutlineGeoJSON(coloredBorough, getZoomAwareOutlineWidth(map, 40), 0.003)
         );
         // T3: zoom-interpolated opacity on borough-outline — same anti-pixelation treatment
         const boroughOpacity = ['interpolate', ['linear'], ['zoom'], 9, 0.70, 13, 0.92];
@@ -1225,10 +1228,12 @@ export default function MapView({ events }) {
     const onZoom = () => {
       if (!threeDRef.current) return;
       if (withHeatRef.current && map.getSource('zcta-outline')) {
-        map.getSource('zcta-outline').setData(createOutlineGeoJSON(withHeatRef.current, getZoomAwareOutlineWidth(map)));
+        const outlineData = createOutlineGeoJSON(withHeatRef.current, getZoomAwareOutlineWidth(map));
+        map.getSource('zcta-outline').setData(outlineData);
+        if (map.getSource('zcta-cap-source')) map.getSource('zcta-cap-source').setData(createCapGeoJSON(outlineData));
       }
       if (boroughWithColorRef.current && map.getSource('borough-source')) {
-        map.getSource('borough-source').setData(createOutlineGeoJSON(boroughWithColorRef.current, getZoomAwareOutlineWidth(map, 40), 0.003, 0.003));
+        map.getSource('borough-source').setData(createOutlineGeoJSON(boroughWithColorRef.current, getZoomAwareOutlineWidth(map, 40), 0.003));
       }
     };
     map.on('zoom', onZoom);
