@@ -315,15 +315,16 @@ function normalizeFeatureGeometry(feature) {
 // T3 3D PIXELIZATION: Smooth continuous zoom-aware width scaling.
 // Shared multiplier so ZCTA outline (base 14m) and borough outline (base 40m)
 // scale at the same proportional rate — visually synced at every zoom level.
-// Continuous exponential ramp: no hard breakpoints, no jumpiness.
-// zoom 13+ = 1× (base only) | 12 ≈ 1.4× | 11 ≈ 2× | 10 ≈ 3.5× | 9 ≈ 6.5× | 7 ≈ 13×
-// pitchFactor boosts width at tilt — compensates horizontal compression.
+// Continuous exponential ramp: handles fractional zoom ticks naturally (no jumps).
+// zoom 13+ = base | 12 ≈ 1.52× | 11 ≈ 2.30× | 10 ≈ 3.49× | 9 ≈ 5.29× (= 74m for base 14)
+// t = 13 - zoom is a continuous float (e.g., 11.37 → t = 1.63), so Math.pow handles
+// half-ticks and all fractional zoom increments with zero jumpiness.
+const OUTLINE_SCALE = Math.pow(74 / 14, 0.25); // ≈1.516 — multiplier per zoom step
 function getZoomAwareOutlineWidth(map, baseMeters = 14) {
   if (!map || typeof map.getZoom !== 'function') return baseMeters;
   const zoom = map.getZoom();
-  const t = Math.max(0, 13 - zoom);  // 0 at zoom 13+, 4 at zoom 9, 6 at zoom 7
-  // Smooth exponential: multiplier = 1.65^t → continuous curve, no step jumps.
-  const multiplier = Math.pow(1.65, t);
+  const t = Math.max(0, 13 - zoom); // continuous float: 0 at zoom 13+, 4 at zoom 9
+  const multiplier = Math.pow(OUTLINE_SCALE, t);
   const pitch = map.getPitch ? map.getPitch() : 0;
   const pitchFactor = 1 + (pitch / 90) * 0.55;
   return baseMeters * multiplier * pitchFactor;
@@ -1054,7 +1055,7 @@ export default function MapView({ events }) {
     });
 
     // Borough outline — fill-extrusion annular rings at 22m height (below cold tier 30m).
-    // Base outline width uses baseMeters=40 so outer perimeter is prominent.
+    // Base outline width uses baseMeters=24 so outer perimeter is prominent.
     // Only visible at the outer NYC perimeter; zip blocks occlude internal borough borders.
     // Color is data-driven via _color property set on each feature before source update.
     if (!map.getSource('borough-source')) {
@@ -1311,7 +1312,7 @@ export default function MapView({ events }) {
         const coloredBorough = buildColoredBoroughFeatures(boroughGeoDataRef.current, avgTiers, heatmap);
         boroughWithColorRef.current = coloredBorough;
         map.getSource('borough-source').setData(
-          createOutlineGeoJSON(coloredBorough, getZoomAwareOutlineWidth(map, 40))
+          createOutlineGeoJSON(coloredBorough, getZoomAwareOutlineWidth(map, 24))
         );
         // T3: zoom-interpolated opacity on borough-outline — same anti-pixelation treatment
         const boroughOpacity = ['interpolate', ['linear'], ['zoom'], 9, 0.70, 13, 0.92];
@@ -1347,7 +1348,7 @@ export default function MapView({ events }) {
           map.getSource('zcta-outline').setData(createZctaOutlineGeoJSON(withHeatRef.current, getZoomAwareOutlineWidth(map)));
         }
         if (boroughWithColorRef.current && map.getSource('borough-source')) {
-          map.getSource('borough-source').setData(createOutlineGeoJSON(boroughWithColorRef.current, getZoomAwareOutlineWidth(map, 40)));
+          map.getSource('borough-source').setData(createOutlineGeoJSON(boroughWithColorRef.current, getZoomAwareOutlineWidth(map, 24)));
         }
       });
     };
