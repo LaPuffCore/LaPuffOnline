@@ -1440,9 +1440,9 @@ export default function MapView({ events }) {
 
     if (heatmap) {
       map.setPaintProperty('zcta-fill', 'fill-color', heatColorExpr);
-      // FIX ADDITIVE STATE: heatmap fill — opaque when 3D (masks heat-underlay beneath zip polygons),
+      // FIX ADDITIVE STATE: heatmap fill — 0 when 3D is on (extrusion takes over),
       // semi-transparent when satellite on, solid otherwise.
-      map.setPaintProperty('zcta-fill', 'fill-opacity', threeD ? 1.0 : (satellite ? 0.5 : 0.9));
+      map.setPaintProperty('zcta-fill', 'fill-opacity', threeD ? 0 : (satellite ? 0.74 : 0.74));
 
       if (threeD) {
         map.setPaintProperty('zcta-safe-line', 'line-opacity', 0);
