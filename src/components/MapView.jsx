@@ -370,36 +370,40 @@ function offsetRing(outerRing, widthMeters) {
   });
 
   const MITER_LIMIT = 2.5;
-  const outer = pts.flatMap((_, i) => {
+  // map() not flatMap() — vertex count must be invariant (always pts.length) so earcut
+  // produces the same triangulation topology at every zoom level. Clamped miter join:
+  // if spike distance > MITER_LIMIT × halfWidth, clamp to that distance in avg-normal
+  // direction (still 1 vertex per corner, no extra point emitted).
+  const outer = pts.map((_, i) => {
     const prev = outerEdges[(i - 1 + outerEdges.length) % outerEdges.length];
     const curr = outerEdges[i];
+    const avg = normalize([normals[(i - 1 + normals.length) % normals.length][0] + normals[i][0], normals[(i - 1 + normals.length) % normals.length][1] + normals[i][1]]);
     const intersection = lineIntersection(prev.p0, prev.p1, curr.p0, curr.p1);
     if (intersection) {
       const dx = intersection[0] - pts[i][0];
       const dy = intersection[1] - pts[i][1];
       if (Math.sqrt(dx * dx + dy * dy) > MITER_LIMIT * halfWidth) {
-        return [prev.p1, curr.p0];
+        return [pts[i][0] + avg[0] * MITER_LIMIT * halfWidth, pts[i][1] + avg[1] * MITER_LIMIT * halfWidth];
       }
-      return [intersection];
+      return intersection;
     }
-    const avg = normalize([normals[(i - 1 + normals.length) % normals.length][0] + normals[i][0], normals[(i - 1 + normals.length) % normals.length][1] + normals[i][1]]);
-    return [[pts[i][0] + avg[0] * halfWidth, pts[i][1] + avg[1] * halfWidth]];
+    return [pts[i][0] + avg[0] * halfWidth, pts[i][1] + avg[1] * halfWidth];
   });
 
-  const inner = pts.flatMap((_, i) => {
+  const inner = pts.map((_, i) => {
     const prev = innerEdges[(i - 1 + innerEdges.length) % innerEdges.length];
     const curr = innerEdges[i];
+    const avg = normalize([normals[(i - 1 + normals.length) % normals.length][0] + normals[i][0], normals[(i - 1 + normals.length) % normals.length][1] + normals[i][1]]);
     const intersection = lineIntersection(prev.p0, prev.p1, curr.p0, curr.p1);
     if (intersection) {
       const dx = intersection[0] - pts[i][0];
       const dy = intersection[1] - pts[i][1];
       if (Math.sqrt(dx * dx + dy * dy) > MITER_LIMIT * halfWidth) {
-        return [prev.p1, curr.p0];
+        return [pts[i][0] - avg[0] * MITER_LIMIT * halfWidth, pts[i][1] - avg[1] * MITER_LIMIT * halfWidth];
       }
-      return [intersection];
+      return intersection;
     }
-    const avg = normalize([normals[(i - 1 + normals.length) % normals.length][0] + normals[i][0], normals[(i - 1 + normals.length) % normals.length][1] + normals[i][1]]);
-    return [[pts[i][0] - avg[0] * halfWidth, pts[i][1] - avg[1] * halfWidth]];
+    return [pts[i][0] - avg[0] * halfWidth, pts[i][1] - avg[1] * halfWidth];
   });
 
   const outerGeo = closeRing(outer).map(coord => metersToLngLat(coord, refLat));
@@ -465,14 +469,22 @@ function createZctaOutlineGeoJSON(sourceGeoJSON, widthMeters = 12) {
       const next = pts[(i + 1) % pts.length]; const norm = normals[i];
       return { p0: [p[0] + norm[0] * widthMeters, p[1] + norm[1] * widthMeters], p1: [next[0] + norm[0] * widthMeters, next[1] + norm[1] * widthMeters] };
     });
-    // Width is always fixed (never rebuilt on zoom) so vertex count is always stable.
-    // Simple miter join — no bevel needed since the topology never changes mid-animation.
+    // map() not flatMap() — 1 vertex per corner, vertex count = pts.length always.
+    // Clamped miter: if spike > MITER_LIMIT × widthMeters, clamp to that length.
+    const MITER_LIMIT = 2.5;
     const outer = pts.map((_, i) => {
       const prev = outerEdges[(i - 1 + outerEdges.length) % outerEdges.length];
       const curr = outerEdges[i];
-      const intersection = lineIntersection(prev.p0, prev.p1, curr.p0, curr.p1);
-      if (intersection) return intersection;
       const avg = normalize([normals[(i - 1 + normals.length) % normals.length][0] + normals[i][0], normals[(i - 1 + normals.length) % normals.length][1] + normals[i][1]]);
+      const intersection = lineIntersection(prev.p0, prev.p1, curr.p0, curr.p1);
+      if (intersection) {
+        const dx = intersection[0] - pts[i][0];
+        const dy = intersection[1] - pts[i][1];
+        if (Math.sqrt(dx * dx + dy * dy) > MITER_LIMIT * widthMeters) {
+          return [pts[i][0] + avg[0] * MITER_LIMIT * widthMeters, pts[i][1] + avg[1] * MITER_LIMIT * widthMeters];
+        }
+        return intersection;
+      }
       return [pts[i][0] + avg[0] * widthMeters, pts[i][1] + avg[1] * widthMeters];
     });
     const outerGeo = closeRing(outer).map(coord => metersToLngLat(coord, refLat));
@@ -1083,9 +1095,7 @@ export default function MapView({ events }) {
     // Store so zoom/pitch listener can regenerate outline width without full recompute
     withHeatRef.current = withHeat;
     if (map.getSource('zcta-outline')) {
-      // Fixed 14m width — geometry is static, never rebuilt on zoom. Visual weight
-      // at zoom-out is handled by the fill-extrusion-height zoom expression instead.
-      map.getSource('zcta-outline').setData(createZctaOutlineGeoJSON(withHeat, 14));
+      map.getSource('zcta-outline').setData(createZctaOutlineGeoJSON(withHeat, getZoomAwareOutlineWidth(map)));
     }
 
     const heatColorExpr = [
@@ -1247,13 +1257,17 @@ export default function MapView({ events }) {
     map.easeTo({ pitch: threeD ? 48 : 0, bearing: threeD ? -17 : 0, duration: 700 });
   }, [threeD, mapReady]);
 
-  // Borough outline width regenerated on zoom/pitch — borough shapes are simpler and benefit from wider rings at zoom-out.
-  // ZCTA outline geometry is fixed (14m static) — its visual weight scales via fill-extrusion-height zoom expression instead.
+  // ZCTA and borough outline widths regenerated on zoom/pitch.
+  // Miter-clamped map() join (1 vertex per corner, invariant count) means zoom width changes
+  // never cause earcut topology jumps — shapes stay identical, only outer ring scales outward.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
     const onZoom = () => {
       if (!threeDRef.current) return;
+      if (withHeatRef.current && map.getSource('zcta-outline')) {
+        map.getSource('zcta-outline').setData(createZctaOutlineGeoJSON(withHeatRef.current, getZoomAwareOutlineWidth(map)));
+      }
       if (boroughWithColorRef.current && map.getSource('borough-source')) {
         map.getSource('borough-source').setData(createOutlineGeoJSON(boroughWithColorRef.current, getZoomAwareOutlineWidth(map, 40)));
       }
