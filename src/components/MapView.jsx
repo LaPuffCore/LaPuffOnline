@@ -315,9 +315,9 @@ function normalizeFeatureGeometry(feature) {
 // T3 3D PIXELIZATION: Smooth continuous zoom-aware width scaling.
 // Scaling starts at zoom 10.5 — flat base from zoom 13 to 10.5.
 // From zoom 10.5→9: continuous exponential ramp to prevent pixelization.
-// ZCTA (base 10m): 10m flat until zoom 10.5, then ramps to 40m at zoom 9.
+// ZCTA (base 12m): 12m flat until zoom 10.5, then ramps to 40m at zoom 9.
 // Borough (base 48m): 48m flat until zoom 10.5, then ramps to 167m at zoom 9.
-function getZoomAwareOutlineWidth(map, baseMeters = 10) {
+function getZoomAwareOutlineWidth(map, baseMeters = 12) {
   if (!map || typeof map.getZoom !== 'function') return baseMeters;
   const zoom = map.getZoom();
   const t = Math.max(0, 10.5 - zoom); // 0 at zoom 10.5+, 1.5 at zoom 9
@@ -797,6 +797,9 @@ function computeZipBoroughMap(zctaFeatures, boroughFeatures) {
 }
 
 // Compute average tier per borough (rounded). Returns array indexed by borough feature index.
+// Compute borough heat as relative ranking — boroughs are ranked against each other
+// so the full color range is always expressed. Highest avg heat → tier 4 (hot/red),
+// lowest → tier 0 (cold). This ensures visual differentiation between boroughs.
 function computeBoroughAvgTiers(tiers, zipBoroughMap, boroughCount) {
   const sums = new Array(boroughCount).fill(0);
   const counts = new Array(boroughCount).fill(0);
@@ -804,25 +807,33 @@ function computeBoroughAvgTiers(tiers, zipBoroughMap, boroughCount) {
     const tier = tiers[parseInt(idx)];
     if (tier >= 0) { sums[bi] += tier; counts[bi]++; }
   });
-  return sums.map((s, i) => counts[i] > 0 ? Math.round(s / counts[i]) : 0);
+  const avgs = sums.map((s, i) => counts[i] > 0 ? s / counts[i] : 0);
+  // Rank boroughs by their average heat, assign tiers 0–4 based on relative position
+  const indexed = avgs.map((avg, i) => ({ avg, i }));
+  indexed.sort((a, b) => a.avg - b.avg); // ascending: lowest first
+  const ranked = new Array(boroughCount).fill(0);
+  // Map sorted position → tier. 5 boroughs → positions 0,1,2,3,4 → tiers 0,1,2,3,4
+  const tierCount = 5; // cold=0, cool=1, warm=2, orange=3, hot=4
+  for (let pos = 0; pos < indexed.length; pos++) {
+    const tierForPos = Math.min(Math.round(pos * (tierCount - 1) / Math.max(indexed.length - 1, 1)), tierCount - 1);
+    ranked[indexed[pos].i] = tierForPos;
+  }
+  return ranked;
 }
 
-// Inject a _tier property onto each borough feature based on heatmap state + avg tier.
-// Uses _tier (not _color) so the borough-outline layer can use the same data-driven
-// step expression as the ZCTA upper outline — ensuring identical color system.
+// Inject _tier and _color onto each borough feature. avgTiers are already integer
+// tiers from relative ranking — directly map to HEAT_DARK_COLORS for exact color match.
 function buildColoredBoroughFeatures(boroughGeoData, avgTiers, isHeatmap) {
   return {
     ...boroughGeoData,
     features: boroughGeoData.features.map((f, i) => {
-      const roundedTier = Math.round(avgTiers[i] ?? 0);
+      const tier = avgTiers[i] ?? 0;
       return {
         ...f,
         properties: {
           ...f.properties,
-          _tier: isHeatmap ? roundedTier : 0,
-          // Use rounded tier so _color exactly matches the same HEAT_DARK_COLORS
-          // that ZCTA upper outlines use — no float→threshold discrepancy.
-          _color: isHeatmap ? darkTierColor(roundedTier) : OUTLINE_COLOR,
+          _tier: isHeatmap ? tier : 0,
+          _color: isHeatmap ? darkTierColor(tier) : OUTLINE_COLOR,
         },
       };
     }),
@@ -1150,6 +1161,20 @@ export default function MapView({ events }) {
       },
     });
 
+    // Floor — thin slab inside each 3D block, visible only when camera enters the block.
+    // Same color as the block but half opacity. Height 1m (base 0) avoids z-fighting.
+    // Occluded by zcta-extrude walls when viewed from outside.
+    map.addLayer({
+      id: 'zcta-floor', type: 'fill-extrusion', source: 'zcta',
+      paint: {
+        'fill-extrusion-color': ['case', ['boolean', ['get', '_special'], false], '#222222', '#1a0505'],
+        'fill-extrusion-height': 1,
+        'fill-extrusion-base': 0,
+        'fill-extrusion-opacity': 0,
+        'fill-extrusion-vertical-gradient': false,
+      },
+    });
+
     // Flat fill — slightly transparent dark red to differentiate regions from bg without solid fill
     map.addLayer({
       id: 'zcta-fill', type: 'fill', source: 'zcta',
@@ -1375,7 +1400,13 @@ export default function MapView({ events }) {
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-color', withHoverColor(extrudeColorExpr));
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-height', extrudeH);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-base', 0);
-        map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', satellite ? 0.85 : 0.72);
+        map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', 0.58);
+
+        // Floor: inside-block slab, same color at half opacity — visible when camera enters block
+        map.setPaintProperty('zcta-floor', 'fill-extrusion-color', withHoverColor(extrudeColorExpr));
+        map.setPaintProperty('zcta-floor', 'fill-extrusion-height', 1);
+        map.setPaintProperty('zcta-floor', 'fill-extrusion-base', 0);
+        map.setPaintProperty('zcta-floor', 'fill-extrusion-opacity', 0.29);
 
         // Cap: flat slab 1m above block top — glows purple on hover, aligns with zcta-outline boundary
         map.setPaintProperty('zcta-cap', 'fill-extrusion-height', extrudeHCap);
@@ -1392,6 +1423,8 @@ export default function MapView({ events }) {
           ['case', ['boolean', ['get', '_special'], false], '#222222', '#1a0505']);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-height', 0);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', 0);
+        // Floor disabled in heatmap 2D
+        map.setPaintProperty('zcta-floor', 'fill-extrusion-opacity', 0);
         // Cap disabled in 2D
         map.setPaintProperty('zcta-cap', 'fill-extrusion-height', 1);
         map.setPaintProperty('zcta-cap', 'fill-extrusion-base', 0);
@@ -1414,7 +1447,13 @@ export default function MapView({ events }) {
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-color', withHoverColor(flatColorExpr));
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-height', flatH);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-base', 0);
-        map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', satellite ? 0.85 : 0.72);
+        map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', 0.58);
+
+        // Floor: inside-block slab, same color at half opacity — visible when camera enters block
+        map.setPaintProperty('zcta-floor', 'fill-extrusion-color', withHoverColor(flatColorExpr));
+        map.setPaintProperty('zcta-floor', 'fill-extrusion-height', 1);
+        map.setPaintProperty('zcta-floor', 'fill-extrusion-base', 0);
+        map.setPaintProperty('zcta-floor', 'fill-extrusion-opacity', 0.29);
 
         // Cap: flat slab 1m above block top — glows purple on hover, aligns with zcta-outline boundary
         map.setPaintProperty('zcta-cap', 'fill-extrusion-height', flatHCap);
@@ -1431,6 +1470,8 @@ export default function MapView({ events }) {
           ['case', ['boolean', ['get', '_special'], false], '#222222', '#1a0505']);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-height', 0);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', 0);
+        // Floor disabled in non-heatmap 2D
+        map.setPaintProperty('zcta-floor', 'fill-extrusion-opacity', 0);
         // Cap disabled in 2D
         map.setPaintProperty('zcta-cap', 'fill-extrusion-height', 1);
         map.setPaintProperty('zcta-cap', 'fill-extrusion-base', 0);
@@ -1481,9 +1522,9 @@ export default function MapView({ events }) {
         // Borough color: read baked _color from features — guaranteed to be the exact
         // same HEAT_DARK_COLORS hex value as ZCTA upper outlines (via rounded tier).
         map.setPaintProperty('borough-outline', 'fill-extrusion-color', ['coalesce', ['get', '_color'], OUTLINE_COLOR]);
-        // T3: zoom-interpolated opacity on borough-outline — matches ZCTA outline opacity
-        const boroughOpacity = ['interpolate', ['linear'], ['zoom'], 9, 0.70, 13, 0.98];
-        map.setPaintProperty('borough-outline', 'fill-extrusion-opacity', boroughOpacity);
+        // Solid opacity at all zoom levels — no interpolation so borough color
+        // exactly matches upper 3D outline dark contrast colors without any fade.
+        map.setPaintProperty('borough-outline', 'fill-extrusion-opacity', 1.0);
       } else {
         map.setPaintProperty('borough-outline', 'fill-extrusion-opacity', 0);
         boroughWithColorRef.current = null;
