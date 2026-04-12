@@ -1921,7 +1921,7 @@ export default function MapView({ events }) {
                   </button>
                   {heatmap && (
                     <button onClick={() => setTopoOn(v => !v)}
-                      className={`w-10 h-10 rounded-2xl border-2 p-0 bg-black/60 flex items-center justify-center ${topoOn ? 'ring-2 ring-yellow-300' : 'opacity-50'}`}
+                      className={`w-10 h-10 rounded-2xl border-2 p-0 flex items-center justify-center transition-all ${topoOn ? 'ring-2 ring-yellow-300 bg-gradient-to-r from-cyan-500 via-yellow-400 to-red-500 border-yellow-300 text-white' : 'bg-black/70 border-white/30 opacity-50'}`}
                       title="Topo Heatmap Toggle"
                       style={{ position: 'absolute', top: 'calc(100% + 8px)', left: '50%', transform: 'translateX(-50%)' }}>
                       <div style={{ width: 36, height: 36, borderRadius: 8, backgroundImage: `url('${PUBLIC_BASE}data/topo-thumb.png')`, backgroundSize: 'cover', backgroundPosition: 'center' }} />
