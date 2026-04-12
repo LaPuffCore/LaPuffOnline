@@ -855,7 +855,7 @@ function buildHeatUnderlayPoints(geoData, tiers) {
     const [cx, cy] = getGeomCentroid(f.geometry);
     features.push({
       type: 'Feature',
-      properties: { _weight: [0, 0.08, 0.22, 0.55, 1.0][tier] || 0 },
+      properties: { _weight: [0, 0.10, 0.28, 0.70, 1.6][tier] || 0 },
       geometry: { type: 'Point', coordinates: [cx, cy] },
     });
   });
@@ -1178,15 +1178,15 @@ export default function MapView({ events }) {
         id: 'heat-underlay', type: 'heatmap', source: 'heat-underlay',
         paint: {
           'heatmap-weight': ['coalesce', ['get', '_weight'], 0],
-          'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 8, 1.4, 11, 2.0, 13, 2.5],
-          'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 8, 350, 11, 200, 13, 200],
+          'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 8, 1.6, 11, 2.4, 13, 2.8],
+          'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 8, 400, 11, 220, 13, 220],
           'heatmap-color': [
             'interpolate', ['linear'], ['heatmap-density'],
             0,    'rgba(0,0,0,0)',
-            0.15, '#00ccdd',
-            0.35, '#00dd66',
+            0.12, '#00ccdd',
+            0.30, '#00dd66',
             0.55, '#aadd00',
-            0.75, '#dd6600',
+            0.80, '#dd6600',
             1.0,  '#cc0d00',
           ],
           'heatmap-opacity': 0,
