@@ -713,6 +713,8 @@ export default function MapView({ events }) {
   // ── Layer setup ────────────────────────────────────────────────────────────
   function addLayers(map, data, sat) {
     if (!map || !data || map.getSource('zcta')) return;
+    // Read current 3D state so initial paint values are correct even on re-add (satellite swap)
+    const is3D = threeDRef.current;
     map.addSource('zcta', { type: 'geojson', data, generateId: false });
 
     // Extrusion base — fully opaque, blocks everything below
@@ -741,28 +743,28 @@ export default function MapView({ events }) {
       paint: { 'fill-color': '#7C3AED', 'fill-opacity': ['case', ['boolean', ['feature-state', 'hovered'], false], 0.5, 0] },
     });
 
-    // Safe zone outline — toggled off when 3D is on
+    // Safe zone outline — hidden in 3D mode
     map.addLayer({
       id: 'zcta-safe-line', type: 'line', source: 'zcta',
       filter: ['==', ['get', '_special'], true],
-      paint: { 'line-color': '#000000', 'line-width': 2, 'line-opacity': 1 },
+      paint: { 'line-color': '#000000', 'line-width': 2, 'line-opacity': is3D ? 0 : 1 },
     });
 
-    // Ground boundary glows (non-special)
+    // Ground boundary glows (non-special) — hidden in 3D mode
     map.addLayer({
       id: 'zcta-line-glow2', type: 'line', source: 'zcta',
       filter: ['!=', ['get', '_special'], true],
-      paint: { 'line-color': OUTLINE_GLOW, 'line-width': 3, 'line-opacity': sat ? 0.25 : 0.35, 'line-blur': 10 },
+      paint: { 'line-color': OUTLINE_GLOW, 'line-width': 3, 'line-opacity': is3D ? 0 : (sat ? 0.25 : 0.35), 'line-blur': 10 },
     });
     map.addLayer({
       id: 'zcta-line-glow', type: 'line', source: 'zcta',
       filter: ['!=', ['get', '_special'], true],
-      paint: { 'line-color': OUTLINE_COLOR, 'line-width': 1, 'line-opacity': sat ? 0.55 : 0.75, 'line-blur': 3 },
+      paint: { 'line-color': OUTLINE_COLOR, 'line-width': 1, 'line-opacity': is3D ? 0 : (sat ? 0.55 : 0.75), 'line-blur': 3 },
     });
     map.addLayer({
       id: 'zcta-line', type: 'line', source: 'zcta',
       filter: ['!=', ['get', '_special'], true],
-      paint: { 'line-color': OUTLINE_COLOR, 'line-width': 0.5, 'line-opacity': 1 },
+      paint: { 'line-color': OUTLINE_COLOR, 'line-width': 0.5, 'line-opacity': is3D ? 0 : 1 },
     });
 
     map.addSource('zcta-outline', { type: 'geojson', data: { type: 'FeatureCollection', features: [] }, generateId: false });
@@ -904,11 +906,6 @@ export default function MapView({ events }) {
     // Flat 3D
     const flatH    = ['case', ['boolean', ['get', '_special'], false], 30, 400];
 
-    // FIX 3D PIXELIZATION: in 3D mode keep ground-level lines visible at low zoom
-    // so outlines remain readable when zoomed out (natural overlap-bleed approach).
-    // These fade to 0 as zoom increases so they don't interfere with the 3D view up close.
-    const zoomBasedLineOpacity = ['interpolate', ['linear'], ['zoom'], 9.5, 0.4, 11, 0.18, 12.5, 0];
-
     if (heatmap) {
       map.setPaintProperty('zcta-fill', 'fill-color', heatColorExpr);
       // FIX ADDITIVE STATE: heatmap fill — 0 when 3D is on (extrusion takes over),
@@ -928,10 +925,10 @@ export default function MapView({ events }) {
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-base', 0);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', 1.0);
 
-        // FIX 3D PIXELIZATION: hide solid lines but keep them faintly visible at low zoom
-        map.setPaintProperty('zcta-line',       'line-opacity', zoomBasedLineOpacity);
-        map.setPaintProperty('zcta-line-glow',  'line-opacity', zoomBasedLineOpacity);
-        map.setPaintProperty('zcta-line-glow2', 'line-opacity', zoomBasedLineOpacity);
+        // Hide all 2D zip lines in 3D mode — no depth test against fill-extrusions (x-ray fix)
+        map.setPaintProperty('zcta-line',       'line-opacity', 0);
+        map.setPaintProperty('zcta-line-glow',  'line-opacity', 0);
+        map.setPaintProperty('zcta-line-glow2', 'line-opacity', 0);
       } else {
         map.setPaintProperty('zcta-safe-line', 'line-opacity', 1);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-color',
@@ -958,10 +955,10 @@ export default function MapView({ events }) {
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-base', 0);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', satellite ? 0.9 : 1.0);
 
-        // FIX 3D PIXELIZATION: same zoom-based ground line fade
-        map.setPaintProperty('zcta-line',       'line-opacity', zoomBasedLineOpacity);
-        map.setPaintProperty('zcta-line-glow',  'line-opacity', zoomBasedLineOpacity);
-        map.setPaintProperty('zcta-line-glow2', 'line-opacity', zoomBasedLineOpacity);
+        // Hide all 2D zip lines in 3D mode — no depth test against fill-extrusions (x-ray fix)
+        map.setPaintProperty('zcta-line',       'line-opacity', 0);
+        map.setPaintProperty('zcta-line-glow',  'line-opacity', 0);
+        map.setPaintProperty('zcta-line-glow2', 'line-opacity', 0);
       } else {
         map.setPaintProperty('zcta-safe-line', 'line-opacity', 1);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-color', 
