@@ -313,18 +313,19 @@ function normalizeFeatureGeometry(feature) {
 }
 
 // T3 3D PIXELIZATION: Smooth continuous zoom-aware width scaling.
-// Shared multiplier so ZCTA outline (base 14m) and borough outline (base 24m)
-// scale at the same proportional rate — visually synced at every zoom level.
-// Scaling starts at zoom 11 (not 13) — no scaling needed at close zooms (13→11).
-// From zoom 11→9: continuous exponential ramp to prevent pixelization.
-// zoom 13-11 = base | 10 ≈ 2.30× | 9 ≈ 5.29× (= 74m for base 14, 127m for base 24)
-// t is continuous float from map.getZoom() — handles fractional ticks smoothly.
-const OUTLINE_SCALE = Math.pow(74 / 14, 0.5); // ≈2.30 — multiplier per zoom step (2 steps: 11→9)
+// Scaling starts at zoom 10 — flat base from zoom 13 to 10.
+// From zoom 10→9: continuous exponential ramp to prevent pixelization.
+// ZCTA (base 14m): 14m flat until zoom 10, then ramps to 54m at zoom 9.
+// Borough (base 24m): 24m flat until zoom 10, then ramps to 167m at zoom 9.
+// Since borough needs a steeper ramp (167/24 ≈ 6.96×) vs ZCTA (54/14 ≈ 3.86×),
+// each gets its own scale factor derived from its target at zoom 9.
 function getZoomAwareOutlineWidth(map, baseMeters = 14) {
   if (!map || typeof map.getZoom !== 'function') return baseMeters;
   const zoom = map.getZoom();
-  const t = Math.max(0, 11 - zoom); // 0 at zoom 11+, 2 at zoom 9
-  const multiplier = Math.pow(OUTLINE_SCALE, t);
+  const t = Math.max(0, 10 - zoom); // 0 at zoom 10+, 1 at zoom 9
+  const targetAt9 = baseMeters === 24 ? 167 : 54;
+  const scale = targetAt9 / baseMeters; // per-base scale factor over 1 zoom step
+  const multiplier = Math.pow(scale, t);
   const pitch = map.getPitch ? map.getPitch() : 0;
   const pitchFactor = 1 + (pitch / 90) * 0.55;
   return baseMeters * multiplier * pitchFactor;
@@ -808,7 +809,9 @@ function computeBoroughAvgTiers(tiers, zipBoroughMap, boroughCount) {
   return sums.map((s, i) => counts[i] > 0 ? Math.round(s / counts[i]) : 0);
 }
 
-// Inject a _color property onto each borough feature based on heatmap state + avg tier.
+// Inject a _tier property onto each borough feature based on heatmap state + avg tier.
+// Uses _tier (not _color) so the borough-outline layer can use the same data-driven
+// step expression as the ZCTA upper outline — ensuring identical color system.
 function buildColoredBoroughFeatures(boroughGeoData, avgTiers, isHeatmap) {
   return {
     ...boroughGeoData,
@@ -816,6 +819,7 @@ function buildColoredBoroughFeatures(boroughGeoData, avgTiers, isHeatmap) {
       ...f,
       properties: {
         ...f.properties,
+        _tier: isHeatmap ? Math.round(avgTiers[i] ?? 0) : 0,
         _color: isHeatmap ? darkTierColor(avgTiers[i] ?? 0) : OUTLINE_COLOR,
       },
     })),
@@ -1453,6 +1457,7 @@ export default function MapView({ events }) {
     }
 
     // Borough outline — visible only in 3D mode, color based on avg borough tier
+    // Uses same HEAT_DARK_COLORS step expression as ZCTA upper outline for identical colors.
     if (map.getSource('borough-source')) {
       if (threeD && boroughGeoDataRef.current) {
         const avgTiers = computeBoroughAvgTiers(
@@ -1465,6 +1470,11 @@ export default function MapView({ events }) {
         map.getSource('borough-source').setData(
           createOutlineGeoJSON(coloredBorough, getZoomAwareOutlineWidth(map, 24))
         );
+        // Same dark color step expression as ZCTA upper outline — ensures identical color system
+        const boroughColorExpr = heatmap ? [
+          'step', ['get', '_tier'], HEAT_DARK_COLORS.cold, 1, HEAT_DARK_COLORS.cool, 2, HEAT_DARK_COLORS.warm, 3, HEAT_DARK_COLORS.orange, 4, HEAT_DARK_COLORS.hot,
+        ] : OUTLINE_COLOR;
+        map.setPaintProperty('borough-outline', 'fill-extrusion-color', boroughColorExpr);
         // T3: zoom-interpolated opacity on borough-outline — same anti-pixelation treatment
         const boroughOpacity = ['interpolate', ['linear'], ['zoom'], 9, 0.70, 13, 0.92];
         map.setPaintProperty('borough-outline', 'fill-extrusion-opacity', boroughOpacity);
