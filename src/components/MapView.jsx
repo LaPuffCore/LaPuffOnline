@@ -315,13 +315,13 @@ function normalizeFeatureGeometry(feature) {
 // T3 3D PIXELIZATION: Smooth continuous zoom-aware width scaling.
 // Scaling starts at zoom 10.5 — flat base from zoom 13 to 10.5.
 // From zoom 10.5→9: continuous exponential ramp to prevent pixelization.
-// ZCTA (base 12m): 12m flat until zoom 10.5, then ramps to 40m at zoom 9.
-// Borough (base 48m): 48m flat until zoom 10.5, then ramps to 167m at zoom 9.
-function getZoomAwareOutlineWidth(map, baseMeters = 12) {
+// ZCTA (base 14m): 14m flat until zoom 10.5, then ramps to 64m at zoom 9.
+// Borough (base 18m): 18m flat until zoom 10.5, then ramps to 96m at zoom 9.
+function getZoomAwareOutlineWidth(map, baseMeters = 14) {
   if (!map || typeof map.getZoom !== 'function') return baseMeters;
   const zoom = map.getZoom();
   const t = Math.max(0, 10.5 - zoom); // 0 at zoom 10.5+, 1.5 at zoom 9
-  const targetAt9 = baseMeters === 48 ? 167 : 40;
+  const targetAt9 = baseMeters === 18 ? 96 : 64;
   const scale = Math.pow(targetAt9 / baseMeters, 1 / 1.5); // per-step factor over 1.5 zoom steps
   const multiplier = Math.pow(scale, t);
   const pitch = map.getPitch ? map.getPitch() : 0;
@@ -855,7 +855,7 @@ function buildHeatUnderlayPoints(geoData, tiers) {
     const [cx, cy] = getGeomCentroid(f.geometry);
     features.push({
       type: 'Feature',
-      properties: { _weight: tier / 4 },
+      properties: { _weight: [0, 0.08, 0.22, 0.55, 1.0][tier] || 0 },
       geometry: { type: 'Point', coordinates: [cx, cy] },
     });
   });
@@ -1178,8 +1178,8 @@ export default function MapView({ events }) {
         id: 'heat-underlay', type: 'heatmap', source: 'heat-underlay',
         paint: {
           'heatmap-weight': ['coalesce', ['get', '_weight'], 0],
-          'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 8, 1.2, 13, 2.5],
-          'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 8, 40, 11, 70, 13, 100],
+          'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 8, 1.4, 11, 2.0, 13, 2.5],
+          'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 8, 350, 11, 200, 13, 200],
           'heatmap-color': [
             'interpolate', ['linear'], ['heatmap-density'],
             0,    'rgba(0,0,0,0)',
@@ -1440,9 +1440,9 @@ export default function MapView({ events }) {
 
     if (heatmap) {
       map.setPaintProperty('zcta-fill', 'fill-color', heatColorExpr);
-      // FIX ADDITIVE STATE: heatmap fill — 0 when 3D is on (extrusion takes over),
+      // FIX ADDITIVE STATE: heatmap fill — opaque when 3D (masks heat-underlay beneath zip polygons),
       // semi-transparent when satellite on, solid otherwise.
-      map.setPaintProperty('zcta-fill', 'fill-opacity', threeD ? 0 : (satellite ? 0.5 : 0.9));
+      map.setPaintProperty('zcta-fill', 'fill-opacity', threeD ? 1.0 : (satellite ? 0.5 : 0.9));
 
       if (threeD) {
         map.setPaintProperty('zcta-safe-line', 'line-opacity', 0);
@@ -1572,7 +1572,7 @@ export default function MapView({ events }) {
         const coloredBorough = buildColoredBoroughFeatures(boroughGeoDataRef.current, avgTiers, heatmap);
         boroughWithColorRef.current = coloredBorough;
         map.getSource('borough-source').setData(
-          createOutlineGeoJSON(coloredBorough, getZoomAwareOutlineWidth(map, 48))
+          createOutlineGeoJSON(coloredBorough, getZoomAwareOutlineWidth(map, 18))
         );
         // Borough color: read baked _color from features — guaranteed to be the exact
         // same HEAT_DARK_COLORS hex value as ZCTA upper outlines (via rounded tier).
@@ -1624,10 +1624,10 @@ export default function MapView({ events }) {
           if (boroughSkeletonRef.current && boroughWithColorRef.current) {
             const overrides = boroughWithColorRef.current.features.map(f => f.properties);
             map.getSource('borough-source').setData(
-              generateBoroughQuadsFromSkeleton(boroughSkeletonRef.current, getZoomAwareOutlineWidth(map, 48), overrides)
+              generateBoroughQuadsFromSkeleton(boroughSkeletonRef.current, getZoomAwareOutlineWidth(map, 18), overrides)
             );
           } else if (boroughWithColorRef.current) {
-            map.getSource('borough-source').setData(createOutlineGeoJSON(boroughWithColorRef.current, getZoomAwareOutlineWidth(map, 48)));
+            map.getSource('borough-source').setData(createOutlineGeoJSON(boroughWithColorRef.current, getZoomAwareOutlineWidth(map, 18)));
           }
         }
       });
