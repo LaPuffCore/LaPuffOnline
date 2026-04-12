@@ -313,18 +313,16 @@ function normalizeFeatureGeometry(feature) {
 }
 
 // T3 3D PIXELIZATION: Smooth continuous zoom-aware width scaling.
-// Scaling starts at zoom 10 — flat base from zoom 13 to 10.
-// From zoom 10→9: continuous exponential ramp to prevent pixelization.
-// ZCTA (base 14m): 14m flat until zoom 10, then ramps to 54m at zoom 9.
-// Borough (base 24m): 24m flat until zoom 10, then ramps to 167m at zoom 9.
-// Since borough needs a steeper ramp (167/24 ≈ 6.96×) vs ZCTA (54/14 ≈ 3.86×),
-// each gets its own scale factor derived from its target at zoom 9.
+// Scaling starts at zoom 11 — flat base from zoom 13 to 11.
+// From zoom 11→9: continuous exponential ramp to prevent pixelization.
+// ZCTA (base 14m): 14m flat until zoom 11, then ramps to 40m at zoom 9.
+// Borough (base 24m): 24m flat until zoom 11, then ramps to 167m at zoom 9.
 function getZoomAwareOutlineWidth(map, baseMeters = 14) {
   if (!map || typeof map.getZoom !== 'function') return baseMeters;
   const zoom = map.getZoom();
-  const t = Math.max(0, 10 - zoom); // 0 at zoom 10+, 1 at zoom 9
-  const targetAt9 = baseMeters === 24 ? 167 : 54;
-  const scale = targetAt9 / baseMeters; // per-base scale factor over 1 zoom step
+  const t = Math.max(0, 11 - zoom); // 0 at zoom 11+, 2 at zoom 9
+  const targetAt9 = baseMeters === 24 ? 167 : 40;
+  const scale = Math.pow(targetAt9 / baseMeters, 0.5); // per-step factor over 2 zoom steps
   const multiplier = Math.pow(scale, t);
   const pitch = map.getPitch ? map.getPitch() : 0;
   const pitchFactor = 1 + (pitch / 90) * 0.55;
@@ -1115,7 +1113,12 @@ export default function MapView({ events }) {
       maxBounds: [[-75.5, 40.0], [-72.5, 41.5]],
       attributionControl: false,
     });
-    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
+    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-left');
+    // Pad the nav control away from edges so zoom buttons are always accessible
+    map.once('load', () => {
+      const navContainer = map.getContainer().querySelector('.maplibregl-ctrl-bottom-left');
+      if (navContainer) { navContainer.style.bottom = '24px'; navContainer.style.left = '16px'; }
+    });
     mapRef.current = map;
     map.on('load', () => {
       map.getCanvas().style.backgroundColor = 'transparent';
@@ -1367,7 +1370,7 @@ export default function MapView({ events }) {
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-color', withHoverColor(extrudeColorExpr));
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-height', extrudeH);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-base', 0);
-        map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', 1.0);
+        map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', satellite ? 0.88 : 0.92);
 
         // Cap: flat slab 1m above block top — glows purple on hover, aligns with zcta-outline boundary
         map.setPaintProperty('zcta-cap', 'fill-extrusion-height', extrudeHCap);
@@ -1406,7 +1409,7 @@ export default function MapView({ events }) {
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-color', withHoverColor(flatColorExpr));
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-height', flatH);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-base', 0);
-        map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', satellite ? 0.9 : 0.75);
+        map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', satellite ? 0.85 : 0.72);
 
         // Cap: flat slab 1m above block top — glows purple on hover, aligns with zcta-outline boundary
         map.setPaintProperty('zcta-cap', 'fill-extrusion-height', flatHCap);
@@ -1815,9 +1818,9 @@ export default function MapView({ events }) {
             )}
           </div>
 
-          {/* Center-to-location */}
+          {/* Center-to-location — positioned above the zoom nav control in bottom-left */}
           <button onClick={handleCenterLocation} disabled={locLoading}
-            className="absolute bottom-24 right-4 z-30 w-11 h-11 bg-black/80 border border-white/30 rounded-xl flex items-center justify-center hover:bg-[#7C3AED]/80 hover:border-[#7C3AED] transition-all shadow-lg">
+            className="absolute bottom-[120px] left-4 z-30 w-11 h-11 bg-black/80 border border-white/30 rounded-xl flex items-center justify-center hover:bg-[#7C3AED]/80 hover:border-[#7C3AED] transition-all shadow-lg">
             {locLoading
               ? <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
               : <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>
