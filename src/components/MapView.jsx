@@ -1400,13 +1400,13 @@ export default function MapView({ events }) {
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-color', withHoverColor(extrudeColorExpr));
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-height', extrudeH);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-base', 0);
-        map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', 0.58);
+        map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', 0.72);
 
         // Floor: inside-block slab, same color at half opacity — visible when camera enters block
         map.setPaintProperty('zcta-floor', 'fill-extrusion-color', withHoverColor(extrudeColorExpr));
         map.setPaintProperty('zcta-floor', 'fill-extrusion-height', 1);
         map.setPaintProperty('zcta-floor', 'fill-extrusion-base', 0);
-        map.setPaintProperty('zcta-floor', 'fill-extrusion-opacity', 0.29);
+        map.setPaintProperty('zcta-floor', 'fill-extrusion-opacity', 0.36);
 
         // Cap: flat slab 1m above block top — glows purple on hover, aligns with zcta-outline boundary
         map.setPaintProperty('zcta-cap', 'fill-extrusion-height', extrudeHCap);
@@ -1447,13 +1447,13 @@ export default function MapView({ events }) {
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-color', withHoverColor(flatColorExpr));
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-height', flatH);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-base', 0);
-        map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', 0.58);
+        map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', 0.72);
 
         // Floor: inside-block slab, same color at half opacity — visible when camera enters block
         map.setPaintProperty('zcta-floor', 'fill-extrusion-color', withHoverColor(flatColorExpr));
         map.setPaintProperty('zcta-floor', 'fill-extrusion-height', 1);
         map.setPaintProperty('zcta-floor', 'fill-extrusion-base', 0);
-        map.setPaintProperty('zcta-floor', 'fill-extrusion-opacity', 0.29);
+        map.setPaintProperty('zcta-floor', 'fill-extrusion-opacity', 0.36);
 
         // Cap: flat slab 1m above block top — glows purple on hover, aligns with zcta-outline boundary
         map.setPaintProperty('zcta-cap', 'fill-extrusion-height', flatHCap);
