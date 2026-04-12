@@ -1161,11 +1161,16 @@ export default function MapView({ events }) {
       maxBounds: [[-75.5, 40.0], [-72.5, 41.5]],
       attributionControl: false,
     });
-    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-left');
-    // Pad the nav control away from edges so zoom buttons are always accessible
+    // Place navigation controls in the bottom-right and give extra padding + slight scale for accessibility
+    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
     map.once('load', () => {
-      const navContainer = map.getContainer().querySelector('.maplibregl-ctrl-bottom-left');
-      if (navContainer) { navContainer.style.bottom = '24px'; navContainer.style.left = '16px'; }
+      const navContainer = map.getContainer().querySelector('.maplibregl-ctrl-bottom-right');
+      if (navContainer) {
+        navContainer.style.bottom = '28px';
+        navContainer.style.right = '20px';
+        navContainer.style.transformOrigin = 'bottom right';
+        navContainer.style.transform = 'scale(1.08)';
+      }
     });
     mapRef.current = map;
     map.on('load', () => {
@@ -1917,7 +1922,7 @@ export default function MapView({ events }) {
                       className={`w-10 h-10 rounded-2xl border-2 p-0 bg-black/60 flex items-center justify-center ${topoOn ? 'ring-2 ring-yellow-300' : 'opacity-50'}`}
                       title="Topo Heatmap Toggle"
                       style={{ position: 'absolute', top: 'calc(100% + 8px)', left: '50%', transform: 'translateX(-50%)' }}>
-                      <div style={{ width: 36, height: 36, borderRadius: 8, backgroundImage: "url('/data/topo.jpg')", backgroundSize: 'cover', backgroundPosition: 'center' }} />
+                      <div style={{ width: 36, height: 36, borderRadius: 8, backgroundImage: "url('/data/topo-thumb.png')", backgroundSize: 'cover', backgroundPosition: 'center' }} />
                     </button>
                   )}
                 </div>
@@ -1944,10 +1949,11 @@ export default function MapView({ events }) {
 
           {/* Center-to-location — positioned above the zoom nav control in bottom-left */}
           <button onClick={handleCenterLocation} disabled={locLoading}
-            className="absolute bottom-[120px] left-4 z-30 w-11 h-11 bg-black/80 border border-white/30 rounded-xl flex items-center justify-center hover:bg-[#7C3AED]/80 hover:border-[#7C3AED] transition-all shadow-lg">
+            className="absolute bottom-[140px] right-6 z-30 w-12 h-12 bg-black/90 border border-white/30 rounded-xl flex items-center justify-center hover:bg-[#7C3AED]/80 hover:border-[#7C3AED] transition-all shadow-lg"
+            style={{ padding: 0 }}>
             {locLoading
               ? <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-              : <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>
+              : <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>
             }
           </button>
 
