@@ -310,13 +310,19 @@ function normalizeFeatureGeometry(feature) {
   return null;
 }
 
-// T3 3D PIXELIZATION: More aggressive width scaling so outlines remain visible
-// when zoomed out. Each step below zoom 14 adds 8m, covering sub-pixel gaps.
+// T3 3D PIXELIZATION: Zoom + pitch aware width scaling.
+// Each step below zoom 14 adds 12m (was 8) — 50% more ramp for the last 30-40% of zoom-out.
+// pitchFactor compensates for the horizontal compression at tilted angles:
+// at our 48° 3D pitch the far edge of the map is ~35% shorter on screen.
 function getZoomAwareOutlineWidth(map, baseMeters = 14) {
   if (!map || typeof map.getZoom !== 'function') return baseMeters;
   const zoom = map.getZoom();
-  const extra = Math.max(0, 14 - zoom) * 8;
-  return baseMeters + extra;
+  const extra = Math.max(0, 14 - zoom) * 12;
+  const pitch = map.getPitch ? map.getPitch() : 0;
+  // Up to 55% extra width at our max pitch (55°). cos(55°) ≈ 0.57 → 1/0.57 ≈ 1.75,
+  // but we clamp the boost at 0.55 so it's noticeable without looking broken at mid-pitch.
+  const pitchFactor = 1 + (pitch / 90) * 0.55;
+  return (baseMeters + extra) * pitchFactor;
 }
 
 function offsetRing(outerRing, widthMeters) {
@@ -1123,7 +1129,7 @@ export default function MapView({ events }) {
     map.easeTo({ pitch: threeD ? 48 : 0, bearing: threeD ? -17 : 0, duration: 700 });
   }, [threeD, mapReady]);
 
-  // T3 3D PIXELIZATION: re-generate outline ring width on zoom so it stays visible.
+  // T3 3D PIXELIZATION: re-generate outline ring width on zoom AND pitch so it stays visible.
   // Uses withHeatRef so it doesn't need to recompute tiers/zip data.
   // Also regenerates borough-outline width with baseMeters=40.
   useEffect(() => {
@@ -1139,7 +1145,8 @@ export default function MapView({ events }) {
       }
     };
     map.on('zoom', onZoom);
-    return () => map.off('zoom', onZoom);
+    map.on('pitch', onZoom);
+    return () => { map.off('zoom', onZoom); map.off('pitch', onZoom); };
   }, [mapReady]);
 
   // FIX ADDITIVE STATE: Satellite is additive — does NOT touch heatmap/3D/real3D state.
