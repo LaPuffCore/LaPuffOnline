@@ -322,10 +322,9 @@ function getZoomAwareOutlineWidth(map, baseMeters = 14) {
   if (!map || typeof map.getZoom !== 'function') return baseMeters;
   const zoom = map.getZoom();
   const steps = Math.max(0, 13 - zoom);
-  // Less aggressive at medium zooms (11-12), same at far zooms (9-10).
-  // steps 1-2 (zoom 12-11): quadratic × 3 → 3m, 12m
-  // steps 3+ (zoom 10-9): quadratic × 5 → 45m, 80m (unchanged from before)
-  const extra = steps <= 2 ? steps * steps * 3 : steps * steps * 5;
+  // Gentler at medium zooms (12-11), ramps up toward far zooms (10-9).
+  // step 1 (zoom 12): 2m | step 2 (zoom 11): 8m | step 3 (zoom 10): 45m | step 4 (zoom 9): 80m
+  const extra = steps <= 2 ? steps * steps * 2 : steps * steps * 5;
   const pitch = map.getPitch ? map.getPitch() : 0;
   const pitchFactor = 1 + (pitch / 90) * 0.55;
   return (baseMeters + extra) * pitchFactor;
@@ -973,7 +972,7 @@ export default function MapView({ events }) {
 
     // Upper 3D border — annular ring using createZctaOutlineGeoJSON.
     // Inner ring = raw MODZCTA coords (1:1 with zcta-extrude blocks). Outer ring = fullWidth outward.
-    map.addSource('zcta-outline', { type: 'geojson', data: { type: 'FeatureCollection', features: [] }, generateId: false });
+    map.addSource('zcta-outline', { type: 'geojson', data: { type: 'FeatureCollection', features: [] }, generateId: false, tolerance: 0 });
     map.addLayer({
       id: 'zcta-outline', type: 'fill-extrusion', source: 'zcta-outline',
       paint: {
