@@ -395,38 +395,10 @@ function offsetRing(outerRing, widthMeters) {
   return [outerGeo, innerGeo];
 }
 
-// Extract inner rings from an outline GeoJSON (annular ring polygons) as standalone fill polygons.
-// Each annular ring has coordinates[0]=outerRing and coordinates[1]=innerRing(hole).
-// The inner ring, reversed to CCW winding, defines the "inside" face of the upper 3D border.
-// This is used as the zcta-cap source — giving the cap the shape of the inner boundary of
-// the upper 3D outline extrusion, NOT the zip block's own top face.
-function createCapGeoJSON(outlineGeoJSON) {
-  return {
-    type: 'FeatureCollection',
-    features: outlineGeoJSON.features.map(feature => {
-      const geom = feature.geometry;
-      if (geom.type === 'Polygon') {
-        if (geom.coordinates.length < 2) return null;
-        // coordinates[1] = inner ring (CW hole) — reverse to CCW for outer ring
-        const innerRing = geom.coordinates[1].slice().reverse();
-        if (innerRing.length < 4) return null;
-        return { ...feature, geometry: { type: 'Polygon', coordinates: [innerRing] } };
-      }
-      if (geom.type === 'MultiPolygon') {
-        const polys = geom.coordinates
-          .filter(p => p.length >= 2)
-          .map(p => {
-            const innerRing = p[1].slice().reverse();
-            return innerRing.length >= 4 ? [innerRing] : null;
-          })
-          .filter(Boolean);
-        if (polys.length === 0) return null;
-        return { ...feature, geometry: { type: 'MultiPolygon', coordinates: polys } };
-      }
-      return null;
-    }).filter(Boolean),
-  };
-}
+// The cap shape IS the annular ring of the upper 3D outline — kept as a trivial passthrough.
+// (No longer used; zcta-outline and zcta-cap both use source: 'zcta' directly.)
+// Retained to avoid removal noise if referenced elsewhere.
+function createCapGeoJSON(outlineGeoJSON) { return outlineGeoJSON; }
 
 function createOutlineGeoJSON(sourceGeoJSON, widthMeters = 12) {
   return {
@@ -867,12 +839,11 @@ export default function MapView({ events }) {
       paint: { 'fill-color': '#7C3AED', 'fill-opacity': ['case', ['boolean', ['feature-state', 'hovered'], false], 0.5, 0] },
     });
 
-    // Cap — invisible flat slab shaped like the INNER ring of the zcta-outline annular ring.
-    // NOT the zip block top face — slightly inset, matching the inner boundary of the upper 3D border.
-    // In 3D mode: glows purple on hover, visually bridging the gap between the border extrusion
-    // and the underlying zip block extrusion. Heights set dynamically to match zcta-extrude.
+    // Cap — thin slab on top of each zip block, same polygon as the block (source: 'zcta').
+    // Glows purple on hover in 3D mode only. 1:1 aligned with zcta-extrude by design.
+    // Heights set dynamically in heatmap effect to sit exactly at the block top face.
     map.addLayer({
-      id: 'zcta-cap', type: 'fill-extrusion', source: 'zcta-cap-source',
+      id: 'zcta-cap', type: 'fill-extrusion', source: 'zcta',
       paint: {
         'fill-extrusion-color': '#9F67FF',
         'fill-extrusion-height': 1,
@@ -906,27 +877,16 @@ export default function MapView({ events }) {
       paint: { 'line-color': OUTLINE_COLOR, 'line-width': 0.5, 'line-opacity': is3D ? 0 : 1 },
     });
 
-    map.addSource('zcta-outline', { type: 'geojson', data: { type: 'FeatureCollection', features: [] }, generateId: false });
-    // Cap source: inner-ring polygons of the zcta-outline annular rings.
-    // Shape = the inward face of the upper 3D border, NOT the zip block top face.
-    map.addSource('zcta-cap-source', { type: 'geojson', data: { type: 'FeatureCollection', features: [] }, generateId: false });
+    // Upper 3D border — thin slab on top of each zip block using same ZCTA source as the block.
+    // 1:1 aligned with zcta-extrude. Heights/colors set dynamically in heatmap effect.
     map.addLayer({
-      id: 'zcta-outline', type: 'fill-extrusion', source: 'zcta-outline',
+      id: 'zcta-outline', type: 'fill-extrusion', source: 'zcta',
       paint: {
         'fill-extrusion-color': OUTLINE_COLOR,
         'fill-extrusion-height': 0,
         'fill-extrusion-base': 0,
         'fill-extrusion-opacity': 0,
         'fill-extrusion-vertical-gradient': false,
-      },
-    });
-    map.addLayer({
-      id: 'zcta-outline-line', type: 'line', source: 'zcta-outline',
-      paint: {
-        'line-color': OUTLINE_COLOR,
-        'line-width': 1.5,
-        'line-opacity': 0,
-        'line-blur': 0.5,
       },
     });
 
@@ -950,13 +910,10 @@ export default function MapView({ events }) {
     const handleZctaHover = e => {
       if (!e.features.length) return;
       const f = e.features[0];
-      if (hoveredIdRef.current !== null && hoveredIdRef.current !== f.id) {
+      if (hoveredIdRef.current !== null && hoveredIdRef.current !== f.id)
         map.setFeatureState({ source: 'zcta', id: hoveredIdRef.current }, { hovered: false });
-        if (map.getSource('zcta-cap-source')) map.setFeatureState({ source: 'zcta-cap-source', id: hoveredIdRef.current }, { hovered: false });
-      }
       hoveredIdRef.current = f.id;
       map.setFeatureState({ source: 'zcta', id: f.id }, { hovered: true });
-      if (map.getSource('zcta-cap-source')) map.setFeatureState({ source: 'zcta-cap-source', id: f.id }, { hovered: true });
       map.getCanvas().style.cursor = 'pointer';
       setHoveredZip(String(f.properties.MODZCTA || ''));
       setTooltipPos({ x: e.point.x, y: e.point.y });
@@ -965,7 +922,6 @@ export default function MapView({ events }) {
     const handleZctaLeave = () => {
       if (hoveredIdRef.current !== null) {
         map.setFeatureState({ source: 'zcta', id: hoveredIdRef.current }, { hovered: false });
-        if (map.getSource('zcta-cap-source')) map.setFeatureState({ source: 'zcta-cap-source', id: hoveredIdRef.current }, { hovered: false });
         hoveredIdRef.current = null;
       }
       map.getCanvas().style.cursor = '';
@@ -1049,13 +1005,8 @@ export default function MapView({ events }) {
       }),
     };
     if (map.getSource('zcta')) map.getSource('zcta').setData(withHeat);
-    // FIX REAL3D: store so zoom listener can regenerate outline width without full recompute
+    // FIX REAL3D: store so zoom listener can regenerate borough outline width without full recompute
     withHeatRef.current = withHeat;
-    if (map.getSource('zcta-outline')) {
-      const outlineData = createOutlineGeoJSON(withHeat, getZoomAwareOutlineWidth(map));
-      map.getSource('zcta-outline').setData(outlineData);
-      if (map.getSource('zcta-cap-source')) map.getSource('zcta-cap-source').setData(createCapGeoJSON(outlineData));
-    }
 
     const heatColorExpr = [
       'case', ['boolean', ['get', '_special'], false], '#ffffff',
@@ -1169,19 +1120,17 @@ export default function MapView({ events }) {
       ['step', ['get', '_tier'], HEAT_DARK_COLORS.cold, 1, HEAT_DARK_COLORS.cool, 2, HEAT_DARK_COLORS.warm, 3, HEAT_DARK_COLORS.orange, 4, HEAT_DARK_COLORS.hot],
     ] : OUTLINE_COLOR;
 
-    if (map.getSource('zcta-outline')) {
-      // T3: zoom-interpolated opacity — reduces fringing at low zoom, full at close zoom
-      const outlineOpacity = ['interpolate', ['linear'], ['zoom'], 9, 0.70, 13, 0.98];
-      map.setPaintProperty('zcta-outline', 'fill-extrusion-opacity', threeD ? outlineOpacity : 0);
-      map.setPaintProperty('zcta-outline-line', 'line-opacity', 0);
-      if (threeD) {
-        map.setPaintProperty('zcta-outline', 'fill-extrusion-color', upperBorderColorExpr);
-        map.setPaintProperty('zcta-outline', 'fill-extrusion-base', heatmap ? extrudeH : flatH);
-        map.setPaintProperty('zcta-outline', 'fill-extrusion-height', ['+', heatmap ? extrudeH : flatH, 18]);
-      } else {
-        map.setPaintProperty('zcta-outline', 'fill-extrusion-base', 0);
-        map.setPaintProperty('zcta-outline', 'fill-extrusion-height', 0);
-      }
+    // Upper 3D border — now uses source: 'zcta' (1:1 with blocks). No source guard needed.
+    // T3: zoom-interpolated opacity — reduces fringing at low zoom, full at close zoom
+    const outlineOpacity = ['interpolate', ['linear'], ['zoom'], 9, 0.70, 13, 0.98];
+    map.setPaintProperty('zcta-outline', 'fill-extrusion-opacity', threeD ? outlineOpacity : 0);
+    if (threeD) {
+      map.setPaintProperty('zcta-outline', 'fill-extrusion-color', upperBorderColorExpr);
+      map.setPaintProperty('zcta-outline', 'fill-extrusion-base', heatmap ? extrudeH : flatH);
+      map.setPaintProperty('zcta-outline', 'fill-extrusion-height', ['+', heatmap ? extrudeH : flatH, 18]);
+    } else {
+      map.setPaintProperty('zcta-outline', 'fill-extrusion-base', 0);
+      map.setPaintProperty('zcta-outline', 'fill-extrusion-height', 0);
     }
 
     // Borough outline — visible only in 3D mode, color based on avg borough tier
@@ -1222,11 +1171,6 @@ export default function MapView({ events }) {
     if (!map || !mapReady) return;
     const onZoom = () => {
       if (!threeDRef.current) return;
-      if (withHeatRef.current && map.getSource('zcta-outline')) {
-        const outlineData = createOutlineGeoJSON(withHeatRef.current, getZoomAwareOutlineWidth(map));
-        map.getSource('zcta-outline').setData(outlineData);
-        if (map.getSource('zcta-cap-source')) map.getSource('zcta-cap-source').setData(createCapGeoJSON(outlineData));
-      }
       if (boroughWithColorRef.current && map.getSource('borough-source')) {
         map.getSource('borough-source').setData(createOutlineGeoJSON(boroughWithColorRef.current, getZoomAwareOutlineWidth(map, 40)));
       }
