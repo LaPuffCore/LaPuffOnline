@@ -432,13 +432,12 @@ function createZctaOutlineGeoJSON(sourceGeoJSON, widthMeters = 12) {
     const innerGeo = closeRing([...normalized].reverse());
     if (innerGeo.length < 4) return null;
 
-    // Outer ring: offset outward by fullWidth using the same normalized ring.
-    // We can still use subdivision/smoothing for the OUTER edge only (it's cosmetic, not a boundary match).
-    let ring = normalized[0][0] === normalized[normalized.length - 1][0] && normalized[0][1] === normalized[normalized.length - 1][1]
+    // Outer ring: same raw vertices as inner ring, just offset outward by widthMeters.
+    // No subdivision or smoothing — keeping vertex count identical to inner ring prevents
+    // MapLibre's earcut triangulator from producing degenerate triangles during zoom rebuilds.
+    const ring = normalized[0][0] === normalized[normalized.length - 1][0] && normalized[0][1] === normalized[normalized.length - 1][1]
       ? normalized.slice(0, -1) : normalized;
     if (ring.length < 3) return null;
-    ring = subdivideRing(ring, 10);
-    ring = smoothRing(ring, 1);
     const refLat = ring.reduce((sum, [, lat]) => sum + lat, 0) / ring.length;
     const pts = ring.map(coord => lngLatToMeters(coord, refLat));
     const orientation = signedArea([...pts, pts[0]]) >= 0 ? 1 : -1;
