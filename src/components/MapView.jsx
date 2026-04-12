@@ -872,6 +872,7 @@ export default function MapView({ events }) {
     });
 
     // Borough outline — fill-extrusion annular rings at 22m height (below cold tier 30m).
+    // Base outline width uses baseMeters=40 so outer perimeter is prominent.
     // Only visible at the outer NYC perimeter; zip blocks occlude internal borough borders.
     // Color is data-driven via _color property set on each feature before source update.
     if (!map.getSource('borough-source')) {
