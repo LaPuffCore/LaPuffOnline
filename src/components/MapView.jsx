@@ -440,55 +440,72 @@ function createOutlineGeoJSON(sourceGeoJSON, widthMeters = 12) {
   };
 }
 
-// ZCTA upper 3D border outline: inner ring = raw MODZCTA coordinates (no smoothing, no subdivision),
-// outer ring = fullWidth offset outward. Inner edge is pixel-perfect 1:1 with zcta-extrude blocks.
+// ZCTA upper 3D border outline — centered stroke on the zip boundary.
+// The raw MODZCTA vertex is the midpoint of the ring width.
+// Outer ring = midpoint + halfWidth outward.
+// Inner ring = midpoint - halfWidth inward.
+// Both rings come from a single pass over the raw MODZCTA vertices.
+// map() not flatMap() — vertex count is always exactly pts.length, earcut topology is
+// invariant across zoom levels. Width scales with zoom; geometry never changes.
+// Clamped miter join: sharp corners cap at MITER_LIMIT×halfWidth (1 vertex always).
 function createZctaOutlineGeoJSON(sourceGeoJSON, widthMeters = 12) {
+  const MITER_LIMIT = 2.5;
   const buildZctaRing = (rawRing) => {
     const normalized = normalizeRing(rawRing);
     if (!normalized || normalized.length < 4) return null;
-    // Inner ring: raw MODZCTA coords exactly — same as what MapLibre uses for the 3D block.
-    // Reverse for CW hole winding required by GeoJSON polygon spec.
-    const innerGeo = closeRing([...normalized].reverse());
-    if (innerGeo.length < 4) return null;
-
-    // Outer ring: same raw vertices as inner ring, just offset outward by widthMeters.
-    // No subdivision or smoothing — keeping vertex count identical to inner ring prevents
-    // MapLibre's earcut triangulator from producing degenerate triangles during zoom rebuilds.
     const ring = normalized[0][0] === normalized[normalized.length - 1][0] && normalized[0][1] === normalized[normalized.length - 1][1]
       ? normalized.slice(0, -1) : normalized;
     if (ring.length < 3) return null;
+    const halfWidth = widthMeters / 2;
     const refLat = ring.reduce((sum, [, lat]) => sum + lat, 0) / ring.length;
     const pts = ring.map(coord => lngLatToMeters(coord, refLat));
     const orientation = signedArea([...pts, pts[0]]) >= 0 ? 1 : -1;
+
+    // Per-edge outward normals (direction = away from polygon interior)
     const normals = pts.map((p, i) => {
       const next = pts[(i + 1) % pts.length];
       const dx = next[0] - p[0]; const dy = next[1] - p[1];
       return normalize(orientation > 0 ? [dy, -dx] : [-dy, dx]);
     });
+
+    // Build parallel edge pairs at ±halfWidth
     const outerEdges = pts.map((p, i) => {
-      const next = pts[(i + 1) % pts.length]; const norm = normals[i];
-      return { p0: [p[0] + norm[0] * widthMeters, p[1] + norm[1] * widthMeters], p1: [next[0] + norm[0] * widthMeters, next[1] + norm[1] * widthMeters] };
+      const next = pts[(i + 1) % pts.length]; const n = normals[i];
+      return { p0: [p[0] + n[0] * halfWidth, p[1] + n[1] * halfWidth], p1: [next[0] + n[0] * halfWidth, next[1] + n[1] * halfWidth] };
     });
-    // map() not flatMap() — 1 vertex per corner, vertex count = pts.length always.
-    // Clamped miter: if spike > MITER_LIMIT × widthMeters, clamp to that length.
-    const MITER_LIMIT = 2.5;
-    const outer = pts.map((_, i) => {
-      const prev = outerEdges[(i - 1 + outerEdges.length) % outerEdges.length];
-      const curr = outerEdges[i];
-      const avg = normalize([normals[(i - 1 + normals.length) % normals.length][0] + normals[i][0], normals[(i - 1 + normals.length) % normals.length][1] + normals[i][1]]);
+    const innerEdges = pts.map((p, i) => {
+      const next = pts[(i + 1) % pts.length]; const n = normals[i];
+      return { p0: [p[0] - n[0] * halfWidth, p[1] - n[1] * halfWidth], p1: [next[0] - n[0] * halfWidth, next[1] - n[1] * halfWidth] };
+    });
+
+    // Resolve corner vertices — clamped miter, 1 vertex per corner always
+    const resolveCorner = (edges, offsetSign) => pts.map((_, i) => {
+      const prev = edges[(i - 1 + edges.length) % edges.length];
+      const curr = edges[i];
+      const avg = normalize([
+        normals[(i - 1 + normals.length) % normals.length][0] + normals[i][0],
+        normals[(i - 1 + normals.length) % normals.length][1] + normals[i][1],
+      ]);
       const intersection = lineIntersection(prev.p0, prev.p1, curr.p0, curr.p1);
       if (intersection) {
         const dx = intersection[0] - pts[i][0];
         const dy = intersection[1] - pts[i][1];
-        if (Math.sqrt(dx * dx + dy * dy) > MITER_LIMIT * widthMeters) {
-          return [pts[i][0] + avg[0] * MITER_LIMIT * widthMeters, pts[i][1] + avg[1] * MITER_LIMIT * widthMeters];
+        if (Math.sqrt(dx * dx + dy * dy) > MITER_LIMIT * halfWidth) {
+          return [pts[i][0] + avg[0] * offsetSign * MITER_LIMIT * halfWidth, pts[i][1] + avg[1] * offsetSign * MITER_LIMIT * halfWidth];
         }
         return intersection;
       }
-      return [pts[i][0] + avg[0] * widthMeters, pts[i][1] + avg[1] * widthMeters];
+      return [pts[i][0] + avg[0] * offsetSign * halfWidth, pts[i][1] + avg[1] * offsetSign * halfWidth];
     });
-    const outerGeo = closeRing(outer).map(coord => metersToLngLat(coord, refLat));
-    if (outerGeo.length < 8) return null;
+
+    const outerPts = resolveCorner(outerEdges, 1);
+    const innerPts = resolveCorner(innerEdges, -1);
+
+    const outerGeo = closeRing(outerPts).map(coord => metersToLngLat(coord, refLat));
+    // Inner ring must be CW (hole winding) — reverse the CCW inner offset
+    const innerGeo = closeRing([...innerPts].reverse()).map(coord => metersToLngLat(coord, refLat));
+
+    if (outerGeo.length < 8 || innerGeo.length < 8) return null;
     return [outerGeo, innerGeo];
   };
 
