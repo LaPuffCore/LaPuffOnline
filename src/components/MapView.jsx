@@ -872,10 +872,25 @@ export default function MapView({ events }) {
       },
     });
 
-    // Hover — electric purple
+    // Hover — electric purple (2D fill overlay)
     map.addLayer({
       id: 'zcta-hover', type: 'fill', source: 'zcta',
       paint: { 'fill-color': '#7C3AED', 'fill-opacity': ['case', ['boolean', ['feature-state', 'hovered'], false], 0.5, 0] },
+    });
+
+    // Cap — invisible flat slab sitting 1m above the zip block top surface.
+    // In 3D mode: glows purple on hover (same feature-state), aligning the hover glow
+    // precisely with the zcta-outline annular ring boundary. Both effects fire together.
+    // Heights are set dynamically in the heatmap update effect to match zcta-extrude.
+    map.addLayer({
+      id: 'zcta-cap', type: 'fill-extrusion', source: 'zcta',
+      paint: {
+        'fill-extrusion-color': '#9F67FF',
+        'fill-extrusion-height': 1,
+        'fill-extrusion-base': 0,
+        'fill-extrusion-opacity': 0,
+        'fill-extrusion-vertical-gradient': false,
+      },
     });
 
     // Safe zone outline — hidden in 3D mode
@@ -1054,8 +1069,13 @@ export default function MapView({ events }) {
 
     // Height expressions — heatmap 3D
     const extrudeH = ['case', ['boolean', ['get', '_special'], false], 30, ['step', ['get', '_tier'], 30, 1, 200, 2, 700, 3, 1600, 4, 2800]];
+    // Cap sits 1m above the block top — same tiers +1
+    const extrudeHCap = ['case', ['boolean', ['get', '_special'], false], 31, ['step', ['get', '_tier'], 31, 1, 201, 2, 701, 3, 1601, 4, 2801]];
     // Flat 3D
     const flatH    = ['case', ['boolean', ['get', '_special'], false], 30, 400];
+    const flatHCap = ['case', ['boolean', ['get', '_special'], false], 31, 401];
+    // Cap opacity expression — visible (glow purple) only on hover in 3D mode
+    const capHoverOpacity = ['case', ['boolean', ['feature-state', 'hovered'], false], 0.72, 0];
 
     if (heatmap) {
       map.setPaintProperty('zcta-fill', 'fill-color', heatColorExpr);
@@ -1076,6 +1096,11 @@ export default function MapView({ events }) {
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-base', 0);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', 1.0);
 
+        // Cap: flat slab 1m above block top — glows purple on hover, aligns with zcta-outline boundary
+        map.setPaintProperty('zcta-cap', 'fill-extrusion-height', extrudeHCap);
+        map.setPaintProperty('zcta-cap', 'fill-extrusion-base', extrudeH);
+        map.setPaintProperty('zcta-cap', 'fill-extrusion-opacity', capHoverOpacity);
+
         // Hide all 2D zip lines in 3D mode — no depth test against fill-extrusions (x-ray fix)
         map.setPaintProperty('zcta-line',       'line-opacity', 0);
         map.setPaintProperty('zcta-line-glow',  'line-opacity', 0);
@@ -1086,6 +1111,10 @@ export default function MapView({ events }) {
           ['case', ['boolean', ['get', '_special'], false], '#222222', '#1a0505']);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-height', 0);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', 0);
+        // Cap disabled in 2D
+        map.setPaintProperty('zcta-cap', 'fill-extrusion-height', 1);
+        map.setPaintProperty('zcta-cap', 'fill-extrusion-base', 0);
+        map.setPaintProperty('zcta-cap', 'fill-extrusion-opacity', 0);
         map.setPaintProperty('zcta-line',      'line-opacity', 1);
         map.setPaintProperty('zcta-line-glow', 'line-opacity', satellite ? 0.55 : 0.75);
         map.setPaintProperty('zcta-line-glow2','line-opacity', satellite ? 0.25 : 0.35);
@@ -1106,6 +1135,11 @@ export default function MapView({ events }) {
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-base', 0);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', satellite ? 0.9 : 1.0);
 
+        // Cap: flat slab 1m above block top — glows purple on hover, aligns with zcta-outline boundary
+        map.setPaintProperty('zcta-cap', 'fill-extrusion-height', flatHCap);
+        map.setPaintProperty('zcta-cap', 'fill-extrusion-base', flatH);
+        map.setPaintProperty('zcta-cap', 'fill-extrusion-opacity', capHoverOpacity);
+
         // Hide all 2D zip lines in 3D mode — no depth test against fill-extrusions (x-ray fix)
         map.setPaintProperty('zcta-line',       'line-opacity', 0);
         map.setPaintProperty('zcta-line-glow',  'line-opacity', 0);
@@ -1116,6 +1150,10 @@ export default function MapView({ events }) {
           ['case', ['boolean', ['get', '_special'], false], '#222222', '#1a0505']);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-height', 0);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', 0);
+        // Cap disabled in 2D
+        map.setPaintProperty('zcta-cap', 'fill-extrusion-height', 1);
+        map.setPaintProperty('zcta-cap', 'fill-extrusion-base', 0);
+        map.setPaintProperty('zcta-cap', 'fill-extrusion-opacity', 0);
         map.setPaintProperty('zcta-line',      'line-opacity', 1);
         map.setPaintProperty('zcta-line-glow', 'line-opacity', satellite ? 0.55 : 0.75);
         map.setPaintProperty('zcta-line-glow2','line-opacity', satellite ? 0.25 : 0.35);
