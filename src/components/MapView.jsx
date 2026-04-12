@@ -423,40 +423,35 @@ function createOutlineGeoJSON(sourceGeoJSON, widthMeters = 12) {
   };
 }
 
-// ZCTA upper 3D border outline — outer edge = raw MODZCTA boundary (zero math),
-// inner edge = MODZCTA vertices offset inward by widthMeters.
-// Outer ring has NO offset computation → cannot self-intersect → zero artifacts.
-// Inner ring uses clamped miter (map(), 1 vertex per corner) — inward at concave
-// corners produces convergent (short) miters, not divergent spikes.
-// Width scales with zoom (getZoomAwareOutlineWidth) — shape geometry never changes.
-// No subdivision, no smoothing — vertex count = raw MODZCTA count always.
+// ZCTA upper 3D border outline — quad strip decomposition.
+// Outer edge = raw MODZCTA boundary (zero math). Inner edge = inward offset by widthMeters.
+// Instead of one complex annular polygon (earcut fails on 200+ vertex rings → artifacts),
+// we emit N simple quad polygons (one per boundary edge). Each quad = 4 vertices →
+// trivially triangulates into 2 perfect triangles. Zero earcut ambiguity, zero artifacts.
+// Quads tile edge-to-edge along the boundary = visually identical to continuous ring.
+// Shape integrity: outer vertices ARE the raw MODZCTA coords, unchanged.
 function createZctaOutlineGeoJSON(sourceGeoJSON, widthMeters = 12) {
   const MITER_LIMIT = 2.5;
 
-  const buildZctaRing = (rawRing) => {
+  const buildZctaQuads = (rawRing, featureProps) => {
     const normalized = normalizeRing(rawRing);
-    if (!normalized || normalized.length < 4) return null;
+    if (!normalized || normalized.length < 4) return [];
     const ring = normalized[0][0] === normalized[normalized.length - 1][0] && normalized[0][1] === normalized[normalized.length - 1][1]
       ? normalized.slice(0, -1) : normalized;
-    if (ring.length < 3) return null;
-
-    // Outer ring: raw MODZCTA coords exactly — no offset, no math, no spike risk.
-    // CCW winding (standard GeoJSON exterior ring).
-    const outerGeo = closeRing([...ring]);
+    if (ring.length < 3) return [];
 
     const refLat = ring.reduce((sum, [, lat]) => sum + lat, 0) / ring.length;
     const pts = ring.map(coord => lngLatToMeters(coord, refLat));
     const orientation = signedArea([...pts, pts[0]]) >= 0 ? 1 : -1;
 
-    // Per-edge inward normals (toward polygon interior)
+    // Per-edge inward normals
     const normals = pts.map((p, i) => {
       const next = pts[(i + 1) % pts.length];
       const dx = next[0] - p[0]; const dy = next[1] - p[1];
-      // Inward = flip outward normal sign
       return normalize(orientation > 0 ? [-dy, dx] : [dy, -dx]);
     });
 
-    // Parallel inward edges at widthMeters from the boundary
+    // Parallel inward edges
     const innerEdges = pts.map((p, i) => {
       const next = pts[(i + 1) % pts.length]; const n = normals[i];
       return {
@@ -466,7 +461,6 @@ function createZctaOutlineGeoJSON(sourceGeoJSON, widthMeters = 12) {
     });
 
     // Resolve inner corner vertices — clamped miter, 1 vertex per corner always.
-    // Inward at concave corners = convergent miters (safe). Clamp catches convex extremes.
     const innerPts = pts.map((_, i) => {
       const prev = innerEdges[(i - 1 + innerEdges.length) % innerEdges.length];
       const curr = innerEdges[i];
@@ -479,43 +473,51 @@ function createZctaOutlineGeoJSON(sourceGeoJSON, widthMeters = 12) {
         const dx = intersection[0] - pts[i][0];
         const dy = intersection[1] - pts[i][1];
         if (Math.sqrt(dx * dx + dy * dy) > MITER_LIMIT * widthMeters) {
-          return [
-            pts[i][0] + avgNorm[0] * MITER_LIMIT * widthMeters,
-            pts[i][1] + avgNorm[1] * MITER_LIMIT * widthMeters,
-          ];
+          return [pts[i][0] + avgNorm[0] * MITER_LIMIT * widthMeters, pts[i][1] + avgNorm[1] * MITER_LIMIT * widthMeters];
         }
         return intersection;
       }
-      return [
-        pts[i][0] + avgNorm[0] * widthMeters,
-        pts[i][1] + avgNorm[1] * widthMeters,
-      ];
+      return [pts[i][0] + avgNorm[0] * widthMeters, pts[i][1] + avgNorm[1] * widthMeters];
     });
 
-    // Inner ring must be CW winding (GeoJSON hole) — reverse
-    const innerGeo = closeRing([...innerPts].reverse()).map(coord => metersToLngLat(coord, refLat));
+    // Convert inner points back to lng/lat
+    const innerGeo = innerPts.map(coord => metersToLngLat(coord, refLat));
 
-    if (outerGeo.length < 4 || innerGeo.length < 4) return null;
-    return [outerGeo, innerGeo];
+    // Emit one quad feature per edge segment: [outer_i, outer_i+1, inner_i+1, inner_i]
+    // CCW winding for each quad (standard GeoJSON exterior ring).
+    const quads = [];
+    const n = ring.length;
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      const quadRing = [
+        ring[i],        // outer corner i
+        ring[j],        // outer corner i+1
+        innerGeo[j],    // inner corner i+1
+        innerGeo[i],    // inner corner i
+        ring[i],        // close ring
+      ];
+      quads.push({
+        type: 'Feature',
+        properties: { ...featureProps },
+        geometry: { type: 'Polygon', coordinates: [quadRing] },
+      });
+    }
+    return quads;
   };
 
-  return {
-    type: 'FeatureCollection',
-    features: sourceGeoJSON.features.map(feature => {
-      const geom = feature.geometry;
-      if (geom.type === 'Polygon') {
-        const ring = buildZctaRing(geom.coordinates[0]);
-        if (!ring) return null;
-        return { ...feature, geometry: { type: 'Polygon', coordinates: ring } };
+  const features = [];
+  for (const feature of sourceGeoJSON.features) {
+    const geom = feature.geometry;
+    const props = feature.properties || {};
+    if (geom.type === 'Polygon') {
+      features.push(...buildZctaQuads(geom.coordinates[0], props));
+    } else if (geom.type === 'MultiPolygon') {
+      for (const poly of geom.coordinates) {
+        features.push(...buildZctaQuads(poly[0], props));
       }
-      if (geom.type === 'MultiPolygon') {
-        const polygons = geom.coordinates.map(p => buildZctaRing(p[0])).filter(Boolean);
-        if (polygons.length === 0) return null;
-        return { ...feature, geometry: { type: 'MultiPolygon', coordinates: polygons } };
-      }
-      return null;
-    }).filter(Boolean),
-  };
+    }
+  }
+  return { type: 'FeatureCollection', features };
 }
 
 function darkMapStyle() {
@@ -972,7 +974,7 @@ export default function MapView({ events }) {
 
     // Upper 3D border — annular ring using createZctaOutlineGeoJSON.
     // Inner ring = raw MODZCTA coords (1:1 with zcta-extrude blocks). Outer ring = fullWidth outward.
-    map.addSource('zcta-outline', { type: 'geojson', data: { type: 'FeatureCollection', features: [] }, generateId: false, tolerance: 0 });
+    map.addSource('zcta-outline', { type: 'geojson', data: { type: 'FeatureCollection', features: [] }, generateId: false, tolerance: 0.001 });
     map.addLayer({
       id: 'zcta-outline', type: 'fill-extrusion', source: 'zcta-outline',
       paint: {
