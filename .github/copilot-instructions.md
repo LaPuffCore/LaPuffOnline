@@ -1,32 +1,40 @@
-# LaPuffOnline — Copilot Workspace Instructions
+# LaPuffOnline — Copilot Instructions
 
-## Codebase Context
-- Always use the **full codebase** as context when solving problems. Never limit context to a single file.
-- Before making changes, explore all relevant files (components, lib, pages, css) to understand the full picture, then implement across all affected files in one pass.
+## Scope First
+- Start with the smallest relevant scope.
+- Do **not** read the full codebase for every task.
+- Only expand to nearby files when the change clearly affects shared logic, styling, data flow, or reused components.
 
-## Workflow Order
-1. **Read** all relevant files first
-2. **Write** all changes (multi-file edits in parallel where possible)
-3. **Build/test** once at the end to catch any errors
-4. **Fix** any build errors found, then confirm done
+## Workflow
+1. Read the file or files most likely involved.
+2. Make the required change.
+3. Check related files only if needed to keep behavior consistent.
+4. Run `npm run build` at the end for code changes.
 
-Do NOT read one file → ask → read another → ask. Batch all reads upfront, make all writes, then validate.
+## Guardrails
+- Do not run dev servers or deploy commands.
+- Use `npm run build` only for verification.
+- Prefer focused, surgical edits over broad refactors unless the task explicitly requires one.
+- Do not inspect or search `node_modules`, `dist`, `.vite`, or other generated/vendor folders unless the task explicitly targets them.
+- Prefer searches scoped to `src`, `.github`, `public`, or a specific file path instead of repo-wide scans.
 
-## Deployment
-- The project uses a GitHub Actions pipeline for build and deploy. **Do not run dev servers or deploy commands.** Only run `npm run build` to verify correctness.
+## Project Notes
+- Stack: React + Vite + Tailwind CSS + Supabase.
+- Theme system uses CSS custom properties and `.lp-theme-scope`.
+- `src/lib/theme.js` contains shared theme helpers.
+- `EventTile` and `EventDetailPopup` should stay visually and behaviorally aligned where they share event UI.
 
-## Project Stack
-- React + Vite, Tailwind CSS, Supabase
-- Theme system: CSS custom properties via `applyThemeToDocument()`, `.lp-theme-scope` on component roots
-- `src/lib/theme.js` — `DEFAULT_THEME`, `THEME_FIELDS`, `CURSOR_TRAILS`, `getTileAccentColor`, `useSiteTheme`
-- `src/components/CustomCursorOverlay.jsx` — full cursor rendering (trails, overlays, outline)
-- `src/components/ThemeCustomizerModal.jsx` — customization popup
-- `src/components/ColorPicker.jsx` — portaled color picker (always anchors to its trigger button)
-- Cursor settings persist across views; color settings do not persist into map view
+## Archival Inertia Ability
+- You have the power to record known conventions and logic in the section below this for future reference. 
+- This can help maintain consistency and speed up future tasks by reducing the need to re-derive or re-discover established patterns.
+- You can update this section as you learn more about the codebase or as conventions evolve or change as needed to make it up to date.
+- Update the below section after each successful fix or feature implementation to capture any new insights or patterns you discover during your work. This will help build a comprehensive reference for future contributors and maintainers of the project.
+- Update the section below while we are working on a fix or feature, so that you can capture insights in real time and ensure that the information is fresh and relevant to the task at hand. This will also help you internalize the conventions and logic as you work with them, making it easier to apply them in future tasks. 
+- Do not let this process slow you down or distract you from the task. Focus on the task first, and then take a moment to jot down any relevant insights or patterns in the section below after you have completed the task. This way, you can maintain your workflow while still building up a valuable reference for the future.
+- You do not need to read the full convention and logic section for every fix but instead you can start each fix by quickly scanning and searching within the section for any relevant information that might be helpful for the task at hand using a contextual search. This can help you quickly orient yourself and apply established patterns without having to re-derive them from scratch.
 
-## Conventions
-- Cursor outline: default on, black, 2px
-- True cursor default = `cursorType: 'default'`, all cursor keys cleared
-- `tileAccentOverride` wires through `getTileAccentColor()` in both `EventTile` and `EventDetailPopup`
-- Modal footer is `flex-shrink-0` pinned — never sticky-scroll
-- `data-theme-modal-portal="true"` on portaled pickers so modal outside-click ignores them
+## Known Conventions And Logic
+- Cursor outline default: on, black, 2px.
+- True cursor default: `cursorType: 'default'` with other cursor keys cleared.
+- `tileAccentOverride` should flow through `getTileAccentColor()`.
+- Portaled theme pickers use `data-theme-modal-portal="true"`.

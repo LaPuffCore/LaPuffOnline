@@ -1,1 +1,83 @@
-[]
+[
+  {
+    "startDate": "2026-04-11",
+    "endDate": "2026-04-11",
+    "description": "Dudes for Dads Nonprofit is happy to invite you to a night of celebration and fundraising.",
+    "url": "https://www.eventbrite.com/e/dudes-for-dads-2026-gala-tickets-1964602749710",
+    "image": "https://img.evbuc.com/https%3A%2F%2Fcdn.evbuc.com%2Fimages%2F1173177012%2F2484424131371%2F1%2Foriginal.20251218-014859?crop=focalpoint&fit=crop&w=512&auto=format%2Ccompress&q=75&sharp=10&fp-x=0.5&fp-y=0.5&s=41688e1769d37d0bfec2762a0ad75f64",
+    "location": {
+      "address": {
+        "addressCountry": "US",
+        "addressLocality": "New York",
+        "addressRegion": "NY",
+        "streetAddress": "25 11th Avenue",
+        "postalCode": "10011",
+        "@type": "PostalAddress"
+      },
+      "geo": {
+        "latitude": "40.74294099999999",
+        "@type": "GeoCoordinates",
+        "longitude": "-74.0091145"
+      },
+      "@type": "Place",
+      "name": "City Winery New York City"
+    },
+    "eventAttendanceMode": "https://schema.org/OfflineEventAttendanceMode",
+    "@type": "Event",
+    "name": "Dudes for Dads 2026 Gala"
+  },
+  {
+    "startDate": "2026-04-17",
+    "endDate": "2026-04-17",
+    "description": "A concert w/ Frog in The Hall @ Elsewhere in Bushwick on 4.17! Tickets start at $25 \u2022 7pm \u2022 16+ | Genre: Rock, Indie",
+    "url": "https://www.eventbrite.com/e/frog-olivia-o-dj-silky-smooth-tickets-1983103228139",
+    "image": "https://img.evbuc.com/https%3A%2F%2Fcdn.evbuc.com%2Fimages%2F1177497590%2F2569518370411%2F1%2Foriginal.20260213-202046?crop=focalpoint&fit=crop&w=512&auto=format%2Ccompress&q=75&sharp=10&fp-x=0.5&fp-y=0.5&s=9ea85b2170367879c097e59450487384",
+    "location": {
+      "address": {
+        "addressCountry": "US",
+        "addressLocality": "Brooklyn",
+        "addressRegion": "NY",
+        "streetAddress": "599 Johnson Avenue",
+        "postalCode": "11237",
+        "@type": "PostalAddress"
+      },
+      "geo": {
+        "latitude": "40.709411",
+        "@type": "GeoCoordinates",
+        "longitude": "-73.923169"
+      },
+      "@type": "Place",
+      "name": "Elsewhere - The Hall"
+    },
+    "eventAttendanceMode": "https://schema.org/OfflineEventAttendanceMode",
+    "@type": "Event",
+    "name": "Frog, Olivia O., DJ Silky Smooth"
+  },
+  {
+    "startDate": "2026-04-17",
+    "endDate": "2026-04-18",
+    "description": "Get in early and party free before midnight with RSVP for a night full of good vibes and great times!",
+    "url": "https://www.eventbrite.com/e/friday-night-lights-everyone-free-b4-12am-wrsvp-at-mama-taco-bk-tickets-1977459767396",
+    "image": "https://img.evbuc.com/https%3A%2F%2Fcdn.evbuc.com%2Fimages%2F1181937558%2F48251508672%2F1%2Foriginal.20260411-155602?crop=focalpoint&fit=crop&w=512&auto=format%2Ccompress&q=75&sharp=10&fp-x=0.5&fp-y=0.5&s=0b14cedc932099cf898c99eaa6598340",
+    "location": {
+      "address": {
+        "addressCountry": "US",
+        "addressLocality": "Brooklyn",
+        "addressRegion": "NY",
+        "streetAddress": "880 Flushing Avenue",
+        "postalCode": "11206",
+        "@type": "PostalAddress"
+      },
+      "geo": {
+        "latitude": "40.701824",
+        "@type": "GeoCoordinates",
+        "longitude": "-73.93664799999999"
+      },
+      "@type": "Place",
+      "name": "MAMATACO"
+    },
+    "eventAttendanceMode": "https://schema.org/OfflineEventAttendanceMode",
+    "@type": "Event",
+    "name": "Friday Night Lights Everyone FREE B4 12am w/RSVP at Mama Taco Bk"
+  }
+]
