@@ -1586,7 +1586,7 @@ export default function MapView({ events }) {
         boroughWithColorRef.current = null;
       }
     }
-  }, [heatmap, threeD, real3D, timespanIdx, events, geoData, boroughGeoData, mapReady, satellite, adjacency, styleVersion]);
+  }, [heatmap, topoOn, threeD, real3D, timespanIdx, events, geoData, boroughGeoData, mapReady, satellite, adjacency, styleVersion]);
 
   // 3D pitch
   useEffect(() => {
@@ -1894,15 +1894,17 @@ export default function MapView({ events }) {
               ))}
             </div>
             <div className="flex gap-2 flex-wrap justify-center">
-              <button onClick={() => { setHeatmap(v => { const nv = !v; if (nv) setTopoOn(true); return nv; }); }}
-                className={`px-4 py-2 rounded-2xl font-black text-sm border-2 transition-all ${heatmap ? 'bg-gradient-to-r from-cyan-500 via-yellow-400 to-red-500 border-yellow-300 text-white' : 'bg-black/70 border-white/30 text-white hover:border-orange-400'}`}>
-                🌡️ Heatmap
-              </button>
-              {heatmap && (
-                <button onClick={() => setTopoOn(v => !v)} className={`w-9 h-9 rounded-xl border-2 p-1 bg-black/60 flex items-center justify-center ml-2 ${topoOn ? 'ring-2 ring-yellow-300' : 'opacity-50'}`} title="Topo Heatmap Toggle">
-                  <img src="/data/topo.jpg" alt="Topo" className="w-7 h-7 object-cover rounded-sm" />
+              <div className="flex flex-col items-center gap-2">
+                <button onClick={() => { setHeatmap(v => { const nv = !v; if (nv) setTopoOn(true); return nv; }); }}
+                  className={`px-4 py-2 rounded-2xl font-black text-sm border-2 transition-all ${heatmap ? 'bg-gradient-to-r from-cyan-500 via-yellow-400 to-red-500 border-yellow-300 text-white' : 'bg-black/70 border-white/30 text-white hover:border-orange-400'}`}>
+                  🌡️ Heatmap
                 </button>
-              )}
+                {heatmap && (
+                  <button onClick={() => setTopoOn(v => !v)} className={`w-10 h-10 rounded-2xl border-2 p-1 bg-black/60 flex items-center justify-center ${topoOn ? 'ring-2 ring-yellow-300' : 'opacity-50'}`} title="Topo Heatmap Toggle">
+                    <img src="/data/topo.jpg" alt="Topo" className="w-8 h-8 object-cover rounded-sm" />
+                  </button>
+                )}
+              </div>
               <button onClick={() => setSatellite(v => !v)}
                 className={`px-4 py-2 rounded-2xl font-black text-sm border-2 transition-all ${satellite ? 'bg-[#7C3AED] border-[#7C3AED] text-white' : 'bg-black/70 border-white/30 text-white hover:border-violet-400'}`}>
                 🛰️ Satellite
