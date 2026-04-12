@@ -160,7 +160,7 @@
 - The **"Upper 3D Border"** is the top-edge ring of each extrusion, rendered as a separate red-tinted extrusion layer sitting on top of the zip block at a translated height. It traces the 2D zip boundary lines but elevated to the height of the block beneath it. In heatmap combos, the upper border height follows the heatmap extrusion height of each zip.
 - The upper 3D border structure and logic is currently working and should be maintained. Only the visual fixes below apply.
 - 3D extrusion heights per tier: 30, 200, 700, 1600, 2800.
-- Outline: neon red `#ff2200`, glow layers at varying widths.
+- Outline: neon red `#ff2200`, glow layers at varying widths. Current dynamic width formula: `14m + max(0, 13-zoom)*4.5m` (thickens as zoom decreases).
 
 ### MapView — 3D Known Issues & Desired Fixes
 - **GeoJSON sync**: All geographic vertices/features for ZCTA zip polygons, the upper 3D border, and 3D extrusions MUST be derived from the same cleaned `MODZCTA_2010_WGS1984.geo.json`. If any pre-generated data (e.g., in `nycZipGeoJSON.js` or other files) was built from an older GeoJSON, it must be regenerated from the cleaned version. Everything must be in sync.
