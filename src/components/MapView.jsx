@@ -797,23 +797,23 @@ function computeZipBoroughMap(zctaFeatures, boroughFeatures) {
 }
 
 // Compute average tier per borough (rounded). Returns array indexed by borough feature index.
-// Compute borough heat as relative ranking — boroughs are ranked against each other
-// so the full color range is always expressed. Highest avg heat → tier 4 (hot/red),
-// lowest → tier 0 (cold). This ensures visual differentiation between boroughs.
+// Compute borough heat tiers using peak-weighted scoring — boroughs with the highest
+// concentration of hot/orange 3D blocks get the highest tier. This matches the visual:
+// the borough with the tallest red spikes gets the red outline.
+// Score = weighted sum: tier4 zips count ×5, tier3 ×3, tier2 ×1.5, tier1 ×0.5, tier0 ×0.
+// Boroughs then ranked against each other → tiers 0–4.
+const PEAK_WEIGHTS = [0, 0.5, 1.5, 3, 5];
 function computeBoroughAvgTiers(tiers, zipBoroughMap, boroughCount) {
-  const sums = new Array(boroughCount).fill(0);
-  const counts = new Array(boroughCount).fill(0);
+  const scores = new Array(boroughCount).fill(0);
   Object.entries(zipBoroughMap).forEach(([idx, bi]) => {
     const tier = tiers[parseInt(idx)];
-    if (tier >= 0) { sums[bi] += tier; counts[bi]++; }
+    if (tier >= 0 && tier <= 4) scores[bi] += (PEAK_WEIGHTS[tier] || 0);
   });
-  const avgs = sums.map((s, i) => counts[i] > 0 ? s / counts[i] : 0);
-  // Rank boroughs by their average heat, assign tiers 0–4 based on relative position
-  const indexed = avgs.map((avg, i) => ({ avg, i }));
-  indexed.sort((a, b) => a.avg - b.avg); // ascending: lowest first
+  // Rank boroughs by peak-weighted score, assign tiers 0–4 based on relative position
+  const indexed = scores.map((score, i) => ({ score, i }));
+  indexed.sort((a, b) => a.score - b.score); // ascending: lowest first
   const ranked = new Array(boroughCount).fill(0);
-  // Map sorted position → tier. 5 boroughs → positions 0,1,2,3,4 → tiers 0,1,2,3,4
-  const tierCount = 5; // cold=0, cool=1, warm=2, orange=3, hot=4
+  const tierCount = 5;
   for (let pos = 0; pos < indexed.length; pos++) {
     const tierForPos = Math.min(Math.round(pos * (tierCount - 1) / Math.max(indexed.length - 1, 1)), tierCount - 1);
     ranked[indexed[pos].i] = tierForPos;
@@ -1385,9 +1385,10 @@ export default function MapView({ events }) {
 
     if (heatmap) {
       map.setPaintProperty('zcta-fill', 'fill-color', heatColorExpr);
-      // FIX ADDITIVE STATE: heatmap fill — 0 when 3D is on (extrusion takes over),
-      // semi-transparent when satellite on, solid otherwise.
-      map.setPaintProperty('zcta-fill', 'fill-opacity', threeD ? 0 : (satellite ? 0.5 : 0.9));
+      // Heat underlay: in 3D+heatmap, zcta-fill renders at ground level underneath
+      // semi-transparent 3D blocks — creates a topographic heat staining effect.
+      // Per-zip colors, time-bound via timespan slider.
+      map.setPaintProperty('zcta-fill', 'fill-opacity', threeD ? 0.50 : (satellite ? 0.5 : 0.9));
 
       if (threeD) {
         map.setPaintProperty('zcta-safe-line', 'line-opacity', 0);
