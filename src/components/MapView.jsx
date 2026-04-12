@@ -313,17 +313,17 @@ function normalizeFeatureGeometry(feature) {
 }
 
 // T3 3D PIXELIZATION: Smooth continuous zoom-aware width scaling.
-// Shared multiplier so ZCTA outline (base 14m) and borough outline (base 40m)
+// Shared multiplier so ZCTA outline (base 14m) and borough outline (base 24m)
 // scale at the same proportional rate — visually synced at every zoom level.
-// Continuous exponential ramp: handles fractional zoom ticks naturally (no jumps).
-// zoom 13+ = base | 12 ≈ 1.52× | 11 ≈ 2.30× | 10 ≈ 3.49× | 9 ≈ 5.29× (= 74m for base 14)
-// t = 13 - zoom is a continuous float (e.g., 11.37 → t = 1.63), so Math.pow handles
-// half-ticks and all fractional zoom increments with zero jumpiness.
-const OUTLINE_SCALE = Math.pow(74 / 14, 0.25); // ≈1.516 — multiplier per zoom step
+// Scaling starts at zoom 11 (not 13) — no scaling needed at close zooms (13→11).
+// From zoom 11→9: continuous exponential ramp to prevent pixelization.
+// zoom 13-11 = base | 10 ≈ 2.30× | 9 ≈ 5.29× (= 74m for base 14, 127m for base 24)
+// t is continuous float from map.getZoom() — handles fractional ticks smoothly.
+const OUTLINE_SCALE = Math.pow(74 / 14, 0.5); // ≈2.30 — multiplier per zoom step (2 steps: 11→9)
 function getZoomAwareOutlineWidth(map, baseMeters = 14) {
   if (!map || typeof map.getZoom !== 'function') return baseMeters;
   const zoom = map.getZoom();
-  const t = Math.max(0, 13 - zoom); // continuous float: 0 at zoom 13+, 4 at zoom 9
+  const t = Math.max(0, 11 - zoom); // 0 at zoom 11+, 2 at zoom 9
   const multiplier = Math.pow(OUTLINE_SCALE, t);
   const pitch = map.getPitch ? map.getPitch() : 0;
   const pitchFactor = 1 + (pitch / 90) * 0.55;
@@ -491,13 +491,158 @@ function createOutlineGeoJSON(sourceGeoJSON, widthMeters = 12) {
   return { type: 'FeatureCollection', features };
 }
 
-// ZCTA upper 3D border outline — quad strip decomposition.
-// Outer edge = raw MODZCTA boundary (zero math). Inner edge = inward offset by widthMeters.
-// Instead of one complex annular polygon (earcut fails on 200+ vertex rings → artifacts),
-// we emit N simple quad polygons (one per boundary edge). Each quad = 4 vertices →
-// trivially triangulates into 2 perfect triangles. Zero earcut ambiguity, zero artifacts.
-// Quads tile edge-to-edge along the boundary = visually identical to continuous ring.
-// Shape integrity: outer vertices ARE the raw MODZCTA coords, unchanged.
+// ── Skeleton Cache System ──────────────────────────────────────────────────
+// Precomputes per-ring geometry constants (normals, miter directions, meter coords)
+// once on GeoJSON load. At runtime (every zoom tick), only cheap linear scaling
+// is needed: offsetPt = pts[i] + unitOffsetVec[i] * widthMeters → metersToLngLat.
+// Eliminates ~80% of per-tick compute (no re-normalizing, no re-intersecting).
+const SKEL_MITER_LIMIT = 2.5;
+
+function buildRingSkeleton(rawRing, direction) {
+  // direction: 'inward' for ZCTA, 'outward' for borough
+  const normalized = normalizeRing(rawRing);
+  if (!normalized || normalized.length < 4) return null;
+  const ring = normalized[0][0] === normalized[normalized.length - 1][0] && normalized[0][1] === normalized[normalized.length - 1][1]
+    ? normalized.slice(0, -1) : normalized;
+  if (ring.length < 3) return null;
+
+  const refLat = ring.reduce((sum, [, lat]) => sum + lat, 0) / ring.length;
+  const pts = ring.map(coord => lngLatToMeters(coord, refLat));
+  const orientation = signedArea([...pts, pts[0]]) >= 0 ? 1 : -1;
+
+  // Normals: inward or outward depending on direction
+  const normals = pts.map((p, i) => {
+    const next = pts[(i + 1) % pts.length];
+    const dx = next[0] - p[0]; const dy = next[1] - p[1];
+    if (direction === 'inward') {
+      return normalize(orientation > 0 ? [-dy, dx] : [dy, -dx]);
+    }
+    return normalize(orientation > 0 ? [dy, -dx] : [-dy, dx]);
+  });
+
+  // Compute unit offset vectors at w=1 using line intersection
+  const unitEdges = pts.map((p, i) => {
+    const next = pts[(i + 1) % pts.length]; const n = normals[i];
+    return { p0: [p[0] + n[0], p[1] + n[1]], p1: [next[0] + n[0], next[1] + n[1]] };
+  });
+
+  const unitOffsetVecs = pts.map((_, i) => {
+    const prev = unitEdges[(i - 1 + unitEdges.length) % unitEdges.length];
+    const curr = unitEdges[i];
+    const avgNorm = normalize([
+      normals[(i - 1 + normals.length) % normals.length][0] + normals[i][0],
+      normals[(i - 1 + normals.length) % normals.length][1] + normals[i][1],
+    ]);
+    const intersection = lineIntersection(prev.p0, prev.p1, curr.p0, curr.p1);
+    if (intersection) {
+      const dx = intersection[0] - pts[i][0];
+      const dy = intersection[1] - pts[i][1];
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist > SKEL_MITER_LIMIT) {
+        return [avgNorm[0] * SKEL_MITER_LIMIT, avgNorm[1] * SKEL_MITER_LIMIT];
+      }
+      return [dx, dy];
+    }
+    return [avgNorm[0], avgNorm[1]];
+  });
+
+  return { ring, refLat, pts, unitOffsetVecs };
+}
+
+function buildZctaSkeleton(sourceGeoJSON) {
+  return sourceGeoJSON.features.map(feature => {
+    const geom = feature.geometry;
+    const props = feature.properties || {};
+    if (geom.type === 'Polygon') {
+      const skel = buildRingSkeleton(geom.coordinates[0], 'inward');
+      return skel ? { props, rings: [skel] } : null;
+    }
+    if (geom.type === 'MultiPolygon') {
+      const rings = geom.coordinates.map(p => buildRingSkeleton(p[0], 'inward')).filter(Boolean);
+      return rings.length ? { props, rings } : null;
+    }
+    return null;
+  }).filter(Boolean);
+}
+
+function buildBoroughSkeleton(sourceGeoJSON) {
+  return sourceGeoJSON.features.map(feature => {
+    const normalizedGeom = normalizeFeatureGeometry(feature) || feature.geometry;
+    if (!normalizedGeom) return null;
+    const props = feature.properties || {};
+    if (normalizedGeom.type === 'Polygon') {
+      const skel = buildRingSkeleton(normalizedGeom.coordinates[0], 'outward');
+      return skel ? { props, rings: [skel] } : null;
+    }
+    if (normalizedGeom.type === 'MultiPolygon') {
+      const rings = normalizedGeom.coordinates.map(p => buildRingSkeleton(p[0], 'outward')).filter(Boolean);
+      return rings.length ? { props, rings } : null;
+    }
+    return null;
+  }).filter(Boolean);
+}
+
+// Fast quad generation from precomputed skeleton — only linear scaling + metersToLngLat.
+// ZCTA: outer = raw ring, offset = inward (inner edge)
+function generateZctaQuadsFromSkeleton(skeletons, widthMeters, propsOverrides) {
+  const features = [];
+  for (let si = 0; si < skeletons.length; si++) {
+    const { props, rings } = skeletons[si];
+    const mergedProps = propsOverrides ? { ...props, ...propsOverrides[si] } : props;
+    for (const { ring, refLat, pts, unitOffsetVecs } of rings) {
+      const n = ring.length;
+      const offsetGeo = new Array(n);
+      for (let i = 0; i < n; i++) {
+        offsetGeo[i] = metersToLngLat(
+          [pts[i][0] + unitOffsetVecs[i][0] * widthMeters, pts[i][1] + unitOffsetVecs[i][1] * widthMeters],
+          refLat
+        );
+      }
+      for (let i = 0; i < n; i++) {
+        const j = (i + 1) % n;
+        features.push({
+          type: 'Feature',
+          properties: mergedProps,
+          geometry: { type: 'Polygon', coordinates: [[ring[i], ring[j], offsetGeo[j], offsetGeo[i], ring[i]]] },
+        });
+      }
+    }
+  }
+  return { type: 'FeatureCollection', features };
+}
+
+// Borough: inner = raw ring, offset = outward (outer edge)
+function generateBoroughQuadsFromSkeleton(skeletons, widthMeters, propsOverrides) {
+  const features = [];
+  for (let si = 0; si < skeletons.length; si++) {
+    const { props, rings } = skeletons[si];
+    const mergedProps = propsOverrides ? { ...props, ...propsOverrides[si] } : props;
+    for (const { ring, refLat, pts, unitOffsetVecs } of rings) {
+      const n = ring.length;
+      const offsetGeo = new Array(n);
+      for (let i = 0; i < n; i++) {
+        offsetGeo[i] = metersToLngLat(
+          [pts[i][0] + unitOffsetVecs[i][0] * widthMeters, pts[i][1] + unitOffsetVecs[i][1] * widthMeters],
+          refLat
+        );
+      }
+      for (let i = 0; i < n; i++) {
+        const j = (i + 1) % n;
+        features.push({
+          type: 'Feature',
+          properties: mergedProps,
+          geometry: { type: 'Polygon', coordinates: [[offsetGeo[i], offsetGeo[j], ring[j], ring[i], offsetGeo[i]]] },
+        });
+      }
+    }
+  }
+  return { type: 'FeatureCollection', features };
+}
+
+// ── End Skeleton Cache System ─────────────────────────────────────────────
+
+// ZCTA upper 3D border outline — quad strip decomposition (non-cached, used for initial render).
+// Kept as fallback; skeleton-cached version is used for zoom updates.
 function createZctaOutlineGeoJSON(sourceGeoJSON, widthMeters = 12) {
   const MITER_LIMIT = 2.5;
 
@@ -857,6 +1002,8 @@ export default function MapView({ events }) {
   const boroughGeoDataRef  = useRef(null);
   const zipBoroughMapRef   = useRef({});
   const boroughWithColorRef = useRef(null);
+  const zctaSkeletonRef    = useRef(null);
+  const boroughSkeletonRef = useRef(null);
 
   const [timespanIdx,   setTimespanIdx]   = useState(4);
   const [heatmap,       setHeatmap]       = useState(false);
@@ -931,6 +1078,8 @@ export default function MapView({ events }) {
       });
       setGeoData({ ...data, features });
       setAdjacency(buildAdjacency(features));
+      // Build ZCTA skeleton cache once — precomputes normals, miter vectors per ring
+      zctaSkeletonRef.current = buildZctaSkeleton({ ...data, features });
     });
   }, []);
 
@@ -938,6 +1087,8 @@ export default function MapView({ events }) {
   useEffect(() => {
     fetch(BOROUGH_GEOJSON_URL).then(r => r.json()).then(data => {
       setBoroughGeoData(data);
+      // Build borough skeleton cache once — precomputes outward offset vectors per ring
+      boroughSkeletonRef.current = buildBoroughSkeleton(data);
     }).catch(err => console.warn('Borough GeoJSON load failed:', err));
   }, []);
 
@@ -1332,8 +1483,8 @@ export default function MapView({ events }) {
   }, [threeD, mapReady]);
 
   // T3 3D PIXELIZATION: re-generate outline ring width on zoom AND pitch so it stays visible.
-  // Uses withHeatRef so it doesn't need to recompute tiers/zip data.
-  // Also regenerates borough-outline width with baseMeters=40.
+  // Uses skeleton cache for fast generation — only linear scaling + metersToLngLat per vertex.
+  // Also regenerates borough-outline width with baseMeters=24.
   // RAF debounce: coalesces rapid zoom ticks to one rebuild per animation frame for smoothness.
   useEffect(() => {
     const map = mapRef.current;
@@ -1344,11 +1495,28 @@ export default function MapView({ events }) {
       if (rafId) cancelAnimationFrame(rafId);
       rafId = requestAnimationFrame(() => {
         rafId = null;
-        if (withHeatRef.current && map.getSource('zcta-outline')) {
-          map.getSource('zcta-outline').setData(createZctaOutlineGeoJSON(withHeatRef.current, getZoomAwareOutlineWidth(map)));
+        // ZCTA outline — use skeleton cache if available, fallback to full recompute
+        if (map.getSource('zcta-outline')) {
+          if (zctaSkeletonRef.current && withHeatRef.current) {
+            // Build props overrides from withHeat features (_heat, _tier, _special)
+            const overrides = withHeatRef.current.features.map(f => f.properties);
+            map.getSource('zcta-outline').setData(
+              generateZctaQuadsFromSkeleton(zctaSkeletonRef.current, getZoomAwareOutlineWidth(map), overrides)
+            );
+          } else if (withHeatRef.current) {
+            map.getSource('zcta-outline').setData(createZctaOutlineGeoJSON(withHeatRef.current, getZoomAwareOutlineWidth(map)));
+          }
         }
-        if (boroughWithColorRef.current && map.getSource('borough-source')) {
-          map.getSource('borough-source').setData(createOutlineGeoJSON(boroughWithColorRef.current, getZoomAwareOutlineWidth(map, 24)));
+        // Borough outline — use skeleton cache if available, fallback to full recompute
+        if (map.getSource('borough-source')) {
+          if (boroughSkeletonRef.current && boroughWithColorRef.current) {
+            const overrides = boroughWithColorRef.current.features.map(f => f.properties);
+            map.getSource('borough-source').setData(
+              generateBoroughQuadsFromSkeleton(boroughSkeletonRef.current, getZoomAwareOutlineWidth(map, 24), overrides)
+            );
+          } else if (boroughWithColorRef.current) {
+            map.getSource('borough-source').setData(createOutlineGeoJSON(boroughWithColorRef.current, getZoomAwareOutlineWidth(map, 24)));
+          }
         }
       });
     };
