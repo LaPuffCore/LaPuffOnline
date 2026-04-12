@@ -310,13 +310,12 @@ function normalizeFeatureGeometry(feature) {
   return null;
 }
 
-// FIX 3D PIXELIZATION: More aggressive width scaling so outlines remain visible
-// when zoomed out. The extra width creates natural overlap-bleed at low zoom.
+// T3 3D PIXELIZATION: More aggressive width scaling so outlines remain visible
+// when zoomed out. Each step below zoom 14 adds 8m, covering sub-pixel gaps.
 function getZoomAwareOutlineWidth(map, baseMeters = 14) {
   if (!map || typeof map.getZoom !== 'function') return baseMeters;
   const zoom = map.getZoom();
-  // Slightly more aggressive ramp — each zoom step below 13 adds 4.5m of ring width
-  const extra = Math.max(0, 13 - zoom) * 4.5;
+  const extra = Math.max(0, 14 - zoom) * 8;
   return baseMeters + extra;
 }
 
@@ -1080,7 +1079,9 @@ export default function MapView({ events }) {
     ] : OUTLINE_COLOR;
 
     if (map.getSource('zcta-outline')) {
-      map.setPaintProperty('zcta-outline', 'fill-extrusion-opacity', threeD ? 0.98 : 0);
+      // T3: zoom-interpolated opacity — reduces fringing at low zoom, full at close zoom
+      const outlineOpacity = ['interpolate', ['linear'], ['zoom'], 9, 0.70, 13, 0.98];
+      map.setPaintProperty('zcta-outline', 'fill-extrusion-opacity', threeD ? outlineOpacity : 0);
       map.setPaintProperty('zcta-outline-line', 'line-opacity', 0);
       if (threeD) {
         map.setPaintProperty('zcta-outline', 'fill-extrusion-color', upperBorderColorExpr);
@@ -1105,7 +1106,9 @@ export default function MapView({ events }) {
         map.getSource('borough-source').setData(
           createOutlineGeoJSON(coloredBorough, getZoomAwareOutlineWidth(map, 40))
         );
-        map.setPaintProperty('borough-outline', 'fill-extrusion-opacity', 0.92);
+        // T3: zoom-interpolated opacity on borough-outline — same anti-pixelation treatment
+        const boroughOpacity = ['interpolate', ['linear'], ['zoom'], 9, 0.70, 13, 0.92];
+        map.setPaintProperty('borough-outline', 'fill-extrusion-opacity', boroughOpacity);
       } else {
         map.setPaintProperty('borough-outline', 'fill-extrusion-opacity', 0);
         boroughWithColorRef.current = null;
@@ -1120,15 +1123,19 @@ export default function MapView({ events }) {
     map.easeTo({ pitch: threeD ? 48 : 0, bearing: threeD ? -17 : 0, duration: 700 });
   }, [threeD, mapReady]);
 
-  // FIX 3D PIXELIZATION: re-generate outline ring width on zoom so it stays visible.
+  // T3 3D PIXELIZATION: re-generate outline ring width on zoom so it stays visible.
   // Uses withHeatRef so it doesn't need to recompute tiers/zip data.
+  // Also regenerates borough-outline width with baseMeters=40.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
     const onZoom = () => {
-      if (!threeDRef.current || !withHeatRef.current) return;
-      if (map.getSource('zcta-outline')) {
+      if (!threeDRef.current) return;
+      if (withHeatRef.current && map.getSource('zcta-outline')) {
         map.getSource('zcta-outline').setData(createOutlineGeoJSON(withHeatRef.current, getZoomAwareOutlineWidth(map)));
+      }
+      if (boroughWithColorRef.current && map.getSource('borough-source')) {
+        map.getSource('borough-source').setData(createOutlineGeoJSON(boroughWithColorRef.current, getZoomAwareOutlineWidth(map, 40)));
       }
     };
     map.on('zoom', onZoom);
