@@ -1027,6 +1027,8 @@ export default function MapView({ events }) {
     }
   });
   const containerRef    = useRef(null);
+  // Public base (Vite base) so assets resolve correctly when app is served under a subpath
+  const PUBLIC_BASE = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.BASE_URL) ? import.meta.env.BASE_URL : '/';
   const mapContainerRef = useRef(null);
   const mapRef          = useRef(null);
   const hoveredIdRef    = useRef(null);
@@ -1922,7 +1924,7 @@ export default function MapView({ events }) {
                       className={`w-10 h-10 rounded-2xl border-2 p-0 bg-black/60 flex items-center justify-center ${topoOn ? 'ring-2 ring-yellow-300' : 'opacity-50'}`}
                       title="Topo Heatmap Toggle"
                       style={{ position: 'absolute', top: 'calc(100% + 8px)', left: '50%', transform: 'translateX(-50%)' }}>
-                      <div style={{ width: 36, height: 36, borderRadius: 8, backgroundImage: "url('/data/topo-thumb.png')", backgroundSize: 'cover', backgroundPosition: 'center' }} />
+                      <div style={{ width: 36, height: 36, borderRadius: 8, backgroundImage: `url('${PUBLIC_BASE}data/topo-thumb.png')`, backgroundSize: 'cover', backgroundPosition: 'center' }} />
                     </button>
                   )}
                 </div>
