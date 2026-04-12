@@ -322,7 +322,10 @@ function getZoomAwareOutlineWidth(map, baseMeters = 14) {
   if (!map || typeof map.getZoom !== 'function') return baseMeters;
   const zoom = map.getZoom();
   const steps = Math.max(0, 13 - zoom);
-  const extra = steps * steps * 5; // quadratic: 0,5,20,45,80,125,180 for steps 0-6
+  // Less aggressive at medium zooms (11-12), same at far zooms (9-10).
+  // steps 1-2 (zoom 12-11): quadratic × 3 → 3m, 12m
+  // steps 3+ (zoom 10-9): quadratic × 5 → 45m, 80m (unchanged from before)
+  const extra = steps <= 2 ? steps * steps * 3 : steps * steps * 5;
   const pitch = map.getPitch ? map.getPitch() : 0;
   const pitchFactor = 1 + (pitch / 90) * 0.55;
   return (baseMeters + extra) * pitchFactor;
@@ -1145,7 +1148,7 @@ export default function MapView({ events }) {
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-color', withHoverColor(flatColorExpr));
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-height', flatH);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-base', 0);
-        map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', satellite ? 0.9 : 1.0);
+        map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', satellite ? 0.9 : 0.75);
 
         // Cap: flat slab 1m above block top — glows purple on hover, aligns with zcta-outline boundary
         map.setPaintProperty('zcta-cap', 'fill-extrusion-height', flatHCap);
