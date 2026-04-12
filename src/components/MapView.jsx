@@ -211,8 +211,46 @@ function dedupeRing(ring) {
 }
 
 function isNearlyCollinear(a, b, c) {
+  // T4 FIX: threshold was 1e-8, which collapsed valid coastal curvature vertices
+  // (pier-edge cross products are ~1e-10). Use 1e-12 to preserve all real geometry.
   const cross = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
-  return Math.abs(cross) < 1e-8;
+  return Math.abs(cross) < 1e-12;
+}
+
+// Ramer-Douglas-Peucker simplification for pre-processing borough outer rings only.
+// Removes sub-pixel pier/jetty protrusions (tolerance ~0.0004° ≈ 40m) before offsetRing.
+// NEVER applied to ZCTA zip data — zip accuracy must be preserved exactly.
+function rdpSimplify(points, tolerance) {
+  if (points.length < 3) return points;
+  const perpendicularDist = (pt, lineStart, lineEnd) => {
+    const dx = lineEnd[0] - lineStart[0];
+    const dy = lineEnd[1] - lineStart[1];
+    const lenSq = dx * dx + dy * dy;
+    if (lenSq === 0) {
+      const ex = pt[0] - lineStart[0]; const ey = pt[1] - lineStart[1];
+      return Math.sqrt(ex * ex + ey * ey);
+    }
+    const t = Math.max(0, Math.min(1, ((pt[0] - lineStart[0]) * dx + (pt[1] - lineStart[1]) * dy) / lenSq));
+    const px = lineStart[0] + t * dx - pt[0]; const py = lineStart[1] + t * dy - pt[1];
+    return Math.sqrt(px * px + py * py);
+  };
+  const rdp = (pts, start, end, tol, keep) => {
+    if (end <= start + 1) return;
+    let maxDist = 0; let maxIdx = start;
+    for (let i = start + 1; i < end; i++) {
+      const d = perpendicularDist(pts[i], pts[start], pts[end]);
+      if (d > maxDist) { maxDist = d; maxIdx = i; }
+    }
+    if (maxDist > tol) {
+      keep[maxIdx] = true;
+      rdp(pts, start, maxIdx, tol, keep);
+      rdp(pts, maxIdx, end, tol, keep);
+    }
+  };
+  const keep = new Array(points.length).fill(false);
+  keep[0] = true; keep[points.length - 1] = true;
+  rdp(points, 0, points.length - 1, tolerance, keep);
+  return points.filter((_, i) => keep[i]);
 }
 
 function simplifyRing(ring) {
@@ -393,7 +431,11 @@ function offsetRing(outerRing, widthMeters) {
   return [outerGeo, innerGeo];
 }
 
-function createOutlineGeoJSON(sourceGeoJSON, widthMeters = 12, minAreaSq = 0) {
+// simplifyInputTolerance: degrees tolerance for RDP pre-simplification of the outer ring.
+// Pass 0.0004 (~40m) for borough outlines to strip sub-pixel pier/jetty protrusions.
+// ALWAYS pass 0 (default) for ZCTA zip outlines — zip accuracy must be preserved.
+function createOutlineGeoJSON(sourceGeoJSON, widthMeters = 12, minAreaSq = 0, simplifyInputTolerance = 0) {
+  const maybeSimplify = (ring) => simplifyInputTolerance > 0 ? rdpSimplify(ring, simplifyInputTolerance) : ring;
   return {
     type: 'FeatureCollection',
     features: sourceGeoJSON.features.map(feature => {
@@ -401,7 +443,8 @@ function createOutlineGeoJSON(sourceGeoJSON, widthMeters = 12, minAreaSq = 0) {
       if (!normalizedGeom) return null;
       if (normalizedGeom.type === 'Polygon') {
         if (minAreaSq > 0 && Math.abs(signedArea(normalizedGeom.coordinates[0])) < minAreaSq) return null;
-        const outline = offsetRing(normalizedGeom.coordinates[0], widthMeters);
+        const inputRing = maybeSimplify(normalizedGeom.coordinates[0]);
+        const outline = offsetRing(inputRing, widthMeters);
         if (!outline) return null;
         return { ...feature, geometry: { type: 'Polygon', coordinates: outline } };
       }
@@ -409,7 +452,8 @@ function createOutlineGeoJSON(sourceGeoJSON, widthMeters = 12, minAreaSq = 0) {
         const polygons = [];
         normalizedGeom.coordinates.forEach(polygon => {
           if (minAreaSq > 0 && Math.abs(signedArea(polygon[0])) < minAreaSq) return;
-          const outline = offsetRing(polygon[0], widthMeters);
+          const inputRing = maybeSimplify(polygon[0]);
+          const outline = offsetRing(inputRing, widthMeters);
           if (outline) polygons.push(outline);
         });
         if (polygons.length === 0) return null;
@@ -1113,7 +1157,7 @@ export default function MapView({ events }) {
         const coloredBorough = buildColoredBoroughFeatures(boroughGeoDataRef.current, avgTiers, heatmap);
         boroughWithColorRef.current = coloredBorough;
         map.getSource('borough-source').setData(
-          createOutlineGeoJSON(coloredBorough, getZoomAwareOutlineWidth(map, 40), 0.003)
+          createOutlineGeoJSON(coloredBorough, getZoomAwareOutlineWidth(map, 40), 0.003, 0.0004)
         );
         // T3: zoom-interpolated opacity on borough-outline — same anti-pixelation treatment
         const boroughOpacity = ['interpolate', ['linear'], ['zoom'], 9, 0.70, 13, 0.92];
@@ -1144,7 +1188,7 @@ export default function MapView({ events }) {
         map.getSource('zcta-outline').setData(createOutlineGeoJSON(withHeatRef.current, getZoomAwareOutlineWidth(map)));
       }
       if (boroughWithColorRef.current && map.getSource('borough-source')) {
-        map.getSource('borough-source').setData(createOutlineGeoJSON(boroughWithColorRef.current, getZoomAwareOutlineWidth(map, 40), 0.003));
+        map.getSource('borough-source').setData(createOutlineGeoJSON(boroughWithColorRef.current, getZoomAwareOutlineWidth(map, 40), 0.003, 0.0004));
       }
     };
     map.on('zoom', onZoom);
