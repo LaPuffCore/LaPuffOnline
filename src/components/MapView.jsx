@@ -1620,7 +1620,7 @@ export default function MapView({ events }) {
     }
   }, [heatmap, topoOn, threeD, real3D, timespanIdx, events, geoData, boroughGeoData, mapReady, satellite, adjacency, styleVersion]);
 
-  // Manage heat-underlay radius so its real-world meter reach stays constant at zoom >= 12.
+  // Manage heat-underlay radius so its real-world meter reach stays constant between zoom 9.5 and 14.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !map.getLayer) return;
@@ -1629,50 +1629,51 @@ export default function MapView({ events }) {
     const center = map.getCenter();
     const refLat = center && typeof center.lat === 'number' ? center.lat : 40.71;
     const metersPerPixel = (z) => 156543.03392 * Math.cos(refLat * Math.PI / 180) / Math.pow(2, z);
+    // Preserve the original desiredMeters computation (based on px@12 and prior scale)
     const mpp12 = metersPerPixel(12);
-    // Previous frozen px@12 (after 30% reduction) was 154px. User requests: freeze at zoom>=11
-    // and increase minimum size by 20% for 11+. Apply desiredMeters scaled by 1.2.
     const ORIGINAL_PX_AT_12 = 220;
     const FROZEN_PX_AT_12 = Math.round(ORIGINAL_PX_AT_12 * 0.7); // 154px
-    // Increase frozen real-world radius for zoom >= 11. Previously 1.20 (20%).
-    // User requested an additional 20% on top of the prior 1.20 -> cumulative 1.44.
-    const SCALE_ABOVE_11 = 1.44; // 44% larger cumulative for zoom >= 11
+    const SCALE_ABOVE_11 = 1.44; // cumulative scale used historically
     const desiredMeters = FROZEN_PX_AT_12 * mpp12 * SCALE_ABOVE_11; // apply cumulative scale to real-world reach
+
+    const freezeLower = 9.5;
+    const freezeUpper = 14; // safety cap (user requested +1 beyond base 13)
+    const pxFreezeLowerEquiv = Math.max(1, desiredMeters / metersPerPixel(freezeLower));
+    const pxFreezeUpperEquiv = Math.max(1, desiredMeters / metersPerPixel(freezeUpper));
 
     const updateHeatRadius = () => {
       if (!map.getLayer('heat-underlay')) return;
       const zoom = map.getZoom();
       let px;
-      // Freeze real-world radius for zoom >= 11
-      if (zoom >= 11) {
+      // Constant (frozen) behavior between freezeLower and freezeUpper inclusive
+      if (zoom >= freezeLower && zoom <= freezeUpper) {
         px = Math.max(1, desiredMeters / metersPerPixel(zoom));
+      } else if (zoom > freezeUpper) {
+        // Cap at the equivalent px for freezeUpper to avoid uncontrolled growth beyond safety range
+        px = pxFreezeUpperEquiv;
       } else {
-        // For zooms 9 -> 11: interpolate px linearly between px@9 and px@11
+        // For zooms 9 -> freezeLower: interpolate px linearly between px@9 and px@freezeLower
         const PX_AT_9 = 200;
-        const px11_equiv = Math.max(1, desiredMeters / metersPerPixel(11));
         if (zoom <= 9) px = PX_AT_9;
-        else px = PX_AT_9 + (px11_equiv - PX_AT_9) * ((zoom - 9) / (11 - 9));
+        else px = PX_AT_9 + (pxFreezeLowerEquiv - PX_AT_9) * ((zoom - 9) / (freezeLower - 9));
       }
       if (!Number.isFinite(px) || px < 1) px = Math.max(1, Math.round(desiredMeters / metersPerPixel(Math.max(zoom, 11))));
       map.setPaintProperty('heat-underlay', 'heatmap-radius', px);
 
-      // Compute tier-specific multipliers for weights per user request:
-      // - Tier4 (red): zoom 9 -> 11 ramps down (weaker at wide zooms), then slightly larger at >=11
-      //   floor at zoom 9: 0.55, ramp to 0.90 at zoom 11, then >=11 -> 1.35
-      // - Other tiers: baseline 1.0; >=11 -> 1.20 (to make mid-bands more visible when frozen)
+      // Compute tier-specific multipliers for weights. Freeze multipliers inside [freezeLower, freezeUpper].
       try {
         let multiplierRed, multiplierOthers;
-        if (zoom >= 11) {
-          // Close-in view: emphasize red a bit for expression
+        if (zoom >= freezeLower && zoom <= freezeUpper) {
+          multiplierRed = 1.35;
+          multiplierOthers = 1.20;
+        } else if (zoom > freezeUpper) {
           multiplierRed = 1.35;
           multiplierOthers = 1.20;
         } else if (zoom <= 9) {
-          // Far-out view: reduce red dominance
           multiplierRed = 0.55;
           multiplierOthers = 1.0;
         } else {
-          // interpolate red between 9 and 11 from 0.55 -> 0.90
-          const t = (zoom - 9) / (11 - 9);
+          const t = (zoom - 9) / (freezeLower - 9);
           multiplierRed = 0.55 + t * (0.90 - 0.55);
           multiplierOthers = 1.0;
         }
