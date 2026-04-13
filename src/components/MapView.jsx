@@ -1657,30 +1657,28 @@ export default function MapView({ events }) {
       // Dynamic color & weight logic centered around a freeze at zoom 9.5 (inclusive).
       try {
         const freezeZoom = 9.5;
-        // Weight multipliers (restored to previously working values):
-        // - Tier4 (red): reduced at far zooms, interpolates up to freeze, fixed at freeze range
-        // - Other tiers: baseline -> scaled up in freeze range to broaden cooler bands
+        // Weight multipliers: drastically reduce red in the constant/frozen range so red's
+        // visual area becomes much smaller (approx 10x reduction). Keep other tiers boosted.
         let multiplierRed, multiplierOthers;
         if (zoom >= freezeZoom) {
-          // Constant range (>=9.5): use the older red centrality and boost other tiers
-          multiplierRed = 1.25; // restored from working commit
+          // Constant range (>=9.5): drastically reduce red contribution while keeping others larger
+          multiplierRed = 0.12; // ~10x smaller than previous 1.25
           multiplierOthers = 1.20;
         } else if (zoom <= 9.0) {
-          // Far-out view: reduce red dominance (keeps red tight when zoomed out)
-          multiplierRed = 0.70;
+          // Far-out view: red very small
+          multiplierRed = 0.06;
           multiplierOthers = 1.0;
         } else {
-          // Smooth interpolate from zoom 9.0 -> 9.5 (ramp red 0.70 -> 1.00, others 1.0 -> 1.2)
+          // Smooth interpolate from zoom 9.0 -> 9.5 (ramp red 0.06 -> 0.12, others 1.0 -> 1.2)
           const t = (zoom - 9.0) / (freezeZoom - 9.0);
-          multiplierRed = 0.70 + t * (1.00 - 0.70);
+          multiplierRed = 0.06 + t * (0.12 - 0.06);
           multiplierOthers = 1.0 + t * 0.20;
         }
         const weightExpr = ['case', ['==', ['get', '_tier'], 4], ['*', ['coalesce', ['get', '_weight'], 0], multiplierRed], ['*', ['coalesce', ['get', '_weight'], 0], multiplierOthers]];
         map.setPaintProperty('heat-underlay', 'heatmap-weight', weightExpr);
 
-        // Color spans: keep red positions conservative (old centrality) while keeping the
-        // expanded outer bands introduced earlier. This preserves red as the tight core
-        // while letting orange->dark-blue occupy progressively larger spans outward.
+        // Color spans: keep red color threshold very high so only the densest cores map to red
+        // while preserving the expanded outer bands for cooler colors.
         const colorExprFrozen = [
           'interpolate', ['linear'], ['heatmap-density'],
           0, 'rgba(0,0,0,0)',
@@ -1689,8 +1687,8 @@ export default function MapView({ events }) {
           0.28, '#00dd66', // green (larger)
           0.44, '#f6e65a', // yellow (larger)
           0.60, '#ff9a00', // orange (bigger than red)
-          0.72, '#ff4d4d', // red-orange
-          0.75, '#cc0d00', // red (tight innermost band - restored threshold)
+          0.78, '#ff4d4d', // red-orange
+          0.95, '#cc0d00', // red (extremely tight innermost band)
         ];
 
         // Pre-freeze palette: reduce red presence and keep bands tighter
