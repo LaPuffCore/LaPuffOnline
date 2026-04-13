@@ -1202,10 +1202,20 @@ export default function MapView({ events }) {
       map.addLayer({
         id: 'heat-underlay', type: 'heatmap', source: 'heat-underlay',
         paint: {
-          'heatmap-weight': ['coalesce', ['get', '_weight'], 0],
-          'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 8, 1.2, 12, 1.8, 13, 1.8],
+          // Dynamic weight multiplier per-tier based on zoom:
+          // - Tier 4 (red) : reduced on zoom 9→11, slightly increased at zoom >=11
+          // - Other tiers: baseline, but scaled up 20% at zoom >=11 to enlarge all elements
+          'heatmap-weight': [
+            'case',
+              ['==', ['get', '_tier'], 4],
+              ['*', ['coalesce', ['get', '_weight'], 0],
+                ['case', ['>=', ['zoom'], 11], 1.25, ['interpolate', ['linear'], ['zoom'], 9, 0.7, 11, 1.0]]
+              ],
+              ['*', ['coalesce', ['get', '_weight'], 0], ['case', ['>=', ['zoom'], 11], 1.20, 1.0]],
+          ],
+          'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 8, 1.2, 11, 1.6, 13, 1.6],
           // radius is managed dynamically (meters→pixels) elsewhere so set a fallback
-          'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 8, 200, 12, 154, 13, 154],
+          'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 9, 200, 11, 185, 12, 185],
           'heatmap-color': [
             'interpolate', ['linear'], ['heatmap-density'],
             0,    'rgba(0,0,0,0)',
@@ -1473,6 +1483,20 @@ export default function MapView({ events }) {
       // semi-transparent when satellite on, solid otherwise.
       map.setPaintProperty('zcta-fill', 'fill-opacity', threeD ? 0 : (satellite ? 0.74 : 0.74));
 
+      // Ensure heat-underlay uses dynamic weight multipliers based on zoom and tier
+      const heatWeightExpr = [
+        'case',
+          ['==', ['get', '_tier'], 4],
+          ['*', ['coalesce', ['get', '_weight'], 0], ['case', ['>=', ['zoom'], 11], 1.25, ['interpolate', ['linear'], ['zoom'], 9, 0.7, 11, 1.0]]],
+          ['*', ['coalesce', ['get', '_weight'], 0], ['case', ['>=', ['zoom'], 11], 1.20, 1.0]],
+      ];
+      try {
+        map.setPaintProperty('heat-underlay', 'heatmap-weight', heatWeightExpr);
+        map.setPaintProperty('heat-underlay', 'heatmap-intensity', ['interpolate', ['linear'], ['zoom'], 8, 1.2, 11, 1.6, 13, 1.6]);
+      } catch (e) {
+        // ignore if layer not present yet
+      }
+
       if (threeD) {
         map.setPaintProperty('zcta-safe-line', 'line-opacity', 0);
 
@@ -1626,23 +1650,28 @@ export default function MapView({ events }) {
     const refLat = center && typeof center.lat === 'number' ? center.lat : 40.71;
     const metersPerPixel = (z) => 156543.03392 * Math.cos(refLat * Math.PI / 180) / Math.pow(2, z);
     const mpp12 = metersPerPixel(12);
-    // Original frozen px@zoom12 was 220px; apply requested 30% reduction -> 154px
+    // Previous frozen px@12 (after 30% reduction) was 154px. User requests: freeze at zoom>=11
+    // and increase minimum size by 20% for 11+. Apply desiredMeters scaled by 1.2.
     const ORIGINAL_PX_AT_12 = 220;
     const FROZEN_PX_AT_12 = Math.round(ORIGINAL_PX_AT_12 * 0.7); // 154px
-    const desiredMeters = FROZEN_PX_AT_12 * mpp12; // px@12 * mpp@12
+    const SCALE_ABOVE_11 = 1.20; // 20% larger for zoom >= 11
+    const desiredMeters = FROZEN_PX_AT_12 * mpp12 * SCALE_ABOVE_11; // apply 20% increase to real-world reach
 
     const updateHeatRadius = () => {
       if (!map.getLayer('heat-underlay')) return;
       const zoom = map.getZoom();
       let px;
-      if (zoom >= 12) {
-        // Preserve a constant real-world radius for zoom >= 12 by converting desiredMeters back to px at current zoom
+      // Freeze real-world radius for zoom >= 11
+      if (zoom >= 11) {
         px = Math.max(1, desiredMeters / metersPerPixel(zoom));
       } else {
-        if (zoom <= 8) px = 200;
-        else px = 200 + (FROZEN_PX_AT_12 - 200) * ((zoom - 8) / (12 - 8));
+        // For zooms 9 -> 11: interpolate px linearly between px@9 and px@11
+        const PX_AT_9 = 200;
+        const px11_equiv = Math.max(1, desiredMeters / metersPerPixel(11));
+        if (zoom <= 9) px = PX_AT_9;
+        else px = PX_AT_9 + (px11_equiv - PX_AT_9) * ((zoom - 9) / (11 - 9));
       }
-      if (!Number.isFinite(px) || px < 1) px = FROZEN_PX_AT_12;
+      if (!Number.isFinite(px) || px < 1) px = Math.max(1, Math.round(desiredMeters / metersPerPixel(Math.max(zoom, 11))));
       map.setPaintProperty('heat-underlay', 'heatmap-radius', px);
     };
     updateHeatRadius();
