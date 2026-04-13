@@ -1637,7 +1637,7 @@ export default function MapView({ events }) {
     const desiredMeters = FROZEN_PX_AT_12 * mpp12 * SCALE_ABOVE_11; // apply cumulative scale to real-world reach
 
     const freezeLower = 9.5;
-    const freezeUpper = 14; // safety cap (user requested +1 beyond base 13)
+    const freezeUpper = 16; // safety cap (expanded per user request)
     const pxFreezeLowerEquiv = Math.max(1, desiredMeters / metersPerPixel(freezeLower));
     const pxFreezeUpperEquiv = Math.max(1, desiredMeters / metersPerPixel(freezeUpper));
 
@@ -1653,12 +1653,8 @@ export default function MapView({ events }) {
         // Cap at the equivalent px for freezeUpper to avoid uncontrolled growth beyond safety range
         px = pxFreezeUpperEquiv;
       } else {
-        // For zooms 9 -> freezeLower: interpolate px linearly between px@9 and px@freezeLower
-        const PX_AT_9 = 200;
-        if (zoom <= 9) px = PX_AT_9;
-        else px = PX_AT_9 + (pxFreezeLowerEquiv - PX_AT_9) * ((zoom - 9) / (freezeLower - 9));
-        // Apply uniform shrink for all zooms below freezeLower as requested (50% smaller)
-        if (zoom < freezeLower) px = px * 0.5;
+        // For any zoom < freezeLower: set px to 3x the freezeLower equivalent (lock relative to constant frame)
+        px = Math.max(1, pxFreezeLowerEquiv * 3);
       }
       if (!Number.isFinite(px) || px < 1) px = Math.max(1, Math.round(desiredMeters / metersPerPixel(Math.max(zoom, 11))));
       map.setPaintProperty('heat-underlay', 'heatmap-radius', px);
