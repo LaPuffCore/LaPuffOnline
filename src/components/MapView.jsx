@@ -1654,30 +1654,62 @@ export default function MapView({ events }) {
       if (!Number.isFinite(px) || px < 1) px = Math.max(1, Math.round(desiredMeters / metersPerPixel(Math.max(zoom, 10))));
       map.setPaintProperty('heat-underlay', 'heatmap-radius', px);
 
-      // Compute tier-specific multipliers for weights per your preference:
-      // - Tier4 (red): zoom 8 -> 10 ramps down (weaker at wide zooms), then slightly larger at >=10
-      //   floor at zoom 8: 0.55, ramp to 0.90 at zoom 10, then >=10 -> 1.35
-      // - Other tiers: baseline 1.0; >=10 -> 1.20 (to make mid-bands more visible when frozen)
+      // Dynamic color & weight logic centered around a freeze at zoom 9.5 (inclusive).
       try {
+        const freezeZoom = 9.5;
+        // Weight multipliers:
+        // - Tier4 (red): significantly reduced at zoom<=9.0, interpolates up to freeze, unchanged in freeze range
+        // - Other tiers: baseline -> scaled up in freeze range
         let multiplierRed, multiplierOthers;
-        if (zoom >= 11) {
-          // Close-in view: emphasize red a bit for expression
+        if (zoom >= freezeZoom) {
+          // Constant range (>=9.5): preserve current red sizing and boost other tiers
           multiplierRed = 1.35;
           multiplierOthers = 1.20;
-        } else if (zoom <= 9) {
-          // Far-out view: reduce red dominance
-          multiplierRed = 0.55;
+        } else if (zoom <= 9.0) {
+          // Pre-freeze: reduce red dominance significantly
+          multiplierRed = 0.45;
           multiplierOthers = 1.0;
         } else {
-          // interpolate red between 9 and 11 from 0.55 -> 0.90
-          const t = (zoom - 9) / (11 - 9);
-          multiplierRed = 0.55 + t * (0.90 - 0.55);
-          multiplierOthers = 1.0;
+          // Smooth interpolate from zoom 9.0 -> 9.5
+          const t = (zoom - 9.0) / (freezeZoom - 9.0);
+          multiplierRed = 0.45 + t * (0.90 - 0.45); // ramp towards ~0.9 at freeze
+          multiplierOthers = 1.0 + t * 0.20; // ramp others to 1.2
         }
         const weightExpr = ['case', ['==', ['get', '_tier'], 4], ['*', ['coalesce', ['get', '_weight'], 0], multiplierRed], ['*', ['coalesce', ['get', '_weight'], 0], multiplierOthers]];
         map.setPaintProperty('heat-underlay', 'heatmap-weight', weightExpr);
+
+        // Color spans: keep red positions in the frozen range, but when frozen widen other colors
+        // New frozen palette: make outer bands progressively larger than inner ones.
+        // Red start moved to 0.94 (smallest innermost band). Other bands increase outward.
+        const colorExprFrozen = [
+          'interpolate', ['linear'], ['heatmap-density'],
+          0, 'rgba(0,0,0,0)',
+          0.03, '#092f6f', // dark-blue (largest span)
+          0.36, '#00a2e8', // cyan-blue
+          0.58, '#00dd66', // green
+          0.74, '#f6e65a', // yellow
+          0.86, '#ff9a00', // orange
+          0.94, '#ff4d4d', // red-orange
+          0.94, '#cc0d00', // red (innermost anchor start at 0.94)
+        ];
+
+        // Pre-freeze palette: reduce red presence and keep bands tighter
+        const colorExprPreFreeze = [
+          'interpolate', ['linear'], ['heatmap-density'],
+          0, 'rgba(0,0,0,0)',
+          0.03, '#092f6f',
+          0.16, '#00a2e8',
+          0.32, '#00dd66',
+          0.46, '#f6e65a',
+          0.60, '#ff9a00',
+          0.72, '#ff4d4d',
+          0.82, '#cc0d00',
+        ];
+
+        if (zoom >= freezeZoom) map.setPaintProperty('heat-underlay', 'heatmap-color', colorExprFrozen);
+        else map.setPaintProperty('heat-underlay', 'heatmap-color', colorExprPreFreeze);
       } catch (e) {
-        // ignore paint errors (layer may not exist yet)
+        // ignore paint errors
       }
     };
     updateHeatRadius();
