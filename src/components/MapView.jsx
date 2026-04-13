@@ -848,7 +848,8 @@ const PAGE_SIZE = 6;
 // blur produces smooth topographic heat gradients across the entire map.
 function buildHeatUnderlayPoints(geoData, tiers) {
   const features = [];
-  const baseWeights = [0, 0.10, 0.28, 0.70, 1.0];
+  // Rebalanced weights: reduce top-tier (red) so mid bands (green/yellow/orange) can form thicker rings
+  const baseWeights = [0, 0.12, 0.30, 0.45, 0.60];
   geoData.features.forEach((f, i) => {
     if (f.properties._special) return;
     const tier = tiers[i] ?? 0;
@@ -1208,12 +1209,12 @@ export default function MapView({ events }) {
           'heatmap-color': [
             'interpolate', ['linear'], ['heatmap-density'],
             0,    'rgba(0,0,0,0)',
-            0.20, '#00ccdd',
-            0.40, '#00dd66',
-            0.60, '#aadd00',
-            0.80, '#f6e65a',
-            0.90, '#dd6600',
-            0.98, '#cc0d00',
+            0.15, '#00ccdd',    // blue/cold
+            0.33, '#00dd66',    // green
+            0.51, '#aadd00',    // warm/green-yellow
+            0.69, '#f6e65a',    // yellow (thicker band)
+            0.85, '#dd6600',    // orange (thicker)
+            0.98, '#cc0d00',    // red (narrow)
           ],
           'heatmap-opacity': 0,
         },
