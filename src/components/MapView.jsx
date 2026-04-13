@@ -1653,29 +1653,17 @@ export default function MapView({ events }) {
         // Cap at the equivalent px for freezeUpper to avoid uncontrolled growth beyond safety range
         px = pxFreezeUpperEquiv;
       } else {
-        // For any zoom < freezeLower: set px to 3x the freezeLower equivalent (lock relative to constant frame)
-        px = Math.max(1, pxFreezeLowerEquiv * 3);
+        // For any zoom < freezeLower: set px to 1.5x the freezeLower equivalent (lock relative to constant frame)
+        px = Math.max(1, pxFreezeLowerEquiv * 1.5);
       }
       if (!Number.isFinite(px) || px < 1) px = Math.max(1, Math.round(desiredMeters / metersPerPixel(Math.max(zoom, 11))));
       map.setPaintProperty('heat-underlay', 'heatmap-radius', px);
 
       // Compute tier-specific multipliers for weights. Freeze multipliers inside [freezeLower, freezeUpper].
       try {
-        let multiplierRed, multiplierOthers;
-        if (zoom >= freezeLower && zoom <= freezeUpper) {
-          multiplierRed = 1.35;
-          multiplierOthers = 1.20;
-        } else if (zoom > freezeUpper) {
-          multiplierRed = 1.35;
-          multiplierOthers = 1.20;
-        } else if (zoom <= 9) {
-          multiplierRed = 0.55;
-          multiplierOthers = 1.0;
-        } else {
-          const t = (zoom - 9) / (freezeLower - 9);
-          multiplierRed = 0.55 + t * (0.90 - 0.55);
-          multiplierOthers = 1.0;
-        }
+        // Use frozen multipliers for all zooms so weights remain consistent relative to constant frame
+        const multiplierRed = 1.35;
+        const multiplierOthers = 1.20;
         const weightExpr = ['case', ['==', ['get', '_tier'], 4], ['*', ['coalesce', ['get', '_weight'], 0], multiplierRed], ['*', ['coalesce', ['get', '_weight'], 0], multiplierOthers]];
         map.setPaintProperty('heat-underlay', 'heatmap-weight', weightExpr);
       } catch (e) {
