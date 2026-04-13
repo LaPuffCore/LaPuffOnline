@@ -1213,12 +1213,12 @@ export default function MapView({ events }) {
             'interpolate', ['linear'], ['heatmap-density'],
             0,    'rgba(0,0,0,0)',
             0.03, '#092f6f',    // dark-blue (deep)
-            0.10, '#00a2e8',    // blue (expanded band)
-            0.22, '#00dd66',    // green (wider band)
-            0.36, '#f6e65a',    // yellow (wider band)
-            0.52, '#ff9a00',    // orange (wider band)
-            0.68, '#ff4d4d',    // red-orange
-            0.82, '#cc0d00',    // red (smallest span)
+            0.09, '#00a2e8',    // blue (band)
+            0.12, '#00dd66',    // green (wider band)
+            0.22, '#f6e65a',    // yellow (wider band)
+            0.36, '#ff9a00',    // orange (wider band)
+            0.55, '#ff4d4d',    // red-orange
+            0.75, '#cc0d00',    // red
           ],
           'heatmap-opacity': 0,
         },
@@ -1629,85 +1629,57 @@ export default function MapView({ events }) {
     const center = map.getCenter();
     const refLat = center && typeof center.lat === 'number' ? center.lat : 40.71;
     const metersPerPixel = (z) => 156543.03392 * Math.cos(refLat * Math.PI / 180) / Math.pow(2, z);
-    const mpp10 = metersPerPixel(10);
-    // Freeze real-world radius at zoom >= 10 per your selection. Scale the frozen real-world
-    // radius up cumulatively by 44% (keeps previous visual scale intent).
-    const ORIGINAL_PX_AT_10 = 220;
-    const FROZEN_PX_AT_10 = Math.round(ORIGINAL_PX_AT_10 * 0.7); // ~154px
-    const SCALE_ABOVE_10 = 1.44; // cumulative scale for zoom >= 10
-    const desiredMeters = FROZEN_PX_AT_10 * mpp10 * SCALE_ABOVE_10; // apply cumulative scale to real-world reach
+    const mpp12 = metersPerPixel(12);
+    // Previous frozen px@12 (after 30% reduction) was 154px. User requests: freeze at zoom>=11
+    // and increase minimum size by 20% for 11+. Apply desiredMeters scaled by 1.2.
+    const ORIGINAL_PX_AT_12 = 220;
+    const FROZEN_PX_AT_12 = Math.round(ORIGINAL_PX_AT_12 * 0.7); // 154px
+    // Increase frozen real-world radius for zoom >= 11. Previously 1.20 (20%).
+    // User requested an additional 20% on top of the prior 1.20 -> cumulative 1.44.
+    const SCALE_ABOVE_11 = 1.44; // 44% larger cumulative for zoom >= 11
+    const desiredMeters = FROZEN_PX_AT_12 * mpp12 * SCALE_ABOVE_11; // apply cumulative scale to real-world reach
 
     const updateHeatRadius = () => {
       if (!map.getLayer('heat-underlay')) return;
       const zoom = map.getZoom();
       let px;
-      // Freeze real-world radius for zoom >= 10 (constant real-world reach)
-      if (zoom >= 10) {
+      // Freeze real-world radius for zoom >= 11
+      if (zoom >= 11) {
         px = Math.max(1, desiredMeters / metersPerPixel(zoom));
       } else {
-        // For zooms 8 -> 10: interpolate px linearly between PX_AT_8 and px@10
-        const PX_AT_8 = 200;
-        const px10_equiv = Math.max(1, desiredMeters / metersPerPixel(10));
-        if (zoom <= 8) px = PX_AT_8;
-        else px = PX_AT_8 + (px10_equiv - PX_AT_8) * ((zoom - 8) / (10 - 8));
+        // For zooms 9 -> 11: interpolate px linearly between px@9 and px@11
+        const PX_AT_9 = 200;
+        const px11_equiv = Math.max(1, desiredMeters / metersPerPixel(11));
+        if (zoom <= 9) px = PX_AT_9;
+        else px = PX_AT_9 + (px11_equiv - PX_AT_9) * ((zoom - 9) / (11 - 9));
       }
-      if (!Number.isFinite(px) || px < 1) px = Math.max(1, Math.round(desiredMeters / metersPerPixel(Math.max(zoom, 10))));
+      if (!Number.isFinite(px) || px < 1) px = Math.max(1, Math.round(desiredMeters / metersPerPixel(Math.max(zoom, 11))));
       map.setPaintProperty('heat-underlay', 'heatmap-radius', px);
 
-      // Dynamic color & weight logic centered around a freeze at zoom 9.5 (inclusive).
+      // Compute tier-specific multipliers for weights per user request:
+      // - Tier4 (red): zoom 9 -> 11 ramps down (weaker at wide zooms), then slightly larger at >=11
+      //   floor at zoom 9: 0.55, ramp to 0.90 at zoom 11, then >=11 -> 1.35
+      // - Other tiers: baseline 1.0; >=11 -> 1.20 (to make mid-bands more visible when frozen)
       try {
-        const freezeZoom = 9.5;
-        // Weight multipliers: drastically reduce red in the constant/frozen range so red's
-        // visual area becomes much smaller (approx 10x reduction). Keep other tiers boosted.
         let multiplierRed, multiplierOthers;
-        if (zoom >= freezeZoom) {
-          // Constant range (>=9.5): drastically reduce red contribution while keeping others larger
-          multiplierRed = 0.12; // ~10x smaller than previous 1.25
+        if (zoom >= 11) {
+          // Close-in view: emphasize red a bit for expression
+          multiplierRed = 1.35;
           multiplierOthers = 1.20;
-        } else if (zoom <= 9.0) {
-          // Far-out view: red very small
-          multiplierRed = 0.06;
+        } else if (zoom <= 9) {
+          // Far-out view: reduce red dominance
+          multiplierRed = 0.55;
           multiplierOthers = 1.0;
         } else {
-          // Smooth interpolate from zoom 9.0 -> 9.5 (ramp red 0.06 -> 0.12, others 1.0 -> 1.2)
-          const t = (zoom - 9.0) / (freezeZoom - 9.0);
-          multiplierRed = 0.06 + t * (0.12 - 0.06);
-          multiplierOthers = 1.0 + t * 0.20;
+          // interpolate red between 9 and 11 from 0.55 -> 0.90
+          const t = (zoom - 9) / (11 - 9);
+          multiplierRed = 0.55 + t * (0.90 - 0.55);
+          multiplierOthers = 1.0;
         }
         const weightExpr = ['case', ['==', ['get', '_tier'], 4], ['*', ['coalesce', ['get', '_weight'], 0], multiplierRed], ['*', ['coalesce', ['get', '_weight'], 0], multiplierOthers]];
         map.setPaintProperty('heat-underlay', 'heatmap-weight', weightExpr);
-
-        // Color spans: keep red color threshold very high so only the densest cores map to red
-        // while preserving the expanded outer bands for cooler colors.
-        const colorExprFrozen = [
-          'interpolate', ['linear'], ['heatmap-density'],
-          0, 'rgba(0,0,0,0)',
-          0.03, '#092f6f', // dark-blue (largest span)
-          0.12, '#00a2e8', // cyan-blue (large)
-          0.28, '#00dd66', // green (larger)
-          0.44, '#f6e65a', // yellow (larger)
-          0.60, '#ff9a00', // orange (bigger than red)
-          0.78, '#ff4d4d', // red-orange
-          0.95, '#cc0d00', // red (extremely tight innermost band)
-        ];
-
-        // Pre-freeze palette: reduce red presence and keep bands tighter
-        const colorExprPreFreeze = [
-          'interpolate', ['linear'], ['heatmap-density'],
-          0, 'rgba(0,0,0,0)',
-          0.03, '#092f6f',
-          0.16, '#00a2e8',
-          0.32, '#00dd66',
-          0.46, '#f6e65a',
-          0.60, '#ff9a00',
-          0.72, '#ff4d4d',
-          0.82, '#cc0d00',
-        ];
-
-        if (zoom >= freezeZoom) map.setPaintProperty('heat-underlay', 'heatmap-color', colorExprFrozen);
-        else map.setPaintProperty('heat-underlay', 'heatmap-color', colorExprPreFreeze);
       } catch (e) {
-        // ignore paint errors
+        // ignore paint errors (layer may not exist yet)
       }
     };
     updateHeatRadius();
@@ -2260,7 +2232,11 @@ export default function MapView({ events }) {
             <ZipHologram feature={holoFeature} color={holoColor} onClose={() => setHoloFeature(null)} />
           )}
 
-
+          {userLocation && (
+            <div className="absolute bottom-16 left-4 z-30 bg-black/70 border border-[#7C3AED]/60 rounded-xl px-3 py-1.5 text-xs text-[#7C3AED] font-bold pointer-events-none">
+              📍 Location active
+            </div>
+          )}
         </>
       )}
 
