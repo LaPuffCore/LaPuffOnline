@@ -1636,10 +1636,23 @@ export default function MapView({ events }) {
     const SCALE_ABOVE_11 = 1.44; // cumulative scale used historically
     const desiredMeters = FROZEN_PX_AT_12 * mpp12 * SCALE_ABOVE_11; // apply cumulative scale to real-world reach
 
+    // Freeze frame bounds: within [freezeLower, freezeUpper] we keep a deterministic
+    // constant rendering frame (radius + intensity + weight multipliers) so close zooms
+    // do not reflow the heatmap.
     const freezeLower = 9.5;
     const freezeUpper = 16; // safety cap (expanded per user request)
     const pxFreezeLowerEquiv = Math.max(1, desiredMeters / metersPerPixel(freezeLower));
     const pxFreezeUpperEquiv = Math.max(1, desiredMeters / metersPerPixel(freezeUpper));
+
+    // Intensity helper: mirrors previous interpolate behavior for zooms < freezeLower
+    const INTERP_INTENSITY = (z) => {
+      if (z <= 8) return 1.2;
+      if (z >= 13) return 1.6;
+      // linear between 8->11 -> 1.2->1.6, clamp thereafter
+      if (z <= 11) return 1.2 + (1.6 - 1.2) * ((z - 8) / (11 - 8));
+      return 1.6;
+    };
+    const FROZEN_INTENSITY = 1.6;
 
     const updateHeatRadius = () => {
       if (!map.getLayer('heat-underlay')) return;
@@ -1648,20 +1661,24 @@ export default function MapView({ events }) {
       let px;
       // Constant (frozen) behavior between freezeLower and freezeUpper inclusive
       if (zoom >= freezeLower && zoom <= freezeUpper) {
-        px = Math.max(1, desiredMeters / metersPerPixel(zoom));
+        px = Math.max(1, Math.round(desiredMeters / metersPerPixel(zoom)));
       } else if (zoom > freezeUpper) {
         // Cap at the equivalent px for freezeUpper to avoid uncontrolled growth beyond safety range
-        px = pxFreezeUpperEquiv;
+        px = Math.max(1, Math.round(pxFreezeUpperEquiv));
       } else {
-        // For any zoom < freezeLower: set px to 1.5x the freezeLower equivalent (lock relative to constant frame)
-        px = Math.max(1, pxFreezeLowerEquiv * 1.5);
+        // For any zoom < freezeLower: use scaled behavior relative to freezeLower
+        px = Math.max(1, Math.round(Math.max(pxFreezeLowerEquiv * 1.5, desiredMeters / metersPerPixel(Math.max(zoom, freezeLower)))));
       }
-      if (!Number.isFinite(px) || px < 1) px = Math.max(1, Math.round(desiredMeters / metersPerPixel(Math.max(zoom, 11))));
+
+      if (!Number.isFinite(px) || px < 1) px = Math.max(1, Math.round(desiredMeters / metersPerPixel(Math.max(zoom, freezeLower))));
       map.setPaintProperty('heat-underlay', 'heatmap-radius', px);
 
-      // Compute tier-specific multipliers for weights. Freeze multipliers inside [freezeLower, freezeUpper].
+      // Compute tier-specific multipliers for weights and lock intensity inside freeze range
       try {
-        // Use frozen multipliers for all zooms so weights remain consistent relative to constant frame
+        const intensity = (zoom >= freezeLower) ? FROZEN_INTENSITY : INTERP_INTENSITY(zoom);
+        map.setPaintProperty('heat-underlay', 'heatmap-intensity', intensity);
+
+        // Use frozen multipliers so relative peak weighting is deterministic
         const multiplierRed = 1.35;
         const multiplierOthers = 1.20;
         const weightExpr = ['case', ['==', ['get', '_tier'], 4], ['*', ['coalesce', ['get', '_weight'], 0], multiplierRed], ['*', ['coalesce', ['get', '_weight'], 0], multiplierOthers]];
