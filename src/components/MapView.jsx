@@ -848,14 +848,18 @@ const PAGE_SIZE = 6;
 // blur produces smooth topographic heat gradients across the entire map.
 function buildHeatUnderlayPoints(geoData, tiers) {
   const features = [];
+  const baseWeights = [0, 0.10, 0.28, 0.70, 1.0];
   geoData.features.forEach((f, i) => {
     if (f.properties._special) return;
-    const tier = tiers[i];
+    const tier = tiers[i] ?? 0;
     if (tier < 0) return;
     const [cx, cy] = getGeomCentroid(f.geometry);
+    const heat = typeof f.properties._heat === 'number' ? f.properties._heat : (tier / 4);
+    // single centroid per ZCTA — weight scaled slightly by normalized heat
+    const weight = (baseWeights[tier] || 0) * (1 + heat * 0.45);
     features.push({
       type: 'Feature',
-      properties: { _weight: [0, 0.10, 0.28, 0.70, 1.6][tier] || 0 },
+      properties: { _weight: weight, _origin_zcta: f.properties.MODZCTA },
       geometry: { type: 'Point', coordinates: [cx, cy] },
     });
   });
@@ -1189,9 +1193,9 @@ export default function MapView({ events }) {
     const is3D = threeDRef.current;
     map.addSource('zcta', { type: 'geojson', data, generateId: false });
 
-    // Topographic heat underlay — MapLibre native heatmap layer from zip centroids.
-    // Smooth Gaussian-blurred gradient covers the entire map (bleeds into water/ocean).
-    // Sits at ground level UNDER all 3D blocks. Only visible in 3D+heatmap mode.
+    // Topographic heat underlay — MapLibre native heatmap from multiple centroids per zip.
+    // Single heatmap layer will receive multiple point features per zip so each local
+    // peak produces its own ring and they blend naturally via density.
     if (!map.getSource('heat-underlay')) {
       map.addSource('heat-underlay', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
       map.addLayer({
@@ -1199,6 +1203,7 @@ export default function MapView({ events }) {
         paint: {
           'heatmap-weight': ['coalesce', ['get', '_weight'], 0],
           'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 8, 1.6, 12, 2.4, 13, 2.4],
+          // radius is managed dynamically (meters→pixels) elsewhere so set a fallback
           'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 8, 400, 12, 220, 13, 220],
           'heatmap-color': [
             'interpolate', ['linear'], ['heatmap-density'],
@@ -1206,8 +1211,9 @@ export default function MapView({ events }) {
             0.20, '#00ccdd',
             0.40, '#00dd66',
             0.60, '#aadd00',
-            0.80, '#dd6600',
-            1.0,  '#cc0d00',
+            0.80, '#f6e65a',
+            0.90, '#dd6600',
+            0.98, '#cc0d00',
           ],
           'heatmap-opacity': 0,
         },
@@ -1431,7 +1437,8 @@ export default function MapView({ events }) {
     // Enabled when heatmap is ON and the topo toggle is on. Visible in 2D, 3D and Real3D.
     if (map.getSource('heat-underlay')) {
       if (heatmap && topoOn) {
-        map.getSource('heat-underlay').setData(buildHeatUnderlayPoints(geoData, tiers));
+        // use withHeat so _heat and _tier properties exist on features
+        map.getSource('heat-underlay').setData(buildHeatUnderlayPoints(withHeat, tiers));
         map.setPaintProperty('heat-underlay', 'heatmap-opacity', 0.50);
       } else {
         map.setPaintProperty('heat-underlay', 'heatmap-opacity', 0);
@@ -1606,6 +1613,37 @@ export default function MapView({ events }) {
       }
     }
   }, [heatmap, topoOn, threeD, real3D, timespanIdx, events, geoData, boroughGeoData, mapReady, satellite, adjacency, styleVersion]);
+
+  // Manage heat-underlay radius so its real-world meter reach stays constant at zoom >= 12.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !map.getLayer) return;
+    // sentinel check: ensure our heat-underlay layer exists
+    if (!map.getLayer('heat-underlay')) return;
+    const center = map.getCenter();
+    const refLat = center && typeof center.lat === 'number' ? center.lat : 40.71;
+    const metersPerPixel = (z) => 156543.03392 * Math.cos(refLat * Math.PI / 180) / Math.pow(2, z);
+    const mpp12 = metersPerPixel(12);
+    const desiredMeters = 220 * mpp12; // px@12 * mpp@12
+
+    const updateHeatRadius = () => {
+      if (!map.getLayer('heat-underlay')) return;
+      const zoom = map.getZoom();
+      let px;
+      if (zoom >= 12) {
+        px = Math.max(1, desiredMeters / metersPerPixel(zoom));
+      } else {
+        if (zoom <= 8) px = 400;
+        else px = 400 + (220 - 400) * ((zoom - 8) / (12 - 8));
+      }
+      if (!Number.isFinite(px) || px < 1) px = 220;
+      map.setPaintProperty('heat-underlay', 'heatmap-radius', px);
+    };
+    updateHeatRadius();
+    map.on('zoom', updateHeatRadius);
+    return () => { try { map.off('zoom', updateHeatRadius); } catch (e) { /* ignore */ } };
+  }, [mapReady, heatmap, topoOn]);
+
 
   // 3D pitch
   useEffect(() => {
