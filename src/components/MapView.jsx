@@ -1212,15 +1212,15 @@ export default function MapView({ events }) {
           'heatmap-color': [
             'interpolate', ['linear'], ['heatmap-density'],
             0,    'rgba(0,0,0,0)',
-            // Expanded non-red bands (outer → inner): dark-blue, cyan, green, yellow, orange
+            // Aggressively expanded non-red bands (outer → inner): dark-blue, cyan, green, yellow, orange
             // Red thresholds preserved exactly to keep the red ring identical in the constant freeze.
-            0.02, '#092f6f',    // dark-blue (outermost)
-            0.05, '#00a2e8',    // cyan/blue
-            0.10, '#00dd66',    // green
-            0.18, '#f6e65a',    // yellow
-            0.30, '#ff9a00',    // orange
-            0.55, '#ff4d4d',    // red-orange (unchanged)
-            0.75, '#cc0d00',    // red (unchanged)
+            0.005, '#092f6f',    // dark-blue (outermost)
+            0.02,  '#00a2e8',    // cyan/blue
+            0.06,  '#00dd66',    // green
+            0.14,  '#f6e65a',    // yellow
+            0.30,  '#ff9a00',    // orange
+            0.55,  '#ff4d4d',    // red-orange (unchanged)
+            0.75,  '#cc0d00',    // red (unchanged)
           ],
           'heatmap-opacity': 0,
         },
