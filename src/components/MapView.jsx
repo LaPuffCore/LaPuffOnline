@@ -1679,18 +1679,18 @@ export default function MapView({ events }) {
         map.setPaintProperty('heat-underlay', 'heatmap-weight', weightExpr);
 
         // Color spans: keep red positions in the frozen range, but when frozen widen other colors
-        // New frozen palette: make outer bands progressively larger than inner ones.
-        // Red start moved to 0.94 (smallest innermost band). Other bands increase outward.
+        // Frozen palette tuned to keep red centrality tight while expanding outer bands.
+        // Red kept narrow; outer bands progressively larger outward (dark-blue largest).
         const colorExprFrozen = [
           'interpolate', ['linear'], ['heatmap-density'],
           0, 'rgba(0,0,0,0)',
           0.03, '#092f6f', // dark-blue (largest span)
-          0.36, '#00a2e8', // cyan-blue
-          0.58, '#00dd66', // green
-          0.74, '#f6e65a', // yellow
-          0.86, '#ff9a00', // orange
-          0.94, '#ff4d4d', // red-orange
-          0.94, '#cc0d00', // red (innermost anchor start at 0.94)
+          0.12, '#00a2e8', // cyan-blue (large)
+          0.28, '#00dd66', // green (larger)
+          0.44, '#f6e65a', // yellow (larger)
+          0.60, '#ff9a00', // orange (bigger than red)
+          0.72, '#ff4d4d', // red-orange
+          0.80, '#cc0d00', // red (smallest innermost band)
         ];
 
         // Pre-freeze palette: reduce red presence and keep bands tighter
