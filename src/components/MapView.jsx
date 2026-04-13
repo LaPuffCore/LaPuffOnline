@@ -59,6 +59,17 @@ const HEAT_BUILDING_TONES = {
   hot:    ['#1a0000', '#4d0000', '#8c0000', '#c80000', '#ff4040'],
 };
 
+// Utility: convert #rrggbb to rgba(r,g,b,a) string for MapLibre paint properties.
+function hexToRgba(hex, alpha) {
+  if (!hex) return `rgba(0,0,0,${alpha})`;
+  const h = hex.replace('#', '');
+  const bigint = parseInt(h, 16);
+  const r = (bigint >> 16) & 255;
+  const g = (bigint >> 8) & 255;
+  const b = bigint & 255;
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
 function tierColor(tier) {
   if (tier >= 4) return HEAT_COLORS.hot;
   if (tier >= 3) return HEAT_COLORS.orange;
@@ -1199,29 +1210,35 @@ export default function MapView({ events }) {
     // peak produces its own ring and they blend naturally via density.
     if (!map.getSource('heat-underlay')) {
       map.addSource('heat-underlay', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
-      map.addLayer({
-        id: 'heat-underlay', type: 'heatmap', source: 'heat-underlay',
-        paint: {
-          // Dynamic weight multiplier per-tier based on zoom:
-          // - Tier 4 (red) : reduced on zoom 9→11, slightly increased at zoom >=11
-          // - Other tiers: baseline, but scaled up 20% at zoom >=11 to enlarge all elements
-          'heatmap-weight': ['coalesce', ['get', '_weight'], 0],
-          'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 8, 1.2, 11, 1.6, 13, 1.6],
-          // radius is managed dynamically (meters→pixels) elsewhere so set a fallback
-          'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 9, 200, 11, 185, 12, 185],
-          'heatmap-color': [
-            'interpolate', ['linear'], ['heatmap-density'],
-            0,    'rgba(0,0,0,0)',
-            0.03, '#092f6f',    // dark-blue (deep)
-            0.09, '#00a2e8',    // blue (band)
-            0.12, '#00dd66',    // green (wider band)
-            0.22, '#f6e65a',    // yellow (wider band)
-            0.36, '#ff9a00',    // orange (wider band)
-            0.55, '#ff4d4d',    // red-orange
-            0.75, '#cc0d00',    // red
-          ],
-          'heatmap-opacity': 0,
-        },
+      // Create one heatmap layer per tier so each tier emits its own colored radius.
+      // Draw order: cold -> cool -> warm -> orange -> hot (hot drawn last so it sits on top).
+      const TIER_LAYERS = [
+        { id: 'heat-tier-0', tier: 0, color: HEAT_COLORS.cold },
+        { id: 'heat-tier-1', tier: 1, color: HEAT_COLORS.cool },
+        { id: 'heat-tier-2', tier: 2, color: HEAT_COLORS.warm },
+        { id: 'heat-tier-3', tier: 3, color: HEAT_COLORS.orange },
+        { id: 'heat-tier-4', tier: 4, color: HEAT_COLORS.hot },
+      ];
+      TIER_LAYERS.forEach(def => {
+        map.addLayer({
+          id: def.id,
+          type: 'heatmap',
+          source: 'heat-underlay',
+          filter: ['==', ['get', '_tier'], def.tier],
+          paint: {
+            'heatmap-weight': ['coalesce', ['get', '_weight'], 0],
+            'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 8, 1.2, 11, 1.6, 13, 1.6],
+            'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 9, 30, 12, 120, 14, 180],
+            'heatmap-color': [
+              'interpolate', ['linear'], ['heatmap-density'],
+              0, 'rgba(0,0,0,0)',
+              0.18, hexToRgba(def.color, 0.28),
+              0.45, hexToRgba(def.color, 0.6),
+              0.8, hexToRgba(def.color, 0.95),
+            ],
+            'heatmap-opacity': 0,
+          },
+        });
       });
     }
 
