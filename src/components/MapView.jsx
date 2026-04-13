@@ -849,7 +849,7 @@ const PAGE_SIZE = 6;
 function buildHeatUnderlayPoints(geoData, tiers) {
   const features = [];
   // Rebalanced weights: reduce top-tier (red) so mid bands (green/yellow/orange) can form thicker rings
-  const baseWeights = [0, 0.12, 0.30, 0.45, 0.60];
+  const baseWeights = [0, 0.10, 0.15, 0.20, 0.26];
   geoData.features.forEach((f, i) => {
     if (f.properties._special) return;
     const tier = tiers[i] ?? 0;
@@ -1203,18 +1203,19 @@ export default function MapView({ events }) {
         id: 'heat-underlay', type: 'heatmap', source: 'heat-underlay',
         paint: {
           'heatmap-weight': ['coalesce', ['get', '_weight'], 0],
-          'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 8, 1.6, 12, 2.4, 13, 2.4],
+          'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 8, 1.2, 12, 1.8, 13, 1.8],
           // radius is managed dynamically (meters→pixels) elsewhere so set a fallback
-          'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 8, 400, 12, 220, 13, 220],
+          'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 8, 200, 12, 50, 13, 50],
           'heatmap-color': [
             'interpolate', ['linear'], ['heatmap-density'],
             0,    'rgba(0,0,0,0)',
-            0.15, '#00ccdd',    // blue/cold
-            0.33, '#00dd66',    // green
-            0.51, '#aadd00',    // warm/green-yellow
-            0.69, '#f6e65a',    // yellow (thicker band)
-            0.85, '#dd6600',    // orange (thicker)
-            0.98, '#cc0d00',    // red (narrow)
+            0.03, '#092f6f',    // dark-blue (deep)
+            0.09, '#00a2e8',    // blue (band)
+            0.18, '#00dd66',    // green
+            0.32, '#f6e65a',    // yellow
+            0.48, '#ff9a00',    // orange
+            0.65, '#ff4d4d',    // red-orange
+            0.80, '#cc0d00',    // red
           ],
           'heatmap-opacity': 0,
         },
@@ -1625,7 +1626,7 @@ export default function MapView({ events }) {
     const refLat = center && typeof center.lat === 'number' ? center.lat : 40.71;
     const metersPerPixel = (z) => 156543.03392 * Math.cos(refLat * Math.PI / 180) / Math.pow(2, z);
     const mpp12 = metersPerPixel(12);
-    const desiredMeters = 220 * mpp12; // px@12 * mpp@12
+    const desiredMeters = 50 * mpp12; // px@12 * mpp@12
 
     const updateHeatRadius = () => {
       if (!map.getLayer('heat-underlay')) return;
@@ -1634,10 +1635,10 @@ export default function MapView({ events }) {
       if (zoom >= 12) {
         px = Math.max(1, desiredMeters / metersPerPixel(zoom));
       } else {
-        if (zoom <= 8) px = 400;
-        else px = 400 + (220 - 400) * ((zoom - 8) / (12 - 8));
+        if (zoom <= 8) px = 200;
+        else px = 200 + (50 - 200) * ((zoom - 8) / (12 - 8));
       }
-      if (!Number.isFinite(px) || px < 1) px = 220;
+      if (!Number.isFinite(px) || px < 1) px = 50;
       map.setPaintProperty('heat-underlay', 'heatmap-radius', px);
     };
     updateHeatRadius();
