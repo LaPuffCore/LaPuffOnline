@@ -860,7 +860,7 @@ function buildHeatUnderlayPoints(geoData, tiers) {
     const weight = (baseWeights[tier] || 0) * (1 + heat * 0.45);
     features.push({
       type: 'Feature',
-      properties: { _weight: weight, _origin_zcta: f.properties.MODZCTA },
+      properties: { _weight: weight, _tier: tier, _origin_zcta: f.properties.MODZCTA },
       geometry: { type: 'Point', coordinates: [cx, cy] },
     });
   });
@@ -1205,14 +1205,7 @@ export default function MapView({ events }) {
           // Dynamic weight multiplier per-tier based on zoom:
           // - Tier 4 (red) : reduced on zoom 9→11, slightly increased at zoom >=11
           // - Other tiers: baseline, but scaled up 20% at zoom >=11 to enlarge all elements
-          'heatmap-weight': [
-            'case',
-              ['==', ['get', '_tier'], 4],
-              ['*', ['coalesce', ['get', '_weight'], 0],
-                ['case', ['>=', ['zoom'], 11], 1.25, ['interpolate', ['linear'], ['zoom'], 9, 0.7, 11, 1.0]]
-              ],
-              ['*', ['coalesce', ['get', '_weight'], 0], ['case', ['>=', ['zoom'], 11], 1.20, 1.0]],
-          ],
+          'heatmap-weight': ['coalesce', ['get', '_weight'], 0],
           'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 8, 1.2, 11, 1.6, 13, 1.6],
           // radius is managed dynamically (meters→pixels) elsewhere so set a fallback
           'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 9, 200, 11, 185, 12, 185],
@@ -1483,19 +1476,6 @@ export default function MapView({ events }) {
       // semi-transparent when satellite on, solid otherwise.
       map.setPaintProperty('zcta-fill', 'fill-opacity', threeD ? 0 : (satellite ? 0.74 : 0.74));
 
-      // Ensure heat-underlay uses dynamic weight multipliers based on zoom and tier
-      const heatWeightExpr = [
-        'case',
-          ['==', ['get', '_tier'], 4],
-          ['*', ['coalesce', ['get', '_weight'], 0], ['case', ['>=', ['zoom'], 11], 1.25, ['interpolate', ['linear'], ['zoom'], 9, 0.7, 11, 1.0]]],
-          ['*', ['coalesce', ['get', '_weight'], 0], ['case', ['>=', ['zoom'], 11], 1.20, 1.0]],
-      ];
-      try {
-        map.setPaintProperty('heat-underlay', 'heatmap-weight', heatWeightExpr);
-        map.setPaintProperty('heat-underlay', 'heatmap-intensity', ['interpolate', ['linear'], ['zoom'], 8, 1.2, 11, 1.6, 13, 1.6]);
-      } catch (e) {
-        // ignore if layer not present yet
-      }
 
       if (threeD) {
         map.setPaintProperty('zcta-safe-line', 'line-opacity', 0);
@@ -1673,6 +1653,29 @@ export default function MapView({ events }) {
       }
       if (!Number.isFinite(px) || px < 1) px = Math.max(1, Math.round(desiredMeters / metersPerPixel(Math.max(zoom, 11))));
       map.setPaintProperty('heat-underlay', 'heatmap-radius', px);
+
+      // Compute tier-specific multipliers for weights per user request:
+      // - Tier4 (red): zoom 9 -> 11 ramps 0.7 -> 1.0; >=11 -> 1.25
+      // - Other tiers: baseline 1.0; >=11 -> 1.20
+      try {
+        let multiplierRed, multiplierOthers;
+        if (zoom >= 11) {
+          multiplierRed = 1.25;
+          multiplierOthers = 1.20;
+        } else if (zoom <= 9) {
+          multiplierRed = 0.70;
+          multiplierOthers = 1.0;
+        } else {
+          // interpolate red between 9 and 11
+          const t = (zoom - 9) / (11 - 9);
+          multiplierRed = 0.70 + t * (1.0 - 0.70);
+          multiplierOthers = 1.0;
+        }
+        const weightExpr = ['case', ['==', ['get', '_tier'], 4], ['*', ['coalesce', ['get', '_weight'], 0], multiplierRed], ['*', ['coalesce', ['get', '_weight'], 0], multiplierOthers]];
+        map.setPaintProperty('heat-underlay', 'heatmap-weight', weightExpr);
+      } catch (e) {
+        // ignore paint errors (layer may not exist yet)
+      }
     };
     updateHeatRadius();
     map.on('zoom', updateHeatRadius);
