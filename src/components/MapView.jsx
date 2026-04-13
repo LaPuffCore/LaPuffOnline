@@ -1644,6 +1644,7 @@ export default function MapView({ events }) {
     const updateHeatRadius = () => {
       if (!map.getLayer('heat-underlay')) return;
       const zoom = map.getZoom();
+
       let px;
       // Constant (frozen) behavior between freezeLower and freezeUpper inclusive
       if (zoom >= freezeLower && zoom <= freezeUpper) {
@@ -1656,6 +1657,8 @@ export default function MapView({ events }) {
         const PX_AT_9 = 200;
         if (zoom <= 9) px = PX_AT_9;
         else px = PX_AT_9 + (pxFreezeLowerEquiv - PX_AT_9) * ((zoom - 9) / (freezeLower - 9));
+        // Apply uniform shrink for all zooms below freezeLower as requested (50% smaller)
+        if (zoom < freezeLower) px = px * 0.5;
       }
       if (!Number.isFinite(px) || px < 1) px = Math.max(1, Math.round(desiredMeters / metersPerPixel(Math.max(zoom, 11))));
       map.setPaintProperty('heat-underlay', 'heatmap-radius', px);
