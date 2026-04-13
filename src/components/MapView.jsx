@@ -1219,8 +1219,8 @@ export default function MapView({ events }) {
             0.06,  '#00dd66',    // green
             0.14,  '#f6e65a',    // yellow
             0.28,  '#ff9a00',    // orange
-            0.65,  '#ff4d4d',    // red-orange (moved inward)
-            0.88,  '#cc0d00',    // red (moved inward)
+            0.72,  '#ff4d4d',    // red-orange (moved inward)
+            0.92,  '#cc0d00',    // red (moved inward)
           ],
           'heatmap-opacity': 0,
         },
@@ -1460,8 +1460,8 @@ export default function MapView({ events }) {
         map.setPaintProperty('heat-underlay', 'heatmap-color', heatColorStops);
         map.setPaintProperty('heat-underlay', 'heatmap-intensity', ['interpolate', ['linear'], ['zoom'], 8, 1.2, 11, 1.6, 13, 1.6]);
         // Adjust red multiplier to shrink red area while preserving overall footprint.
-        // Target: approx 1/4 area for red relative to current — set multiplier to 0.25 and refine if needed.
-        const weightExpr = ['case', ['==', ['get', '_tier'], 4], ['*', ['coalesce', ['get', '_weight'], 0], 0.25], ['*', ['coalesce', ['get', '_weight'], 0], 1.20]];
+        // Combine lowering red weight and raising other weights to reallocate area (red ~1/4).
+        const weightExpr = ['case', ['==', ['get', '_tier'], 4], ['*', ['coalesce', ['get', '_weight'], 0], 0.12], ['*', ['coalesce', ['get', '_weight'], 0], 1.60]];
         map.setPaintProperty('heat-underlay', 'heatmap-weight', weightExpr);
         // Recompute and set radius at current zoom so it's consistent after style changes
         const center = map.getCenter();
