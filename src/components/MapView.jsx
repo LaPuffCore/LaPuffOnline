@@ -1212,15 +1212,13 @@ export default function MapView({ events }) {
           'heatmap-color': [
             'interpolate', ['linear'], ['heatmap-density'],
             0,    'rgba(0,0,0,0)',
-            // Aggressively expanded non-red bands (outer → inner): dark-blue, cyan, green, yellow, orange
-            // Red thresholds moved higher so red requires stronger density (shrinks red area).
-            0.005, '#092f6f',    // dark-blue (outermost)
-            0.02,  '#00a2e8',    // cyan/blue
-            0.06,  '#00dd66',    // green
-            0.14,  '#f6e65a',    // yellow
-            0.28,  '#ff9a00',    // orange
-            0.72,  '#ff4d4d',    // red-orange (moved inward)
-            0.92,  '#cc0d00',    // red (moved inward)
+            0.03, '#092f6f',    // dark-blue (deep)
+            0.09, '#00a2e8',    // blue (band)
+            0.12, '#00dd66',    // green (wider band)
+            0.22, '#f6e65a',    // yellow (wider band)
+            0.36, '#ff9a00',    // orange (wider band)
+            0.55, '#ff4d4d',    // red-orange
+            0.75, '#cc0d00',    // red
           ],
           'heatmap-opacity': 0,
         },
@@ -1446,43 +1444,6 @@ export default function MapView({ events }) {
       if (heatmap && topoOn) {
         // use withHeat so _heat and _tier properties exist on features
         map.getSource('heat-underlay').setData(buildHeatUnderlayPoints(withHeat, tiers));
-        // Re-apply paint settings so style swaps / toggles don't reset our work
-        const heatColorStops = ['interpolate', ['linear'], ['heatmap-density'],
-          0, 'rgba(0,0,0,0)',
-          0.005, '#092f6f',
-          0.02, '#00a2e8',
-          0.06, '#00dd66',
-          0.14, '#f6e65a',
-          0.30, '#ff9a00',
-          0.55, '#ff4d4d',
-          0.75, '#cc0d00'
-        ];
-        map.setPaintProperty('heat-underlay', 'heatmap-color', heatColorStops);
-        map.setPaintProperty('heat-underlay', 'heatmap-intensity', ['interpolate', ['linear'], ['zoom'], 8, 1.2, 11, 1.6, 13, 1.6]);
-        // Adjust red multiplier to shrink red area while preserving overall footprint.
-        // Combine lowering red weight and raising other weights to reallocate area (red ~1/4).
-        const weightExpr = ['case', ['==', ['get', '_tier'], 4], ['*', ['coalesce', ['get', '_weight'], 0], 0.12], ['*', ['coalesce', ['get', '_weight'], 0], 1.60]];
-        map.setPaintProperty('heat-underlay', 'heatmap-weight', weightExpr);
-        // Recompute and set radius at current zoom so it's consistent after style changes
-        const center = map.getCenter();
-        const refLat = center && typeof center.lat === 'number' ? center.lat : 40.71;
-        const metersPerPixel = (z) => 156543.03392 * Math.cos(refLat * Math.PI / 180) / Math.pow(2, z);
-        const mpp12 = metersPerPixel(12);
-        const ORIGINAL_PX_AT_12 = 220;
-        const FROZEN_PX_AT_12 = Math.round(ORIGINAL_PX_AT_12 * 0.7); // 154px
-        const SCALE_ABOVE_11 = 1.44;
-        const desiredMeters = FROZEN_PX_AT_12 * mpp12 * SCALE_ABOVE_11;
-        const freezeLower = 9.5;
-        const freezeUpper = 16;
-        const pxFreezeLowerEquiv = Math.max(1, desiredMeters / metersPerPixel(freezeLower));
-        const pxFreezeUpperEquiv = Math.max(1, desiredMeters / metersPerPixel(freezeUpper));
-        const zoom = map.getZoom();
-        let px;
-        if (zoom >= freezeLower && zoom <= freezeUpper) px = Math.max(1, desiredMeters / metersPerPixel(zoom));
-        else if (zoom > freezeUpper) px = pxFreezeUpperEquiv;
-        else px = Math.max(1, pxFreezeLowerEquiv * 1.5);
-        if (!Number.isFinite(px) || px < 1) px = Math.max(1, Math.round(desiredMeters / metersPerPixel(Math.max(zoom, 11))));
-        map.setPaintProperty('heat-underlay', 'heatmap-radius', px);
         map.setPaintProperty('heat-underlay', 'heatmap-opacity', 0.50);
       } else {
         map.setPaintProperty('heat-underlay', 'heatmap-opacity', 0);
@@ -1673,8 +1634,7 @@ export default function MapView({ events }) {
     const ORIGINAL_PX_AT_12 = 220;
     const FROZEN_PX_AT_12 = Math.round(ORIGINAL_PX_AT_12 * 0.7); // 154px
     const SCALE_ABOVE_11 = 1.44; // cumulative scale used historically
-    // Scale desiredMeters by 2x to expand total footprint as requested
-    const desiredMeters = FROZEN_PX_AT_12 * mpp12 * SCALE_ABOVE_11 * 2.0; // apply cumulative scale to real-world reach
+    const desiredMeters = FROZEN_PX_AT_12 * mpp12 * SCALE_ABOVE_11; // apply cumulative scale to real-world reach
 
     const freezeLower = 9.5;
     const freezeUpper = 16; // safety cap (expanded per user request)
@@ -1693,17 +1653,29 @@ export default function MapView({ events }) {
         // Cap at the equivalent px for freezeUpper to avoid uncontrolled growth beyond safety range
         px = pxFreezeUpperEquiv;
       } else {
-        // For any zoom < freezeLower: set px to 1.5x the freezeLower equivalent (lock relative to constant frame)
-        px = Math.max(1, pxFreezeLowerEquiv * 1.5);
+        // For any zoom < freezeLower: set px to 3x the freezeLower equivalent (lock relative to constant frame)
+        px = Math.max(1, pxFreezeLowerEquiv * 3);
       }
       if (!Number.isFinite(px) || px < 1) px = Math.max(1, Math.round(desiredMeters / metersPerPixel(Math.max(zoom, 11))));
       map.setPaintProperty('heat-underlay', 'heatmap-radius', px);
 
       // Compute tier-specific multipliers for weights. Freeze multipliers inside [freezeLower, freezeUpper].
       try {
-        // Use frozen multipliers for all zooms so weights remain consistent relative to constant frame
-        const multiplierRed = 1.35;
-        const multiplierOthers = 1.20;
+        let multiplierRed, multiplierOthers;
+        if (zoom >= freezeLower && zoom <= freezeUpper) {
+          multiplierRed = 1.35;
+          multiplierOthers = 1.20;
+        } else if (zoom > freezeUpper) {
+          multiplierRed = 1.35;
+          multiplierOthers = 1.20;
+        } else if (zoom <= 9) {
+          multiplierRed = 0.55;
+          multiplierOthers = 1.0;
+        } else {
+          const t = (zoom - 9) / (freezeLower - 9);
+          multiplierRed = 0.55 + t * (0.90 - 0.55);
+          multiplierOthers = 1.0;
+        }
         const weightExpr = ['case', ['==', ['get', '_tier'], 4], ['*', ['coalesce', ['get', '_weight'], 0], multiplierRed], ['*', ['coalesce', ['get', '_weight'], 0], multiplierOthers]];
         map.setPaintProperty('heat-underlay', 'heatmap-weight', weightExpr);
       } catch (e) {
