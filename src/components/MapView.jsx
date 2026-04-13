@@ -1446,6 +1446,42 @@ export default function MapView({ events }) {
       if (heatmap && topoOn) {
         // use withHeat so _heat and _tier properties exist on features
         map.getSource('heat-underlay').setData(buildHeatUnderlayPoints(withHeat, tiers));
+        // Re-apply paint settings so style swaps / toggles don't reset our work
+        const heatColorStops = ['interpolate', ['linear'], ['heatmap-density'],
+          0, 'rgba(0,0,0,0)',
+          0.005, '#092f6f',
+          0.02, '#00a2e8',
+          0.06, '#00dd66',
+          0.14, '#f6e65a',
+          0.30, '#ff9a00',
+          0.55, '#ff4d4d',
+          0.75, '#cc0d00'
+        ];
+        map.setPaintProperty('heat-underlay', 'heatmap-color', heatColorStops);
+        map.setPaintProperty('heat-underlay', 'heatmap-intensity', ['interpolate', ['linear'], ['zoom'], 8, 1.2, 11, 1.6, 13, 1.6]);
+        // After doubling desiredMeters, reduce red multiplier by 4x to keep red physical radius constant.
+        const weightExpr = ['case', ['==', ['get', '_tier'], 4], ['*', ['coalesce', ['get', '_weight'], 0], 0.3375], ['*', ['coalesce', ['get', '_weight'], 0], 1.20]];
+        map.setPaintProperty('heat-underlay', 'heatmap-weight', weightExpr);
+        // Recompute and set radius at current zoom so it's consistent after style changes
+        const center = map.getCenter();
+        const refLat = center && typeof center.lat === 'number' ? center.lat : 40.71;
+        const metersPerPixel = (z) => 156543.03392 * Math.cos(refLat * Math.PI / 180) / Math.pow(2, z);
+        const mpp12 = metersPerPixel(12);
+        const ORIGINAL_PX_AT_12 = 220;
+        const FROZEN_PX_AT_12 = Math.round(ORIGINAL_PX_AT_12 * 0.7); // 154px
+        const SCALE_ABOVE_11 = 1.44;
+        const desiredMeters = FROZEN_PX_AT_12 * mpp12 * SCALE_ABOVE_11;
+        const freezeLower = 9.5;
+        const freezeUpper = 16;
+        const pxFreezeLowerEquiv = Math.max(1, desiredMeters / metersPerPixel(freezeLower));
+        const pxFreezeUpperEquiv = Math.max(1, desiredMeters / metersPerPixel(freezeUpper));
+        const zoom = map.getZoom();
+        let px;
+        if (zoom >= freezeLower && zoom <= freezeUpper) px = Math.max(1, desiredMeters / metersPerPixel(zoom));
+        else if (zoom > freezeUpper) px = pxFreezeUpperEquiv;
+        else px = Math.max(1, pxFreezeLowerEquiv * 1.5);
+        if (!Number.isFinite(px) || px < 1) px = Math.max(1, Math.round(desiredMeters / metersPerPixel(Math.max(zoom, 11))));
+        map.setPaintProperty('heat-underlay', 'heatmap-radius', px);
         map.setPaintProperty('heat-underlay', 'heatmap-opacity', 0.50);
       } else {
         map.setPaintProperty('heat-underlay', 'heatmap-opacity', 0);
@@ -1636,7 +1672,8 @@ export default function MapView({ events }) {
     const ORIGINAL_PX_AT_12 = 220;
     const FROZEN_PX_AT_12 = Math.round(ORIGINAL_PX_AT_12 * 0.7); // 154px
     const SCALE_ABOVE_11 = 1.44; // cumulative scale used historically
-    const desiredMeters = FROZEN_PX_AT_12 * mpp12 * SCALE_ABOVE_11; // apply cumulative scale to real-world reach
+    // Scale desiredMeters by 2x to expand total footprint as requested
+    const desiredMeters = FROZEN_PX_AT_12 * mpp12 * SCALE_ABOVE_11 * 2.0; // apply cumulative scale to real-world reach
 
     const freezeLower = 9.5;
     const freezeUpper = 16; // safety cap (expanded per user request)
