@@ -1660,8 +1660,9 @@ export default function MapView({ events }) {
       // - Other tiers: baseline 1.0; >=11 -> 1.20 (to make mid-bands more visible when frozen)
       try {
         let multiplierRed, multiplierOthers;
-        if (zoom >= 11) {
-          // Close-in view: emphasize red a bit for expression
+        // Use freezeZoom (9.5) as the constant threshold for all frozen behavior
+        if (zoom >= freezeZoom) {
+          // Frozen/constant range: preserve the prior frozen multipliers
           multiplierRed = 1.35;
           multiplierOthers = 1.20;
         } else if (zoom <= 9) {
@@ -1669,10 +1670,10 @@ export default function MapView({ events }) {
           multiplierRed = 0.55;
           multiplierOthers = 1.0;
         } else {
-          // interpolate red between 9 and 11 from 0.55 -> 0.90
-          const t = (zoom - 9) / (11 - 9);
-          multiplierRed = 0.55 + t * (0.90 - 0.55);
-          multiplierOthers = 1.0;
+          // Smoothly interpolate between zoom 9.0 and freezeZoom (9.5)
+          const t = (zoom - 9.0) / (freezeZoom - 9.0);
+          multiplierRed = 0.55 + t * (1.35 - 0.55); // ramp toward frozen value
+          multiplierOthers = 1.0 + t * 0.20; // ramp others to frozen multiplier
         }
         const weightExpr = ['case', ['==', ['get', '_tier'], 4], ['*', ['coalesce', ['get', '_weight'], 0], multiplierRed], ['*', ['coalesce', ['get', '_weight'], 0], multiplierOthers]];
         map.setPaintProperty('heat-underlay', 'heatmap-weight', weightExpr);
