@@ -1214,11 +1214,11 @@ export default function MapView({ events }) {
             0,    'rgba(0,0,0,0)',
             0.03, '#092f6f',    // dark-blue (deep)
             0.09, '#00a2e8',    // blue (band)
-            0.18, '#00dd66',    // green
-            0.32, '#f6e65a',    // yellow
-            0.48, '#ff9a00',    // orange
-            0.65, '#ff4d4d',    // red-orange
-            0.80, '#cc0d00',    // red
+            0.12, '#00dd66',    // green (wider band)
+            0.22, '#f6e65a',    // yellow (wider band)
+            0.36, '#ff9a00',    // orange (wider band)
+            0.55, '#ff4d4d',    // red-orange
+            0.75, '#cc0d00',    // red
           ],
           'heatmap-opacity': 0,
         },
@@ -1634,8 +1634,10 @@ export default function MapView({ events }) {
     // and increase minimum size by 20% for 11+. Apply desiredMeters scaled by 1.2.
     const ORIGINAL_PX_AT_12 = 220;
     const FROZEN_PX_AT_12 = Math.round(ORIGINAL_PX_AT_12 * 0.7); // 154px
-    const SCALE_ABOVE_11 = 1.20; // 20% larger for zoom >= 11
-    const desiredMeters = FROZEN_PX_AT_12 * mpp12 * SCALE_ABOVE_11; // apply 20% increase to real-world reach
+    // Increase frozen real-world radius for zoom >= 11. Previously 1.20 (20%).
+    // User requested an additional 20% on top of the prior 1.20 -> cumulative 1.44.
+    const SCALE_ABOVE_11 = 1.44; // 44% larger cumulative for zoom >= 11
+    const desiredMeters = FROZEN_PX_AT_12 * mpp12 * SCALE_ABOVE_11; // apply cumulative scale to real-world reach
 
     const updateHeatRadius = () => {
       if (!map.getLayer('heat-underlay')) return;
@@ -1655,20 +1657,23 @@ export default function MapView({ events }) {
       map.setPaintProperty('heat-underlay', 'heatmap-radius', px);
 
       // Compute tier-specific multipliers for weights per user request:
-      // - Tier4 (red): zoom 9 -> 11 ramps 0.7 -> 1.0; >=11 -> 1.25
-      // - Other tiers: baseline 1.0; >=11 -> 1.20
+      // - Tier4 (red): zoom 9 -> 11 ramps down (weaker at wide zooms), then slightly larger at >=11
+      //   floor at zoom 9: 0.55, ramp to 0.90 at zoom 11, then >=11 -> 1.35
+      // - Other tiers: baseline 1.0; >=11 -> 1.20 (to make mid-bands more visible when frozen)
       try {
         let multiplierRed, multiplierOthers;
         if (zoom >= 11) {
-          multiplierRed = 1.25;
+          // Close-in view: emphasize red a bit for expression
+          multiplierRed = 1.35;
           multiplierOthers = 1.20;
         } else if (zoom <= 9) {
-          multiplierRed = 0.70;
+          // Far-out view: reduce red dominance
+          multiplierRed = 0.55;
           multiplierOthers = 1.0;
         } else {
-          // interpolate red between 9 and 11
+          // interpolate red between 9 and 11 from 0.55 -> 0.90
           const t = (zoom - 9) / (11 - 9);
-          multiplierRed = 0.70 + t * (1.0 - 0.70);
+          multiplierRed = 0.55 + t * (0.90 - 0.55);
           multiplierOthers = 1.0;
         }
         const weightExpr = ['case', ['==', ['get', '_tier'], 4], ['*', ['coalesce', ['get', '_weight'], 0], multiplierRed], ['*', ['coalesce', ['get', '_weight'], 0], multiplierOthers]];
