@@ -1213,14 +1213,14 @@ export default function MapView({ events }) {
             'interpolate', ['linear'], ['heatmap-density'],
             0,    'rgba(0,0,0,0)',
             // Aggressively expanded non-red bands (outer → inner): dark-blue, cyan, green, yellow, orange
-            // Red thresholds preserved exactly to keep the red ring identical in the constant freeze.
+            // Red thresholds moved higher so red requires stronger density (shrinks red area).
             0.005, '#092f6f',    // dark-blue (outermost)
             0.02,  '#00a2e8',    // cyan/blue
             0.06,  '#00dd66',    // green
             0.14,  '#f6e65a',    // yellow
-            0.30,  '#ff9a00',    // orange
-            0.55,  '#ff4d4d',    // red-orange (unchanged)
-            0.75,  '#cc0d00',    // red (unchanged)
+            0.28,  '#ff9a00',    // orange
+            0.65,  '#ff4d4d',    // red-orange (moved inward)
+            0.88,  '#cc0d00',    // red (moved inward)
           ],
           'heatmap-opacity': 0,
         },
@@ -1459,8 +1459,9 @@ export default function MapView({ events }) {
         ];
         map.setPaintProperty('heat-underlay', 'heatmap-color', heatColorStops);
         map.setPaintProperty('heat-underlay', 'heatmap-intensity', ['interpolate', ['linear'], ['zoom'], 8, 1.2, 11, 1.6, 13, 1.6]);
-        // After doubling desiredMeters, reduce red multiplier by 4x to keep red physical radius constant.
-        const weightExpr = ['case', ['==', ['get', '_tier'], 4], ['*', ['coalesce', ['get', '_weight'], 0], 0.3375], ['*', ['coalesce', ['get', '_weight'], 0], 1.20]];
+        // Adjust red multiplier to shrink red area while preserving overall footprint.
+        // Target: approx 1/4 area for red relative to current — set multiplier to 0.25 and refine if needed.
+        const weightExpr = ['case', ['==', ['get', '_tier'], 4], ['*', ['coalesce', ['get', '_weight'], 0], 0.25], ['*', ['coalesce', ['get', '_weight'], 0], 1.20]];
         map.setPaintProperty('heat-underlay', 'heatmap-weight', weightExpr);
         // Recompute and set radius at current zoom so it's consistent after style changes
         const center = map.getCenter();
