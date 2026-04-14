@@ -1311,24 +1311,24 @@ export default function MapView({ events }) {
     map.addLayer({
       id: 'zcta-safe-line', type: 'line', source: 'zcta',
       filter: ['==', ['get', '_special'], true],
-      paint: { 'line-color': '#000000', 'line-width': ['interpolate', ['linear'], ['zoom'], 9, 6 * 0.35, 9.5, 6 * 1.4, 16, 6 * 1.4], 'line-opacity': is3D ? 0 : 1 },
+      paint: { 'line-color': '#000000', 'line-width': ['case', ['>=', ['zoom'], 9.5], 6 * 1.4, ['interpolate', ['linear'], ['zoom'], 9, 6 * 0.5, 9.5, 6 * 1.4]], 'line-opacity': is3D ? 0 : 1 },
     });
 
     // Ground boundary glows (non-special) — hidden in 3D mode
     map.addLayer({
       id: 'zcta-line-glow2', type: 'line', source: 'zcta',
       filter: ['!=', ['get', '_special'], true],
-      paint: { 'line-color': OUTLINE_GLOW, 'line-width': ['interpolate', ['linear'], ['zoom'], 9, 7 * 0.35, 9.5, 7 * 1.4, 16, 7 * 1.4], 'line-opacity': is3D ? 0 : (sat ? 0.25 : 0.35), 'line-blur': 10 },
+      paint: { 'line-color': OUTLINE_GLOW, 'line-width': ['case', ['>=', ['zoom'], 9.5], 7 * 1.4, ['interpolate', ['linear'], ['zoom'], 9, 7 * 0.5, 9.5, 7 * 1.4]], 'line-opacity': is3D ? 0 : (sat ? 0.25 : 0.35), 'line-blur': 10 },
     });
     map.addLayer({
       id: 'zcta-line-glow', type: 'line', source: 'zcta',
       filter: ['!=', ['get', '_special'], true],
-      paint: { 'line-color': OUTLINE_COLOR, 'line-width': ['interpolate', ['linear'], ['zoom'], 9, 5 * 0.35, 9.5, 5 * 1.4, 16, 5 * 1.4], 'line-opacity': is3D ? 0 : (sat ? 0.55 : 0.75), 'line-blur': 3 },
+      paint: { 'line-color': OUTLINE_COLOR, 'line-width': ['case', ['>=', ['zoom'], 9.5], 5 * 1.4, ['interpolate', ['linear'], ['zoom'], 9, 5 * 0.5, 9.5, 5 * 1.4]], 'line-opacity': is3D ? 0 : (sat ? 0.55 : 0.75), 'line-blur': 3 },
     });
     map.addLayer({
       id: 'zcta-line', type: 'line', source: 'zcta',
       filter: ['!=', ['get', '_special'], true],
-      paint: { 'line-color': OUTLINE_COLOR, 'line-width': ['interpolate', ['linear'], ['zoom'], 9, 4 * 0.35, 9.5, 4 * 1.4, 16, 4 * 1.4], 'line-opacity': is3D ? 0 : 1 },
+      paint: { 'line-color': OUTLINE_COLOR, 'line-width': ['case', ['>=', ['zoom'], 9.5], 4 * 1.4, ['interpolate', ['linear'], ['zoom'], 9, 4 * 0.5, 9.5, 4 * 1.4]], 'line-opacity': is3D ? 0 : 1 },
     });
 
     // Upper 3D border — annular ring using createZctaOutlineGeoJSON.
@@ -1611,6 +1611,22 @@ export default function MapView({ events }) {
 
     // Hover fill: only in 2D modes (3D hover is handled via extrusion color)
     map.setPaintProperty('zcta-hover', 'fill-opacity', threeD ? 0 : ['case', ['boolean', ['feature-state', 'hovered'], false], 0.5, 0]);
+
+    // Re-apply locked outline widths for 2D / Real3D (defensive: enforce after any style swap)
+    if (!threeD) {
+      const lockedWidthExprSafe = ['case', ['>=', ['zoom'], 9.5], 6 * 1.4, ['interpolate', ['linear'], ['zoom'], 9, 6 * 0.5, 9.5, 6 * 1.4]];
+      const lockedWidthExprGlow2 = ['case', ['>=', ['zoom'], 9.5], 7 * 1.4, ['interpolate', ['linear'], ['zoom'], 9, 7 * 0.5, 9.5, 7 * 1.4]];
+      const lockedWidthExprGlow = ['case', ['>=', ['zoom'], 9.5], 5 * 1.4, ['interpolate', ['linear'], ['zoom'], 9, 5 * 0.5, 9.5, 5 * 1.4]];
+      const lockedWidthExprBase = ['case', ['>=', ['zoom'], 9.5], 4 * 1.4, ['interpolate', ['linear'], ['zoom'], 9, 4 * 0.5, 9.5, 4 * 1.4]];
+      try {
+        if (map.getLayer('zcta-safe-line')) map.setPaintProperty('zcta-safe-line', 'line-width', lockedWidthExprSafe);
+        if (map.getLayer('zcta-line-glow2')) map.setPaintProperty('zcta-line-glow2', 'line-width', lockedWidthExprGlow2);
+        if (map.getLayer('zcta-line-glow')) map.setPaintProperty('zcta-line-glow', 'line-width', lockedWidthExprGlow);
+        if (map.getLayer('zcta-line')) map.setPaintProperty('zcta-line', 'line-width', lockedWidthExprBase);
+      } catch (e) {
+        // ignore if layers not present yet
+      }
+    }
 
     // Upper 3D border color: themed to zip's heat tier when heatmap on, red when off
     const upperBorderColorExpr = heatmap ? [
