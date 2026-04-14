@@ -317,16 +317,41 @@ function normalizeFeatureGeometry(feature) {
 // From zoom 10.5→9: continuous exponential ramp to prevent pixelization.
 // ZCTA (base 14m): 14m flat until zoom 10.5, then ramps to 64m at zoom 9.
 // Borough (base 18m): 18m flat until zoom 10.5, then ramps to 96m at zoom 9.
-function getZoomAwareOutlineWidth(map, baseMeters = 14) {
+function getZoomAwareOutlineWidth(map, baseMeters = 14, is3D = false) {
   if (!map || typeof map.getZoom !== 'function') return baseMeters;
+  // If 3D mode is active, preserve original behavior exactly to avoid touching 3D visuals.
+  if (is3D) {
+    const zoom = map.getZoom();
+    const t = Math.max(0, 10.5 - zoom);
+    const targetAt9 = baseMeters === 18 ? 96 : 64;
+    const scale = Math.pow(targetAt9 / baseMeters, 1 / 1.5);
+    const multiplier = Math.pow(scale, t);
+    const pitch = map.getPitch ? map.getPitch() : 0;
+    const pitchFactor = 1 + (pitch / 90) * 0.55;
+    return baseMeters * multiplier * pitchFactor;
+  }
+
+  // Non-3D behavior: apply requested adjustments
   const zoom = map.getZoom();
-  const t = Math.max(0, 10.5 - zoom); // 0 at zoom 10.5+, 1.5 at zoom 9
-  const targetAt9 = baseMeters === 18 ? 96 : 64;
-  const scale = Math.pow(targetAt9 / baseMeters, 1 / 1.5); // per-step factor over 1.5 zoom steps
+  // Increase base starting size by +4 pixels (measured at zoom 10.5)
+  const refLat = (map.getCenter && map.getCenter().lat) ? map.getCenter().lat : 40.71;
+  const metersPerPixelAt105 = 156543.03392 * Math.cos(refLat * Math.PI / 180) / Math.pow(2, 10.5);
+  const extraMetersFor4px = 4 * metersPerPixelAt105;
+  const adjBase = baseMeters + extraMetersFor4px;
+
+  // Lock flat until 10.5 (t = 0 for zoom >= 10.5)
+  const t = Math.max(0, 10.5 - zoom);
+
+  // Reduce the previous target (at zoom 9) by 30% for non-3D modes
+  const originalTargetAt9 = baseMeters === 18 ? 96 : 64;
+  const targetAt9 = originalTargetAt9 * 0.7; // 30% smaller
+
+  const scale = Math.pow(targetAt9 / adjBase, 1 / 1.5);
   const multiplier = Math.pow(scale, t);
   const pitch = map.getPitch ? map.getPitch() : 0;
   const pitchFactor = 1 + (pitch / 90) * 0.55;
-  return baseMeters * multiplier * pitchFactor;
+
+  return adjBase * multiplier * pitchFactor;
 }
 
 function offsetRing(outerRing, widthMeters) {
@@ -1220,7 +1245,7 @@ export default function MapView({ events }) {
             0.55, '#ff4d4d',    // red-orange
             0.75, '#cc0d00',    // red
           ],
-          'heatmap-opacity': 0,
+          'heatmap-opacity': (heatmap && topoOn) ? 0.25 : 0,
         },
       });
     }
@@ -1283,24 +1308,24 @@ export default function MapView({ events }) {
     map.addLayer({
       id: 'zcta-safe-line', type: 'line', source: 'zcta',
       filter: ['==', ['get', '_special'], true],
-      paint: { 'line-color': '#000000', 'line-width': 2, 'line-opacity': is3D ? 0 : 1 },
+      paint: { 'line-color': '#000000', 'line-width': ['interpolate', ['linear'], ['zoom'], 9, 6 * 0.7, 10.5, 6 * 0.7, 13, 6], 'line-opacity': is3D ? 0 : 1 },
     });
 
     // Ground boundary glows (non-special) — hidden in 3D mode
     map.addLayer({
       id: 'zcta-line-glow2', type: 'line', source: 'zcta',
       filter: ['!=', ['get', '_special'], true],
-      paint: { 'line-color': OUTLINE_GLOW, 'line-width': 3, 'line-opacity': is3D ? 0 : (sat ? 0.25 : 0.35), 'line-blur': 10 },
+      paint: { 'line-color': OUTLINE_GLOW, 'line-width': ['interpolate', ['linear'], ['zoom'], 9, 7 * 0.7, 10.5, 7 * 0.7, 13, 7], 'line-opacity': is3D ? 0 : (sat ? 0.25 : 0.35), 'line-blur': 10 },
     });
     map.addLayer({
       id: 'zcta-line-glow', type: 'line', source: 'zcta',
       filter: ['!=', ['get', '_special'], true],
-      paint: { 'line-color': OUTLINE_COLOR, 'line-width': 1, 'line-opacity': is3D ? 0 : (sat ? 0.55 : 0.75), 'line-blur': 3 },
+      paint: { 'line-color': OUTLINE_COLOR, 'line-width': ['interpolate', ['linear'], ['zoom'], 9, 5 * 0.7, 10.5, 5 * 0.7, 13, 5], 'line-opacity': is3D ? 0 : (sat ? 0.55 : 0.75), 'line-blur': 3 },
     });
     map.addLayer({
       id: 'zcta-line', type: 'line', source: 'zcta',
       filter: ['!=', ['get', '_special'], true],
-      paint: { 'line-color': OUTLINE_COLOR, 'line-width': 0.5, 'line-opacity': is3D ? 0 : 1 },
+      paint: { 'line-color': OUTLINE_COLOR, 'line-width': ['interpolate', ['linear'], ['zoom'], 9, 4 * 0.7, 10.5, 4 * 0.7, 13, 4], 'line-opacity': is3D ? 0 : 1 },
     });
 
     // Upper 3D border — annular ring using createZctaOutlineGeoJSON.
@@ -1435,7 +1460,7 @@ export default function MapView({ events }) {
     // Store so zoom/pitch listener can regenerate outline width without full recompute
     withHeatRef.current = withHeat;
     if (map.getSource('zcta-outline')) {
-      map.getSource('zcta-outline').setData(createZctaOutlineGeoJSON(withHeat, getZoomAwareOutlineWidth(map)));
+      map.getSource('zcta-outline').setData(createZctaOutlineGeoJSON(withHeat, getZoomAwareOutlineWidth(map, undefined, threeD)));
     }
 
     // Topographic heat underlay — update point data from zip centroids.
@@ -1444,7 +1469,8 @@ export default function MapView({ events }) {
       if (heatmap && topoOn) {
         // use withHeat so _heat and _tier properties exist on features
         map.getSource('heat-underlay').setData(buildHeatUnderlayPoints(withHeat, tiers));
-        map.setPaintProperty('heat-underlay', 'heatmap-opacity', 0.50);
+        // reduce underlay visibility
+        map.setPaintProperty('heat-underlay', 'heatmap-opacity', 0.25);
       } else {
         map.setPaintProperty('heat-underlay', 'heatmap-opacity', 0);
       }
@@ -1474,7 +1500,12 @@ export default function MapView({ events }) {
       map.setPaintProperty('zcta-fill', 'fill-color', heatColorExpr);
       // FIX ADDITIVE STATE: heatmap fill — 0 when 3D is on (extrusion takes over),
       // semi-transparent when satellite on, solid otherwise.
-      map.setPaintProperty('zcta-fill', 'fill-opacity', threeD ? 0 : (satellite ? 0.74 : 0.74));
+      // In 2D and Real3D heatmap modes (threeD false) make fills more transparent; leave 3D unchanged
+        if (threeD) {
+          map.setPaintProperty('zcta-fill', 'fill-opacity', 0);
+        } else {
+          map.setPaintProperty('zcta-fill', 'fill-opacity', satellite ? 0.45 : 0.35);
+        }
 
 
       if (threeD) {
@@ -1526,7 +1557,12 @@ export default function MapView({ events }) {
       map.setPaintProperty('zcta-fill', 'fill-color', ['case', ['boolean', ['get', '_special'], false], '#ffffff', '#1a0505']);
       // FIX ADDITIVE STATE / 3D ARTIFACTING: zero opacity in 3D so the flat fill
       // doesn't appear as stray 2D surfaces beneath or through extrusions.
-      map.setPaintProperty('zcta-fill', 'fill-opacity', threeD ? 0 : (satellite ? 0.38 : 0.55));
+      // In 2D and Real3D non-heatmap modes make the dark fill more visible; leave 3D unchanged
+        if (threeD) {
+          map.setPaintProperty('zcta-fill', 'fill-opacity', 0);
+        } else {
+          map.setPaintProperty('zcta-fill', 'fill-opacity', satellite ? 0.65 : 0.75);
+        }
 
       if (threeD) {
         map.setPaintProperty('zcta-safe-line', 'line-opacity', 0);
@@ -1605,7 +1641,7 @@ export default function MapView({ events }) {
         const coloredBorough = buildColoredBoroughFeatures(boroughGeoDataRef.current, avgTiers, heatmap);
         boroughWithColorRef.current = coloredBorough;
         map.getSource('borough-source').setData(
-          createOutlineGeoJSON(coloredBorough, getZoomAwareOutlineWidth(map, 18))
+          createOutlineGeoJSON(coloredBorough, getZoomAwareOutlineWidth(map, 18, threeD))
         );
         // Borough color: read baked _color from features — guaranteed to be the exact
         // same HEAT_DARK_COLORS hex value as ZCTA upper outlines (via rounded tier).
@@ -1719,10 +1755,10 @@ export default function MapView({ events }) {
             // Build props overrides from withHeat features (_heat, _tier, _special)
             const overrides = withHeatRef.current.features.map(f => f.properties);
             map.getSource('zcta-outline').setData(
-              generateZctaQuadsFromSkeleton(zctaSkeletonRef.current, getZoomAwareOutlineWidth(map), overrides)
+              generateZctaQuadsFromSkeleton(zctaSkeletonRef.current, getZoomAwareOutlineWidth(map, undefined, true), overrides)
             );
           } else if (withHeatRef.current) {
-            map.getSource('zcta-outline').setData(createZctaOutlineGeoJSON(withHeatRef.current, getZoomAwareOutlineWidth(map)));
+            map.getSource('zcta-outline').setData(createZctaOutlineGeoJSON(withHeatRef.current, getZoomAwareOutlineWidth(map, undefined, true)));
           }
         }
         // Borough outline — use skeleton cache if available, fallback to full recompute
@@ -1730,10 +1766,10 @@ export default function MapView({ events }) {
           if (boroughSkeletonRef.current && boroughWithColorRef.current) {
             const overrides = boroughWithColorRef.current.features.map(f => f.properties);
             map.getSource('borough-source').setData(
-              generateBoroughQuadsFromSkeleton(boroughSkeletonRef.current, getZoomAwareOutlineWidth(map, 18), overrides)
+              generateBoroughQuadsFromSkeleton(boroughSkeletonRef.current, getZoomAwareOutlineWidth(map, 18, true), overrides)
             );
           } else if (boroughWithColorRef.current) {
-            map.getSource('borough-source').setData(createOutlineGeoJSON(boroughWithColorRef.current, getZoomAwareOutlineWidth(map, 18)));
+            map.getSource('borough-source').setData(createOutlineGeoJSON(boroughWithColorRef.current, getZoomAwareOutlineWidth(map, 18, true)));
           }
         }
       });
