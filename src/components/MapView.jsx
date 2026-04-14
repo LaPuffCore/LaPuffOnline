@@ -322,7 +322,7 @@ function getZoomAwareOutlineWidth(map, baseMeters = 14, is3D = false) {
   // If 3D mode is active, preserve original behavior exactly to avoid touching 3D visuals.
   if (is3D) {
     const zoom = map.getZoom();
-    const t = Math.max(0, 10.5 - zoom);
+    const t = Math.max(0, 9.5 - zoom);
     const targetAt9 = baseMeters === 18 ? 96 : 64;
     const scale = Math.pow(targetAt9 / baseMeters, 1 / 1.5);
     const multiplier = Math.pow(scale, t);
@@ -333,20 +333,23 @@ function getZoomAwareOutlineWidth(map, baseMeters = 14, is3D = false) {
 
   // Non-3D behavior: apply requested adjustments
   const zoom = map.getZoom();
-  // Increase base starting size by +4 pixels (measured at zoom 10.5)
+  // Increase base starting size by +4 pixels (measured at zoom 9.5)
   const refLat = (map.getCenter && map.getCenter().lat) ? map.getCenter().lat : 40.71;
-  const metersPerPixelAt105 = 156543.03392 * Math.cos(refLat * Math.PI / 180) / Math.pow(2, 10.5);
-  const extraMetersFor4px = 4 * metersPerPixelAt105;
-  const adjBase = baseMeters + extraMetersFor4px;
+  const metersPerPixelAt95 = 156543.03392 * Math.cos(refLat * Math.PI / 180) / Math.pow(2, 9.5);
+  const extraMetersFor4px = 4 * metersPerPixelAt95;
+  // Increase constant minimum by 40%
+  const adjBase = (baseMeters + extraMetersFor4px) * 1.4;
 
-  // Lock flat until 10.5 (t = 0 for zoom >= 10.5)
-  const t = Math.max(0, 10.5 - zoom);
+  // Lock flat until 9.5 (t = 0 for zoom >= 9.5)
+  const t = Math.max(0, 9.5 - zoom);
 
-  // Reduce the previous target (at zoom 9) by 30% for non-3D modes
+  // Decrease the size at max zooms out (<9.5) by half
   const originalTargetAt9 = baseMeters === 18 ? 96 : 64;
-  const targetAt9 = originalTargetAt9 * 0.7; // 30% smaller
+  const targetAt9 = originalTargetAt9 * 0.5; // half size at zoom 9
 
-  const scale = Math.pow(targetAt9 / adjBase, 1 / 1.5);
+  // exponent over the 0.5 zoom-step (9 -> 9.5)
+  const denom = 9.5 - 9; // 0.5
+  const scale = Math.pow(targetAt9 / adjBase, 1 / denom);
   const multiplier = Math.pow(scale, t);
   const pitch = map.getPitch ? map.getPitch() : 0;
   const pitchFactor = 1 + (pitch / 90) * 0.55;
@@ -1245,7 +1248,7 @@ export default function MapView({ events }) {
             0.55, '#ff4d4d',    // red-orange
             0.75, '#cc0d00',    // red
           ],
-          'heatmap-opacity': (heatmap && topoOn) ? 0.25 : 0,
+          'heatmap-opacity': (heatmap && topoOn) ? 0.50 : 0,
         },
       });
     }
@@ -1308,24 +1311,24 @@ export default function MapView({ events }) {
     map.addLayer({
       id: 'zcta-safe-line', type: 'line', source: 'zcta',
       filter: ['==', ['get', '_special'], true],
-      paint: { 'line-color': '#000000', 'line-width': ['interpolate', ['linear'], ['zoom'], 9, 6 * 0.7, 10.5, 6 * 0.7, 13, 6], 'line-opacity': is3D ? 0 : 1 },
+      paint: { 'line-color': '#000000', 'line-width': ['interpolate', ['linear'], ['zoom'], 9, 6 * 0.35, 9.5, 6 * 1.4, 16, 6 * 1.4], 'line-opacity': is3D ? 0 : 1 },
     });
 
     // Ground boundary glows (non-special) — hidden in 3D mode
     map.addLayer({
       id: 'zcta-line-glow2', type: 'line', source: 'zcta',
       filter: ['!=', ['get', '_special'], true],
-      paint: { 'line-color': OUTLINE_GLOW, 'line-width': ['interpolate', ['linear'], ['zoom'], 9, 7 * 0.7, 10.5, 7 * 0.7, 13, 7], 'line-opacity': is3D ? 0 : (sat ? 0.25 : 0.35), 'line-blur': 10 },
+      paint: { 'line-color': OUTLINE_GLOW, 'line-width': ['interpolate', ['linear'], ['zoom'], 9, 7 * 0.35, 9.5, 7 * 1.4, 16, 7 * 1.4], 'line-opacity': is3D ? 0 : (sat ? 0.25 : 0.35), 'line-blur': 10 },
     });
     map.addLayer({
       id: 'zcta-line-glow', type: 'line', source: 'zcta',
       filter: ['!=', ['get', '_special'], true],
-      paint: { 'line-color': OUTLINE_COLOR, 'line-width': ['interpolate', ['linear'], ['zoom'], 9, 5 * 0.7, 10.5, 5 * 0.7, 13, 5], 'line-opacity': is3D ? 0 : (sat ? 0.55 : 0.75), 'line-blur': 3 },
+      paint: { 'line-color': OUTLINE_COLOR, 'line-width': ['interpolate', ['linear'], ['zoom'], 9, 5 * 0.35, 9.5, 5 * 1.4, 16, 5 * 1.4], 'line-opacity': is3D ? 0 : (sat ? 0.55 : 0.75), 'line-blur': 3 },
     });
     map.addLayer({
       id: 'zcta-line', type: 'line', source: 'zcta',
       filter: ['!=', ['get', '_special'], true],
-      paint: { 'line-color': OUTLINE_COLOR, 'line-width': ['interpolate', ['linear'], ['zoom'], 9, 4 * 0.7, 10.5, 4 * 0.7, 13, 4], 'line-opacity': is3D ? 0 : 1 },
+      paint: { 'line-color': OUTLINE_COLOR, 'line-width': ['interpolate', ['linear'], ['zoom'], 9, 4 * 0.35, 9.5, 4 * 1.4, 16, 4 * 1.4], 'line-opacity': is3D ? 0 : 1 },
     });
 
     // Upper 3D border — annular ring using createZctaOutlineGeoJSON.
@@ -1470,7 +1473,7 @@ export default function MapView({ events }) {
         // use withHeat so _heat and _tier properties exist on features
         map.getSource('heat-underlay').setData(buildHeatUnderlayPoints(withHeat, tiers));
         // reduce underlay visibility
-        map.setPaintProperty('heat-underlay', 'heatmap-opacity', 0.25);
+        map.setPaintProperty('heat-underlay', 'heatmap-opacity', 0.50);
       } else {
         map.setPaintProperty('heat-underlay', 'heatmap-opacity', 0);
       }
