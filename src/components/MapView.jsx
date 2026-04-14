@@ -321,8 +321,9 @@ function getZoomAwareOutlineWidth(map, baseMeters = 14, is3D = false) {
   if (!map || typeof map.getZoom !== 'function') return baseMeters;
   // If 3D mode is active, preserve original behavior exactly to avoid touching 3D visuals.
   if (is3D) {
+    // RESTORED: original 3D outline scaling logic (do not touch 3D visuals)
     const zoom = map.getZoom();
-    const t = Math.max(0, 9.5 - zoom);
+    const t = Math.max(0, 10.5 - zoom);
     const targetAt9 = baseMeters === 18 ? 96 : 64;
     const scale = Math.pow(targetAt9 / baseMeters, 1 / 1.5);
     const multiplier = Math.pow(scale, t);
@@ -1495,6 +1496,7 @@ export default function MapView({ events }) {
         const lineGlow2Px_ = Number((lineBasePx_ * 1.6).toFixed(2));
         const safePx_ = Number((lineBasePx_ * 1.5).toFixed(2));
 
+
         if (map.getLayer('zcta-safe-line')) map.setPaintProperty('zcta-safe-line', 'line-width', safePx_);
         if (map.getLayer('zcta-line-glow2')) map.setPaintProperty('zcta-line-glow2', 'line-width', lineGlow2Px_);
         if (map.getLayer('zcta-line-glow')) map.setPaintProperty('zcta-line-glow', 'line-width', lineGlowPx_);
@@ -1551,7 +1553,12 @@ export default function MapView({ events }) {
         if (threeD) {
           map.setPaintProperty('zcta-fill', 'fill-opacity', 0);
         } else {
-          map.setPaintProperty('zcta-fill', 'fill-opacity', satellite ? 0.45 : 0.35);
+          // 1a/1b: solid fill if heatmap on, satellite off, topo off; else transparent
+        if (heatmap && !satellite && !topoOn) {
+          map.setPaintProperty('zcta-fill', 'fill-opacity', 1.0);
+        } else {
+          map.setPaintProperty('zcta-fill', 'fill-opacity', satellite || topoOn ? 0.35 : 0.45);
+        }
         }
 
 
@@ -1608,7 +1615,7 @@ export default function MapView({ events }) {
         if (threeD) {
           map.setPaintProperty('zcta-fill', 'fill-opacity', 0);
         } else {
-          map.setPaintProperty('zcta-fill', 'fill-opacity', satellite ? 0.65 : 0.75);
+          map.setPaintProperty('zcta-fill', 'fill-opacity', satellite ? 0.65 : 0.75); // unchanged, more visible dark fill for non-heatmap
         }
 
       if (threeD) {
@@ -2015,16 +2022,7 @@ export default function MapView({ events }) {
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
-    if (locationMarkerRef.current) { locationMarkerRef.current.remove(); locationMarkerRef.current = null; }
-    if (!userLocation) return;
-    const el = document.createElement('div');
-    el.style.cssText = `width:18px;height:18px;border-radius:50%;background:#7C3AED;border:2px solid white;box-shadow:0 0 0 4px rgba(124,58,237,0.35),0 0 24px rgba(124,58,237,0.7);z-index:1000;animation:orb-pulse 2s ease-in-out infinite;`;
-    if (!document.getElementById('orb-pulse-style')) {
-      const s = document.createElement('style'); s.id = 'orb-pulse-style';
-      s.textContent = `@keyframes orb-pulse{0%,100%{box-shadow:0 0 0 4px rgba(124,58,237,0.35),0 0 24px rgba(124,58,237,0.7)}50%{box-shadow:0 0 0 8px rgba(124,58,237,0.15),0 0 40px rgba(124,58,237,0.9)}}`;
-      document.head.appendChild(s);
-    }
-    locationMarkerRef.current = new maplibregl.Marker({ element: el }).setLngLat([userLocation.lng, userLocation.lat]).addTo(map);
+    // Location marker removed per user request.
   }, [userLocation, mapReady]);
 
   useEffect(() => {
@@ -2336,11 +2334,7 @@ export default function MapView({ events }) {
             <ZipHologram feature={holoFeature} color={holoColor} onClose={() => setHoloFeature(null)} />
           )}
 
-          {userLocation && (
-            <div className="absolute bottom-16 left-4 z-30 bg-black/70 border border-[#7C3AED]/60 rounded-xl px-3 py-1.5 text-xs text-[#7C3AED] font-bold pointer-events-none">
-              📍 Location active
-            </div>
-          )}
+          {/* Location active marker removed per user request */}
         </>
       )}
 
