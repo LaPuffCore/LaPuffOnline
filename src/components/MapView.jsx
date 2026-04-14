@@ -1724,6 +1724,60 @@ export default function MapView({ events }) {
         boroughWithColorRef.current = null;
       }
     }
+
+    // FIX REAL3D BASEPLATE: Update baseplate layer colors to match heatmap tiers
+    // Baseplates are visible at zoom 10-11 and should show correct zip-tier colors
+    if (real3D && map.getLayer('real3d-buildings-baseplate')) {
+      if (heatmap) {
+        // In heatmap mode, baseplates show darker heatmap colors per zip tier
+        map.setPaintProperty('real3d-buildings-baseplate', 'fill-extrusion-color', ['case',
+          ['==', ['feature-state', 'tier'], 4], HEAT_DARK_COLORS.hot,
+          ['==', ['feature-state', 'tier'], 3], HEAT_DARK_COLORS.orange,
+          ['==', ['feature-state', 'tier'], 2], HEAT_DARK_COLORS.warm,
+          ['==', ['feature-state', 'tier'], 1], HEAT_DARK_COLORS.cool,
+          HEAT_DARK_COLORS.cold,
+        ]);
+        // Also need to assign baseplate tiers when heatmap is on
+        if (map.getLayer('real3d-buildings')) {
+          try {
+            const baseplates = map.queryRenderedFeatures(undefined, { layers: ['real3d-buildings-baseplate'] });
+            const features = geoDataRef.current?.features;
+            const tiersList = tiersRef.current;
+            const boroughFeats = boroughGeoDataRef.current?.features;
+            if (features && tiersList.length) {
+              baseplates.forEach(b => {
+                if (b.id == null) return;
+                const centroid = getGeomCentroid(b.geometry);
+                // Check NYC boundary
+                let inNYC = false;
+                if (boroughFeats) {
+                  for (const bf of boroughFeats) {
+                    const bGeom = bf.geometry;
+                    const polys = bGeom.type === 'MultiPolygon' ? bGeom.coordinates : [bGeom.coordinates];
+                    for (const poly of polys) {
+                      if (pointInRing(centroid[0], centroid[1], poly[0])) {
+                        inNYC = true;
+                        break;
+                      }
+                    }
+                    if (inNYC) break;
+                  }
+                }
+                if (!inNYC) return;
+                const tier = findTierForPoint(centroid, features, tiersList);
+                map.setFeatureState(
+                  { source: 'openmaptiles', sourceLayer: 'building', id: b.id },
+                  { tier }
+                );
+              });
+            }
+          } catch (e) { /* ignore */ }
+        }
+      } else {
+        // Non-heatmap mode: use dark red for baseplates
+        map.setPaintProperty('real3d-buildings-baseplate', 'fill-extrusion-color', '#2d0a0a');
+      }
+    }
   }, [heatmap, topoOn, threeD, real3D, timespanIdx, events, geoData, boroughGeoData, mapReady, satellite, adjacency, styleVersion]);
 
   // Manage heat-underlay radius so its real-world meter reach stays constant between zoom 9.5 and 14.
@@ -1905,16 +1959,36 @@ export default function MapView({ events }) {
   // against zcta features to get the region tier, then sets feature-state on each building.
   // shadeIdx = featureId % 5 ensures neighboring buildings (different OSM IDs) get
   // different shades of the same hue for visibility without needing outlines.
+  // FIX REAL3D NYC BOUNDARY: Also checks that building is within 5 NYC boroughs before assigning.
   function assignBuildingTiersToMap(map) {
     if (!map || !map.getLayer('real3d-buildings')) return;
     const features = geoDataRef.current?.features;
     const tiers = tiersRef.current;
+    const boroughFeats = boroughGeoDataRef.current?.features;
     if (!features || !tiers.length) return;
     try {
       const buildings = map.queryRenderedFeatures(undefined, { layers: ['real3d-buildings'] });
       buildings.forEach(b => {
         if (b.id == null) return;
         const centroid = getGeomCentroid(b.geometry);
+        
+        // FIX REAL3D NYC BOUNDARY: Check if building centroid is within NYC boroughs
+        let inNYC = false;
+        if (boroughFeats) {
+          for (const bf of boroughFeats) {
+            const bGeom = bf.geometry;
+            const polys = bGeom.type === 'MultiPolygon' ? bGeom.coordinates : [bGeom.coordinates];
+            for (const poly of polys) {
+              if (pointInRing(centroid[0], centroid[1], poly[0])) {
+                inNYC = true;
+                break;
+              }
+            }
+            if (inNYC) break;
+          }
+        }
+        if (!inNYC) return; // Skip buildings outside NYC
+        
         const tier = findTierForPoint(centroid, features, tiers);
         const shadeIdx = Math.abs(Number(b.id) || 0) % 5;
         map.setFeatureState(
@@ -1932,15 +2006,37 @@ export default function MapView({ events }) {
       buildingAssignCleanupRef.current = null;
     }
 
-    ['real3d-buildings', 'real3d-buildings-outline'].forEach(id => { if (map.getLayer(id)) map.removeLayer(id); });
+    ['real3d-buildings', 'real3d-buildings-outline', 'real3d-buildings-baseplate'].forEach(id => { if (map.getLayer(id)) map.removeLayer(id); });
     if (!map.getSource('openmaptiles')) {
       try {
         map.addSource('openmaptiles', { type: 'vector', url: `https://api.maptiler.com/tiles/v3/tiles.json?key=${MAPTILER_KEY}` });
       } catch (err) { console.warn('Real3D source add failed:', err); return; }
     }
     try {
+      // FIX REAL3D ZOOM: Add baseplate layer for zoom 10-11 range (minzoom 10, maxzoom 11)
+      // This shows flat building footprints from MapTiler API in the medium zoom range
       map.addLayer({
-        id: 'real3d-buildings', type: 'fill-extrusion', source: 'openmaptiles', 'source-layer': 'building', minzoom: 12,
+        id: 'real3d-buildings-baseplate', type: 'fill-extrusion', source: 'openmaptiles', 'source-layer': 'building',
+        minzoom: 10, maxzoom: 11,
+        paint: {
+          'fill-extrusion-color': isHeatmap ? ['case',
+            ['==', ['feature-state', 'tier'], 4], HEAT_DARK_COLORS.hot,
+            ['==', ['feature-state', 'tier'], 3], HEAT_DARK_COLORS.orange,
+            ['==', ['feature-state', 'tier'], 2], HEAT_DARK_COLORS.warm,
+            ['==', ['feature-state', 'tier'], 1], HEAT_DARK_COLORS.cool,
+            HEAT_DARK_COLORS.cold,
+          ] : '#2d0a0a',
+          'fill-extrusion-height': 0,
+          'fill-extrusion-base': 0,
+          'fill-extrusion-opacity': 0.8,
+          'fill-extrusion-vertical-gradient': false,
+        },
+      });
+
+      // FIX REAL3D ZOOM: Main extrusion layer for zoom 11+ (full 3D buildings)
+      // minzoom 11 means extrusions appear at zoom 11 and above
+      map.addLayer({
+        id: 'real3d-buildings', type: 'fill-extrusion', source: 'openmaptiles', 'source-layer': 'building', minzoom: 11,
         paint: {
           'fill-extrusion-color': buildingColorExprByState(isHeatmap),
           'fill-extrusion-height': ['coalesce', ['get', 'render_height'], ['get', 'height'], 5],
@@ -1949,10 +2045,6 @@ export default function MapView({ events }) {
           'fill-extrusion-vertical-gradient': true,
         },
       });
-      // FIX REAL3D BOTTOM OUTLINE: Do NOT add the outline layer for full 3D blocks.
-      // The outline (minzoom 14) only appears when buildings are fully 3D extruded,
-      // which is exactly when we want NO outline — cluster colors provide distinction.
-      // For baseplate phase (zoom 12-14), the footprint fill provides enough boundary.
 
       map.easeTo({ pitch: 55, bearing: -17, duration: 700 });
 
@@ -1974,7 +2066,7 @@ export default function MapView({ events }) {
     const map = mapRef.current;
     if (!map || !mapReady) return;
     if (!real3D) {
-      ['real3d-buildings', 'real3d-buildings-outline'].forEach(id => { if (map.getLayer(id)) map.removeLayer(id); });
+      ['real3d-buildings', 'real3d-buildings-outline', 'real3d-buildings-baseplate'].forEach(id => { if (map.getLayer(id)) map.removeLayer(id); });
       if (buildingAssignCleanupRef.current) { buildingAssignCleanupRef.current(); buildingAssignCleanupRef.current = null; }
       if (!threeD) map.easeTo({ pitch: 0, bearing: 0, duration: 700 });
       return;
@@ -1983,6 +2075,7 @@ export default function MapView({ events }) {
   }, [real3D, mapReady]);
 
   // FIX REAL3D HEATMAP: refresh building color expression + spatial assignment when heatmap changes
+  // FIX REAL3D TIMESPAN: Add timespanIdx to dependencies so building tiers re-assign when timespan changes
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady || !real3D || !map.getLayer('real3d-buildings')) return;
@@ -1999,7 +2092,7 @@ export default function MapView({ events }) {
       // Heatmap turned off — clear listeners, ID-based expression needs no state
       if (buildingAssignCleanupRef.current) { buildingAssignCleanupRef.current(); buildingAssignCleanupRef.current = null; }
     }
-  }, [heatmap, real3D, mapReady]);
+  }, [heatmap, real3D, mapReady, timespanIdx]);
 
   const handleThreeDToggle = () => {
     if (isOffline) {
@@ -2104,17 +2197,17 @@ export default function MapView({ events }) {
                   </button>
                   {heatmap && !isMobile && (
                     <button onClick={() => setTopoOn(v => !v)}
-                      className={`w-10 h-10 rounded-2xl border-2 p-0 flex items-center justify-center transition-all ${topoOn ? 'ring-2 ring-yellow-300 bg-gradient-to-r from-cyan-500 via-yellow-400 to-red-500 border-yellow-300 text-white' : 'bg-black/70 border-white/30 opacity-50'}`}
+                      className={`w-10 h-10 rounded-2xl border-2 p-0 flex items-center justify-center transition-all ${topoOn ? 'ring-2 ring-yellow-300 border-yellow-300' : 'border-white/30 hover:border-orange-400'}`}
                       title="Topo Heatmap Toggle"
-                      style={{ position: 'absolute', top: 'calc(100% + 8px)', left: '50%', transform: 'translateX(-50%)' }}>
+                      style={{ position: 'absolute', top: 'calc(100% + 8px)', left: '50%', transform: 'translateX(-50%)', backgroundColor: 'rgba(0,0,0,0.7)' }}>
                       <div style={{ width: 36, height: 36, borderRadius: 8, backgroundImage: `url('${PUBLIC_BASE}data/topo-thumb.png')`, backgroundSize: 'cover', backgroundPosition: 'center' }} />
                     </button>
                   )}
                   {heatmap && isMobile && (
                     <button onClick={() => setTopoOn(v => !v)}
-                      className={`absolute left-[-44px] top-0 w-9 h-9 rounded-2xl border-2 p-0 flex items-center justify-center transition-all ${topoOn ? 'ring-2 ring-yellow-300 bg-gradient-to-r from-cyan-500 via-yellow-400 to-red-500 border-yellow-300 text-white' : 'bg-black/70 border-white/30 opacity-50'}`}
+                      className={`absolute left-[-44px] top-0 w-9 h-9 rounded-2xl border-2 p-0 flex items-center justify-center transition-all ${topoOn ? 'ring-2 ring-yellow-300 border-yellow-300' : 'border-white/30 hover:border-orange-400'}`}
                       title="Topo Heatmap Toggle (mobile)"
-                      style={{ transform: 'translateX(-4px)' }}>
+                      style={{ transform: 'translateX(-4px)', backgroundColor: 'rgba(0,0,0,0.7)' }}>
                       <div style={{ width: 30, height: 30, borderRadius: 8, backgroundImage: `url('${PUBLIC_BASE}data/topo-thumb.png')`, backgroundSize: 'cover', backgroundPosition: 'center' }} />
                     </button>
                   )}
