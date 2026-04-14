@@ -1725,58 +1725,12 @@ export default function MapView({ events }) {
       }
     }
 
-    // FIX REAL3D BASEPLATE: Update baseplate layer colors to match heatmap tiers
-    // Baseplates are visible at zoom 10-11 and should show correct zip-tier colors
+    // FIX REAL3D BASEPLATE: Baseplates inherit color from main buildings layer
+    // Both use the same tier-based coloring, so consistent styling between zoom ranges
+    // Note: Baseplates don't need separate tier assignment; they're part of openmaptiles buildings
+    // and will get colored via the same feature-state mechanism used for main buildings layer
     if (real3D && map.getLayer('real3d-buildings-baseplate')) {
-      if (heatmap) {
-        // In heatmap mode, baseplates show darker heatmap colors per zip tier
-        map.setPaintProperty('real3d-buildings-baseplate', 'fill-extrusion-color', ['case',
-          ['==', ['feature-state', 'tier'], 4], HEAT_DARK_COLORS.hot,
-          ['==', ['feature-state', 'tier'], 3], HEAT_DARK_COLORS.orange,
-          ['==', ['feature-state', 'tier'], 2], HEAT_DARK_COLORS.warm,
-          ['==', ['feature-state', 'tier'], 1], HEAT_DARK_COLORS.cool,
-          HEAT_DARK_COLORS.cold,
-        ]);
-        // Also need to assign baseplate tiers when heatmap is on
-        if (map.getLayer('real3d-buildings')) {
-          try {
-            const baseplates = map.queryRenderedFeatures(undefined, { layers: ['real3d-buildings-baseplate'] });
-            const features = geoDataRef.current?.features;
-            const tiersList = tiersRef.current;
-            const boroughFeats = boroughGeoDataRef.current?.features;
-            if (features && tiersList.length) {
-              baseplates.forEach(b => {
-                if (b.id == null) return;
-                const centroid = getGeomCentroid(b.geometry);
-                // Check NYC boundary
-                let inNYC = false;
-                if (boroughFeats) {
-                  for (const bf of boroughFeats) {
-                    const bGeom = bf.geometry;
-                    const polys = bGeom.type === 'MultiPolygon' ? bGeom.coordinates : [bGeom.coordinates];
-                    for (const poly of polys) {
-                      if (pointInRing(centroid[0], centroid[1], poly[0])) {
-                        inNYC = true;
-                        break;
-                      }
-                    }
-                    if (inNYC) break;
-                  }
-                }
-                if (!inNYC) return;
-                const tier = findTierForPoint(centroid, features, tiersList);
-                map.setFeatureState(
-                  { source: 'openmaptiles', sourceLayer: 'building', id: b.id },
-                  { tier }
-                );
-              });
-            }
-          } catch (e) { /* ignore */ }
-        }
-      } else {
-        // Non-heatmap mode: use dark red for baseplates
-        map.setPaintProperty('real3d-buildings-baseplate', 'fill-extrusion-color', '#2d0a0a');
-      }
+      map.setPaintProperty('real3d-buildings-baseplate', 'fill-extrusion-color', buildingColorExprByState(heatmap));
     }
   }, [heatmap, topoOn, threeD, real3D, timespanIdx, events, geoData, boroughGeoData, mapReady, satellite, adjacency, styleVersion]);
 
@@ -2015,17 +1969,12 @@ export default function MapView({ events }) {
     try {
       // FIX REAL3D ZOOM: Add baseplate layer for zoom 10-11 range (minzoom 10, maxzoom 11)
       // This shows flat building footprints from MapTiler API in the medium zoom range
+      // Baseplates use the same color expression as main buildings for consistency
       map.addLayer({
         id: 'real3d-buildings-baseplate', type: 'fill-extrusion', source: 'openmaptiles', 'source-layer': 'building',
         minzoom: 10, maxzoom: 11,
         paint: {
-          'fill-extrusion-color': isHeatmap ? ['case',
-            ['==', ['feature-state', 'tier'], 4], HEAT_DARK_COLORS.hot,
-            ['==', ['feature-state', 'tier'], 3], HEAT_DARK_COLORS.orange,
-            ['==', ['feature-state', 'tier'], 2], HEAT_DARK_COLORS.warm,
-            ['==', ['feature-state', 'tier'], 1], HEAT_DARK_COLORS.cool,
-            HEAT_DARK_COLORS.cold,
-          ] : '#2d0a0a',
+          'fill-extrusion-color': buildingColorExprByState(isHeatmap),
           'fill-extrusion-height': 0,
           'fill-extrusion-base': 0,
           'fill-extrusion-opacity': 0.8,
