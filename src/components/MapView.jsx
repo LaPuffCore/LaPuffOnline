@@ -1881,31 +1881,40 @@ export default function MapView({ events }) {
   // shadeIdx = featureId % 5 for cluster differentiation.
   function buildingColorExprByState(isHeatmap) {
     if (!isHeatmap) {
-      // 5 distinct dark-red shades so neighboring buildings are visually different
+      // 7 distinct red shades spanning dark→light for wide visual differentiation
       return ['case',
-        ['==', ['%', ['to-number', ['id'], 0], 5], 0], '#0d0202',
-        ['==', ['%', ['to-number', ['id'], 0], 5], 1], '#280606',
-        ['==', ['%', ['to-number', ['id'], 0], 5], 2], '#0a0101',
-        ['==', ['%', ['to-number', ['id'], 0], 5], 3], '#3d0a0a',
-        '#1f0505',
+        ['==', ['%', ['to-number', ['id'], 0], 7], 0], '#1a0303',
+        ['==', ['%', ['to-number', ['id'], 0], 7], 1], '#3d0808',
+        ['==', ['%', ['to-number', ['id'], 0], 7], 2], '#5c1010',
+        ['==', ['%', ['to-number', ['id'], 0], 7], 3], '#7a1818',
+        ['==', ['%', ['to-number', ['id'], 0], 7], 4], '#992222',
+        ['==', ['%', ['to-number', ['id'], 0], 7], 5], '#b83030',
+        '#cc4040',
       ];
     }
 
-    // Heatmap: nested case — outer=tier from feature-state, inner=shade index from feature-state
+    // Heatmap: nested case — outer=tier from feature-state, inner=shade index from ID
+    // Using ID-based shade so color is immediate (no waiting for feature-state assignment)
     const shades = (tones) => ['case',
-      ['==', ['feature-state', 'shadeIdx'], 0], tones[0],
-      ['==', ['feature-state', 'shadeIdx'], 1], tones[1],
-      ['==', ['feature-state', 'shadeIdx'], 2], tones[2],
-      ['==', ['feature-state', 'shadeIdx'], 3], tones[3],
+      ['==', ['%', ['to-number', ['id'], 0], 5], 0], tones[0],
+      ['==', ['%', ['to-number', ['id'], 0], 5], 1], tones[1],
+      ['==', ['%', ['to-number', ['id'], 0], 5], 2], tones[2],
+      ['==', ['%', ['to-number', ['id'], 0], 5], 3], tones[3],
       tones[4],
     ];
+
+    // FIX REAL3D CYAN ARTIFACT: Default fallback (when feature-state tier not yet assigned)
+    // uses red shades instead of cold/cyan shades — prevents cyan flash on initial load
+    const RED_FALLBACK_TONES = ['#1a0303', '#3d0808', '#5c1010', '#7a1818', '#992222'];
 
     return ['case',
       ['==', ['feature-state', 'tier'], 4], shades(HEAT_BUILDING_TONES.hot),
       ['==', ['feature-state', 'tier'], 3], shades(HEAT_BUILDING_TONES.orange),
       ['==', ['feature-state', 'tier'], 2], shades(HEAT_BUILDING_TONES.warm),
       ['==', ['feature-state', 'tier'], 1], shades(HEAT_BUILDING_TONES.cool),
-      shades(HEAT_BUILDING_TONES.cold),
+      ['==', ['feature-state', 'tier'], 0], shades(HEAT_BUILDING_TONES.cold),
+      // Fallback when tier hasn't been assigned yet — red instead of cyan
+      shades(RED_FALLBACK_TONES),
     ];
   }
 
@@ -1915,13 +1924,18 @@ export default function MapView({ events }) {
   // different shades of the same hue for visibility without needing outlines.
   // FIX REAL3D NYC BOUNDARY: Also checks that building is within 5 NYC boroughs before assigning.
   function assignBuildingTiersToMap(map) {
-    if (!map || !map.getLayer('real3d-buildings')) return;
+    if (!map) return;
     const features = geoDataRef.current?.features;
     const tiers = tiersRef.current;
     const boroughFeats = boroughGeoDataRef.current?.features;
     if (!features || !tiers.length) return;
+
+    // Query both layers: main extrusions AND baseplates
+    const layersToQuery = ['real3d-buildings', 'real3d-buildings-baseplate'].filter(id => map.getLayer(id));
+    if (layersToQuery.length === 0) return;
+
     try {
-      const buildings = map.queryRenderedFeatures(undefined, { layers: ['real3d-buildings'] });
+      const buildings = map.queryRenderedFeatures(undefined, { layers: layersToQuery });
       buildings.forEach(b => {
         if (b.id == null) return;
         const centroid = getGeomCentroid(b.geometry);
@@ -2029,6 +2043,10 @@ export default function MapView({ events }) {
     const map = mapRef.current;
     if (!map || !mapReady || !real3D || !map.getLayer('real3d-buildings')) return;
     map.setPaintProperty('real3d-buildings', 'fill-extrusion-color', buildingColorExprByState(heatmap));
+    // Also update baseplates so they stay in sync
+    if (map.getLayer('real3d-buildings-baseplate')) {
+      map.setPaintProperty('real3d-buildings-baseplate', 'fill-extrusion-color', buildingColorExprByState(heatmap));
+    }
     if (heatmap) {
       // Re-assign tiers with new heatmap state; set up move/zoom listeners
       if (buildingAssignCleanupRef.current) { buildingAssignCleanupRef.current(); buildingAssignCleanupRef.current = null; }
