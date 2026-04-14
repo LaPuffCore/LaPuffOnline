@@ -2098,11 +2098,11 @@ export default function MapView({ events }) {
             <div className="flex gap-2 flex-wrap justify-center">
               <div className="flex flex-col items-center gap-2">
                 <div className="relative flex flex-col items-center gap-2">
-                  <button onClick={() => { setHeatmap(v => { const nv = !v; if (nv) setTopoOn(true); return nv; }); }}
+                  <button onClick={() => { setHeatmap(v => { if (!v) setTopoOn(false); return !v; }); }}
                     className={`px-4 py-2 rounded-2xl font-black text-sm border-2 transition-all ${heatmap ? 'bg-gradient-to-r from-cyan-500 via-yellow-400 to-red-500 border-yellow-300 text-white' : 'bg-black/70 border-white/30 text-white hover:border-orange-400'}`}>
                     🌡️ Heatmap
                   </button>
-                  {heatmap && (
+                  {heatmap && !isMobile && (
                     <button onClick={() => setTopoOn(v => !v)}
                       className={`w-10 h-10 rounded-2xl border-2 p-0 flex items-center justify-center transition-all ${topoOn ? 'ring-2 ring-yellow-300 bg-gradient-to-r from-cyan-500 via-yellow-400 to-red-500 border-yellow-300 text-white' : 'bg-black/70 border-white/30 opacity-50'}`}
                       title="Topo Heatmap Toggle"
