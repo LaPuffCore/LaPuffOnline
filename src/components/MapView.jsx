@@ -337,7 +337,7 @@ function normalizeFeatureGeometry(feature) {
 
 // T3 3D PIXELIZATION: Smooth continuous zoom-aware width scaling.
 // ZCTA (base 14m): 14m flat until zoom 10.5, then ramps to 64m at zoom 9.
-// Borough (base 54m): 54m flat from zoom 10+, ramps to 144m at zoom 9 (3× at z≥10, 1.5× at z9–10 vs old 18m behavior).
+// Borough (base 18m): 1x at zoom≥11, 2x ramp at zoom 10-11, 3x ramp at zoom ≤9.
 function getZoomAwareOutlineWidth(map, baseMeters = 14, is3D = false) {
   if (!map || typeof map.getZoom !== 'function') return baseMeters;
   // If 3D/Real3D mode is active, use the new split-scale logic.
@@ -345,14 +345,23 @@ function getZoomAwareOutlineWidth(map, baseMeters = 14, is3D = false) {
     const zoom = map.getZoom();
     const pitch = map.getPitch ? map.getPitch() : 0;
     const pitchFactor = 1 + (pitch / 90) * 0.55;
-    // Borough outline (baseMeters=54): lock at zoom>=10, ramp to 144m at zoom 9.
-    if (baseMeters >= 30) {
-      const lockZoom = 10;
-      const t = Math.max(0, lockZoom - zoom);
-      const targetAt9 = 144; // 1.5× the old 96m target
-      const scale = Math.pow(targetAt9 / baseMeters, 1 / (lockZoom - 9)); // exponent over 1 step
-      const multiplier = Math.pow(scale, t);
-      return baseMeters * multiplier * pitchFactor;
+    // Borough outline (baseMeters=18): 1x at zoom>=11, 2x ramp 10-11, 3x ramp <=9.
+    if (baseMeters >= 15) {
+      let meters;
+      if (zoom >= 11) {
+        meters = baseMeters; // 1x — original size at close zoom
+      } else if (zoom >= 10) {
+        // linear ramp 1x → 2x from zoom 11 → 10
+        const t = 11 - zoom; // 0 at zoom11, 1 at zoom10
+        meters = baseMeters * (1 + t);
+      } else if (zoom >= 9) {
+        // linear ramp 2x → 3x from zoom 10 → 9
+        const t = 10 - zoom; // 0 at zoom10, 1 at zoom9
+        meters = baseMeters * (2 + t);
+      } else {
+        meters = baseMeters * 3; // 3x flat below zoom 9
+      }
+      return meters * pitchFactor;
     }
     // ZCTA outline (baseMeters=14): original exponential ramp 10.5→9.
     const t = Math.max(0, 10.5 - zoom);
@@ -1381,6 +1390,7 @@ export default function MapView({ events }) {
     if (!map || !data || map.getSource('zcta')) return;
     // Read current 3D state so initial paint values are correct even on re-add (satellite swap)
     const is3D = threeDRef.current;
+    const isReal3D = real3DRef.current;
     map.addSource('zcta', { type: 'geojson', data, generateId: false });
 
     // Compute 3D upper border constant in meters (same logic as 3D branch at zoom >=9.5)
@@ -1428,11 +1438,13 @@ export default function MapView({ events }) {
       });
     }
 
-    // Extrusion base — fully opaque, blocks everything below
+    // Extrusion base — fully opaque, blocks everything below.
+    // Filter excludes _special (safe zone) features — handled solely by zcta-safezone-extrusion.
     map.addLayer({
       id: 'zcta-extrude', type: 'fill-extrusion', source: 'zcta',
+      filter: ['!=', ['get', '_special'], true],
       paint: {
-        'fill-extrusion-color': ['case', ['boolean', ['get', '_special'], false], '#222222', '#1a0505'],
+        'fill-extrusion-color': '#1a0505',
         'fill-extrusion-height': 0,
         'fill-extrusion-base': 0,
         'fill-extrusion-opacity': 1.0,
@@ -1442,10 +1454,12 @@ export default function MapView({ events }) {
     // Floor — thin slab inside each 3D block, visible only when camera enters the block.
     // Same color as the block but half opacity. Height 1m (base 0) avoids z-fighting.
     // Occluded by zcta-extrude walls when viewed from outside.
+    // Filter excludes _special (safe zone) features — handled solely by zcta-safezone-extrusion.
     map.addLayer({
       id: 'zcta-floor', type: 'fill-extrusion', source: 'zcta',
+      filter: ['!=', ['get', '_special'], true],
       paint: {
-        'fill-extrusion-color': ['case', ['boolean', ['get', '_special'], false], '#222222', '#1a0505'],
+        'fill-extrusion-color': '#1a0505',
         'fill-extrusion-height': 1,
         'fill-extrusion-base': 0,
         'fill-extrusion-opacity': 0,
@@ -1499,11 +1513,11 @@ export default function MapView({ events }) {
       },
     });
 
-    // Safe zone outline — hidden in 3D mode
+    // Safe zone outline — hidden in 3D and Real3D modes (zcta-safezone-extrusion is sole renderer)
     map.addLayer({
       id: 'zcta-safe-line', type: 'line', source: 'zcta',
       filter: ['==', ['get', '_special'], true],
-      paint: { 'line-color': '#000000', 'line-width': safePx, 'line-opacity': is3D ? 0 : 1 },
+      paint: { 'line-color': '#000000', 'line-width': safePx, 'line-opacity': (is3D || isReal3D) ? 0 : 1 },
     });
 
     // Ground boundary glows (non-special) — hidden in 3D mode
@@ -1547,8 +1561,8 @@ export default function MapView({ events }) {
         id: 'borough-outline', type: 'fill-extrusion', source: 'borough-source',
         paint: {
           'fill-extrusion-color': ['coalesce', ['get', '_color'], OUTLINE_COLOR],
-          'fill-extrusion-height': 27.5,
-          'fill-extrusion-base': 0,
+          'fill-extrusion-height': 29.5,
+          'fill-extrusion-base': 2,
           'fill-extrusion-opacity': 0,
           'fill-extrusion-vertical-gradient': false,
         },
@@ -1712,13 +1726,13 @@ export default function MapView({ events }) {
       return ['case', ['boolean', ['feature-state', 'hovered'], false], '#7C3AED', baseExpr];
     };
 
-    // Height expressions — heatmap 3D
-    const extrudeH = ['case', ['boolean', ['get', '_special'], false], 30, ['step', ['get', '_tier'], 30, 1, 200, 2, 700, 3, 1600, 4, 2800]];
+    // Height expressions — heatmap 3D. Safe zones excluded via filter on zcta-extrude/zcta-floor.
+    const extrudeH    = ['step', ['get', '_tier'], 30, 1, 200, 2, 700, 3, 1600, 4, 2800];
     // Cap sits 1m above the block top — same tiers +1
-    const extrudeHCap = ['case', ['boolean', ['get', '_special'], false], 31, ['step', ['get', '_tier'], 31, 1, 201, 2, 701, 3, 1601, 4, 2801]];
+    const extrudeHCap = ['step', ['get', '_tier'], 31, 1, 201, 2, 701, 3, 1601, 4, 2801];
     // Flat 3D
-    const flatH    = ['case', ['boolean', ['get', '_special'], false], 30, 400];
-    const flatHCap = ['case', ['boolean', ['get', '_special'], false], 31, 401];
+    const flatH    = 400;
+    const flatHCap = 401;
     // Cap opacity expression — visible (glow purple) only on hover in 3D mode
     const capHoverOpacity = ['case', ['boolean', ['feature-state', 'hovered'], false], 0.72, 0];
 
@@ -1741,11 +1755,10 @@ export default function MapView({ events }) {
 
       if (threeD) {
         map.setPaintProperty('zcta-safe-line', 'line-opacity', 0);
+        // Safezone extrusion is the sole white renderer — ensure it stays visible in all 3D/Real3D modes
+        if (map.getLayer('zcta-safezone-extrusion')) map.setPaintProperty('zcta-safezone-extrusion', 'fill-extrusion-opacity', 1.0);
 
-        const extrudeColorExpr = [
-          'case', ['boolean', ['get', '_special'], false], '#111111',
-          ['step', ['get', '_tier'], HEAT_COLORS.cold, 1, HEAT_COLORS.cool, 2, HEAT_COLORS.warm, 3, HEAT_COLORS.orange, 4, HEAT_COLORS.hot],
-        ];
+        const extrudeColorExpr = ['step', ['get', '_tier'], HEAT_COLORS.cold, 1, HEAT_COLORS.cool, 2, HEAT_COLORS.warm, 3, HEAT_COLORS.orange, 4, HEAT_COLORS.hot];
         // FIX SATELLITE: 3D+heatmap extrusion stays solid (1.0) even when satellite is on
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-color', withHoverColor(extrudeColorExpr));
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-height', extrudeH);
@@ -1768,9 +1781,10 @@ export default function MapView({ events }) {
         map.setPaintProperty('zcta-line-glow',  'line-opacity', 0);
         map.setPaintProperty('zcta-line-glow2', 'line-opacity', 0);
       } else {
-        map.setPaintProperty('zcta-safe-line', 'line-opacity', 1);
-        map.setPaintProperty('zcta-extrude', 'fill-extrusion-color',
-          ['case', ['boolean', ['get', '_special'], false], '#222222', '#1a0505']);
+        // 2D heatmap — safe-line visible only when NOT in Real3D (where safezone-extrusion handles it)
+        map.setPaintProperty('zcta-safe-line', 'line-opacity', real3D ? 0 : 1);
+        if (map.getLayer('zcta-safezone-extrusion')) map.setPaintProperty('zcta-safezone-extrusion', 'fill-extrusion-opacity', 1.0);
+        map.setPaintProperty('zcta-extrude', 'fill-extrusion-color', '#1a0505');
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-height', 0);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', 0);
         // Floor disabled in heatmap 2D
@@ -1797,8 +1811,10 @@ export default function MapView({ events }) {
 
       if (threeD) {
         map.setPaintProperty('zcta-safe-line', 'line-opacity', 0);
+        // Safezone extrusion is the sole white renderer — ensure it stays visible in all 3D/Real3D modes
+        if (map.getLayer('zcta-safezone-extrusion')) map.setPaintProperty('zcta-safezone-extrusion', 'fill-extrusion-opacity', 1.0);
         // FIX SATELLITE: 3D no-heatmap extrusion is semi-transparent when satellite is on
-        const flatColorExpr = ['case', ['boolean', ['get', '_special'], false], '#111111', '#220202'];
+        const flatColorExpr = '#220202';
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-color', withHoverColor(flatColorExpr));
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-height', flatH);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-base', 0);
@@ -1820,9 +1836,10 @@ export default function MapView({ events }) {
         map.setPaintProperty('zcta-line-glow',  'line-opacity', 0);
         map.setPaintProperty('zcta-line-glow2', 'line-opacity', 0);
       } else {
-        map.setPaintProperty('zcta-safe-line', 'line-opacity', 1);
-        map.setPaintProperty('zcta-extrude', 'fill-extrusion-color', 
-          ['case', ['boolean', ['get', '_special'], false], '#222222', '#1a0505']);
+        // 2D non-heatmap — safe-line visible only when NOT in Real3D
+        map.setPaintProperty('zcta-safe-line', 'line-opacity', real3D ? 0 : 1);
+        if (map.getLayer('zcta-safezone-extrusion')) map.setPaintProperty('zcta-safezone-extrusion', 'fill-extrusion-opacity', 1.0);
+        map.setPaintProperty('zcta-extrude', 'fill-extrusion-color', '#1a0505');
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-height', 0);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', 0);
         // Floor disabled in non-heatmap 2D
@@ -1889,7 +1906,7 @@ export default function MapView({ events }) {
         const coloredBorough = buildColoredBoroughFeatures(boroughGeoDataRef.current, avgTiers, heatmap);
         boroughWithColorRef.current = coloredBorough;
         map.getSource('borough-source').setData(
-          createOutlineGeoJSON(coloredBorough, getZoomAwareOutlineWidth(map, 54, threeD || real3D))
+          createOutlineGeoJSON(coloredBorough, getZoomAwareOutlineWidth(map, 18, threeD || real3D))
         );
         // Borough color: read baked _color from features — guaranteed to be the exact
         // same HEAT_DARK_COLORS hex value as ZCTA upper outlines (via rounded tier).
@@ -2022,10 +2039,10 @@ export default function MapView({ events }) {
           if (boroughSkeletonRef.current && boroughWithColorRef.current) {
             const overrides = boroughWithColorRef.current.features.map(f => f.properties);
             map.getSource('borough-source').setData(
-              generateBoroughQuadsFromSkeleton(boroughSkeletonRef.current, getZoomAwareOutlineWidth(map, 54, true), overrides)
+              generateBoroughQuadsFromSkeleton(boroughSkeletonRef.current, getZoomAwareOutlineWidth(map, 18, true), overrides)
             );
           } else if (boroughWithColorRef.current) {
-            map.getSource('borough-source').setData(createOutlineGeoJSON(boroughWithColorRef.current, getZoomAwareOutlineWidth(map, 54, true)));
+            map.getSource('borough-source').setData(createOutlineGeoJSON(boroughWithColorRef.current, getZoomAwareOutlineWidth(map, 18, true)));
           }
         }
       });
@@ -2152,8 +2169,61 @@ export default function MapView({ events }) {
     ];
   }
 
-  // FIX REAL3D: Spatial assignment — queries rendered buildings, does point-in-polygon
-  // against zcta features to get the region tier, then sets feature-state on each building.
+  // Road color expression for motorway+trunk.
+  // When heatmap=off: neon red. When heatmap=on: feature-state tier → mid-range zone color.
+  function roadMotorwayColorExpr(isHeatmap) {
+    if (!isHeatmap) return '#ff2200';
+    return ['case',
+      ['==', ['feature-state', 'tier'], 4], '#8c0000',  // hot: mid crimson
+      ['==', ['feature-state', 'tier'], 3], '#8c3300',  // orange: mid burnt orange
+      ['==', ['feature-state', 'tier'], 2], '#8c7000',  // warm: mid amber
+      ['==', ['feature-state', 'tier'], 1], '#007a38',  // cool: mid forest green
+      '#007a8c',                                         // cold (default): mid teal
+    ];
+  }
+
+  // Road color expression for primary+secondary.
+  // Slightly darker than motorway for visual depth differentiation.
+  function roadPrimaryColorExpr(isHeatmap) {
+    if (!isHeatmap) return '#cc1800';
+    return ['case',
+      ['==', ['feature-state', 'tier'], 4], '#660000',  // hot: dark crimson
+      ['==', ['feature-state', 'tier'], 3], '#662200',  // orange: dark burnt orange
+      ['==', ['feature-state', 'tier'], 2], '#665500',  // warm: dark amber
+      ['==', ['feature-state', 'tier'], 1], '#005522',  // cool: dark forest green
+      '#005566',                                         // cold (default): dark teal
+    ];
+  }
+
+  // FIX REAL3D ROADS: Spatial assignment — queries rendered road features, computes line centroid,
+  // does point-in-zip lookup, then sets feature-state tier on each road segment.
+  // Mirrors assignBuildingTiersToMap but targets transportation source layer.
+  function assignRoadTiersToMap(map) {
+    if (!map) return;
+    const features = geoDataRef.current?.features;
+    const tiers = tiersRef.current;
+    if (!features || !tiers.length) return;
+
+    const layersToQuery = [];
+    if (map.getLayer('real3d-roads-motorway')) layersToQuery.push('real3d-roads-motorway');
+    if (map.getLayer('real3d-roads-primary')) layersToQuery.push('real3d-roads-primary');
+    if (!layersToQuery.length) return;
+
+    try {
+      const roads = map.queryRenderedFeatures(undefined, { layers: layersToQuery });
+      roads.forEach(r => {
+        if (r.id == null) return;
+        const centroid = getGeomCentroid(r.geometry);
+        const tier = findTierForPoint(centroid, features, tiers);
+        map.setFeatureState(
+          { source: 'openmaptiles', sourceLayer: 'transportation', id: r.id },
+          { tier }
+        );
+      });
+    } catch (e) { /* ignore mid-render errors */ }
+  }
+
+
   // shadeIdx = featureId % 5 ensures neighboring buildings (different OSM IDs) get
   // different shades of the same hue for visibility without needing outlines.
   // FIX REAL3D NYC BOUNDARY: Also checks that building is within 5 NYC boroughs before assigning.
@@ -2256,7 +2326,7 @@ export default function MapView({ events }) {
         minzoom: 9, maxzoom: 13,
         filter: ['match', ['get', 'class'], ['motorway', 'trunk'], true, false],
         paint: {
-          'line-color': '#ff2200',
+          'line-color': roadMotorwayColorExpr(isHeatmap),
           'line-width': ['interpolate', ['linear'], ['zoom'], 9, 1.5, 13, 5],
           'line-blur': 1.5,
           'line-opacity': 0.9,
@@ -2270,7 +2340,7 @@ export default function MapView({ events }) {
         minzoom: 11, maxzoom: 13,
         filter: ['match', ['get', 'class'], ['primary', 'secondary'], true, false],
         paint: {
-          'line-color': '#cc1800',
+          'line-color': roadPrimaryColorExpr(isHeatmap),
           'line-width': ['interpolate', ['linear'], ['zoom'], 11, 0.8, 13, 3],
           'line-blur': 0.8,
           'line-opacity': 0.75,
@@ -2345,8 +2415,12 @@ export default function MapView({ events }) {
             'fill-opacity': satelliteRef.current ? 0 : 1.0,
           },
         });
-        // Move water above stencil — water is unmasked and flows past borough edges.
+        // Layer ordering (back → front within stencil): stencil → water → borough-outline → heat-underlay
+        // Water is unmasked — flows past borough edges naturally.
         if (map.getLayer('real3d-water')) map.moveLayer('real3d-water');
+        // Borough outline is fill-extrusion (3D GPU pass), moved above water.
+        // Naturally occluded by taller 3D buildings via depth buffer — no extra work needed.
+        if (map.getLayer('borough-outline')) map.moveLayer('borough-outline');
         // Move heat-underlay (heatmap kernel + topo) to the very top — above the stencil.
         // This lets the radial gaussian glow bleed past borough edges as intended.
         if (map.getLayer('heat-underlay')) {
@@ -2396,6 +2470,8 @@ export default function MapView({ events }) {
     if (!map.getLayer('real3d-buildings')) return;
 
     map.setPaintProperty('real3d-buildings', 'fill-extrusion-color', buildingColorExprByState(heatmap));
+    // Ensure safezone extrusion stays white and visible — sole white renderer in Real3D mode
+    if (map.getLayer('zcta-safezone-extrusion')) map.setPaintProperty('zcta-safezone-extrusion', 'fill-extrusion-opacity', 1.0);
     if (map.getLayer('real3d-buildings-baseplate')) {
       map.setPaintProperty('real3d-buildings-baseplate', 'fill-extrusion-color', baseplateColorExpr(heatmap));
     }
