@@ -1303,6 +1303,7 @@ export default function MapView({ events }) {
       maxZoom: 16,
       maxBounds: [[-75.5, 40.0], [-72.5, 41.5]],
       attributionControl: false,
+      antialias: true,
     });
     // Place navigation controls in the bottom-right and give extra padding + slight scale for accessibility
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
@@ -1970,13 +1971,16 @@ export default function MapView({ events }) {
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
+    // Toggle stencil opacity when satellite changes in Real3D mode
+    if (real3D && map.getLayer('real3d-nyc-stencil')) {
+      map.setPaintProperty('real3d-nyc-stencil', 'fill-opacity', satellite ? 0 : 1.0);
+    }
     map.setStyle(satellite ? satelliteMapStyle() : darkMapStyle());
     map.once('styledata', () => {
       const currentGeoData = geoDataRef.current;
       if (!currentGeoData || map.getSource('zcta')) return;
       addLayers(map, currentGeoData, satelliteRef.current);
       if (real3DRef.current) applyReal3DLayers(map, heatmapRef.current);
-      // This triggers the main heatmap+3D useEffect to re-run and restore all styles
       setStyleVersion(v => v + 1);
     });
   }, [satellite]);
@@ -2138,7 +2142,7 @@ export default function MapView({ events }) {
         },
       });
 
-      // FULL 3D EXTRUSIONS (z14+): vertical-gradient off reduces Z-fighting artifacts
+      // FULL 3D EXTRUSIONS (z14+): vertical-gradient off + opacity 0.95 reduces tile-seam artifacts
       map.addLayer({
         id: 'real3d-buildings', type: 'fill-extrusion',
         source: 'openmaptiles', 'source-layer': 'building',
@@ -2147,23 +2151,29 @@ export default function MapView({ events }) {
           'fill-extrusion-color': buildingColorExprByState(isHeatmap),
           'fill-extrusion-height': ['coalesce', ['get', 'render_height'], ['get', 'height'], 8],
           'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0],
-          'fill-extrusion-opacity': 1.0,
+          'fill-extrusion-opacity': 0.95,
           'fill-extrusion-vertical-gradient': false,
         },
       });
 
-      // NYC STENCIL MASK: fill layer on top of building layers covering everything OUTSIDE the 5 boroughs.
-      // Uses borough donut polygon to visually block NJ/CT/LI buildings without requiring ['within'] filter.
-      // Color matches darkMapStyle background '#0d0000'.
+      // NYC STENCIL MASK: flat fill at top of layer stack to mask Real3D landuse/baseplates/buildings.
+      // Added LAST (no beforeId) so it sits ABOVE the three Real3D layers.
+      // heat-underlay is then moved above the stencil so heatmap/topo kernel renders unmasked.
+      // Satellite is the base raster style — always below all layers, never maskable by a fill.
       if (stencilGeoJSON) {
         map.addLayer({
           id: 'real3d-nyc-stencil', type: 'fill',
           source: 'real3d-stencil-source',
           paint: {
             'fill-color': '#0d0000',
-            'fill-opacity': 1.0,
+            'fill-opacity': satelliteRef.current ? 0 : 1.0,
           },
         });
+        // Move heat-underlay (heatmap kernel + topo) to the very top — above the stencil.
+        // This lets the radial gaussian glow bleed past borough edges as intended.
+        if (map.getLayer('heat-underlay')) {
+          map.moveLayer('heat-underlay');
+        }
       }
 
       map.easeTo({ pitch: 55, bearing: -17, duration: 700 });
