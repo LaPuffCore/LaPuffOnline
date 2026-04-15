@@ -21,7 +21,7 @@ const TIMESPAN_STEPS = [
 const HEAT_COLORS = {
   cold:   '#00ccdd',
   cool:   '#00dd66',
-  warm:   '#aadd00',
+  warm:   '#f5c800',
   orange: '#dd6600',
   hot:    '#cc0d00',
 };
@@ -35,16 +35,26 @@ const OUTLINE_GLOW  = '#ff0000';
 const HEAT_DARK_COLORS = {
   cold:   '#001f29',
   cool:   '#002910',
-  warm:   '#333b00',
+  warm:   '#5c4a00',
   orange: '#3d1500',
   hot:    '#2e0000',
+};
+
+// Mid-brightness heatmap tier colors for borough outlines in 3D/Real3D heatmap.
+// Brighter than HEAT_DARK_COLORS so outlines stay visible against dark backgrounds and water.
+const HEAT_MID_COLORS = {
+  cold:   '#339eb3',
+  cool:   '#33b366',
+  warm:   '#b39900',
+  orange: '#cc6622',
+  hot:    '#cc3333',
 };
 
 // Tonal shades per tier (legacy, kept for compatibility)
 const HEAT_TONES = {
   cold:   ['#003344', '#006688', '#00ccdd'],
   cool:   ['#003311', '#007733', '#00dd66'],
-  warm:   ['#334400', '#778800', '#aadd00'],
+  warm:   ['#3d2f00', '#806000', '#f5c800'],
   orange: ['#441100', '#882200', '#dd6600'],
   hot:    ['#440400', '#880800', '#cc0d00'],
 };
@@ -54,7 +64,7 @@ const HEAT_TONES = {
 const HEAT_BUILDING_TONES = {
   cold:   ['#001824', '#003d5c', '#007a8c', '#00b8c8', '#a0eeff'],
   cool:   ['#001408', '#003d1c', '#007a38', '#00b854', '#a0ffb8'],
-  warm:   ['#1a1400', '#4d3d00', '#8c7000', '#c8a000', '#ffe060'],
+  warm:   ['#2b1f00', '#5c4a00', '#a08200', '#d4ad00', '#ffe44d'],
   orange: ['#1a0500', '#4d1200', '#8c3300', '#c86000', '#ff9040'],
   hot:    ['#1a0000', '#4d0000', '#8c0000', '#c80000', '#ff4040'],
 };
@@ -73,6 +83,14 @@ function darkTierColor(tier) {
   if (tier >= 2) return HEAT_DARK_COLORS.warm;
   if (tier >= 1) return HEAT_DARK_COLORS.cool;
   return HEAT_DARK_COLORS.cold;
+}
+
+function midTierColor(tier) {
+  if (tier >= 4) return HEAT_MID_COLORS.hot;
+  if (tier >= 3) return HEAT_MID_COLORS.orange;
+  if (tier >= 2) return HEAT_MID_COLORS.warm;
+  if (tier >= 1) return HEAT_MID_COLORS.cool;
+  return HEAT_MID_COLORS.cold;
 }
 
 function isSpecialZip(zip) {
@@ -345,21 +363,17 @@ function getZoomAwareOutlineWidth(map, baseMeters = 14, is3D = false) {
     const zoom = map.getZoom();
     const pitch = map.getPitch ? map.getPitch() : 0;
     const pitchFactor = 1 + (pitch / 90) * 0.55;
-    // Borough outline (baseMeters=18): 1x at zoom>=11, 2x ramp 10-11, 3x ramp <=9.
+    // Borough outline (baseMeters=18): 2x at zoom>=11, ramp to 4x at zoom<=9.
     if (baseMeters >= 15) {
       let meters;
       if (zoom >= 11) {
-        meters = baseMeters; // 1x — original size at close zoom
-      } else if (zoom >= 10) {
-        // linear ramp 1x → 2x from zoom 11 → 10
-        const t = 11 - zoom; // 0 at zoom11, 1 at zoom10
-        meters = baseMeters * (1 + t);
+        meters = baseMeters * 2; // 2x (200%) at close zoom
       } else if (zoom >= 9) {
-        // linear ramp 2x → 3x from zoom 10 → 9
-        const t = 10 - zoom; // 0 at zoom10, 1 at zoom9
-        meters = baseMeters * (2 + t);
+        // linear ramp 2x → 4x from zoom 11 → 9
+        const t = (11 - zoom) / 2; // 0 at zoom11, 1 at zoom9
+        meters = baseMeters * (2 + 2 * t);
       } else {
-        meters = baseMeters * 3; // 3x flat below zoom 9
+        meters = baseMeters * 4; // 4x (400%) flat below zoom 9
       }
       return meters * pitchFactor;
     }
@@ -980,33 +994,38 @@ function computeZipBoroughMap(zctaFeatures, boroughFeatures) {
   return result;
 }
 
-// Compute average tier per borough (rounded). Returns array indexed by borough feature index.
-// Compute borough heat tiers using peak-weighted scoring — boroughs with the highest
-// concentration of hot/orange 3D blocks get the highest tier. This matches the visual:
-// the borough with the tallest red spikes gets the red outline.
-// Score = weighted sum: tier4 zips count ×5, tier3 ×3, tier2 ×1.5, tier1 ×0.5, tier0 ×0.
-// Boroughs then ranked against each other → tiers 0–4.
+// Compute borough heat tiers using unique-rank assignment. Each borough gets a
+// unique tier 0–4. Ranked by: (1) count of tier-4 (red/hot) zip codes, (2) tiebreak
+// by total event count. Highest-ranked borough gets tier 4, lowest gets tier 0.
 const PEAK_WEIGHTS = [0, 0.5, 1.5, 3, 5];
-function computeBoroughAvgTiers(tiers, zipBoroughMap, boroughCount) {
-  const scores = new Array(boroughCount).fill(0);
+function computeBoroughAvgTiers(tiers, zipBoroughMap, boroughCount, geoDataFeatures, zipMap) {
+  const boroughPeaks = new Array(boroughCount).fill(0);
+  const boroughEvents = new Array(boroughCount).fill(0);
   Object.entries(zipBoroughMap).forEach(([idx, bi]) => {
-    const tier = tiers[parseInt(idx)];
-    if (tier >= 0 && tier <= 4) scores[bi] += (PEAK_WEIGHTS[tier] || 0);
+    const i = parseInt(idx);
+    const tier = tiers[i];
+    if (tier === 4) boroughPeaks[bi]++;
+    if (geoDataFeatures) {
+      const zip = String(geoDataFeatures[i]?.properties?.MODZCTA || '');
+      boroughEvents[bi] += (zipMap?.[zip]?.length || 0);
+    }
   });
-  // Rank boroughs by peak-weighted score, assign tiers 0–4 based on relative position
-  const indexed = scores.map((score, i) => ({ score, i }));
-  indexed.sort((a, b) => a.score - b.score); // ascending: lowest first
+  // Sort: most peaks first, tiebreak by most events
+  const indexed = boroughPeaks.map((peaks, i) => ({ peaks, events: boroughEvents[i], i }));
+  indexed.sort((a, b) => {
+    if (b.peaks !== a.peaks) return b.peaks - a.peaks;
+    return b.events - a.events;
+  });
+  // Assign unique tiers: rank 0 → tier 4, rank 1 → tier 3, etc.
   const ranked = new Array(boroughCount).fill(0);
-  const tierCount = 5;
   for (let pos = 0; pos < indexed.length; pos++) {
-    const tierForPos = Math.min(Math.round(pos * (tierCount - 1) / Math.max(indexed.length - 1, 1)), tierCount - 1);
-    ranked[indexed[pos].i] = tierForPos;
+    ranked[indexed[pos].i] = Math.max(0, 4 - pos);
   }
   return ranked;
 }
 
-// Inject _tier and _color onto each borough feature. avgTiers are already integer
-// tiers from relative ranking — directly map to HEAT_DARK_COLORS for exact color match.
+// Inject _tier, _color, and _boroughIdx onto each borough feature. avgTiers are integer
+// tiers from unique ranking — use HEAT_MID_COLORS for visible outline differentiation.
 function buildColoredBoroughFeatures(boroughGeoData, avgTiers, isHeatmap) {
   return {
     ...boroughGeoData,
@@ -1017,9 +1036,40 @@ function buildColoredBoroughFeatures(boroughGeoData, avgTiers, isHeatmap) {
         properties: {
           ...f.properties,
           _tier: isHeatmap ? tier : 0,
-          _color: isHeatmap ? darkTierColor(tier) : OUTLINE_COLOR,
+          _color: isHeatmap ? midTierColor(tier) : OUTLINE_COLOR,
+          _boroughIdx: i,
         },
       };
+    }),
+  };
+}
+
+// Fix shared borough boundary overlap: at interior land borders where two boroughs
+// draw overlapping outward quads, keep only the higher-tier borough's quads.
+// This eliminates the color clash at shared boundaries (Brooklyn-Queens, Bronx-Manhattan, etc).
+// Only applies when heatmap is on — when off, all boroughs have the same color and blend naturally.
+function fixSharedBoundaryQuads(quadsGeoJSON, boroughFeatures, avgTiers, isHeatmap) {
+  if (!isHeatmap || !boroughFeatures || !avgTiers) return quadsGeoJSON;
+  return {
+    ...quadsGeoJSON,
+    features: quadsGeoJSON.features.filter(quad => {
+      const coords = quad.geometry.coordinates[0];
+      const bi = quad.properties._boroughIdx;
+      if (bi == null) return true;
+      // Outward edge midpoint (coords[0] and coords[1] are outer vertices)
+      const mx = (coords[0][0] + coords[1][0]) / 2;
+      const my = (coords[0][1] + coords[1][1]) / 2;
+      // If outward midpoint falls inside another borough with a STRICTLY higher tier, skip this quad
+      for (let j = 0; j < boroughFeatures.length; j++) {
+        if (j === bi) continue;
+        if ((avgTiers[j] || 0) <= (avgTiers[bi] || 0)) continue;
+        const bGeom = boroughFeatures[j].geometry;
+        const polys = bGeom.type === 'MultiPolygon' ? bGeom.coordinates : [bGeom.coordinates];
+        for (const poly of polys) {
+          if (pointInRing(mx, my, poly[0])) return false;
+        }
+      }
+      return true;
     }),
   };
 }
@@ -1241,6 +1291,7 @@ export default function MapView({ events }) {
   const boroughGeoDataRef  = useRef(null);
   const zipBoroughMapRef   = useRef({});
   const boroughWithColorRef = useRef(null);
+  const boroughAvgTiersRef = useRef([]);
   const zctaSkeletonRef    = useRef(null);
   const boroughSkeletonRef = useRef(null);
 
@@ -1428,7 +1479,7 @@ export default function MapView({ events }) {
             0.03, '#092f6f',    // dark-blue (deep)
             0.09, '#00a2e8',    // blue (band)
             0.12, '#00dd66',    // green (wider band)
-            0.22, '#f6e65a',    // yellow (wider band)
+            0.22, '#f5c800',    // yellow (wider band — golden, not lime)
             0.36, '#ff9a00',    // orange (wider band)
             0.55, '#ff4d4d',    // red-orange
             0.75, '#cc0d00',    // red
@@ -1716,9 +1767,11 @@ export default function MapView({ events }) {
       }
     }
 
+    // Fix 11: When satellite ON + 2D/Real3D, boost orange to be more fluorescent/visible
+    const orangeColor = (satellite && !threeD) ? '#ff7700' : HEAT_COLORS.orange;
     const heatColorExpr = [
       'case', ['boolean', ['get', '_special'], false], '#ffffff',
-      ['step', ['get', '_tier'], HEAT_COLORS.cold, 1, HEAT_COLORS.cool, 2, HEAT_COLORS.warm, 3, HEAT_COLORS.orange, 4, HEAT_COLORS.hot],
+      ['step', ['get', '_tier'], HEAT_COLORS.cold, 1, HEAT_COLORS.cool, 2, HEAT_COLORS.warm, 3, orangeColor, 4, HEAT_COLORS.hot],
     ];
 
     // Wrap color expression with hover state check for 3D mode
@@ -1855,7 +1908,9 @@ export default function MapView({ events }) {
     }
 
     // Hover fill: only in 2D modes (3D hover is handled via extrusion color)
-    map.setPaintProperty('zcta-hover', 'fill-opacity', threeD ? 0 : ['case', ['boolean', ['feature-state', 'hovered'], false], 0.5, 0]);
+    // Fix 7: Nearly solid purple selection when satellite off + (2D or Real3D). Keep 0.5 for satellite on.
+    const hoverOpacity = satellite ? 0.5 : 0.85;
+    map.setPaintProperty('zcta-hover', 'fill-opacity', threeD ? 0 : ['case', ['boolean', ['feature-state', 'hovered'], false], hoverOpacity, 0]);
 
     // Re-apply locked outline widths for 2D / Real3D (defensive: enforce after any style swap)
     if (!threeD) {
@@ -1898,25 +1953,30 @@ export default function MapView({ events }) {
     // occludes correctly behind taller buildings via the depth buffer.
     if (map.getSource('borough-source')) {
       if ((threeD || real3D) && boroughGeoDataRef.current) {
+        const { zipMap: zipMapForBorough } = buildZipEventMap(events, TIMESPAN_STEPS[timespanIdx].days);
         const avgTiers = computeBoroughAvgTiers(
           tiers,
           zipBoroughMapRef.current,
-          boroughGeoDataRef.current.features.length
+          boroughGeoDataRef.current.features.length,
+          geoData?.features,
+          zipMapForBorough
         );
+        boroughAvgTiersRef.current = avgTiers;
         const coloredBorough = buildColoredBoroughFeatures(boroughGeoDataRef.current, avgTiers, heatmap);
         boroughWithColorRef.current = coloredBorough;
-        map.getSource('borough-source').setData(
-          createOutlineGeoJSON(coloredBorough, getZoomAwareOutlineWidth(map, 18, threeD || real3D))
-        );
-        // Borough color: read baked _color from features — guaranteed to be the exact
-        // same HEAT_DARK_COLORS hex value as ZCTA upper outlines (via rounded tier).
+        // Generate quads and fix shared boundary overlap (higher-tier wins at shared edges)
+        let boroughQuads = createOutlineGeoJSON(coloredBorough, getZoomAwareOutlineWidth(map, 18, threeD || real3D));
+        boroughQuads = fixSharedBoundaryQuads(boroughQuads, boroughGeoDataRef.current.features, avgTiers, heatmap);
+        map.getSource('borough-source').setData(boroughQuads);
+        // Borough color: read baked _color from features — mid-brightness for visibility
         map.setPaintProperty('borough-outline', 'fill-extrusion-color', ['coalesce', ['get', '_color'], OUTLINE_COLOR]);
         // Solid opacity at all zoom levels — no interpolation so borough color
-        // exactly matches upper 3D outline dark contrast colors without any fade.
+        // stays clearly visible and differentiated.
         map.setPaintProperty('borough-outline', 'fill-extrusion-opacity', 1.0);
       } else {
         map.setPaintProperty('borough-outline', 'fill-extrusion-opacity', 0);
         boroughWithColorRef.current = null;
+        boroughAvgTiersRef.current = [];
       }
     }
 
@@ -2034,15 +2094,21 @@ export default function MapView({ events }) {
             map.getSource('zcta-outline').setData(createZctaOutlineGeoJSON(withHeatRef.current, getZoomAwareOutlineWidth(map, undefined, true)));
           }
         }
-        // Borough outline — 3D and Real3D (baseMeters=54 for new 3× far-zoom width)
+        // Borough outline — 3D and Real3D. Apply shared boundary fix if heatmap is on.
         if ((is3D || isR3D) && map.getSource('borough-source')) {
           if (boroughSkeletonRef.current && boroughWithColorRef.current) {
             const overrides = boroughWithColorRef.current.features.map(f => f.properties);
-            map.getSource('borough-source').setData(
-              generateBoroughQuadsFromSkeleton(boroughSkeletonRef.current, getZoomAwareOutlineWidth(map, 18, true), overrides)
-            );
+            let quads = generateBoroughQuadsFromSkeleton(boroughSkeletonRef.current, getZoomAwareOutlineWidth(map, 18, true), overrides);
+            if (heatmapRef.current && boroughGeoDataRef.current && boroughAvgTiersRef.current.length) {
+              quads = fixSharedBoundaryQuads(quads, boroughGeoDataRef.current.features, boroughAvgTiersRef.current, true);
+            }
+            map.getSource('borough-source').setData(quads);
           } else if (boroughWithColorRef.current) {
-            map.getSource('borough-source').setData(createOutlineGeoJSON(boroughWithColorRef.current, getZoomAwareOutlineWidth(map, 18, true)));
+            let quads = createOutlineGeoJSON(boroughWithColorRef.current, getZoomAwareOutlineWidth(map, 18, true));
+            if (heatmapRef.current && boroughGeoDataRef.current && boroughAvgTiersRef.current.length) {
+              quads = fixSharedBoundaryQuads(quads, boroughGeoDataRef.current.features, boroughAvgTiersRef.current, true);
+            }
+            map.getSource('borough-source').setData(quads);
           }
         }
       });
@@ -2150,9 +2216,8 @@ export default function MapView({ events }) {
     ];
   }
 
-  // Baseplate color expression — NO feature-state dependency.
-  // Eliminates square tile artifacts from queryRenderedFeatures.
-  // When heatmap is off: dark reds. When heatmap is on: dark neutral (underlying heatmap fill provides context).
+  // Baseplate color expression — tier-aware in heatmap mode (same clustering as buildings).
+  // When heatmap is off: dark reds. When heatmap on: feature-state tier → building tone clustering.
   function baseplateColorExpr(isHeatmap) {
     if (!isHeatmap) {
       return ['case',
@@ -2161,12 +2226,8 @@ export default function MapView({ events }) {
         '#330909',
       ];
     }
-    // Heatmap ON: uniform very dark color. The zip polygon fill underneath shows the heat color.
-    return ['case',
-      ['==', ['%', ['to-number', ['id'], 0], 3], 0], '#0d0505',
-      ['==', ['%', ['to-number', ['id'], 0], 3], 1], '#150808',
-      '#1a0a0a',
-    ];
+    // Heatmap ON: same tier-based clustering as buildings for visual consistency
+    return buildingColorExprByState(true);
   }
 
   // Road color expression for motorway+trunk.
@@ -2176,7 +2237,7 @@ export default function MapView({ events }) {
     return ['case',
       ['==', ['feature-state', 'tier'], 4], '#8c0000',  // hot: mid crimson
       ['==', ['feature-state', 'tier'], 3], '#8c3300',  // orange: mid burnt orange
-      ['==', ['feature-state', 'tier'], 2], '#8c7000',  // warm: mid amber
+      ['==', ['feature-state', 'tier'], 2], '#a08200',  // warm: mid golden
       ['==', ['feature-state', 'tier'], 1], '#007a38',  // cool: mid forest green
       '#007a8c',                                         // cold (default): mid teal
     ];
@@ -2189,15 +2250,15 @@ export default function MapView({ events }) {
     return ['case',
       ['==', ['feature-state', 'tier'], 4], '#660000',  // hot: dark crimson
       ['==', ['feature-state', 'tier'], 3], '#662200',  // orange: dark burnt orange
-      ['==', ['feature-state', 'tier'], 2], '#665500',  // warm: dark amber
+      ['==', ['feature-state', 'tier'], 2], '#7a6200',  // warm: dark golden
       ['==', ['feature-state', 'tier'], 1], '#005522',  // cool: dark forest green
       '#005566',                                         // cold (default): dark teal
     ];
   }
 
-  // FIX REAL3D ROADS: Spatial assignment — queries rendered road features, computes line centroid,
-  // does point-in-zip lookup, then sets feature-state tier on each road segment.
-  // Mirrors assignBuildingTiersToMap but targets transportation source layer.
+  // FIX REAL3D ROADS: Multi-point spatial assignment — samples multiple vertices along each
+  // road linestring for majority-vote tier assignment. Much more accurate than centroid for
+  // long roads spanning multiple zip codes.
   function assignRoadTiersToMap(map) {
     if (!map) return;
     const features = geoDataRef.current?.features;
@@ -2213,20 +2274,38 @@ export default function MapView({ events }) {
       const roads = map.queryRenderedFeatures(undefined, { layers: layersToQuery });
       roads.forEach(r => {
         if (r.id == null) return;
-        const centroid = getGeomCentroid(r.geometry);
-        const tier = findTierForPoint(centroid, features, tiers);
+        // Extract all coordinates from the road geometry
+        const coords = r.geometry.type === 'MultiLineString'
+          ? r.geometry.coordinates.flat()
+          : (r.geometry.coordinates || []);
+        if (coords.length === 0) return;
+        // Sample every Nth vertex (aim for ~5 samples), minimum all vertices if short
+        const step = Math.max(1, Math.floor(coords.length / 5));
+        const tierVotes = {};
+        for (let i = 0; i < coords.length; i += step) {
+          const tier = findTierForPoint(coords[i], features, tiers);
+          tierVotes[tier] = (tierVotes[tier] || 0) + 1;
+        }
+        // Always include last vertex
+        const lastTier = findTierForPoint(coords[coords.length - 1], features, tiers);
+        tierVotes[lastTier] = (tierVotes[lastTier] || 0) + 1;
+        // Majority vote
+        let bestTier = 0, bestCount = 0;
+        for (const [tier, count] of Object.entries(tierVotes)) {
+          if (count > bestCount) { bestTier = parseInt(tier); bestCount = count; }
+        }
         map.setFeatureState(
           { source: 'openmaptiles', sourceLayer: 'transportation', id: r.id },
-          { tier }
+          { tier: bestTier }
         );
       });
     } catch (e) { /* ignore mid-render errors */ }
   }
 
 
-  // shadeIdx = featureId % 5 ensures neighboring buildings (different OSM IDs) get
-  // different shades of the same hue for visibility without needing outlines.
-  // FIX REAL3D NYC BOUNDARY: Also checks that building is within 5 NYC boroughs before assigning.
+  // FIX REAL3D NYC BOUNDARY + TIGHTER ZIP ASSIGNMENT: Queries both building extrusion
+  // AND baseplate layers for feature-state tier assignment. Uses multi-sample fallback
+  // for buildings whose centroid returns tier 0 (boundary buildings).
   function assignBuildingTiersToMap(map) {
     if (!map) return;
     const features = geoDataRef.current?.features;
@@ -2234,13 +2313,19 @@ export default function MapView({ events }) {
     const boroughFeats = boroughGeoDataRef.current?.features;
     if (!features || !tiers.length) return;
 
-    // Only query extrusion layer — baseplates use baseplateColorExpr (no feature-state needed)
-    if (!map.getLayer('real3d-buildings')) return;
+    // Query both building AND baseplate layers for complete coverage
+    const layersToQuery = [];
+    if (map.getLayer('real3d-buildings')) layersToQuery.push('real3d-buildings');
+    if (map.getLayer('real3d-buildings-baseplate')) layersToQuery.push('real3d-buildings-baseplate');
+    if (!layersToQuery.length) return;
 
     try {
-      const buildings = map.queryRenderedFeatures(undefined, { layers: ['real3d-buildings'] });
-      buildings.forEach(b => {
-        if (b.id == null) return;
+      const allBuildings = map.queryRenderedFeatures(undefined, { layers: layersToQuery });
+      // Deduplicate by feature ID since same building may appear in both layers
+      const seen = new Set();
+      allBuildings.forEach(b => {
+        if (b.id == null || seen.has(b.id)) return;
+        seen.add(b.id);
         const centroid = getGeomCentroid(b.geometry);
         
         // NYC boundary check — skip buildings outside 5 boroughs
@@ -2260,7 +2345,27 @@ export default function MapView({ events }) {
         }
         if (!inNYC) return;
         
-        const tier = findTierForPoint(centroid, features, tiers);
+        let tier = findTierForPoint(centroid, features, tiers);
+        // Multi-sample fallback for boundary buildings: if centroid yields tier 0 (cold/default),
+        // try up to 4 polygon vertices and use majority non-zero tier
+        if (tier === 0 && b.geometry && b.geometry.coordinates) {
+          const ring = b.geometry.type === 'MultiPolygon'
+            ? (b.geometry.coordinates[0]?.[0] || [])
+            : (b.geometry.coordinates[0] || []);
+          if (ring.length > 1) {
+            const step = Math.max(1, Math.floor(ring.length / 4));
+            const tierVotes = {};
+            for (let i = 0; i < ring.length && i < step * 4; i += step) {
+              const vTier = findTierForPoint(ring[i], features, tiers);
+              if (vTier > 0) tierVotes[vTier] = (tierVotes[vTier] || 0) + 1;
+            }
+            let bestTier = 0, bestCount = 0;
+            for (const [t, c] of Object.entries(tierVotes)) {
+              if (c > bestCount) { bestTier = parseInt(t); bestCount = c; }
+            }
+            if (bestTier > 0) tier = bestTier;
+          }
+        }
         map.setFeatureState(
           { source: 'openmaptiles', sourceLayer: 'building', id: b.id },
           { tier }
@@ -2303,8 +2408,8 @@ export default function MapView({ events }) {
         id: 'real3d-water', type: 'fill',
         source: 'openmaptiles', 'source-layer': 'water',
         paint: {
-          'fill-color': '#060f1a',
-          'fill-opacity': 0.85,
+          'fill-color': '#0e1f35',
+          'fill-opacity': 0.6,
         },
       });
 
@@ -2337,11 +2442,11 @@ export default function MapView({ events }) {
       map.addLayer({
         id: 'real3d-roads-primary', type: 'line',
         source: 'openmaptiles', 'source-layer': 'transportation',
-        minzoom: 11, maxzoom: 13,
+        minzoom: 10, maxzoom: 13,
         filter: ['match', ['get', 'class'], ['primary', 'secondary'], true, false],
         paint: {
           'line-color': roadPrimaryColorExpr(isHeatmap),
-          'line-width': ['interpolate', ['linear'], ['zoom'], 11, 0.8, 13, 3],
+          'line-width': ['interpolate', ['linear'], ['zoom'], 10, 0.8, 13, 3],
           'line-blur': 0.8,
           'line-opacity': 0.75,
         },
@@ -2396,7 +2501,7 @@ export default function MapView({ events }) {
           'fill-extrusion-color': buildingColorExprByState(isHeatmap),
           'fill-extrusion-height': ['coalesce', ['get', 'render_height'], ['get', 'height'], 8],
           'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0],
-          'fill-extrusion-opacity': 1.0,
+          'fill-extrusion-opacity': 0.92,
           'fill-extrusion-vertical-gradient': false,
         },
       });
