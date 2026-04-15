@@ -2014,7 +2014,8 @@ export default function MapView({ events }) {
 
     // NYC boundary filter — restricts rendering to 5 boroughs only (no NJ/CT buildings)
     const nycGeom = nycUnionGeomRef.current;
-    const layerFilter = nycGeom ? ['within', nycGeom] : undefined;
+    // MapLibre expects a GeoJSON Feature for the 'within' operator — wrap geometry in a Feature.
+    const layerFilter = nycGeom ? ['within', { type: 'Feature', geometry: nycGeom }] : undefined;
 
     try {
       // Baseplate layer: flat building footprints at medium zoom.
