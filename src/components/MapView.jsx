@@ -1748,6 +1748,9 @@ export default function MapView({ events }) {
     if (real3D && map.getLayer('real3d-buildings-baseplate')) {
       map.setPaintProperty('real3d-buildings-baseplate', 'fill-extrusion-color', baseplateColorExpr(heatmap));
     }
+    if (real3D && map.getLayer('real3d-landuse-baseplate')) {
+      map.setPaintProperty('real3d-landuse-baseplate', 'fill-color', baseplateColorExpr(heatmap));
+    }
   }, [heatmap, topoOn, threeD, real3D, timespanIdx, events, geoData, boroughGeoData, mapReady, satellite, adjacency, styleVersion]);
 
   // Manage heat-underlay radius so its real-world meter reach stays constant between zoom 9.5 and 14.
@@ -2005,46 +2008,60 @@ export default function MapView({ events }) {
       buildingAssignCleanupRef.current = null;
     }
 
-    ['real3d-buildings', 'real3d-buildings-outline', 'real3d-buildings-baseplate'].forEach(id => { if (map.getLayer(id)) map.removeLayer(id); });
+    ['real3d-buildings', 'real3d-buildings-outline', 'real3d-buildings-baseplate', 'real3d-landuse-baseplate'].forEach(id => { if (map.getLayer(id)) map.removeLayer(id); });
     if (!map.getSource('openmaptiles')) {
       try {
         map.addSource('openmaptiles', { type: 'vector', url: `https://api.maptiler.com/tiles/v3/tiles.json?key=${MAPTILER_KEY}` });
       } catch (err) { console.warn('Real3D source add failed:', err); return; }
     }
 
-    // NYC boundary filter — restricts rendering to 5 boroughs only (no NJ/CT buildings)
-    const nycGeom = nycUnionGeomRef.current;
-    // MapLibre expects a GeoJSON Feature for the 'within' operator — wrap geometry in a Feature.
-    const layerFilter = nycGeom ? ['within', { type: 'Feature', geometry: nycGeom }] : undefined;
-
     try {
-      // Baseplate layer: flat building footprints at medium zoom.
-      // MapTiler v3 building data starts at source zoom 13, so baseplates appear at 13.
-      // Uses baseplateColorExpr (no feature-state) to eliminate square tile artifacts.
+      // --- LOW-ZOOM PROXY BASEPLATES (zoom 9-13) ---
+      // MapTiler v3 building data only exists at zoom 13+.
+      // Use the 'landuse' source-layer (available from zoom 4) as a visual proxy:
+      // residential/commercial/industrial parcels approximate where buildings are.
+      // Opacity interpolated so it fades in at z9→z10, holds, then fades out as real buildings appear.
+      map.addLayer({
+        id: 'real3d-landuse-baseplate', type: 'fill', source: 'openmaptiles', 'source-layer': 'landuse',
+        filter: ['match', ['get', 'class'], ['residential', 'commercial', 'industrial', 'retail'], true, false],
+        paint: {
+          'fill-color': baseplateColorExpr(isHeatmap),
+          'fill-opacity': ['interpolate', ['linear'], ['zoom'], 9, 0, 10, 0.5, 13, 0.5, 14, 0],
+        },
+      });
+
+      // --- FLAT BUILDING FOOTPRINTS (zoom 13-14, cross-fade) ---
+      // Real building geometry from MapTiler — starts at z13.
+      // Opacity interpolated for smooth cross-fade with landuse proxy above.
       map.addLayer({
         id: 'real3d-buildings-baseplate', type: 'fill-extrusion', source: 'openmaptiles', 'source-layer': 'building',
-        minzoom: 13, maxzoom: 14,
-        ...(layerFilter ? { filter: layerFilter } : {}),
+        minzoom: 13,
         paint: {
           'fill-extrusion-color': baseplateColorExpr(isHeatmap),
           'fill-extrusion-height': 0,
           'fill-extrusion-base': 0,
-          'fill-extrusion-opacity': 0.8,
+          'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'], 13, 0, 13.8, 0.8],
           'fill-extrusion-vertical-gradient': false,
         },
       });
 
-      // Main extrusion layer: full 3D buildings at close zoom (14+).
-      // Uses buildingColorExprByState with feature-state for per-zip heatmap coloring.
+      // --- 3D BUILDING EXTRUSIONS (zoom 13+, height fades in at 14) ---
+      // Same source as baseplate — at z13 height=0 (acts as baseplate), grows to full height by z14.
+      // This single-layer approach avoids Z-fighting from two competing layers.
       map.addLayer({
         id: 'real3d-buildings', type: 'fill-extrusion', source: 'openmaptiles', 'source-layer': 'building',
-        minzoom: 14,
-        ...(layerFilter ? { filter: layerFilter } : {}),
+        minzoom: 13,
         paint: {
           'fill-extrusion-color': buildingColorExprByState(isHeatmap),
-          'fill-extrusion-height': ['coalesce', ['get', 'render_height'], ['get', 'height'], 5],
-          'fill-extrusion-base':   ['coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0],
-          'fill-extrusion-opacity': 1.0,
+          'fill-extrusion-height': ['interpolate', ['linear'], ['zoom'],
+            13, 0,
+            14, ['coalesce', ['get', 'render_height'], ['get', 'height'], 5],
+          ],
+          'fill-extrusion-base': ['interpolate', ['linear'], ['zoom'],
+            13, 0,
+            14, ['coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0],
+          ],
+          'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'], 13, 0, 13.8, 1.0],
           'fill-extrusion-vertical-gradient': true,
         },
       });
@@ -2070,7 +2087,7 @@ export default function MapView({ events }) {
     const map = mapRef.current;
     if (!map || !mapReady) return;
     if (!real3D) {
-      ['real3d-buildings', 'real3d-buildings-outline', 'real3d-buildings-baseplate'].forEach(id => { if (map.getLayer(id)) map.removeLayer(id); });
+      ['real3d-buildings', 'real3d-buildings-outline', 'real3d-buildings-baseplate', 'real3d-landuse-baseplate'].forEach(id => { if (map.getLayer(id)) map.removeLayer(id); });
       if (buildingAssignCleanupRef.current) { buildingAssignCleanupRef.current(); buildingAssignCleanupRef.current = null; }
       if (!threeD) map.easeTo({ pitch: 0, bearing: 0, duration: 700 });
       return;
@@ -2083,9 +2100,11 @@ export default function MapView({ events }) {
     const map = mapRef.current;
     if (!map || !mapReady || !real3D || !map.getLayer('real3d-buildings')) return;
     map.setPaintProperty('real3d-buildings', 'fill-extrusion-color', buildingColorExprByState(heatmap));
-    // Baseplates use baseplateColorExpr (no feature-state) — immune to square artifacts
     if (map.getLayer('real3d-buildings-baseplate')) {
       map.setPaintProperty('real3d-buildings-baseplate', 'fill-extrusion-color', baseplateColorExpr(heatmap));
+    }
+    if (map.getLayer('real3d-landuse-baseplate')) {
+      map.setPaintProperty('real3d-landuse-baseplate', 'fill-color', baseplateColorExpr(heatmap));
     }
     if (heatmap) {
       if (buildingAssignCleanupRef.current) { buildingAssignCleanupRef.current(); buildingAssignCleanupRef.current = null; }
