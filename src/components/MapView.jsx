@@ -194,6 +194,29 @@ function signedArea(ring) {
   return area / 2;
 }
 
+// D6: Winding validation — enforce GeoJSON right-hand rule for polygon rings.
+// GeoJSON outer rings must be counterclockwise (positive signed area in screen coords).
+// Reversed rings cause bad GPU triangulation (triangular Z-fighting artifacts).
+function enforceGeoJSONWinding(feature) {
+  if (!feature || !feature.geometry) return feature;
+  const { type, coordinates } = feature.geometry;
+  if (type !== 'Polygon' && type !== 'MultiPolygon') return feature;
+  const fixRings = rings => rings.map((ring, i) => {
+    const area = signedArea([...ring, ring[0]]);
+    // Outer ring (i=0): should be counterclockwise (positive area in lat/lng space)
+    // Holes (i>0): should be clockwise (negative area)
+    const shouldBePositive = i === 0;
+    if ((shouldBePositive && area < 0) || (!shouldBePositive && area > 0)) {
+      return [...ring].reverse();
+    }
+    return ring;
+  });
+  const fixedCoords = type === 'Polygon'
+    ? fixRings(coordinates)
+    : coordinates.map(fixRings);
+  return { ...feature, geometry: { ...feature.geometry, coordinates: fixedCoords } };
+}
+
 function dedupeRing(ring) {
   if (!ring || ring.length === 0) return [];
   const cleaned = [ring[0]];
@@ -313,22 +336,29 @@ function normalizeFeatureGeometry(feature) {
 }
 
 // T3 3D PIXELIZATION: Smooth continuous zoom-aware width scaling.
-// Scaling starts at zoom 10.5 — flat base from zoom 13 to 10.5.
-// From zoom 10.5→9: continuous exponential ramp to prevent pixelization.
 // ZCTA (base 14m): 14m flat until zoom 10.5, then ramps to 64m at zoom 9.
-// Borough (base 18m): 18m flat until zoom 10.5, then ramps to 96m at zoom 9.
+// Borough (base 54m): 54m flat from zoom 10+, ramps to 144m at zoom 9 (3× at z≥10, 1.5× at z9–10 vs old 18m behavior).
 function getZoomAwareOutlineWidth(map, baseMeters = 14, is3D = false) {
   if (!map || typeof map.getZoom !== 'function') return baseMeters;
-  // If 3D mode is active, preserve original behavior exactly to avoid touching 3D visuals.
+  // If 3D/Real3D mode is active, use the new split-scale logic.
   if (is3D) {
-    // RESTORED: original 3D outline scaling logic (do not touch 3D visuals)
     const zoom = map.getZoom();
-    const t = Math.max(0, 10.5 - zoom);
-    const targetAt9 = baseMeters === 18 ? 96 : 64;
-    const scale = Math.pow(targetAt9 / baseMeters, 1 / 1.5);
-    const multiplier = Math.pow(scale, t);
     const pitch = map.getPitch ? map.getPitch() : 0;
     const pitchFactor = 1 + (pitch / 90) * 0.55;
+    // Borough outline (baseMeters=54): lock at zoom>=10, ramp to 144m at zoom 9.
+    if (baseMeters >= 30) {
+      const lockZoom = 10;
+      const t = Math.max(0, lockZoom - zoom);
+      const targetAt9 = 144; // 1.5× the old 96m target
+      const scale = Math.pow(targetAt9 / baseMeters, 1 / (lockZoom - 9)); // exponent over 1 step
+      const multiplier = Math.pow(scale, t);
+      return baseMeters * multiplier * pitchFactor;
+    }
+    // ZCTA outline (baseMeters=14): original exponential ramp 10.5→9.
+    const t = Math.max(0, 10.5 - zoom);
+    const targetAt9 = 64;
+    const scale = Math.pow(targetAt9 / baseMeters, 1 / 1.5);
+    const multiplier = Math.pow(scale, t);
     return baseMeters * multiplier * pitchFactor;
   }
 
@@ -762,7 +792,10 @@ function createZctaOutlineGeoJSON(sourceGeoJSON, widthMeters = 12) {
 }
 
 function darkMapStyle() {
-  return { version: 8, glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf', sources: {}, layers: [{ id: 'bg', type: 'background', paint: { 'background-color': '#0d0000' } }] };
+  // No background layer — CSS background on the container provides the dark red (#0d0000).
+  // Removing 'bg' makes the WebGL canvas transparent where no layers render, allowing
+  // the satellite canvas (positioned behind) to show through when satellite is active.
+  return { version: 8, glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf', sources: {}, layers: [] };
 }
 function satelliteMapStyle() {
   return { version: 8, sources: { sat: { type: 'raster', tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'], tileSize: 256, maxzoom: 19 } }, layers: [{ id: 'sat', type: 'raster', source: 'sat' }] };
@@ -1178,6 +1211,9 @@ export default function MapView({ events }) {
   const PUBLIC_BASE = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.BASE_URL) ? import.meta.env.BASE_URL : '/';
   const mapContainerRef = useRef(null);
   const mapRef          = useRef(null);
+  // Satellite canvas — separate MapLibre instance, lazily initialized on first satellite enable.
+  const satContainerRef = useRef(null);
+  const satMapRef       = useRef(null);
   const hoveredIdRef    = useRef(null);
   const locationMarkerRef = useRef(null);
   const heatmapRef      = useRef(false);
@@ -1273,6 +1309,9 @@ export default function MapView({ events }) {
       const features = data.features.map((f, i) => {
         let zip = String(f.properties.MODZCTA || f.properties.modzcta || '');
         if (isSpecialZip(zip)) f = { ...f, properties: { ...f.properties, MODZCTA: 'SAFEZONE', _special: true } };
+        // D6: enforce correct GeoJSON winding on all features (especially safe zones)
+        // to prevent GPU triangulation artifacts from reversed polygon rings.
+        f = enforceGeoJSONWinding(f);
         return { ...f, id: i };
       });
       setGeoData({ ...data, features });
@@ -1326,7 +1365,15 @@ export default function MapView({ events }) {
       map.getCanvas().style.backgroundColor = 'transparent';
       setMapReady(true);
     });
-    return () => { map.remove(); mapRef.current = null; };
+    return () => {
+      // Cleanup satellite map if initialized
+      if (satMapRef.current) {
+        if (satMapRef.current._syncCleanup) satMapRef.current._syncCleanup();
+        satMapRef.current.remove();
+        satMapRef.current = null;
+      }
+      map.remove(); mapRef.current = null;
+    };
   }, []);
 
   // ── Layer setup ────────────────────────────────────────────────────────────
@@ -1406,12 +1453,29 @@ export default function MapView({ events }) {
       },
     });
 
-    // Flat fill — slightly transparent dark red to differentiate regions from bg without solid fill
+    // Flat fill — slightly transparent dark red to differentiate regions from bg without solid fill.
+    // Excludes _special (safe zone) features — those are handled by zcta-safezone-extrusion below.
     map.addLayer({
       id: 'zcta-fill', type: 'fill', source: 'zcta',
+      filter: ['!=', ['get', '_special'], true],
       paint: {
-        'fill-color': ['case', ['boolean', ['get', '_special'], false], '#ffffff', '#1a0505'],
+        'fill-color': '#1a0505',
         'fill-opacity': sat ? 0.38 : 0.55,
+      },
+    });
+
+    // D1/D2: Safe zone extrusion — 5m tall fill-extrusion so it renders in the GPU 3D pass,
+    // completely eliminating z-fighting with 2D fill layers (real3d-landuse-baseplate, etc.).
+    // White fill preserved in all modes; at 0° pitch a 5m extrusion is visually flat top-down.
+    map.addLayer({
+      id: 'zcta-safezone-extrusion', type: 'fill-extrusion', source: 'zcta',
+      filter: ['==', ['get', '_special'], true],
+      paint: {
+        'fill-extrusion-color': '#ffffff',
+        'fill-extrusion-height': 5,
+        'fill-extrusion-base': 0,
+        'fill-extrusion-opacity': 1.0,
+        'fill-extrusion-vertical-gradient': false,
       },
     });
 
@@ -1483,7 +1547,7 @@ export default function MapView({ events }) {
         id: 'borough-outline', type: 'fill-extrusion', source: 'borough-source',
         paint: {
           'fill-extrusion-color': ['coalesce', ['get', '_color'], OUTLINE_COLOR],
-          'fill-extrusion-height': 22,
+          'fill-extrusion-height': 27.5,
           'fill-extrusion-base': 0,
           'fill-extrusion-opacity': 0,
           'fill-extrusion-vertical-gradient': false,
@@ -1720,8 +1784,8 @@ export default function MapView({ events }) {
         map.setPaintProperty('zcta-line-glow2','line-opacity', satellite ? 0.25 : 0.35);
       }
     } else {
-      // No heatmap — use dark red theme
-      map.setPaintProperty('zcta-fill', 'fill-color', ['case', ['boolean', ['get', '_special'], false], '#ffffff', '#1a0505']);
+      // No heatmap — use dark red theme (zcta-fill filter excludes _special, so no case needed)
+      map.setPaintProperty('zcta-fill', 'fill-color', '#1a0505');
       // FIX ADDITIVE STATE / 3D ARTIFACTING: zero opacity in 3D so the flat fill
       // doesn't appear as stray 2D surfaces beneath or through extrusions.
       // In 2D and Real3D non-heatmap modes make the dark fill more visible; leave 3D unchanged
@@ -1825,7 +1889,7 @@ export default function MapView({ events }) {
         const coloredBorough = buildColoredBoroughFeatures(boroughGeoDataRef.current, avgTiers, heatmap);
         boroughWithColorRef.current = coloredBorough;
         map.getSource('borough-source').setData(
-          createOutlineGeoJSON(coloredBorough, getZoomAwareOutlineWidth(map, 18, threeD || real3D))
+          createOutlineGeoJSON(coloredBorough, getZoomAwareOutlineWidth(map, 54, threeD || real3D))
         );
         // Borough color: read baked _color from features — guaranteed to be the exact
         // same HEAT_DARK_COLORS hex value as ZCTA upper outlines (via rounded tier).
@@ -1927,21 +1991,22 @@ export default function MapView({ events }) {
     map.easeTo({ pitch: threeD ? 48 : 0, bearing: threeD ? -17 : 0, duration: 700 });
   }, [threeD, mapReady]);
 
-  // T3 3D PIXELIZATION: re-generate outline ring width on zoom AND pitch so it stays visible.
-  // Uses skeleton cache for fast generation — only linear scaling + metersToLngLat per vertex.
-  // Also regenerates borough-outline width with baseMeters=24.
+  // Outline ring width regeneration on zoom AND pitch — covers 3D and Real3D modes.
+  // ZCTA outline only rebuilds in 3D (layer only exists in 3D). Borough outline rebuilds in both.
   // RAF debounce: coalesces rapid zoom ticks to one rebuild per animation frame for smoothness.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
     let rafId = null;
     const onZoom = () => {
-      if (!threeDRef.current) return;
+      const is3D  = threeDRef.current;
+      const isR3D = real3DRef.current;
+      if (!is3D && !isR3D) return; // nothing to update in 2D mode
       if (rafId) cancelAnimationFrame(rafId);
       rafId = requestAnimationFrame(() => {
         rafId = null;
-        // ZCTA outline — use skeleton cache if available, fallback to full recompute
-        if (map.getSource('zcta-outline')) {
+        // ZCTA outline — 3D only (layer does not exist in Real3D)
+        if (is3D && map.getSource('zcta-outline')) {
           if (zctaSkeletonRef.current && withHeatRef.current) {
             // Build props overrides from withHeat features (_heat, _tier, _special)
             const overrides = withHeatRef.current.features.map(f => f.properties);
@@ -1952,15 +2017,15 @@ export default function MapView({ events }) {
             map.getSource('zcta-outline').setData(createZctaOutlineGeoJSON(withHeatRef.current, getZoomAwareOutlineWidth(map, undefined, true)));
           }
         }
-        // Borough outline — use skeleton cache if available, fallback to full recompute
-        if (map.getSource('borough-source')) {
+        // Borough outline — 3D and Real3D (baseMeters=54 for new 3× far-zoom width)
+        if ((is3D || isR3D) && map.getSource('borough-source')) {
           if (boroughSkeletonRef.current && boroughWithColorRef.current) {
             const overrides = boroughWithColorRef.current.features.map(f => f.properties);
             map.getSource('borough-source').setData(
-              generateBoroughQuadsFromSkeleton(boroughSkeletonRef.current, getZoomAwareOutlineWidth(map, 18, true), overrides)
+              generateBoroughQuadsFromSkeleton(boroughSkeletonRef.current, getZoomAwareOutlineWidth(map, 54, true), overrides)
             );
           } else if (boroughWithColorRef.current) {
-            map.getSource('borough-source').setData(createOutlineGeoJSON(boroughWithColorRef.current, getZoomAwareOutlineWidth(map, 18, true)));
+            map.getSource('borough-source').setData(createOutlineGeoJSON(boroughWithColorRef.current, getZoomAwareOutlineWidth(map, 54, true)));
           }
         }
       });
@@ -1970,26 +2035,62 @@ export default function MapView({ events }) {
     return () => { map.off('zoom', onZoom); map.off('pitch', onZoom); if (rafId) cancelAnimationFrame(rafId); };
   }, [mapReady]);
 
-  // FIX ADDITIVE STATE: Satellite is additive — does NOT touch heatmap/3D/real3D state.
-  // After style swap, re-adds zcta layers and real3D layers if active.
-  // styleVersion increment triggers the main heatmap effect to re-apply all paint
-  // properties to the freshly created layers, restoring all active combos.
+  // SATELLITE: Separate canvas approach — no style swap on main map.
+  // Satellite imagery is rendered on a second maplibregl.Map instance positioned behind the main
+  // map canvas. This eliminates the style-swap→styledata→re-add-layers cycle entirely.
+  // The main map canvas background is transparent (no 'bg' layer in darkMapStyle), so the
+  // satellite canvas shows through wherever main map fills have opacity < 1 or are absent.
+  // Layer stack from back to front: CSS bg (#0d0000) → sat canvas (z=1) → main map canvas (z=2).
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
-    // Toggle stencil opacity when satellite changes in Real3D mode
+
+    const satContainer = satContainerRef.current;
+    if (!satContainer) return;
+
+    if (satellite) {
+      // Show satellite canvas
+      satContainer.style.display = 'block';
+      // Lazy-init the satellite map on first use
+      if (!satMapRef.current) {
+        satMapRef.current = new maplibregl.Map({
+          container: satContainer,
+          style: satelliteMapStyle(),
+          interactive: false,
+          attributionControl: false,
+          center: map.getCenter(),
+          zoom: map.getZoom(),
+          bearing: map.getBearing(),
+          pitch: map.getPitch(),
+        });
+        // Sync camera from main map to sat map on every move
+        const syncCamera = () => {
+          const s = satMapRef.current;
+          if (!s) return;
+          s.jumpTo({ center: map.getCenter(), zoom: map.getZoom(), bearing: map.getBearing(), pitch: map.getPitch() });
+        };
+        map.on('move', syncCamera);
+        // Cleanup stored on satMap instance for component unmount
+        satMapRef.current._syncCleanup = () => map.off('move', syncCamera);
+      } else {
+        // Already initialized — sync camera immediately
+        satMapRef.current.jumpTo({ center: map.getCenter(), zoom: map.getZoom(), bearing: map.getBearing(), pitch: map.getPitch() });
+      }
+    } else {
+      // Hide satellite canvas (keep GL context alive to avoid re-init cost)
+      satContainer.style.display = 'none';
+    }
+
+    // Real3D stencil: keep opaque when satellite on (stencil masks the outside-NYC area;
+    // satellite shows through because zcta-fill and stencil have < 1 opacity in sat mode).
     if (real3D && map.getLayer('real3d-nyc-stencil')) {
       map.setPaintProperty('real3d-nyc-stencil', 'fill-opacity', satellite ? 0 : 1.0);
     }
-    map.setStyle(satellite ? satelliteMapStyle() : darkMapStyle());
-    map.once('styledata', () => {
-      const currentGeoData = geoDataRef.current;
-      if (!currentGeoData || map.getSource('zcta')) return;
-      addLayers(map, currentGeoData, satelliteRef.current);
-      if (real3DRef.current) applyReal3DLayers(map, heatmapRef.current);
-      setStyleVersion(v => v + 1);
-    });
-  }, [satellite]);
+
+    // Main heatmap effect re-runs on satellite change (satellite is in its dep array)
+    // and re-applies all paint properties (fill opacity, line opacity, extrusion opacity).
+    // No style swap, no layer re-add, no styleVersion increment needed.
+  }, [satellite, mapReady]);
 
   // FIX REAL3D: Building color expression using feature-state (tier+shadeIdx) for
   // heatmap mode, or deterministic ID-based red shades for non-heatmap mode.
@@ -2301,6 +2402,14 @@ export default function MapView({ events }) {
     if (map.getLayer('real3d-landuse-baseplate')) {
       map.setPaintProperty('real3d-landuse-baseplate', 'fill-color', baseplateColorExpr(heatmap));
     }
+    // Heatmap staining for Digital Skeleton roads — shift to warm dark tones when heatmap on,
+    // restore neon reds when heatmap off. Applies to motorway+trunk and primary+secondary.
+    if (map.getLayer('real3d-roads-motorway')) {
+      map.setPaintProperty('real3d-roads-motorway', 'line-color', heatmap ? '#884400' : '#ff2200');
+    }
+    if (map.getLayer('real3d-roads-primary')) {
+      map.setPaintProperty('real3d-roads-primary', 'line-color', heatmap ? '#662200' : '#cc1800');
+    }
 
     if (buildingAssignCleanupRef.current) { buildingAssignCleanupRef.current(); buildingAssignCleanupRef.current = null; }
     if (heatmap) {
@@ -2380,6 +2489,15 @@ export default function MapView({ events }) {
   return (
     // Outer div is the positioning root for everything
     <div ref={containerRef} className="absolute inset-0 overflow-hidden" style={{ background: '#0d0000' }}>
+
+      {/* SATELLITE CANVAS: separate MapLibre instance at z=1 — behind main map (z=2).
+          Stack from back to front: CSS bg (#0d0000) → sat canvas → main map (transparent bg) → everything else.
+          Hidden by default; shown when satellite state is true. */}
+      <div
+        ref={satContainerRef}
+        className="absolute inset-0 w-full h-full"
+        style={{ zIndex: 1, display: 'none' }}
+      />
 
       {/* FIX CRT: Wrap CRTEffect at z-index 20 so it renders ABOVE the map canvas
           (z:2) as a visible overlay on all views and combos, while remaining below
