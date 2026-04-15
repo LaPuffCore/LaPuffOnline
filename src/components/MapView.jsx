@@ -817,6 +817,11 @@ const NYC_BBOX_GEOM = {
 
 // All Real3D layer IDs — used for cleanup. Includes per-tier heatmap layer IDs.
 const REAL3D_ALL_LAYER_IDS = [
+  'real3d-water',
+  'real3d-park',
+  'real3d-roads-motorway',
+  'real3d-roads-primary',
+  'real3d-roads-tertiary',
   'real3d-landuse-baseplate',
   'real3d-buildings', 'real3d-buildings-outline', 'real3d-buildings-baseplate',
   'real3d-nyc-stencil',
@@ -1807,10 +1812,11 @@ export default function MapView({ events }) {
       }
     }
 
-    // Borough outline — visible only in 3D mode, color based on avg borough tier
-    // Uses same HEAT_DARK_COLORS step expression as ZCTA upper outline for identical colors.
+    // Borough outline — visible in 3D and Real3D modes, color based on avg borough tier.
+    // In Real3D: fill-extrusion renders in the GPU 3D pass, sits above the stencil and
+    // occludes correctly behind taller buildings via the depth buffer.
     if (map.getSource('borough-source')) {
-      if (threeD && boroughGeoDataRef.current) {
+      if ((threeD || real3D) && boroughGeoDataRef.current) {
         const avgTiers = computeBoroughAvgTiers(
           tiers,
           zipBoroughMapRef.current,
@@ -1819,7 +1825,7 @@ export default function MapView({ events }) {
         const coloredBorough = buildColoredBoroughFeatures(boroughGeoDataRef.current, avgTiers, heatmap);
         boroughWithColorRef.current = coloredBorough;
         map.getSource('borough-source').setData(
-          createOutlineGeoJSON(coloredBorough, getZoomAwareOutlineWidth(map, 18, threeD))
+          createOutlineGeoJSON(coloredBorough, getZoomAwareOutlineWidth(map, 18, threeD || real3D))
         );
         // Borough color: read baked _color from features — guaranteed to be the exact
         // same HEAT_DARK_COLORS hex value as ZCTA upper outlines (via rounded tier).
@@ -2117,6 +2123,73 @@ export default function MapView({ events }) {
     }
 
     try {
+      // Fix tile-seam shimmering during pitch/rotation — must be set before layers render.
+      map.setLight({ anchor: 'map' });
+
+      // WATER (z9–15): NOT stencil-bound — rivers/harbor flow past borough edges.
+      // Added first so it can be moved above the stencil after the stencil is created.
+      map.addLayer({
+        id: 'real3d-water', type: 'fill',
+        source: 'openmaptiles', 'source-layer': 'water',
+        paint: {
+          'fill-color': '#060f1a',
+          'fill-opacity': 0.85,
+        },
+      });
+
+      // PARKS (z9–15): stencil-bound — stays below stencil so only NYC parks show.
+      map.addLayer({
+        id: 'real3d-park', type: 'fill',
+        source: 'openmaptiles', 'source-layer': 'landuse',
+        filter: ['==', ['get', 'class'], 'park'],
+        paint: {
+          'fill-color': '#081408',
+          'fill-opacity': 0.8,
+        },
+      });
+
+      // ROADS — MOTORWAY + TRUNK (z9–13): thick neon veins, stencil-bound.
+      map.addLayer({
+        id: 'real3d-roads-motorway', type: 'line',
+        source: 'openmaptiles', 'source-layer': 'transportation',
+        minzoom: 9, maxzoom: 13,
+        filter: ['match', ['get', 'class'], ['motorway', 'trunk'], true, false],
+        paint: {
+          'line-color': '#ff2200',
+          'line-width': ['interpolate', ['linear'], ['zoom'], 9, 1.5, 13, 5],
+          'line-blur': 1.5,
+          'line-opacity': 0.9,
+        },
+      });
+
+      // ROADS — PRIMARY + SECONDARY (z11–13): stencil-bound.
+      map.addLayer({
+        id: 'real3d-roads-primary', type: 'line',
+        source: 'openmaptiles', 'source-layer': 'transportation',
+        minzoom: 11, maxzoom: 13,
+        filter: ['match', ['get', 'class'], ['primary', 'secondary'], true, false],
+        paint: {
+          'line-color': '#cc1800',
+          'line-width': ['interpolate', ['linear'], ['zoom'], 11, 0.8, 13, 3],
+          'line-blur': 0.8,
+          'line-opacity': 0.75,
+        },
+      });
+
+      // ROADS — TERTIARY + RESIDENTIAL (z12–13): stencil-bound.
+      map.addLayer({
+        id: 'real3d-roads-tertiary', type: 'line',
+        source: 'openmaptiles', 'source-layer': 'transportation',
+        minzoom: 12, maxzoom: 13,
+        filter: ['match', ['get', 'class'], ['tertiary', 'minor', 'residential'], true, false],
+        paint: {
+          'line-color': '#771100',
+          'line-width': ['interpolate', ['linear'], ['zoom'], 12, 0.5, 13, 1.5],
+          'line-blur': 0.3,
+          'line-opacity': 0.65,
+        },
+      });
+
       // LANDUSE PROXY (z9–13): coarse block shapes before building tiles exist
       map.addLayer({
         id: 'real3d-landuse-baseplate', type: 'fill',
@@ -2142,7 +2215,8 @@ export default function MapView({ events }) {
         },
       });
 
-      // FULL 3D EXTRUSIONS (z14+): vertical-gradient off + opacity 0.95 reduces tile-seam artifacts
+      // FULL 3D EXTRUSIONS (z14+): vertical-gradient off + opacity 1.0 with fixed map-anchored
+      // lighting eliminates tile-seam Z-fighting artifacts at full building height.
       map.addLayer({
         id: 'real3d-buildings', type: 'fill-extrusion',
         source: 'openmaptiles', 'source-layer': 'building',
@@ -2151,7 +2225,7 @@ export default function MapView({ events }) {
           'fill-extrusion-color': buildingColorExprByState(isHeatmap),
           'fill-extrusion-height': ['coalesce', ['get', 'render_height'], ['get', 'height'], 8],
           'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0],
-          'fill-extrusion-opacity': 0.95,
+          'fill-extrusion-opacity': 1.0,
           'fill-extrusion-vertical-gradient': false,
         },
       });
@@ -2160,6 +2234,7 @@ export default function MapView({ events }) {
       // Added LAST (no beforeId) so it sits ABOVE the three Real3D layers.
       // heat-underlay is then moved above the stencil so heatmap/topo kernel renders unmasked.
       // Satellite is the base raster style — always below all layers, never maskable by a fill.
+
       if (stencilGeoJSON) {
         map.addLayer({
           id: 'real3d-nyc-stencil', type: 'fill',
@@ -2169,13 +2244,8 @@ export default function MapView({ events }) {
             'fill-opacity': satelliteRef.current ? 0 : 1.0,
           },
         });
-        // Move zcta line layers above the stencil so the outer borough boundary stroke
-        // is not clipped by the stencil's donut edge. fill-extrusion layers (Real3D
-        // buildings) render in the GPU 3D pass above ALL 2D layers regardless, so
-        // moving these lines here does not affect the stencil's masking of extrusions.
-        ['zcta-safe-line', 'zcta-line-glow2', 'zcta-line-glow', 'zcta-line'].forEach(id => {
-          if (map.getLayer(id)) map.moveLayer(id);
-        });
+        // Move water above stencil — water is unmasked and flows past borough edges.
+        if (map.getLayer('real3d-water')) map.moveLayer('real3d-water');
         // Move heat-underlay (heatmap kernel + topo) to the very top — above the stencil.
         // This lets the radial gaussian glow bleed past borough edges as intended.
         if (map.getLayer('heat-underlay')) {
