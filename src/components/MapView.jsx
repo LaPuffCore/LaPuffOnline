@@ -805,20 +805,34 @@ function findTierForPoint([px, py], features, tiers) {
   return 0;
 }
 
-// Build a single MultiPolygon unioning all 5 NYC borough boundaries.
-// Used as a MapLibre ['within'] filter to restrict Real3D rendering to NYC only.
-function buildNYCUnionGeometry(boroughGeoData) {
-  if (!boroughGeoData?.features) return null;
-  const allCoords = [];
-  for (const feat of boroughGeoData.features) {
-    const geom = feat.geometry;
-    if (geom.type === 'MultiPolygon') {
-      allCoords.push(...geom.coordinates);
-    } else if (geom.type === 'Polygon') {
-      allCoords.push(geom.coordinates);
-    }
-  }
-  return { type: 'MultiPolygon', coordinates: allCoords };
+// NYC bounding box as simple 5-vertex polygon — reliable GPU filter (eliminates NJ/CT).
+// Borough.geo.json full polygon was too complex for MapLibre's within filter.
+const NYC_BBOX_GEOM = {
+  type: 'Polygon',
+  coordinates: [[
+    [-74.27, 40.47], [-73.68, 40.47], [-73.68, 40.93],
+    [-74.27, 40.93], [-74.27, 40.47],
+  ]],
+};
+
+// All Real3D layer IDs — used for cleanup. Includes per-tier heatmap layer IDs.
+const REAL3D_ALL_LAYER_IDS = [
+  'real3d-landuse-baseplate',
+  'real3d-buildings', 'real3d-buildings-outline', 'real3d-buildings-baseplate',
+  ...Array.from({length: 5}, (_, i) => `real3d-hm-baseplate-${i}`),
+  ...Array.from({length: 5}, (_, i) => `real3d-hm-buildings-${i}`),
+];
+
+// Group ZCTA features by their heat tier. Returns array of 5 FeatureCollections (tier 0-4).
+// Used for GPU-side ['within'] filter on per-tier building layers — eliminates feature-state lag.
+function buildTierGeoCollections(features, tiers) {
+  const groups = [[], [], [], [], []];
+  features.forEach((feat, i) => {
+    if (feat.properties?._special) return;
+    const t = Math.min(4, Math.max(0, Math.round(tiers[i] ?? 0)));
+    groups[t].push(feat);
+  });
+  return groups.map(feats => ({ type: 'FeatureCollection', features: feats }));
 }
 
 // Map each ZCTA feature index → borough feature index via centroid PiP.
@@ -1097,7 +1111,6 @@ export default function MapView({ events }) {
   const buildingAssignCleanupRef = useRef(null);
   // Borough outline refs
   const boroughGeoDataRef  = useRef(null);
-  const nycUnionGeomRef    = useRef(null);
   const zipBoroughMapRef   = useRef({});
   const boroughWithColorRef = useRef(null);
   const zctaSkeletonRef    = useRef(null);
@@ -1190,10 +1203,7 @@ export default function MapView({ events }) {
   useEffect(() => {
     fetch(BOROUGH_GEOJSON_URL).then(r => r.json()).then(data => {
       setBoroughGeoData(data);
-      // Build borough skeleton cache once — precomputes outward offset vectors per ring
       boroughSkeletonRef.current = buildBoroughSkeleton(data);
-      // Build NYC union geometry for Real3D ['within'] filter
-      nycUnionGeomRef.current = buildNYCUnionGeometry(data);
     }).catch(err => console.warn('Borough GeoJSON load failed:', err));
   }, []);
 
@@ -1744,10 +1754,9 @@ export default function MapView({ events }) {
       }
     }
 
-    // Real3D baseplates use baseplateColorExpr (no feature-state, no square artifacts)
-    if (real3D && map.getLayer('real3d-buildings-baseplate')) {
-      map.setPaintProperty('real3d-buildings-baseplate', 'fill-extrusion-color', baseplateColorExpr(heatmap));
-    }
+    // Real3D: when heatmap/timespan changes, rebuild all Real3D layers with updated tiers/colors.
+    // applyReal3DLayers handles this via the dedicated Real3D useEffect below.
+    // Only update landuse proxy here (safe to set without full rebuild).
     if (real3D && map.getLayer('real3d-landuse-baseplate')) {
       map.setPaintProperty('real3d-landuse-baseplate', 'fill-color', baseplateColorExpr(heatmap));
     }
@@ -2002,92 +2011,136 @@ export default function MapView({ events }) {
   }
 
   function applyReal3DLayers(map, isHeatmap) {
-    // Clean up any previous building assignment listeners
     if (buildingAssignCleanupRef.current) {
       buildingAssignCleanupRef.current();
       buildingAssignCleanupRef.current = null;
     }
 
-    ['real3d-buildings', 'real3d-buildings-outline', 'real3d-buildings-baseplate', 'real3d-landuse-baseplate'].forEach(id => { if (map.getLayer(id)) map.removeLayer(id); });
+    // Remove all Real3D layers (both named-tier and legacy names)
+    REAL3D_ALL_LAYER_IDS.forEach(id => { if (map.getLayer(id)) map.removeLayer(id); });
+
     if (!map.getSource('openmaptiles')) {
       try {
         map.addSource('openmaptiles', { type: 'vector', url: `https://api.maptiler.com/tiles/v3/tiles.json?key=${MAPTILER_KEY}` });
       } catch (err) { console.warn('Real3D source add failed:', err); return; }
     }
 
+    // Simple 5-vertex bounding box filter — reliably restricts to NYC (eliminates NJ/CT).
+    // Using NYC_BBOX_GEOM constant defined at module level.
+    const bboxFilter = ['within', NYC_BBOX_GEOM];
+
     try {
-      // --- LOW-ZOOM PROXY BASEPLATES (zoom 9-13) ---
-      // MapTiler v3 building data only exists at zoom 13+.
-      // Use the 'landuse' source-layer (available from zoom 4) as a visual proxy:
-      // residential/commercial/industrial parcels approximate where buildings are.
-      // Opacity interpolated so it fades in at z9→z10, holds, then fades out as real buildings appear.
+      // --- LANDUSE PROXY (z9–13): coarse building-zone shapes at low zoom ---
+      // MapTiler building tiles don't exist below z13; landuse parcels approximate building coverage.
       map.addLayer({
-        id: 'real3d-landuse-baseplate', type: 'fill', source: 'openmaptiles', 'source-layer': 'landuse',
-        filter: ['match', ['get', 'class'], ['residential', 'commercial', 'industrial', 'retail'], true, false],
+        id: 'real3d-landuse-baseplate', type: 'fill',
+        source: 'openmaptiles', 'source-layer': 'landuse',
+        filter: ['all', bboxFilter,
+          ['match', ['get', 'class'], ['residential', 'commercial', 'industrial', 'retail'], true, false],
+        ],
         paint: {
           'fill-color': baseplateColorExpr(isHeatmap),
-          'fill-opacity': ['interpolate', ['linear'], ['zoom'], 9, 0, 10, 0.5, 13, 0.5, 14, 0],
+          'fill-opacity': ['interpolate', ['linear'], ['zoom'], 9, 0, 10, 0.45, 13, 0.45, 14, 0],
         },
       });
 
-      // --- FLAT BUILDING FOOTPRINTS (zoom 13-14, cross-fade) ---
-      // Real building geometry from MapTiler — starts at z13.
-      // Opacity interpolated for smooth cross-fade with landuse proxy above.
-      map.addLayer({
-        id: 'real3d-buildings-baseplate', type: 'fill-extrusion', source: 'openmaptiles', 'source-layer': 'building',
-        minzoom: 13,
-        paint: {
-          'fill-extrusion-color': baseplateColorExpr(isHeatmap),
-          'fill-extrusion-height': 0,
-          'fill-extrusion-base': 0,
-          'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'], 13, 0, 13.8, 0.8],
-          'fill-extrusion-vertical-gradient': false,
-        },
-      });
+      const features = geoDataRef.current?.features;
+      const tiers = tiersRef.current;
+      const hasHeatmapData = isHeatmap && tiers.length > 0 && features?.length > 0;
 
-      // --- 3D BUILDING EXTRUSIONS (zoom 13+, height fades in at 14) ---
-      // Same source as baseplate — at z13 height=0 (acts as baseplate), grows to full height by z14.
-      // This single-layer approach avoids Z-fighting from two competing layers.
-      map.addLayer({
-        id: 'real3d-buildings', type: 'fill-extrusion', source: 'openmaptiles', 'source-layer': 'building',
-        minzoom: 13,
-        paint: {
-          'fill-extrusion-color': buildingColorExprByState(isHeatmap),
-          'fill-extrusion-height': ['interpolate', ['linear'], ['zoom'],
-            13, 0,
-            14, ['coalesce', ['get', 'render_height'], ['get', 'height'], 5],
-          ],
-          'fill-extrusion-base': ['interpolate', ['linear'], ['zoom'],
-            13, 0,
-            14, ['coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0],
-          ],
-          'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'], 13, 0, 13.8, 1.0],
-          'fill-extrusion-vertical-gradient': true,
-        },
-      });
+      if (hasHeatmapData) {
+        // --- HEATMAP MODE: Per-tier GPU layers with ['within'] filter ---
+        // Each tier gets its own baseplate + extrusion layer, filtered strictly to its zip zones.
+        // GPU-side ['within'] means NO feature-state, NO queryRenderedFeatures lag, NO color bleeding.
+        const tierCollections = buildTierGeoCollections(features, tiers);
+        const tierKeys = ['cold', 'cool', 'warm', 'orange', 'hot'];
+
+        tierCollections.forEach((tierFC, tierIdx) => {
+          if (tierFC.features.length === 0) return;
+          const tones = HEAT_BUILDING_TONES[tierKeys[tierIdx]];
+          const shadeExpr = ['case',
+            ['==', ['%', ['to-number', ['id'], 0], 5], 0], tones[0],
+            ['==', ['%', ['to-number', ['id'], 0], 5], 1], tones[1],
+            ['==', ['%', ['to-number', ['id'], 0], 5], 2], tones[2],
+            ['==', ['%', ['to-number', ['id'], 0], 5], 3], tones[3],
+            tones[4],
+          ];
+          // ['all', bboxFilter, ['within', tierFC]] — building must be in NYC AND in this tier's zip zones
+          const tierFilter = ['all', bboxFilter, ['within', tierFC]];
+
+          // Baseplate: 5m tall, z13–14
+          map.addLayer({
+            id: `real3d-hm-baseplate-${tierIdx}`, type: 'fill-extrusion',
+            source: 'openmaptiles', 'source-layer': 'building',
+            minzoom: 13, maxzoom: 14.5,
+            filter: tierFilter,
+            paint: {
+              'fill-extrusion-color': tones[1],
+              'fill-extrusion-height': 5,
+              'fill-extrusion-base': 0,
+              'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'], 13, 0, 13.8, 0.9],
+              'fill-extrusion-vertical-gradient': false,
+            },
+          });
+
+          // Extrusion: full height, z14+
+          map.addLayer({
+            id: `real3d-hm-buildings-${tierIdx}`, type: 'fill-extrusion',
+            source: 'openmaptiles', 'source-layer': 'building',
+            minzoom: 14,
+            filter: tierFilter,
+            paint: {
+              'fill-extrusion-color': shadeExpr,
+              'fill-extrusion-height': ['coalesce', ['get', 'render_height'], ['get', 'height'], 8],
+              'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0],
+              'fill-extrusion-opacity': 1.0,
+              'fill-extrusion-vertical-gradient': true,
+            },
+          });
+        });
+      } else {
+        // --- NON-HEATMAP (or heatmap with tiers not yet ready): single ID-based layers ---
+        // Baseplate: 5m tall, z13–14
+        map.addLayer({
+          id: 'real3d-buildings-baseplate', type: 'fill-extrusion',
+          source: 'openmaptiles', 'source-layer': 'building',
+          minzoom: 13, maxzoom: 14.5,
+          filter: bboxFilter,
+          paint: {
+            'fill-extrusion-color': baseplateColorExpr(false),
+            'fill-extrusion-height': 5,
+            'fill-extrusion-base': 0,
+            'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'], 13, 0, 13.8, 0.9],
+            'fill-extrusion-vertical-gradient': false,
+          },
+        });
+
+        // Extrusion: full height, z14+
+        map.addLayer({
+          id: 'real3d-buildings', type: 'fill-extrusion',
+          source: 'openmaptiles', 'source-layer': 'building',
+          minzoom: 14,
+          filter: bboxFilter,
+          paint: {
+            'fill-extrusion-color': buildingColorExprByState(false),
+            'fill-extrusion-height': ['coalesce', ['get', 'render_height'], ['get', 'height'], 8],
+            'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0],
+            'fill-extrusion-opacity': 1.0,
+            'fill-extrusion-vertical-gradient': true,
+          },
+        });
+      }
 
       map.easeTo({ pitch: 55, bearing: -17, duration: 700 });
-
-      if (isHeatmap) {
-        const assignFn = () => assignBuildingTiersToMap(map);
-        setTimeout(assignFn, 500);
-        map.on('moveend', assignFn);
-        map.on('zoomend', assignFn);
-        map.on('idle', assignFn);
-        buildingAssignCleanupRef.current = () => {
-          map.off('moveend', assignFn);
-          map.off('zoomend', assignFn);
-          map.off('idle', assignFn);
-        };
-      }
     } catch (err) { console.warn('Real3D layer add failed:', err); }
   }
 
+  // Real3D toggle — add or remove all Real3D layers
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
     if (!real3D) {
-      ['real3d-buildings', 'real3d-buildings-outline', 'real3d-buildings-baseplate', 'real3d-landuse-baseplate'].forEach(id => { if (map.getLayer(id)) map.removeLayer(id); });
+      REAL3D_ALL_LAYER_IDS.forEach(id => { if (map.getLayer(id)) map.removeLayer(id); });
       if (buildingAssignCleanupRef.current) { buildingAssignCleanupRef.current(); buildingAssignCleanupRef.current = null; }
       if (!threeD) map.easeTo({ pitch: 0, bearing: 0, duration: 700 });
       return;
@@ -2095,28 +2148,12 @@ export default function MapView({ events }) {
     applyReal3DLayers(map, heatmapRef.current);
   }, [real3D, mapReady]);
 
-  // Refresh Real3D colors when heatmap or timespan changes
+  // Real3D heatmap/timespan — rebuild all tier layers when colors or tiers change.
+  // Since main heatmap effect runs first (updates tiersRef), tiers are current when this fires.
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !mapReady || !real3D || !map.getLayer('real3d-buildings')) return;
-    map.setPaintProperty('real3d-buildings', 'fill-extrusion-color', buildingColorExprByState(heatmap));
-    if (map.getLayer('real3d-buildings-baseplate')) {
-      map.setPaintProperty('real3d-buildings-baseplate', 'fill-extrusion-color', baseplateColorExpr(heatmap));
-    }
-    if (map.getLayer('real3d-landuse-baseplate')) {
-      map.setPaintProperty('real3d-landuse-baseplate', 'fill-color', baseplateColorExpr(heatmap));
-    }
-    if (heatmap) {
-      if (buildingAssignCleanupRef.current) { buildingAssignCleanupRef.current(); buildingAssignCleanupRef.current = null; }
-      const assignFn = () => assignBuildingTiersToMap(map);
-      setTimeout(assignFn, 300);
-      map.on('moveend', assignFn);
-      map.on('zoomend', assignFn);
-      map.on('idle', assignFn);
-      buildingAssignCleanupRef.current = () => { map.off('moveend', assignFn); map.off('zoomend', assignFn); map.off('idle', assignFn); };
-    } else {
-      if (buildingAssignCleanupRef.current) { buildingAssignCleanupRef.current(); buildingAssignCleanupRef.current = null; }
-    }
+    if (!map || !mapReady || !real3D) return;
+    applyReal3DLayers(map, heatmap);
   }, [heatmap, real3D, mapReady, timespanIdx]);
 
   const handleThreeDToggle = () => {
