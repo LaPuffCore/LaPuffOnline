@@ -2169,6 +2169,13 @@ export default function MapView({ events }) {
             'fill-opacity': satelliteRef.current ? 0 : 1.0,
           },
         });
+        // Move zcta line layers above the stencil so the outer borough boundary stroke
+        // is not clipped by the stencil's donut edge. fill-extrusion layers (Real3D
+        // buildings) render in the GPU 3D pass above ALL 2D layers regardless, so
+        // moving these lines here does not affect the stencil's masking of extrusions.
+        ['zcta-safe-line', 'zcta-line-glow2', 'zcta-line-glow', 'zcta-line'].forEach(id => {
+          if (map.getLayer(id)) map.moveLayer(id);
+        });
         // Move heat-underlay (heatmap kernel + topo) to the very top — above the stencil.
         // This lets the radial gaussian glow bleed past borough edges as intended.
         if (map.getLayer('heat-underlay')) {
