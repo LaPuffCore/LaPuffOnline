@@ -819,18 +819,96 @@ const NYC_BBOX_GEOM = {
 const REAL3D_ALL_LAYER_IDS = [
   'real3d-landuse-baseplate',
   'real3d-buildings', 'real3d-buildings-outline', 'real3d-buildings-baseplate',
+  'real3d-nyc-stencil',
   ...Array.from({length: 5}, (_, i) => `real3d-hm-baseplate-${i}`),
   ...Array.from({length: 5}, (_, i) => `real3d-hm-buildings-${i}`),
 ];
 
-// Group ZCTA features by their heat tier. Returns array of 5 FeatureCollections (tier 0-4).
-// Used for GPU-side ['within'] filter on per-tier building layers — eliminates feature-state lag.
+// Douglas-Peucker line simplification — reduces coordinate count while preserving shape.
+// tolerance in degrees (0.002 ≈ 200m, enough to cut ZCTA point count by ~70%).
+function dpSimplify(points, tolerance) {
+  if (points.length <= 2) return points;
+  let maxDist = 0, maxIdx = 0;
+  const [x1, y1] = points[0], [x2, y2] = points[points.length - 1];
+  const dx = x2 - x1, dy = y2 - y1;
+  const lenSq = dx * dx + dy * dy;
+  for (let i = 1; i < points.length - 1; i++) {
+    const [px, py] = points[i];
+    let d;
+    if (lenSq === 0) {
+      d = Math.hypot(px - x1, py - y1);
+    } else {
+      const t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / lenSq));
+      d = Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
+    }
+    if (d > maxDist) { maxDist = d; maxIdx = i; }
+  }
+  if (maxDist > tolerance) {
+    const l = dpSimplify(points.slice(0, maxIdx + 1), tolerance);
+    const r = dpSimplify(points.slice(maxIdx), tolerance);
+    return [...l.slice(0, -1), ...r];
+  }
+  return [points[0], points[points.length - 1]];
+}
+
+// Simplify a GeoJSON feature's geometry rings using Douglas-Peucker.
+// Returns a new feature with simplified coordinates (only affects PiP/within filter geometry,
+// not the rendered ZCTA fill layers which use original GeoJSON).
+function simplifyFeature(feat, tolerance) {
+  const geom = feat.geometry;
+  const simplifyRing = (ring) => {
+    const s = dpSimplify(ring, tolerance);
+    if (s.length < 4) return ring; // keep original if too short
+    // Ensure ring is closed
+    const last = s[s.length - 1];
+    if (s[0][0] !== last[0] || s[0][1] !== last[1]) s.push(s[0]);
+    return s;
+  };
+  let newCoords;
+  if (geom.type === 'Polygon') {
+    newCoords = geom.coordinates.map(simplifyRing);
+  } else if (geom.type === 'MultiPolygon') {
+    newCoords = geom.coordinates.map(poly => poly.map(simplifyRing));
+  } else {
+    return feat;
+  }
+  return { ...feat, geometry: { ...geom, coordinates: newCoords } };
+}
+
+// Build a "donut" GeoJSON that covers everything EXCEPT the 5 NYC boroughs.
+// Outer ring: world bbox. Inner rings: each borough polygon (holes).
+// Used as an inverse stencil fill layer to visually mask NJ/CT buildings in Real3D.
+function buildNYCStencilGeoJSON(boroughGeoData) {
+  if (!boroughGeoData?.features) return null;
+  // World-covering outer ring (counterclockwise for GeoJSON exterior)
+  const outerRing = [[-180,-90],[180,-90],[180,90],[-180,90],[-180,-90]];
+  // Collect all borough polygon rings as holes (clockwise winding = interior holes)
+  const holes = [];
+  for (const feat of boroughGeoData.features) {
+    const geom = feat.geometry;
+    const polys = geom.type === 'MultiPolygon' ? geom.coordinates : [geom.coordinates];
+    for (const poly of polys) {
+      // Outer ring of each borough polygon becomes a hole — reverse to clockwise
+      holes.push([...poly[0]].reverse());
+    }
+  }
+  return {
+    type: 'Feature',
+    geometry: { type: 'Polygon', coordinates: [outerRing, ...holes] },
+    properties: {},
+  };
+}
+// Features are simplified with Douglas-Peucker so ['within'] filter payload is small.
+// IMPORTANT: ['within'] in MapLibre requires COMPLETE containment — buildings straddling zip
+// borders will be excluded. For coloring we fall back to CPU-side feature-state assignment.
+// These collections are used only for additional heatmap-mode coloring; tier 0 = cold fallback.
 function buildTierGeoCollections(features, tiers) {
+  const SIMPLIFY_TOLERANCE = 0.002; // ~200m — reduces points by ~60-70%, preserves general shape
   const groups = [[], [], [], [], []];
   features.forEach((feat, i) => {
     if (feat.properties?._special) return;
     const t = Math.min(4, Math.max(0, Math.round(tiers[i] ?? 0)));
-    groups[t].push(feat);
+    groups[t].push(simplifyFeature(feat, SIMPLIFY_TOLERANCE));
   });
   return groups.map(feats => ({ type: 'FeatureCollection', features: feats }));
 }
@@ -2024,6 +2102,16 @@ export default function MapView({ events }) {
       } catch (err) { console.warn('Real3D source add failed:', err); return; }
     }
 
+    // Add stencil GeoJSON source if not present
+    const stencilGeoJSON = buildNYCStencilGeoJSON(boroughGeoDataRef.current);
+    if (stencilGeoJSON) {
+      if (map.getSource('real3d-stencil-source')) {
+        map.getSource('real3d-stencil-source').setData(stencilGeoJSON);
+      } else {
+        map.addSource('real3d-stencil-source', { type: 'geojson', data: stencilGeoJSON });
+      }
+    }
+
     try {
       // LANDUSE PROXY (z9–13): coarse block shapes before building tiles exist
       map.addLayer({
@@ -2036,7 +2124,7 @@ export default function MapView({ events }) {
         },
       });
 
-      // FLAT BUILDING FOOTPRINTS (z13–14.5): 5m so they clear z-fighting with map surface
+      // FLAT BUILDING FOOTPRINTS (z13–14.5): 5m height to avoid z-fighting
       map.addLayer({
         id: 'real3d-buildings-baseplate', type: 'fill-extrusion',
         source: 'openmaptiles', 'source-layer': 'building',
@@ -2050,7 +2138,7 @@ export default function MapView({ events }) {
         },
       });
 
-      // FULL 3D EXTRUSIONS (z14+)
+      // FULL 3D EXTRUSIONS (z14+): vertical-gradient off reduces Z-fighting artifacts
       map.addLayer({
         id: 'real3d-buildings', type: 'fill-extrusion',
         source: 'openmaptiles', 'source-layer': 'building',
@@ -2060,22 +2148,40 @@ export default function MapView({ events }) {
           'fill-extrusion-height': ['coalesce', ['get', 'render_height'], ['get', 'height'], 8],
           'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0],
           'fill-extrusion-opacity': 1.0,
-          'fill-extrusion-vertical-gradient': true,
+          'fill-extrusion-vertical-gradient': false,
         },
       });
+
+      // NYC STENCIL MASK: fill layer on top of building layers covering everything OUTSIDE the 5 boroughs.
+      // Uses borough donut polygon to visually block NJ/CT/LI buildings without requiring ['within'] filter.
+      // Color matches darkMapStyle background '#0d0000'.
+      if (stencilGeoJSON) {
+        map.addLayer({
+          id: 'real3d-nyc-stencil', type: 'fill',
+          source: 'real3d-stencil-source',
+          paint: {
+            'fill-color': '#0d0000',
+            'fill-opacity': 1.0,
+          },
+        });
+      }
 
       map.easeTo({ pitch: 55, bearing: -17, duration: 700 });
 
       if (isHeatmap) {
-        const assignFn = () => assignBuildingTiersToMap(map);
-        setTimeout(assignFn, 600);
+        // Throttled assign — max once per 800ms to prevent repaint thrashing
+        let assignTimer = null;
+        const assignFn = () => {
+          if (assignTimer) return;
+          assignTimer = setTimeout(() => { assignTimer = null; assignBuildingTiersToMap(map); }, 800);
+        };
+        setTimeout(() => assignBuildingTiersToMap(map), 700);
         map.on('moveend', assignFn);
         map.on('zoomend', assignFn);
-        map.on('idle', assignFn);
         buildingAssignCleanupRef.current = () => {
           map.off('moveend', assignFn);
           map.off('zoomend', assignFn);
-          map.off('idle', assignFn);
+          if (assignTimer) { clearTimeout(assignTimer); assignTimer = null; }
         };
       }
     } catch (err) { console.error('Real3D layer add failed:', err); }
@@ -2111,12 +2217,15 @@ export default function MapView({ events }) {
 
     if (buildingAssignCleanupRef.current) { buildingAssignCleanupRef.current(); buildingAssignCleanupRef.current = null; }
     if (heatmap) {
-      const assignFn = () => assignBuildingTiersToMap(map);
-      setTimeout(assignFn, 300);
+      let assignTimer = null;
+      const assignFn = () => {
+        if (assignTimer) return;
+        assignTimer = setTimeout(() => { assignTimer = null; assignBuildingTiersToMap(map); }, 800);
+      };
+      setTimeout(() => assignBuildingTiersToMap(map), 500);
       map.on('moveend', assignFn);
       map.on('zoomend', assignFn);
-      map.on('idle', assignFn);
-      buildingAssignCleanupRef.current = () => { map.off('moveend', assignFn); map.off('zoomend', assignFn); map.off('idle', assignFn); };
+      buildingAssignCleanupRef.current = () => { map.off('moveend', assignFn); map.off('zoomend', assignFn); if (assignTimer) clearTimeout(assignTimer); };
     }
   }, [heatmap, real3D, mapReady, timespanIdx]);
 
