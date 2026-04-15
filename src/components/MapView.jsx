@@ -2431,13 +2431,17 @@ export default function MapView({ events }) {
       map.easeTo({ pitch: 55, bearing: -17, duration: 700 });
 
       if (isHeatmap) {
+        const assignAll = () => {
+          assignBuildingTiersToMap(map);
+          assignRoadTiersToMap(map);
+        };
         // Throttled assign — max once per 800ms to prevent repaint thrashing
         let assignTimer = null;
         const assignFn = () => {
           if (assignTimer) return;
-          assignTimer = setTimeout(() => { assignTimer = null; assignBuildingTiersToMap(map); }, 800);
+          assignTimer = setTimeout(() => { assignTimer = null; assignAll(); }, 800);
         };
-        setTimeout(() => assignBuildingTiersToMap(map), 700);
+        setTimeout(() => assignAll(), 700);
         map.on('moveend', assignFn);
         map.on('zoomend', assignFn);
         buildingAssignCleanupRef.current = () => {
@@ -2478,23 +2482,27 @@ export default function MapView({ events }) {
     if (map.getLayer('real3d-landuse-baseplate')) {
       map.setPaintProperty('real3d-landuse-baseplate', 'fill-color', baseplateColorExpr(heatmap));
     }
-    // Heatmap staining for Digital Skeleton roads — shift to warm dark tones when heatmap on,
-    // restore neon reds when heatmap off. Applies to motorway+trunk and primary+secondary.
+    // Heatmap staining for Digital Skeleton roads — per-zone colors via feature-state tier.
+    // Restore neon reds when heatmap off.
     if (map.getLayer('real3d-roads-motorway')) {
-      map.setPaintProperty('real3d-roads-motorway', 'line-color', heatmap ? '#884400' : '#ff2200');
+      map.setPaintProperty('real3d-roads-motorway', 'line-color', roadMotorwayColorExpr(heatmap));
     }
     if (map.getLayer('real3d-roads-primary')) {
-      map.setPaintProperty('real3d-roads-primary', 'line-color', heatmap ? '#662200' : '#cc1800');
+      map.setPaintProperty('real3d-roads-primary', 'line-color', roadPrimaryColorExpr(heatmap));
     }
 
     if (buildingAssignCleanupRef.current) { buildingAssignCleanupRef.current(); buildingAssignCleanupRef.current = null; }
     if (heatmap) {
+      const assignAll = () => {
+        assignBuildingTiersToMap(map);
+        assignRoadTiersToMap(map);
+      };
       let assignTimer = null;
       const assignFn = () => {
         if (assignTimer) return;
-        assignTimer = setTimeout(() => { assignTimer = null; assignBuildingTiersToMap(map); }, 800);
+        assignTimer = setTimeout(() => { assignTimer = null; assignAll(); }, 800);
       };
-      setTimeout(() => assignBuildingTiersToMap(map), 500);
+      setTimeout(() => assignAll(), 500);
       map.on('moveend', assignFn);
       map.on('zoomend', assignFn);
       buildingAssignCleanupRef.current = () => { map.off('moveend', assignFn); map.off('zoomend', assignFn); if (assignTimer) clearTimeout(assignTimer); };
