@@ -811,12 +811,7 @@ function createZctaOutlineGeoJSON(sourceGeoJSON, widthMeters = 12) {
 
 function darkMapStyle() {
   // No background layer — CSS background on the container provides the dark red (#0d0000).
-  // Removing 'bg' makes the WebGL canvas transparent where no layers render, allowing
-  // the satellite canvas (positioned behind) to show through when satellite is active.
   return { version: 8, glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf', sources: {}, layers: [] };
-}
-function satelliteMapStyle() {
-  return { version: 8, sources: { sat: { type: 'raster', tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'], tileSize: 256, maxzoom: 19 } }, layers: [{ id: 'sat', type: 'raster', source: 'sat' }] };
 }
 
 // FIX REAL3D: Point-in-polygon (ray casting) for building→zip spatial assignment
@@ -875,7 +870,6 @@ const REAL3D_ALL_LAYER_IDS = [
   'real3d-roads-tertiary',
   'real3d-landuse-baseplate',
   'real3d-buildings', 'real3d-buildings-outline', 'real3d-buildings-baseplate',
-  'real3d-nyc-stencil',
 ];
 
 // Douglas-Peucker line simplification — reduces coordinate count while preserving shape.
@@ -929,29 +923,7 @@ function simplifyFeature(feat, tolerance) {
   return { ...feat, geometry: { ...geom, coordinates: newCoords } };
 }
 
-// Build a "donut" GeoJSON that covers everything EXCEPT the 5 NYC boroughs.
-// Outer ring: world bbox. Inner rings: each borough polygon (holes).
-// Used as an inverse stencil fill layer to visually mask NJ/CT buildings in Real3D.
-function buildNYCStencilGeoJSON(boroughGeoData) {
-  if (!boroughGeoData?.features) return null;
-  // World-covering outer ring (counterclockwise for GeoJSON exterior)
-  const outerRing = [[-180,-90],[180,-90],[180,90],[-180,90],[-180,-90]];
-  // Collect all borough polygon rings as holes (clockwise winding = interior holes)
-  const holes = [];
-  for (const feat of boroughGeoData.features) {
-    const geom = feat.geometry;
-    const polys = geom.type === 'MultiPolygon' ? geom.coordinates : [geom.coordinates];
-    for (const poly of polys) {
-      // Outer ring of each borough polygon becomes a hole — reverse to clockwise
-      holes.push([...poly[0]].reverse());
-    }
-  }
-  return {
-    type: 'Feature',
-    geometry: { type: 'Polygon', coordinates: [outerRing, ...holes] },
-    properties: {},
-  };
-}
+
 // Build per-tier FeatureCollections for ['within']-based building layers (planned C2 optimization).
 // Features are simplified with Douglas-Peucker so ['within'] filter payload is small.
 // IMPORTANT: ['within'] in MapLibre requires COMPLETE containment — buildings straddling zip
@@ -1040,30 +1012,35 @@ function buildColoredBoroughFeatures(boroughGeoData, avgTiers, isHeatmap) {
 // draw overlapping outward quads, keep only the higher-tier borough's quads.
 // This eliminates the color clash at shared boundaries (Brooklyn-Queens, Bronx-Manhattan, etc).
 // Only applies when heatmap is on — when off, all boroughs have the same color and blend naturally.
-function fixSharedBoundaryQuads(quadsGeoJSON, boroughFeatures, avgTiers, isHeatmap) {
-  if (!isHeatmap || !boroughFeatures || !avgTiers) return quadsGeoJSON;
-  return {
-    ...quadsGeoJSON,
-    features: quadsGeoJSON.features.filter(quad => {
-      const coords = quad.geometry.coordinates[0];
-      const bi = quad.properties._boroughIdx;
-      if (bi == null) return true;
-      // Outward edge midpoint (coords[0] and coords[1] are outer vertices)
-      const mx = (coords[0][0] + coords[1][0]) / 2;
-      const my = (coords[0][1] + coords[1][1]) / 2;
-      // If outward midpoint falls inside another borough with a STRICTLY higher tier, skip this quad
-      for (let j = 0; j < boroughFeatures.length; j++) {
-        if (j === bi) continue;
-        if ((avgTiers[j] || 0) <= (avgTiers[bi] || 0)) continue;
-        const bGeom = boroughFeatures[j].geometry;
-        const polys = bGeom.type === 'MultiPolygon' ? bGeom.coordinates : [bGeom.coordinates];
-        for (const poly of polys) {
-          if (pointInRing(mx, my, poly[0])) return false;
-        }
+// Shared boundary fix: removes quads whose outward edge midpoint falls inside ANY
+// neighboring borough (internal edges). Only external perimeter edges survive.
+// Returns { filtered, removedIdxSet }. The removedIdxSet is stable across zooms
+// and can be reused in the zoom listener for O(1) index-based filtering.
+function fixSharedBoundaryQuads(quadsGeoJSON, boroughFeatures) {
+  const removedIdxSet = new Set();
+  if (!boroughFeatures) return { filtered: quadsGeoJSON, removedIdxSet };
+  const kept = [];
+  quadsGeoJSON.features.forEach((quad, idx) => {
+    const coords = quad.geometry.coordinates[0];
+    const bi = quad.properties._boroughIdx;
+    if (bi == null) { kept.push(quad); return; }
+    // Outward edge midpoint (coords[0] and coords[1] are outer vertices)
+    const mx = (coords[0][0] + coords[1][0]) / 2;
+    const my = (coords[0][1] + coords[1][1]) / 2;
+    let isInternal = false;
+    for (let j = 0; j < boroughFeatures.length; j++) {
+      if (j === bi) continue;
+      const bGeom = boroughFeatures[j].geometry;
+      const polys = bGeom.type === 'MultiPolygon' ? bGeom.coordinates : [bGeom.coordinates];
+      for (const poly of polys) {
+        if (pointInRing(mx, my, poly[0])) { isInternal = true; break; }
       }
-      return true;
-    }),
-  };
+      if (isInternal) break;
+    }
+    if (isInternal) removedIdxSet.add(idx);
+    else kept.push(quad);
+  });
+  return { filtered: { ...quadsGeoJSON, features: kept }, removedIdxSet };
 }
 
 const MEDALS = ['🥇', '🥈', '🥉'];
@@ -1262,13 +1239,6 @@ export default function MapView({ events }) {
   const PUBLIC_BASE = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.BASE_URL) ? import.meta.env.BASE_URL : '/';
   const mapContainerRef = useRef(null);
   const mapRef          = useRef(null);
-  // Satellite canvas — separate MapLibre instance, lazily initialized on first satellite enable.
-  const satContainerRef = useRef(null);
-  const satMapRef       = useRef(null);
-  // Topo heatmap canvas — separate MapLibre instance for Real3D topo glow.
-  // Renders heat-underlay below stencil (unrestricted by borough mask).
-  const topoContainerRef = useRef(null);
-  const topoMapRef       = useRef(null);
   const hoveredIdRef    = useRef(null);
   const locationMarkerRef = useRef(null);
   const heatmapRef      = useRef(false);
@@ -1288,6 +1258,7 @@ export default function MapView({ events }) {
   const zipBoroughMapRef   = useRef({});
   const boroughWithColorRef = useRef(null);
   const boroughAvgTiersRef = useRef([]);
+  const boroughQuadFilterRef = useRef(null); // Pre-computed Set of skeleton segment indices to KEEP after fixSharedBoundaryQuads
   const zctaSkeletonRef    = useRef(null);
   const boroughSkeletonRef = useRef(null);
 
@@ -1422,18 +1393,6 @@ export default function MapView({ events }) {
       setMapReady(true);
     });
     return () => {
-      // Cleanup satellite map if initialized
-      if (satMapRef.current) {
-        if (satMapRef.current._syncCleanup) satMapRef.current._syncCleanup();
-        satMapRef.current.remove();
-        satMapRef.current = null;
-      }
-      // Cleanup topo heatmap canvas if initialized
-      if (topoMapRef.current) {
-        if (topoMapRef.current._syncCleanup) topoMapRef.current._syncCleanup();
-        topoMapRef.current.remove();
-        topoMapRef.current = null;
-      }
       map.remove(); mapRef.current = null;
     };
   }, []);
@@ -1531,15 +1490,15 @@ export default function MapView({ events }) {
       },
     });
 
-    // D1/D2: Safe zone extrusion — 5m tall fill-extrusion so it renders in the GPU 3D pass,
-    // completely eliminating z-fighting with 2D fill layers (real3d-landuse-baseplate, etc.).
-    // White fill preserved in all modes; at 0° pitch a 5m extrusion is visually flat top-down.
+    // D1/D2: Safe zone extrusion — minimal height (1m) so features (parks, water, buildings)
+    // above it remain visible. White fill serves as ground plane; features sit on top.
+    // At 0° pitch a 1m extrusion is visually flat top-down.
     map.addLayer({
       id: 'zcta-safezone-extrusion', type: 'fill-extrusion', source: 'zcta',
       filter: ['==', ['get', '_special'], true],
       paint: {
         'fill-extrusion-color': '#ffffff',
-        'fill-extrusion-height': 5,
+        'fill-extrusion-height': 1,
         'fill-extrusion-base': 0,
         'fill-extrusion-opacity': 1.0,
         'fill-extrusion-vertical-gradient': false,
@@ -1757,15 +1716,13 @@ export default function MapView({ events }) {
     }
 
     // Topographic heat underlay — update point data from zip centroids.
-    // Enabled when heatmap is ON and the topo toggle is on. Visible in 2D, 3D and Real3D.
-    // In Real3D: topo glow moves to a separate canvas (topoMapRef) so it radiates under the
-    // stencil unrestricted. Main map heat-underlay stays at opacity 0 in that case.
+    // Enabled when heatmap is ON and the topo toggle is on. Visible in ALL modes (2D, 3D, Real3D).
+    // No separate canvas needed — `['within']` handles NYC restriction, topo glow radiates naturally.
     if (map.getSource('heat-underlay')) {
-      if (heatmap && topoOn && !real3D) {
+      if (heatmap && topoOn) {
         map.getSource('heat-underlay').setData(buildHeatUnderlayPoints(withHeat, tiers));
         map.setPaintProperty('heat-underlay', 'heatmap-opacity', 0.50);
       } else {
-        // Real3D topo handled by separate canvas effect; non-topo = hidden
         map.setPaintProperty('heat-underlay', 'heatmap-opacity', 0);
       }
     }
@@ -1956,21 +1913,21 @@ export default function MapView({ events }) {
     // occludes correctly behind taller buildings via the depth buffer.
     if (map.getSource('borough-source')) {
       if ((threeD || real3D) && boroughGeoDataRef.current) {
-        const { zipMap: zipMapForBorough } = buildZipEventMap(events, TIMESPAN_STEPS[timespanIdx].days);
         const avgTiers = computeBoroughAvgTiers(
           tiers,
           zipBoroughMapRef.current,
           boroughGeoDataRef.current.features.length,
           geoData?.features,
-          zipMapForBorough
+          zipMap  // reuse from line 1713 — same events+timespan
         );
         boroughAvgTiersRef.current = avgTiers;
         const coloredBorough = buildColoredBoroughFeatures(boroughGeoDataRef.current, avgTiers, heatmap);
         boroughWithColorRef.current = coloredBorough;
-        // Generate quads and fix shared boundary overlap (higher-tier wins at shared edges)
+        // Generate quads and remove internal shared boundary edges (only outer perimeter survives)
         let boroughQuads = createOutlineGeoJSON(coloredBorough, getZoomAwareOutlineWidth(map, 18, threeD || real3D));
-        boroughQuads = fixSharedBoundaryQuads(boroughQuads, boroughGeoDataRef.current.features, avgTiers, heatmap);
-        map.getSource('borough-source').setData(boroughQuads);
+        const { filtered, removedIdxSet } = fixSharedBoundaryQuads(boroughQuads, boroughGeoDataRef.current.features);
+        boroughQuadFilterRef.current = removedIdxSet;
+        map.getSource('borough-source').setData(filtered);
         // Borough color: read baked _color from features — mid-brightness for visibility
         map.setPaintProperty('borough-outline', 'fill-extrusion-color', ['coalesce', ['get', '_color'], OUTLINE_COLOR]);
         // Solid opacity at all zoom levels — no interpolation so borough color
@@ -1980,6 +1937,7 @@ export default function MapView({ events }) {
         map.setPaintProperty('borough-outline', 'fill-extrusion-opacity', 0);
         boroughWithColorRef.current = null;
         boroughAvgTiersRef.current = [];
+        boroughQuadFilterRef.current = null;
       }
     }
 
@@ -2097,19 +2055,20 @@ export default function MapView({ events }) {
             map.getSource('zcta-outline').setData(createZctaOutlineGeoJSON(withHeatRef.current, getZoomAwareOutlineWidth(map, undefined, true)));
           }
         }
-        // Borough outline — 3D and Real3D. Apply shared boundary fix if heatmap is on.
+        // Borough outline — 3D and Real3D. Uses pre-computed filter index for shared boundary fix (no PiP).
         if ((is3D || isR3D) && map.getSource('borough-source')) {
+          const filterSet = boroughQuadFilterRef.current;
           if (boroughSkeletonRef.current && boroughWithColorRef.current) {
             const overrides = boroughWithColorRef.current.features.map(f => f.properties);
             let quads = generateBoroughQuadsFromSkeleton(boroughSkeletonRef.current, getZoomAwareOutlineWidth(map, 18, true), overrides);
-            if (heatmapRef.current && boroughGeoDataRef.current && boroughAvgTiersRef.current.length) {
-              quads = fixSharedBoundaryQuads(quads, boroughGeoDataRef.current.features, boroughAvgTiersRef.current, true);
+            if (filterSet && filterSet.size > 0) {
+              quads = { ...quads, features: quads.features.filter((_, i) => !filterSet.has(i)) };
             }
             map.getSource('borough-source').setData(quads);
           } else if (boroughWithColorRef.current) {
             let quads = createOutlineGeoJSON(boroughWithColorRef.current, getZoomAwareOutlineWidth(map, 18, true));
-            if (heatmapRef.current && boroughGeoDataRef.current && boroughAvgTiersRef.current.length) {
-              quads = fixSharedBoundaryQuads(quads, boroughGeoDataRef.current.features, boroughAvgTiersRef.current, true);
+            if (filterSet && filterSet.size > 0) {
+              quads = { ...quads, features: quads.features.filter((_, i) => !filterSet.has(i)) };
             }
             map.getSource('borough-source').setData(quads);
           }
@@ -2121,170 +2080,36 @@ export default function MapView({ events }) {
     return () => { map.off('zoom', onZoom); map.off('pitch', onZoom); if (rafId) cancelAnimationFrame(rafId); };
   }, [mapReady]);
 
-  // SATELLITE: Dual-mode approach.
-  // - 2D/3D: Add satellite as a raster source+layer on the MAIN map (bottom of layer stack).
-  //   No separate canvas, no camera sync. Layer moves with main map naturally.
-  // - Real3D: Separate MapLibre canvas at z=1 (needed because stencil mask would hide it
-  //   if it were on the main map — satellite must show through the NYC stencil hole).
+  // SATELLITE: Single raster layer on main map — same approach for ALL modes (2D, 3D, Real3D).
+  // Inserted at bottom of layer stack so it renders behind all other layers. No stencil blocks it.
+  // No separate canvas, no camera sync. Moves naturally with main map.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
 
-    const satContainer = satContainerRef.current;
-    if (!satContainer) return;
-
     if (satellite) {
-      if (real3D) {
-        // REAL3D: separate canvas approach — satellite below stencil via z-order
-        // Remove main-map raster layer if it exists (mode switch from 2D/3D → Real3D)
-        if (map.getLayer('sat-layer')) map.removeLayer('sat-layer');
-        if (map.getSource('sat-source')) map.removeSource('sat-source');
-
-        satContainer.style.display = 'block';
-        if (!satMapRef.current) {
-          satMapRef.current = new maplibregl.Map({
-            container: satContainer,
-            style: satelliteMapStyle(),
-            interactive: false,
-            attributionControl: false,
-            center: map.getCenter(),
-            zoom: map.getZoom(),
-            bearing: map.getBearing(),
-            pitch: map.getPitch(),
-          });
-          const syncCamera = () => {
-            const s = satMapRef.current;
-            if (!s) return;
-            s.jumpTo({ center: map.getCenter(), zoom: map.getZoom(), bearing: map.getBearing(), pitch: map.getPitch() });
-          };
-          map.on('move', syncCamera);
-          satMapRef.current._syncCleanup = () => map.off('move', syncCamera);
-        } else {
-          satMapRef.current.jumpTo({ center: map.getCenter(), zoom: map.getZoom(), bearing: map.getBearing(), pitch: map.getPitch() });
-        }
-      } else {
-        // 2D/3D: raster source+layer on main map — no separate canvas, no sync
-        satContainer.style.display = 'none';
-
-        if (!map.getSource('sat-source')) {
-          map.addSource('sat-source', {
-            type: 'raster',
-            tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
-            tileSize: 256,
-            maxzoom: 19,
-          });
-        }
-        if (!map.getLayer('sat-layer')) {
-          // Find the first existing layer to insert satellite below everything
-          const layers = map.getStyle().layers;
-          const firstLayerId = layers.length > 0 ? layers[0].id : undefined;
-          map.addLayer({
-            id: 'sat-layer', type: 'raster', source: 'sat-source',
-            paint: { 'raster-opacity': 1 },
-          }, firstLayerId);
-        }
+      if (!map.getSource('sat-source')) {
+        map.addSource('sat-source', {
+          type: 'raster',
+          tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+          tileSize: 256,
+          maxzoom: 19,
+        });
+      }
+      if (!map.getLayer('sat-layer')) {
+        const layers = map.getStyle().layers;
+        const firstLayerId = layers.length > 0 ? layers[0].id : undefined;
+        map.addLayer({
+          id: 'sat-layer', type: 'raster', source: 'sat-source',
+          paint: { 'raster-opacity': 1 },
+        }, firstLayerId);
       }
     } else {
-      // Satellite OFF: hide separate canvas and remove raster layer
-      satContainer.style.display = 'none';
       if (map.getLayer('sat-layer')) map.removeLayer('sat-layer');
       if (map.getSource('sat-source')) map.removeSource('sat-source');
     }
-
-    // Real3D stencil: ALWAYS opaque — masks outside-NYC 2D layers (parks, roads, landuse).
-    if (real3D && map.getLayer('real3d-nyc-stencil')) {
-      map.setPaintProperty('real3d-nyc-stencil', 'fill-opacity', 1.0);
-    }
   }, [satellite, real3D, mapReady]);
 
-  // TOPO HEATMAP CANVAS: separate MapLibre instance for Real3D topo glow.
-  // Renders heat-underlay at z=2 (below main map at z=3), unrestricted by the stencil.
-  // The glow radiates past borough edges as a background layer visible through
-  // the transparent main canvas. Only active when real3D + heatmap + topoOn.
-  // In 2D/3D modes, heat-underlay stays on the main map as normal (no separate canvas).
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !mapReady) return;
-
-    const topoContainer = topoContainerRef.current;
-    if (!topoContainer) return;
-
-    const shouldShow = real3D && heatmap && topoOn;
-
-    if (shouldShow) {
-      topoContainer.style.display = 'block';
-
-      // Build heat-underlay point data from current computed state
-      const withHeat = withHeatRef.current;
-      const tiers = tiersRef.current;
-      const heatData = (withHeat && tiers.length)
-        ? buildHeatUnderlayPoints(withHeat, tiers)
-        : { type: 'FeatureCollection', features: [] };
-
-      if (!topoMapRef.current) {
-        // Create lightweight MapLibre instance — transparent bg, only heat-underlay layer
-        const topoMap = new maplibregl.Map({
-          container: topoContainer,
-          style: { version: 8, sources: {}, layers: [] },
-          interactive: false,
-          attributionControl: false,
-          center: map.getCenter(),
-          zoom: map.getZoom(),
-          bearing: map.getBearing(),
-          pitch: map.getPitch(),
-        });
-        topoMap.on('load', () => {
-          topoMap.getCanvas().style.backgroundColor = 'transparent';
-          topoMap.addSource('topo-heat', { type: 'geojson', data: heatData });
-          topoMap.addLayer({
-            id: 'topo-heat-layer', type: 'heatmap', source: 'topo-heat',
-            paint: {
-              'heatmap-weight': ['coalesce', ['get', '_weight'], 0],
-              'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 8, 1.2, 11, 1.6, 13, 1.6],
-              'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 9, 200, 11, 185, 12, 185],
-              'heatmap-color': [
-                'interpolate', ['linear'], ['heatmap-density'],
-                0,    'rgba(0,0,0,0)',
-                0.03, '#092f6f',
-                0.09, '#00a2e8',
-                0.12, '#00dd66',
-                0.22, '#f5c800',
-                0.36, '#ff9a00',
-                0.55, '#ff4d4d',
-                0.75, '#cc0d00',
-              ],
-              'heatmap-opacity': 0.50,
-            },
-          });
-        });
-        // Sync camera
-        const syncCamera = () => {
-          const t = topoMapRef.current;
-          if (!t) return;
-          t.jumpTo({ center: map.getCenter(), zoom: map.getZoom(), bearing: map.getBearing(), pitch: map.getPitch() });
-        };
-        map.on('move', syncCamera);
-        topoMap._syncCleanup = () => map.off('move', syncCamera);
-        topoMapRef.current = topoMap;
-      } else {
-        // Already initialized — update data and sync camera
-        const topoMap = topoMapRef.current;
-        topoMap.jumpTo({ center: map.getCenter(), zoom: map.getZoom(), bearing: map.getBearing(), pitch: map.getPitch() });
-        if (topoMap.getSource('topo-heat')) {
-          topoMap.getSource('topo-heat').setData(heatData);
-        }
-        if (topoMap.getLayer('topo-heat-layer')) {
-          topoMap.setPaintProperty('topo-heat-layer', 'heatmap-opacity', 0.50);
-        }
-      }
-    } else {
-      // Hide topo canvas (keep GL context alive)
-      topoContainer.style.display = 'none';
-      if (topoMapRef.current && topoMapRef.current.getLayer('topo-heat-layer')) {
-        topoMapRef.current.setPaintProperty('topo-heat-layer', 'heatmap-opacity', 0);
-      }
-    }
-  }, [real3D, heatmap, topoOn, mapReady, timespanIdx, events]);
 
   // FIX REAL3D: Building color expression using feature-state (tier+shadeIdx) for
   // heatmap mode, or deterministic ID-based red shades for non-heatmap mode.
@@ -2348,121 +2173,24 @@ export default function MapView({ events }) {
     ];
   }
 
-  // Road color expression for motorway+trunk.
-  // When heatmap=off: neon red. When heatmap=on: feature-state tier → mid-range zone color.
-  function roadMotorwayColorExpr(isHeatmap) {
-    if (!isHeatmap) return '#ff2200';
-    return ['case',
-      ['==', ['feature-state', 'tier'], 4], '#8c0000',  // hot: mid crimson
-      ['==', ['feature-state', 'tier'], 3], '#8c3300',  // orange: mid burnt orange
-      ['==', ['feature-state', 'tier'], 2], '#a08200',  // warm: mid golden
-      ['==', ['feature-state', 'tier'], 1], '#007a38',  // cool: mid forest green
-      '#007a8c',                                         // cold (default): mid teal
-    ];
-  }
 
-  // Road color expression for primary+secondary.
-  // Slightly darker than motorway for visual depth differentiation.
-  function roadPrimaryColorExpr(isHeatmap) {
-    if (!isHeatmap) return '#cc1800';
-    return ['case',
-      ['==', ['feature-state', 'tier'], 4], '#660000',  // hot: dark crimson
-      ['==', ['feature-state', 'tier'], 3], '#662200',  // orange: dark burnt orange
-      ['==', ['feature-state', 'tier'], 2], '#7a6200',  // warm: dark golden
-      ['==', ['feature-state', 'tier'], 1], '#005522',  // cool: dark forest green
-      '#005566',                                         // cold (default): dark teal
-    ];
-  }
-
-  // FIX REAL3D ROADS: Multi-point spatial assignment — samples multiple vertices along each
-  // road linestring for majority-vote tier assignment. Much more accurate than centroid for
-  // long roads spanning multiple zip codes.
-  function assignRoadTiersToMap(map) {
-    if (!map) return;
-    const features = geoDataRef.current?.features;
-    const tiers = tiersRef.current;
-    if (!features || !tiers.length) return;
-
-    const layersToQuery = [];
-    if (map.getLayer('real3d-roads-motorway')) layersToQuery.push('real3d-roads-motorway');
-    if (map.getLayer('real3d-roads-primary')) layersToQuery.push('real3d-roads-primary');
-    if (!layersToQuery.length) return;
-
-    try {
-      const roads = map.queryRenderedFeatures(undefined, { layers: layersToQuery });
-      roads.forEach(r => {
-        if (r.id == null) return;
-        // Extract all coordinates from the road geometry
-        const coords = r.geometry.type === 'MultiLineString'
-          ? r.geometry.coordinates.flat()
-          : (r.geometry.coordinates || []);
-        if (coords.length === 0) return;
-        // Sample every Nth vertex (aim for ~5 samples), minimum all vertices if short
-        const step = Math.max(1, Math.floor(coords.length / 5));
-        const tierVotes = {};
-        for (let i = 0; i < coords.length; i += step) {
-          const tier = findTierForPoint(coords[i], features, tiers);
-          tierVotes[tier] = (tierVotes[tier] || 0) + 1;
-        }
-        // Always include last vertex
-        const lastTier = findTierForPoint(coords[coords.length - 1], features, tiers);
-        tierVotes[lastTier] = (tierVotes[lastTier] || 0) + 1;
-        // Majority vote
-        let bestTier = 0, bestCount = 0;
-        for (const [tier, count] of Object.entries(tierVotes)) {
-          if (count > bestCount) { bestTier = parseInt(tier); bestCount = count; }
-        }
-        map.setFeatureState(
-          { source: 'openmaptiles', sourceLayer: 'transportation', id: r.id },
-          { tier: bestTier }
-        );
-      });
-    } catch (e) { /* ignore mid-render errors */ }
-  }
-
-
-  // FIX REAL3D NYC BOUNDARY + TIGHTER ZIP ASSIGNMENT: Queries both building extrusion
-  // AND baseplate layers for feature-state tier assignment. Uses multi-sample fallback
-  // for buildings whose centroid returns tier 0 (boundary buildings).
+  // FIX REAL3D: Building tier assignment — queries extrusion layer for feature-state tier.
+  // Uses multi-sample fallback for buildings whose centroid returns tier 0 (boundary buildings).
   function assignBuildingTiersToMap(map) {
     if (!map) return;
     const features = geoDataRef.current?.features;
     const tiers = tiersRef.current;
-    const boroughFeats = boroughGeoDataRef.current?.features;
     if (!features || !tiers.length) return;
 
-    // Query both building AND baseplate layers for complete coverage
-    const layersToQuery = [];
-    if (map.getLayer('real3d-buildings')) layersToQuery.push('real3d-buildings');
-    if (map.getLayer('real3d-buildings-baseplate')) layersToQuery.push('real3d-buildings-baseplate');
-    if (!layersToQuery.length) return;
+    // Only query the extrusions layer — baseplates use uniform tier colors, no feature-state needed.
+    // Buildings already have ['within', NYC_BBOX_GEOM] filter, so no NJ/CT buildings exist.
+    if (!map.getLayer('real3d-buildings')) return;
 
     try {
-      const allBuildings = map.queryRenderedFeatures(undefined, { layers: layersToQuery });
-      // Deduplicate by feature ID since same building may appear in both layers
-      const seen = new Set();
-      allBuildings.forEach(b => {
-        if (b.id == null || seen.has(b.id)) return;
-        seen.add(b.id);
+      const buildings = map.queryRenderedFeatures(undefined, { layers: ['real3d-buildings'] });
+      buildings.forEach(b => {
+        if (b.id == null) return;
         const centroid = getGeomCentroid(b.geometry);
-        
-        // NYC boundary check — skip buildings outside 5 boroughs
-        let inNYC = false;
-        if (boroughFeats) {
-          for (const bf of boroughFeats) {
-            const bGeom = bf.geometry;
-            const polys = bGeom.type === 'MultiPolygon' ? bGeom.coordinates : [bGeom.coordinates];
-            for (const poly of polys) {
-              if (pointInRing(centroid[0], centroid[1], poly[0])) {
-                inNYC = true;
-                break;
-              }
-            }
-            if (inNYC) break;
-          }
-        }
-        if (!inNYC) return;
-        
         let tier = findTierForPoint(centroid, features, tiers);
         // Multi-sample fallback for boundary buildings: if centroid yields tier 0 (cold/default),
         // try up to 4 polygon vertices and use majority non-zero tier
@@ -2506,22 +2234,11 @@ export default function MapView({ events }) {
       } catch (err) { console.warn('Real3D source add failed:', err); return; }
     }
 
-    // Add stencil GeoJSON source if not present
-    const stencilGeoJSON = buildNYCStencilGeoJSON(boroughGeoDataRef.current);
-    if (stencilGeoJSON) {
-      if (map.getSource('real3d-stencil-source')) {
-        map.getSource('real3d-stencil-source').setData(stencilGeoJSON);
-      } else {
-        map.addSource('real3d-stencil-source', { type: 'geojson', data: stencilGeoJSON });
-      }
-    }
-
     try {
       // Fix tile-seam shimmering during pitch/rotation — must be set before layers render.
       map.setLight({ anchor: 'map' });
 
-      // WATER (z9–15): NOT stencil-bound — rivers/harbor flow past borough edges.
-      // Added first so it can be moved above the stencil after the stencil is created.
+      // WATER: unrestricted — rivers/harbor flow past borough edges naturally.
       map.addLayer({
         id: 'real3d-water', type: 'fill',
         source: 'openmaptiles', 'source-layer': 'water',
@@ -2531,11 +2248,11 @@ export default function MapView({ events }) {
         },
       });
 
-      // PARKS (z9–15): stencil-bound — stays below stencil so only NYC parks show.
+      // PARKS — NYC-restricted via ['within'] filter so stencil can be transparent.
       map.addLayer({
         id: 'real3d-park', type: 'fill',
         source: 'openmaptiles', 'source-layer': 'landuse',
-        filter: ['==', ['get', 'class'], 'park'],
+        filter: ['all', ['==', ['get', 'class'], 'park'], ['within', NYC_BBOX_GEOM]],
         paint: {
           'fill-color': '#081408',
           'fill-opacity': 0.8,
@@ -2549,33 +2266,33 @@ export default function MapView({ events }) {
         minzoom: 9, maxzoom: 13,
         filter: ['match', ['get', 'class'], ['motorway', 'trunk'], true, false],
         paint: {
-          'line-color': roadMotorwayColorExpr(isHeatmap),
+          'line-color': isHeatmap ? '#884400' : '#ff2200',
           'line-width': ['interpolate', ['linear'], ['zoom'], 9, 1.5, 13, 5],
           'line-blur': 1.5,
           'line-opacity': 0.9,
         },
       });
 
-      // ROADS — PRIMARY + SECONDARY (z11–13): stencil-bound.
+      // ROADS — PRIMARY + SECONDARY (z10–13): NYC-restricted via ['within'].
       map.addLayer({
         id: 'real3d-roads-primary', type: 'line',
         source: 'openmaptiles', 'source-layer': 'transportation',
         minzoom: 10, maxzoom: 13,
-        filter: ['match', ['get', 'class'], ['primary', 'secondary'], true, false],
+        filter: ['all', ['match', ['get', 'class'], ['primary', 'secondary'], true, false], ['within', NYC_BBOX_GEOM]],
         paint: {
-          'line-color': roadPrimaryColorExpr(isHeatmap),
+          'line-color': isHeatmap ? '#662200' : '#cc1800',
           'line-width': ['interpolate', ['linear'], ['zoom'], 10, 0.8, 13, 3],
           'line-blur': 0.8,
           'line-opacity': 0.75,
         },
       });
 
-      // ROADS — TERTIARY + RESIDENTIAL (z12–13): stencil-bound.
+      // ROADS — TERTIARY + RESIDENTIAL (z12–13): NYC-restricted via ['within'].
       map.addLayer({
         id: 'real3d-roads-tertiary', type: 'line',
         source: 'openmaptiles', 'source-layer': 'transportation',
         minzoom: 12, maxzoom: 13,
-        filter: ['match', ['get', 'class'], ['tertiary', 'minor', 'residential'], true, false],
+        filter: ['all', ['match', ['get', 'class'], ['tertiary', 'minor', 'residential'], true, false], ['within', NYC_BBOX_GEOM]],
         paint: {
           'line-color': '#771100',
           'line-width': ['interpolate', ['linear'], ['zoom'], 12, 0.5, 13, 1.5],
@@ -2584,88 +2301,68 @@ export default function MapView({ events }) {
         },
       });
 
-      // LANDUSE PROXY (z9–13): coarse block shapes before building tiles exist
+      // LANDUSE PROXY (z9–13): coarse block shapes — NYC-restricted via ['within'].
       map.addLayer({
         id: 'real3d-landuse-baseplate', type: 'fill',
         source: 'openmaptiles', 'source-layer': 'landuse',
-        filter: ['match', ['get', 'class'], ['residential', 'commercial', 'industrial', 'retail'], true, false],
+        filter: ['all', ['match', ['get', 'class'], ['residential', 'commercial', 'industrial', 'retail'], true, false], ['within', NYC_BBOX_GEOM]],
         paint: {
           'fill-color': baseplateColorExpr(isHeatmap),
-          'fill-opacity': ['interpolate', ['linear'], ['zoom'], 9, 0, 10, 0.45, 13, 0.45, 14, 0],
+          'fill-opacity': ['interpolate', ['linear'], ['zoom'], 9, 0, 10, 0.45, 11, 0.45, 12, 0],
         },
       });
 
-      // FLAT BUILDING FOOTPRINTS (z13–14.5): 5m height to avoid z-fighting
-      // ['within', NYC_BBOX_GEOM] restricts to NYC only — prevents NJ/CT buildings
-      // from rendering above the 2D stencil when satellite is on.
+      // FLAT BUILDING FOOTPRINTS (z10–11): low-height extrusion as baseplate proxy
+      // ['within', NYC_BBOX_GEOM] restricts to NYC only — prevents NJ/CT buildings.
+      // Base 2m ensures baseplates sit above safezone extrusion (1m) in safezone areas.
       map.addLayer({
         id: 'real3d-buildings-baseplate', type: 'fill-extrusion',
         source: 'openmaptiles', 'source-layer': 'building',
-        minzoom: 13, maxzoom: 14.5,
+        minzoom: 10, maxzoom: 11,
         filter: ['within', NYC_BBOX_GEOM],
         paint: {
           'fill-extrusion-color': baseplateColorExpr(isHeatmap),
-          'fill-extrusion-height': 5,
-          'fill-extrusion-base': 0,
-          'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'], 13, 0, 13.8, 0.9],
+          'fill-extrusion-height': 7,
+          'fill-extrusion-base': 2,
+          'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'], 10, 0, 10.5, 0.9],
           'fill-extrusion-vertical-gradient': false,
         },
       });
 
-      // FULL 3D EXTRUSIONS (z14+): vertical-gradient off + opacity 1.0 with fixed map-anchored
-      // lighting eliminates tile-seam Z-fighting artifacts at full building height.
+      // FULL 3D EXTRUSIONS (z11+): vertical-gradient off + opacity < 1 forces framebuffer
+      // compositing which hides tile-seam Z-fighting artifacts at full building height.
       map.addLayer({
         id: 'real3d-buildings', type: 'fill-extrusion',
         source: 'openmaptiles', 'source-layer': 'building',
-        minzoom: 14,
+        minzoom: 11,
         filter: ['within', NYC_BBOX_GEOM],
         paint: {
           'fill-extrusion-color': buildingColorExprByState(isHeatmap),
           'fill-extrusion-height': ['coalesce', ['get', 'render_height'], ['get', 'height'], 8],
-          'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0],
+          'fill-extrusion-base': ['max', 2, ['coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0]],
           'fill-extrusion-opacity': 0.92,
           'fill-extrusion-vertical-gradient': false,
         },
       });
 
-      // NYC STENCIL MASK: flat fill at top of layer stack to mask Real3D landuse/baseplates/buildings.
-      // Added LAST (no beforeId) so it sits ABOVE the three Real3D layers.
-      // heat-underlay is then moved above the stencil so heatmap/topo kernel renders unmasked.
-      // Satellite is the base raster style — always below all layers, never maskable by a fill.
-
-      if (stencilGeoJSON) {
-        map.addLayer({
-          id: 'real3d-nyc-stencil', type: 'fill',
-          source: 'real3d-stencil-source',
-          paint: {
-            'fill-color': '#0d0000',
-            'fill-opacity': 1.0,
-          },
-        });
-        // Layer ordering above stencil (back → front): water → motorway → borough-outline
-        // Heat-underlay is NOT moved above stencil in Real3D — topo glow uses separate canvas.
-        // Water is unmasked — flows past borough edges naturally.
-        if (map.getLayer('real3d-water')) map.moveLayer('real3d-water');
-        // Motorway/trunk roads extend past borough edges — must be above stencil.
-        if (map.getLayer('real3d-roads-motorway')) map.moveLayer('real3d-roads-motorway');
-        // Borough outline is fill-extrusion (3D GPU pass) — topmost, occluded by buildings naturally.
-        if (map.getLayer('borough-outline')) map.moveLayer('borough-outline');
-      }
+      // Layer ordering: move unrestricted layers to top of stack.
+      // Water is unmasked — flows past borough edges naturally.
+      if (map.getLayer('real3d-water')) map.moveLayer('real3d-water');
+      // Motorway/trunk roads extend past borough edges — above everything except borough outline.
+      if (map.getLayer('real3d-roads-motorway')) map.moveLayer('real3d-roads-motorway');
+      // Borough outline is fill-extrusion (3D GPU pass) — topmost, occluded by buildings naturally.
+      if (map.getLayer('borough-outline')) map.moveLayer('borough-outline');
 
       map.easeTo({ pitch: 55, bearing: -17, duration: 700 });
 
       if (isHeatmap) {
-        const assignAll = () => {
-          assignBuildingTiersToMap(map);
-          assignRoadTiersToMap(map);
-        };
         // Throttled assign — max once per 800ms to prevent repaint thrashing
         let assignTimer = null;
         const assignFn = () => {
           if (assignTimer) return;
-          assignTimer = setTimeout(() => { assignTimer = null; assignAll(); }, 800);
+          assignTimer = setTimeout(() => { assignTimer = null; assignBuildingTiersToMap(map); }, 800);
         };
-        setTimeout(() => assignAll(), 700);
+        setTimeout(() => assignBuildingTiersToMap(map), 700);
         map.on('moveend', assignFn);
         map.on('zoomend', assignFn);
         buildingAssignCleanupRef.current = () => {
@@ -2683,6 +2380,9 @@ export default function MapView({ events }) {
     if (!map || !mapReady) return;
     if (!real3D) {
       REAL3D_ALL_LAYER_IDS.forEach(id => { if (map.getLayer(id)) map.removeLayer(id); });
+      // Clean up stencil source from old sessions (may exist from previous code)
+      if (map.getLayer('real3d-nyc-stencil')) map.removeLayer('real3d-nyc-stencil');
+      if (map.getSource('real3d-stencil-source')) map.removeSource('real3d-stencil-source');
       if (buildingAssignCleanupRef.current) { buildingAssignCleanupRef.current(); buildingAssignCleanupRef.current = null; }
       if (!threeD) map.easeTo({ pitch: 0, bearing: 0, duration: 700 });
       return;
@@ -2706,27 +2406,23 @@ export default function MapView({ events }) {
     if (map.getLayer('real3d-landuse-baseplate')) {
       map.setPaintProperty('real3d-landuse-baseplate', 'fill-color', baseplateColorExpr(heatmap));
     }
-    // Heatmap staining for Digital Skeleton roads — per-zone colors via feature-state tier.
-    // Restore neon reds when heatmap off.
+    // Heatmap staining for Digital Skeleton roads — static warm tones when heatmap on,
+    // neon reds when heatmap off. No per-feature tier assignment (eliminated for performance).
     if (map.getLayer('real3d-roads-motorway')) {
-      map.setPaintProperty('real3d-roads-motorway', 'line-color', roadMotorwayColorExpr(heatmap));
+      map.setPaintProperty('real3d-roads-motorway', 'line-color', heatmap ? '#884400' : '#ff2200');
     }
     if (map.getLayer('real3d-roads-primary')) {
-      map.setPaintProperty('real3d-roads-primary', 'line-color', roadPrimaryColorExpr(heatmap));
+      map.setPaintProperty('real3d-roads-primary', 'line-color', heatmap ? '#662200' : '#cc1800');
     }
 
     if (buildingAssignCleanupRef.current) { buildingAssignCleanupRef.current(); buildingAssignCleanupRef.current = null; }
     if (heatmap) {
-      const assignAll = () => {
-        assignBuildingTiersToMap(map);
-        assignRoadTiersToMap(map);
-      };
       let assignTimer = null;
       const assignFn = () => {
         if (assignTimer) return;
-        assignTimer = setTimeout(() => { assignTimer = null; assignAll(); }, 800);
+        assignTimer = setTimeout(() => { assignTimer = null; assignBuildingTiersToMap(map); }, 800);
       };
-      setTimeout(() => assignAll(), 500);
+      setTimeout(() => assignBuildingTiersToMap(map), 500);
       map.on('moveend', assignFn);
       map.on('zoomend', assignFn);
       buildingAssignCleanupRef.current = () => { map.off('moveend', assignFn); map.off('zoomend', assignFn); if (assignTimer) clearTimeout(assignTimer); };
@@ -2798,30 +2494,15 @@ export default function MapView({ events }) {
     // Outer div is the positioning root for everything
     <div ref={containerRef} className="absolute inset-0 overflow-hidden" style={{ background: '#0d0000' }}>
 
-      {/* SATELLITE CANVAS: separate MapLibre instance at z=1.
-          Stack from back to front: CSS bg (#0d0000) → sat canvas (z=1) → topo canvas (z=2) → main map (z=3). */}
-      <div
-        ref={satContainerRef}
-        className="absolute inset-0 w-full h-full"
-        style={{ zIndex: 1, display: 'none' }}
-      />
-
-      {/* TOPO HEATMAP CANVAS: separate MapLibre instance at z=2 — above satellite, below main map.
-          Only active when real3D + heatmap + topoOn. Radiates unrestricted by stencil. */}
-      <div
-        ref={topoContainerRef}
-        className="absolute inset-0 w-full h-full"
-        style={{ zIndex: 2, display: 'none' }}
-      />
-
       {/* FIX CRT: Wrap CRTEffect at z-index 20 so it renders ABOVE the map canvas
-          (z:3) as a visible overlay on all views and combos, while remaining below
+          as a visible overlay on all views and combos, while remaining below
           popups (z:30+). pointer-events-none ensures it never blocks interaction. */}
       <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 20 }}>
         <CRTEffect active={true} limitMobile={isMobile} />
       </div>
 
-      {/* Map canvas at z-index 3 */}
+      {/* Single map canvas — all layers (satellite, topo, DS, buildings) on one MapLibre instance.
+          No separate canvases needed. ['within'] handles NYC restriction. */}
       <div
         ref={mapContainerRef}
         className="absolute inset-0 w-full h-full"

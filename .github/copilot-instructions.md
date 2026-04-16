@@ -178,10 +178,10 @@
 - **What each mode owns**:
   - **2D**: ZCTA fill, ZCTA outline, borough outline (flat), heat-underlay. No extrusions, no stencil, no Real3D layers.
   - **3D**: Everything in 2D + ZCTA fill-extrusions, upper 3D border extrusions, borough outline extrusions. Pitch/bearing: `{48, -17}`.
-  - **Real3D**: Replaces all 3D layers with own stack: park, roads, landuse-baseplate, buildings-baseplate, buildings, stencil. Adds water. Borough outline shared. Pitch/bearing: `{55, -17}`.
-  - **Satellite**: Separate MapLibre canvas at z=1 (all modes). Camera synced via `map.on('move')`.
+  - **Real3D**: Replaces all 3D layers with own stack: park, roads, landuse-baseplate, buildings-baseplate, buildings. Adds water. Borough outline shared. Pitch/bearing: `{55, -17}`. All feature layers NYC-restricted via `['within', NYC_BBOX_GEOM]`.
+  - **Satellite**: Raster source+layer on the main map in ALL modes (bottom of stack). Single canvas, no separate MapLibre instance.
   - **Heatmap**: Recolors ZCTA fills/extrusions by tier. Enables heat-underlay (gaussian kernel). In Real3D: triggers `assignBuildingTiersToMap` for building-to-zip color assignment.
-  - **Topo**: When `heatmap && topoOn`: sets heat-underlay opacity to 0.50 (otherwise 0).
+  - **Topo**: When `heatmap && topoOn`: sets heat-underlay opacity to 0.50 (otherwise 0). Works on main map in all modes.
 
 - **Conditionals must cleanly separate** 2D from 3D from Real3D logic. Each overlay combo within a core view may need its own paint property values (e.g., fill opacity differs satellite vs non-satellite).
 
@@ -210,42 +210,43 @@
   - **Heatmap palette (heatmap ON)**: Buildings use tier-based colors via `feature-state` tier + ID%5 shade index. This requires CPU-side tier assignment via `assignBuildingTiersToMap`. Baseplates should use simple dark heatmap colors (NOT clustered — clustering causes tile seam artifacts).
 - Buildings must only render within NYC (5 boroughs). `NYC_BBOX_GEOM` bounding box is defined but NOT currently used as a filter — must add `filter: ['within', NYC_BBOX_GEOM]` to building layers.
 
-### MapView — Real3D Architecture (Audit Findings — commit 1c3c045)
+### MapView — Real3D Architecture (Simplified — no stencil, no separate canvases)
 
-#### Real3D Canvas Stack (back to front):
+#### Single-Canvas Architecture (ALL modes):
+All modes (2D, 3D, Real3D) use a single MapLibre canvas. Satellite and topo heatmap are normal layers on the main map. No separate canvases, no camera sync.
+
+#### NYC Restriction via `['within']`:
+Instead of a stencil mask, individual layers use `filter: ['within', NYC_BBOX_GEOM]` to restrict rendering to NYC at the GPU level. Features outside the bounding box are never rendered (true compute savings, not just visual hiding).
+
+**NYC-restricted layers** (only render inside NYC bounding box):
+- `real3d-park` (fill)
+- `real3d-roads-primary` (line)
+- `real3d-roads-tertiary` (line)
+- `real3d-landuse-baseplate` (fill)
+- `real3d-buildings-baseplate` (fill-extrusion)
+- `real3d-buildings` (fill-extrusion)
+
+**Unrestricted layers** (intentionally extend past borough edges):
+- `real3d-water` (fill) — rivers/harbor flow past boroughs
+- `real3d-roads-motorway` (line) — highways cross boundaries
+- `borough-outline` (fill-extrusion) — outer NYC perimeter
+- `sat-layer` (raster) — satellite imagery everywhere
+- `heat-underlay` (heatmap) — topo glow radiates past boroughs
+
+#### Real3D Layer Stack (back to front):
 ```
-z=0   Container CSS background (#0d0000)
-z=1   Satellite canvas (when satellite ON + real3D) — separate MapLibre, camera-synced
-z=2   Topo heatmap canvas (when real3D + heatmap + topoOn) — separate MapLibre, camera-synced
-z=3   Main map canvas (transparent background)
+sat-layer (raster, when satellite ON)
+heat-underlay (heatmap, when heatmap + topo ON)
+real3d-park (fill, NYC-restricted)
+real3d-roads-primary (line, NYC-restricted)
+real3d-roads-tertiary (line, NYC-restricted)
+real3d-landuse-baseplate (fill, NYC-restricted)
+real3d-buildings-baseplate (fill-extrusion, NYC-restricted, z10-11)
+real3d-buildings (fill-extrusion, NYC-restricted, z11+)
+real3d-water (fill, unrestricted)
+real3d-roads-motorway (line, unrestricted)
+borough-outline (fill-extrusion, unrestricted, topmost)
 ```
-Separate canvases exist ONLY in Real3D mode. In 2D/3D, satellite is a raster source+layer on the main map (bottom of stack), and topo heat-underlay is a heatmap layer on the main map. No camera sync needed in 2D/3D.
-
-#### Real3D Main Map Layer Stack (back to front):
-BELOW STENCIL (visually masked outside NYC):
-1. `real3d-park` (type: fill) — ✂ masked
-2. `real3d-roads-primary` (type: line) — ✂ masked
-3. `real3d-roads-tertiary` (type: line) — ✂ masked
-4. `real3d-landuse-baseplate` (type: fill) — ✂ masked
-
-FILL-EXTRUSIONS (separate 3D GPU pass — stencil cannot mask):
-5. `real3d-buildings-baseplate` (fill-extrusion) — 🔒 `['within', NYC_BBOX_GEOM]` filter
-6. `real3d-buildings` (fill-extrusion) — 🔒 `['within', NYC_BBOX_GEOM]` filter
-
-THE STENCIL:
-7. `real3d-nyc-stencil` (type: fill, always opacity 1.0)
-
-ABOVE STENCIL (moveLayer'd, unmasked):
-8. `real3d-water` (type: fill) — 🌊 flows past boroughs
-9. `real3d-roads-motorway` (type: line) — 🛣️ extends past boroughs
-10. `borough-outline` (fill-extrusion) — 🏙️ topmost, occluded by buildings naturally
-
-#### Stencil + Satellite Interaction (fill-extrusions bypass 2D stencil)
-- MapLibre renders all `fill-extrusion` layers in a SEPARATE 3D GPU pass, composited ABOVE all 2D fills regardless of layer order.
-- The stencil (type: `fill`) only masks other 2D layers (parks, roads, landuse fills).
-- **Without satellite**: The stencil's dark color (`#0d0000`) matches the page/map background, so building fill-extrusions outside NYC render above the stencil but are visually hidden against the identical dark background. Stencil appears to work correctly.
-- **With satellite + Real3D**: The satellite canvas (z=1) provides a bright background behind the main map (z=2). Buildings outside NYC render above the dark stencil, and now they're visible against the bright satellite imagery instead of blending into darkness. This is the ONLY combo where the stencil "breaks" visually.
-- **Fix**: Add `filter: ['within', NYC_BBOX_GEOM]` to both building fill-extrusion layers for GPU-level restriction. This ensures NJ/CT buildings are never rendered regardless of background.
 
 #### Raytracer System — Performance Bottleneck
 - `assignBuildingTiersToMap` runs on every `moveend`/`zoomend` (800ms throttle).
@@ -255,10 +256,10 @@ ABOVE STENCIL (moveLayer'd, unmasked):
 - Causes: tile seam artifacts (only styles on-screen tiles), square bounding artifacts, GPU stalls, main thread blocking.
 - **Planned replacement**: Per-tier building layers with `['within', tierGeometry]` filters. Eliminates ALL CPU-side PiP and feature-state assignment. `buildTierGeoCollections()` already generates the tier geometries.
 
-#### Satellite Canvas — Overhead in 2D/3D
-- Satellite is ALWAYS a separate MapLibre canvas instance, even in 2D/3D where no stencil exists.
-- This means double GPU draw calls, double tile fetching, `syncCamera` on every `move` event.
-- **Planned fix**: Use satellite as a normal raster source/layer in 2D/3D. Only keep separate canvas for Real3D.
+#### Satellite — Unified Raster Layer (All Modes)
+- Satellite is a raster source+layer on the main map in ALL modes (2D, 3D, Real3D).
+- No separate MapLibre canvas. No camera sync overhead.
+- Raster layer inserted at bottom of stack, below all other layers.
 
 #### Redundant Computations Found
 - `buildZipEventMap` called twice with identical params in the same heatmap effect (lines 1706 and 1956).
@@ -267,12 +268,12 @@ ABOVE STENCIL (moveLayer'd, unmasked):
 - `ZipHologram` + `ZipHologramMobile` — 95% duplicate code, only differ in canvas size and depth.
 
 #### Dead Code
-- `HEAT_TONES` constant — marked "legacy", never referenced.
-- `PEAK_WEIGHTS` constant — unused after `computeBoroughAvgTiers` rewrite.
-- `REAL3D_ALL_LAYER_IDS` includes `real3d-hm-baseplate-*` and `real3d-hm-buildings-*` IDs that are never created.
-- `buildTierGeoCollections()` — defined but never called (was intended for `['within']` approach).
-- `NYC_BBOX_GEOM` — defined but never used as a filter.
-- `styleVersion` state — was for style-swap cycle, no longer needed with separate canvas approach.
+- `HEAT_TONES` constant — marked "legacy", never referenced. REMOVED.
+- `PEAK_WEIGHTS` constant — unused after `computeBoroughAvgTiers` rewrite. REMOVED.
+- `REAL3D_ALL_LAYER_IDS` included `real3d-hm-baseplate-*` and `real3d-hm-buildings-*` IDs that were never created. REMOVED.
+- `buildTierGeoCollections()` — defined but never called (intended for `['within']` per-tier approach).
+- `buildNYCStencilGeoJSON()` — REMOVED (stencil eliminated).
+- `satelliteMapStyle()` — REMOVED (satellite is now a raster layer, no separate map instance).
 
 ### MapView — Post-Mortem: Failed Approaches (DO NOT REPEAT)
 - **Failure 1 — queryRenderedFeatures + setFeatureState for Real3D**: Caused "square bleeding" artifacts because it only styles tiles currently rendered on-screen. Panning reveals unqueried buildings flashing the default color. Must use GPU-side data-driven paint expressions instead. The current implementation still uses this approach for building-to-zip tier assignment. Planned replacement: per-tier building layers with `['within', tierGeoCollection]` filters.
@@ -281,6 +282,7 @@ ABOVE STENCIL (moveLayer'd, unmasked):
 - **Failure 4 — Zip polygon glitching (e.g., 11422)**: Confirmed as GeoJSON triangulation issue. Solved by `enforceGeoJSONWinding` on all features at load time.
 - **Failure 5 — Baseplate tier clustering via feature-state (commit 1c3c045)**: Making `baseplateColorExpr(true)` use `buildingColorExprByState(true)` caused tile-seam artifacts because queryRenderedFeatures only assigns tiers to on-screen tiles. Baseplates should use simple uniform dark colors, NOT feature-state dependent clustering.
 - **Failure 6 — Stencil masking fill-extrusions**: A 2D `fill` layer CANNOT mask `fill-extrusion` layers in MapLibre — they render in separate GPU passes. Stencil only works for 2D layers (parks, roads, landuse fills). Building layers need `['within']` GPU-side filter for true NYC restriction.
+- **Failure 7 — Separate canvases for satellite/topo in Real3D**: Created 2-3 MapLibre canvas instances (sat z=1, topo z=2, main z=3) with camera sync. Massive overhead: double/triple GPU draw calls, constant `map.on('move', syncCamera)` events. Eliminated entirely by using `['within']` for NYC restriction (no stencil needed → no visual occlusion → no need for layers below the stencil). All modes now use a single canvas with satellite/topo as normal layers.
 
 ### MapView — UI Micro-Fixes
 - **Zoom controls overlap**: The native MapLibre zoom-out (minus) button overlaps the custom Recentering button. Fix: add `marginBottom: '80px'` to the MapLibre NavigationControl container on load, or reposition the custom recentering button so the native minus button is always clickable.
@@ -304,13 +306,28 @@ ABOVE STENCIL (moveLayer'd, unmasked):
 **Round 4 — Group A (safe fixes, 2026-04-16):**
 - **A1 — ZCTA outline width lock (3D/Real3D):** Changed `getZoomAwareOutlineWidth` ZCTA path from `Math.max(0, 10.5 - zoom)` to `Math.max(0, 10.5 - Math.min(zoom, 10))`. Outline width at zoom 10 is now the constant for all zooms ≥ 10. Affects 3D and Real3D only (non-3D path unchanged).
 - **A2 — Revert baseplate clustering:** `baseplateColorExpr(true)` no longer delegates to `buildingColorExprByState(true)`. Heatmap ON baseplates now use uniform dark tier colors via `feature-state` tier (no ID%5 clustering). Eliminates tile-seam artifacts caused by per-feature clustering on baseplates. Affects Real3D + Heatmap combo only.
-- **A3 — NYC building filter + stencil fix:** Added `filter: ['within', NYC_BBOX_GEOM]` to `real3d-buildings-baseplate` and `real3d-buildings` layers. GPU-side restriction prevents NJ/CT building rendering in all Real3D combos. Stencil `fill-opacity` set to always `1.0` (was `0` when satellite ON — that broke visual masking). Motorway moved above stencil via `moveLayer`. Affects Real3D only.
-- **A3b — Heat-underlay reorder:** Moved `heat-underlay` below `borough-outline` in the above-stencil stack. New order: water → motorway → heat-underlay → borough-outline. Affects Real3D only.
-- **A4 — Dead code removal:** Removed `HEAT_TONES` constant (legacy, never referenced), `PEAK_WEIGHTS` constant (unused after `computeBoroughAvgTiers` rewrite), `real3d-hm-baseplate-*` and `real3d-hm-buildings-*` from `REAL3D_ALL_LAYER_IDS` (layers never created). Updated `buildTierGeoCollections` comment to mark as planned for C2 optimization. No behavioral change.
-- **Topo heatmap separate canvas (Real3D only):** Added `topoContainerRef` + `topoMapRef` for a dedicated lightweight MapLibre instance at z=2 (between satellite z=1 and main map z=3). When `real3D && heatmap && topoOn`: topo glow renders on this canvas with `heatmap-opacity: 0.50`, unrestricted by the stencil. Main map's heat-underlay is never active in Real3D (opacity 0, no data). For 2D/3D modes, topo canvas is hidden and heat-underlay stays on main map exactly as before — no separate canvas, no camera sync, unchanged behavior. This is the ONLY heatmap element that gets a separate canvas — the heatmap fill recoloring (zcta-fill) stays on main map in all modes.
-- **A1 outline width fix (corrected scope):** Original A1 change was applied to wrong path (3D mode). Reverted 3D path. Applied zoom-lock to non-3D path (2D and Real3D flat outlines) instead: `zoomCompensation = zoom > 10 ? Math.pow(2, zoom - 10) : 1` scales meter width proportionally so visual pixel width stays constant at zoom > 10. 3D mode outline is unchanged.
-- **z-index stack corrected:** satellite z=1, topo canvas z=2, main map z=3 (was z=1, z=1.5, z=2).
-- **C1 — Satellite dual-mode:** Satellite is now a raster source+layer on the main map for 2D/3D (no separate canvas, no camera sync overhead). In Real3D, satellite uses a separate MapLibre canvas at z=1 (needed because stencil mask would hide a main-map raster layer). The satellite effect re-runs on `[satellite, real3D, mapReady]` so toggling between modes cleanly switches approaches: entering Real3D with sat ON removes the raster layer and shows the canvas; leaving Real3D with sat ON hides the canvas and adds the raster layer. This eliminates double GPU draw calls and constant `map.on('move', syncCamera)` overhead in 2D/3D modes. Separate canvases now exist ONLY in Real3D.
+- **A3 — NYC building filter:** Added `filter: ['within', NYC_BBOX_GEOM]` to `real3d-buildings-baseplate` and `real3d-buildings` layers. GPU-side restriction prevents NJ/CT building rendering in all Real3D combos.
+- **A4 — Dead code removal:** Removed `HEAT_TONES`, `PEAK_WEIGHTS`, unused `REAL3D_ALL_LAYER_IDS` entries.
+- **Zoom thresholds applied:** Baseplates `minzoom: 10, maxzoom: 11` (was 13–14.5). Buildings `minzoom: 11` (was 14). Landuse proxy opacity ramp adjusted. Baseplate opacity fade-in at zoom 10–10.5.
+
+**Round 4 — Performance fixes:**
+- **B1 — Deduplicate `buildZipEventMap`:** Reuse result from line 1706 at line 1956 (was calling function twice with identical params).
+- **B2 — Pre-compute `fixSharedBoundaryQuads`:** Removed PiP from zoom/pitch listener. Now pre-computed once in heatmap effect, stored in `boroughQuadFilterRef` (Set of removed quad indices). Zoom listener uses O(n) index filtering instead of O(n×boroughs×vertices) PiP.
+- **Road tier elimination:** Removed `assignRoadTiersToMap`, `roadMotorwayColorExpr`, `roadPrimaryColorExpr` (all dead code). Roads now use static colors (`#884400`/`#ff2200` for heatmap on/off).
+- **Building tier simplification:** `assignBuildingTiersToMap` only queries `real3d-buildings` layer (not baseplates), removed per-building NYC PiP check (redundant with `['within']` filter).
+
+**Round 4 — Safezone fixes:**
+- Safezone extrusion height: 10→1m (features like buildings/parks render above it).
+- Building baseplate base: 0→2m. Building extrusion base: `['max', 2, ...]`.
+- `fixSharedBoundaryQuads` now removes ALL internal borough boundary edges. Only outer NYC perimeter outline survives — eliminates safezone wall artifacts from interior edges.
+
+**Round 4 — Architecture overhaul (stencil + canvas removal):**
+- **Stencil removed:** `real3d-nyc-stencil` layer and `real3d-stencil-source` completely removed. NYC restriction handled entirely by `['within', NYC_BBOX_GEOM]` filters on individual layers.
+- **Separate canvases removed:** Eliminated `satContainerRef`, `satMapRef`, `topoContainerRef`, `topoMapRef`. No more second/third MapLibre instances. No camera sync code.
+- **Satellite unified:** Satellite is now a raster source+layer on the main map in ALL modes (2D, 3D, Real3D). No separate canvas needed since no stencil blocks it.
+- **Topo unified:** Heat-underlay (topo glow) renders on main map in ALL modes. Guard changed from `!real3D` to just `heatmap && topoOn`.
+- **Single canvas:** All modes use one MapLibre canvas. CSS background `#0d0000` provides dark fill outside NYC. z-index stack simplified.
+- **~200 lines removed.** File reduced from ~2966 to ~2773 lines.
 
 ### Favorites System
 - Storage keys: `lapuff_favorites` (IDs), `lapuff_fav_counts` (counts), `lapuff_fav_history` (activity), `lapuff_favorite_event_cache` (snapshots, max 240), `lapuff_sb_favs` (synced set).
