@@ -198,27 +198,27 @@
 - **Zip polygon glitching** (e.g., zip 11422): Random flat red vertices/caps appear at certain zoom levels. This is a GeoJSON triangulation issue — broken polygons or bad zoom-out simplification in the source data. Investigate the cleaned GeoJSON for broken polygon rings. If any derived zip data elsewhere in the codebase was generated from an older GeoJSON, regenerate it.
 
 ### MapView — Real3D Mode Rules (Individual Buildings)
-- Real3D renders actual OSM building footprints from the MapTiler 3D buildings source (`openmaptiles` vector tiles, `building` source-layer).
-- **3 zoom tiers** (current thresholds — to be adjusted):
+- Real3D renders NYC building footprints from a local FlatGeobuf file (`public/data/BUILDING.fgb`, 348K polygons).
+- **Data source**: GeoJSON via `flatgeobuf` library. Properties: `height_roof` (float), `ground_elevation` (float, 181 nulls), `objectid` (string). All parsed to numbers at load time.
+- **NYC-only data** — no `['within']` filter needed for buildings (unlike previous MapTiler approach).
+- **3 zoom tiers**:
   - Far zoom (< zoom 10): No 3D building extrusions or baseplates rendered.
-  - Medium zoom (zoom 10–11): Baseplates only (flat building footprints as fill-extrusions at 5m height, opacity fade-in from 0 to 0.9 across z13–13.8). Also landuse proxy fills for coarse area shading (z10–14).
-  - Close zoom (zoom 11+): Full 3D building extrusions at actual building heights (opacity 0.92).
-- **Target zoom thresholds** (user-requested): baseplates at zoom ≥ 10, buildings at zoom ≥ 11.
-- **Current zoom thresholds**: baseplates minzoom 13, buildings minzoom 14. These need lowering.
-- **Two color palettes** with clustering for visual differentiation of adjacent buildings:
-  - **Standard palette (heatmap OFF)**: 7 dark-red shades via `['%', ['to-number', ['id'], 0], 7]` for GPU-side clustering. No CPU-side assignment needed. Baseplates use 3 dark reds via ID%3.
-  - **Heatmap palette (heatmap ON)**: Buildings use tier-based colors via `feature-state` tier + ID%5 shade index. This requires CPU-side tier assignment via `assignBuildingTiersToMap`. Baseplates should use simple dark heatmap colors (NOT clustered — clustering causes tile seam artifacts).
-- Buildings must only render within NYC (5 boroughs). `NYC_BBOX_GEOM` bounding box is defined but NOT currently used as a filter — must add `filter: ['within', NYC_BBOX_GEOM]` to building layers.
+  - Medium zoom (zoom 10–11): Baseplates only (flat footprints at 7m height, opacity fade-in z10–10.5).
+  - Close zoom (zoom 11+): Full 3D building extrusions at actual `height_roof` heights (opacity 0.92).
+- **Two color palettes** with clustering via `objectid % N` for GPU-side differentiation:
+  - **Standard palette (heatmap OFF)**: 7 dark-red shades via `['%', ['to-number', ['get', 'objectid'], 0], 7]`. Baseplates use 3 dark reds via objectid%3.
+  - **Heatmap palette (heatmap ON)**: Buildings use `_tier` property (baked into GeoJSON by `bakeBuildingTiers()`) + objectid%5 shade index. Baseplates use uniform dark tier colors.
+- **Tier baking**: `bakeBuildingTiers()` runs PiP for each building centroid against ZCTA polygons to assign `_tier` (0-4). Runs once per heatmap/timespan change. No per-frame CPU work.
+- **No more raytracer**: Eliminated `assignBuildingTiersToMap` (queryRenderedFeatures + setFeatureState). No tile-seam artifacts. No moveend/zoomend listeners for building coloring.
 
 ### MapView — Real3D Architecture (Simplified — no stencil, no separate canvases)
 
 #### Single-Canvas Architecture (ALL modes):
 All modes (2D, 3D, Real3D) use a single MapLibre canvas. Satellite and topo heatmap are normal layers on the main map. No separate canvases, no camera sync.
 
-#### NYC Restriction via `['within']`:
-Individual layers use `filter: ['within', NYC_BBOX_GEOM]` to restrict rendering to NYC at the GPU level.
-
-**CRITICAL**: `['within']` does NOT work reliably with MapTiler vector tile fill-extrusion features. Building/baseplate layers MUST NOT use `['within']` — they render all buildings but NJ/CT ones stay in dark default colors that blend with the CSS background. CPU-side `assignBuildingTiersToMap` restricts colorful tier coloring to NYC only.
+#### NYC Restriction:
+- Fill/line layers from MapTiler use `filter: ['within', NYC_BBOX_GEOM]` for GPU-side restriction.
+- Building/baseplate layers use local FGB data (NYC-only) — no filter needed.
 
 **NYC-restricted layers** (only render inside NYC bounding box):
 - `real3d-park` (fill)
@@ -229,8 +229,8 @@ Individual layers use `filter: ['within', NYC_BBOX_GEOM]` to restrict rendering 
 **Unrestricted layers** (intentionally extend past borough edges):
 - `real3d-water` (fill) — rivers/harbor flow past boroughs
 - `real3d-roads-motorway` (line) — highways cross boundaries
-- `real3d-buildings-baseplate` (fill-extrusion) — `['within']` incompatible, uses dark reds
-- `real3d-buildings` (fill-extrusion) — `['within']` incompatible, tier coloring via CPU PiP
+- `real3d-buildings-baseplate` (fill-extrusion) — NYC-only FGB data, source: `fgb-buildings`
+- `real3d-buildings` (fill-extrusion) — NYC-only FGB data, source: `fgb-buildings`
 - `borough-outline` (fill-extrusion) — outer NYC perimeter
 - `sat-layer` (raster) — satellite imagery everywhere
 - `heat-underlay` (heatmap) — topo glow radiates past boroughs
@@ -244,19 +244,17 @@ real3d-park (fill, NYC-restricted)
 real3d-roads-primary (line, NYC-restricted)
 real3d-roads-tertiary (line, NYC-restricted)
 real3d-landuse-baseplate (fill, NYC-restricted)
-real3d-buildings-baseplate (fill-extrusion, unrestricted, z10-11)
-real3d-buildings (fill-extrusion, unrestricted, z11+)
+real3d-buildings-baseplate (fill-extrusion, FGB source, z10-11)
+real3d-buildings (fill-extrusion, FGB source, z11+)
 real3d-roads-motorway (line, unrestricted, moved to top)
 borough-outline (fill-extrusion, unrestricted, topmost)
 ```
 
-#### Raytracer System — Performance Bottleneck
-- `assignBuildingTiersToMap` runs on every `moveend`/`zoomend` (800ms throttle).
-- Queries ALL visible building features via `queryRenderedFeatures`.
-- For EACH building: 5-borough PiP check (is it in NYC?), then ~180 ZCTA PiP check (which zip?), then 4-vertex fallback.
-- Potentially 10,000+ buildings × 185 PiP operations = **millions of ray casts per camera stop**.
-- Causes: tile seam artifacts (only styles on-screen tiles), square bounding artifacts, GPU stalls, main thread blocking.
-- **Planned replacement**: Per-tier building layers with `['within', tierGeometry]` filters. Eliminates ALL CPU-side PiP and feature-state assignment. `buildTierGeoCollections()` already generates the tier geometries.
+#### FGB Building Data Pipeline
+- `loadBuildingFGB()`: Fetches `BUILDING.fgb` via flatgeobuf `deserialize(resp.body)`, parses all string properties to numbers, caches in `buildingFGBRef`.
+- `bakeBuildingTiers(buildingGeoJSON)`: For heatmap mode — runs PiP to assign `_tier` to each feature's properties. Returns new FeatureCollection (does not mutate cached data).
+- GeoJSON source `fgb-buildings` with `generateId: true` — MapLibre assigns sequential IDs for internal use.
+- Source is created/destroyed with Real3D toggle. Data is updated via `setData()` when heatmap/timespan changes.
 
 #### Satellite — Unified Raster Layer (All Modes)
 - Satellite is a raster source+layer on the main map in ALL modes (2D, 3D, Real3D).
@@ -340,16 +338,25 @@ borough-outline (fill-extrusion, unrestricted, topmost)
 - **~200 lines removed.** File reduced from ~2966 to ~2773 lines.
 
 **Round 4 — 5-issue fix batch (post-overhaul):**
-- **Buildings fix (CRITICAL):** Removed `['within', NYC_BBOX_GEOM]` from `real3d-buildings-baseplate` and `real3d-buildings`. MapLibre's `['within']` expression does NOT work reliably with MapTiler vector tile fill-extrusion features — all buildings were being filtered out. NJ/CT buildings now render but blend with dark CSS background; `assignBuildingTiersToMap` handles NYC-only tier coloring.
 - **Water layer ordering:** Water now inserted BELOW heat-underlay via `addLayer(spec, 'heat-underlay')`. Removed `moveLayer('real3d-water')` to top. Stack: satellite → water → heat-underlay → parks/roads/buildings.
 - **Borough outlines — safezone filter:** Replaced `fixSharedBoundaryQuads` (removed ALL internal edges) with `removeSafezoneOverlapQuads` (only removes quads overlapping safezone ZCTA features). Interior borough lines now visible for clarity.
-- **Borough outlines — height stagger:** Base/height offset by `_boroughIdx * 1m` per borough to prevent Z-fighting at overlapping edges.
+- **Borough outlines — height stagger:** Base/height offset by `_tier * 1m` (not `_boroughIdx`) so red (tier 4) always renders on top.
 - **Borough pixelation:** Width ramp increased from 2x→4x to 2.5x→7x (zoom 11→9) for thicker outlines at low zoom.
+- **Borough opacity:** Zoom-interpolated opacity `['interpolate', ['linear'], ['zoom'], 9, 0.4, 11, 1.0]` softens thin extrusions at distance.
 - **Toggle lag:** `cachedTierDataRef` caches `buildZipEventMap` + `computeTiers`. Paint-only toggles (satellite, topoOn, threeD) skip expensive recomputation.
 - **Heat-underlay opacity:** Removed `!real3D` restriction from initial layer creation so topo glow works in Real3D immediately.
+- **Zoom handler:** Removed RAF debounce — fires synchronously on zoom/pitch for instant outline response.
+
+**Round 4 — FGB Building Migration (commit 9dd1a94):**
+- **BUILDING.fgb source:** Replaced MapTiler `openmaptiles` building source with local FlatGeobuf file (348K NYC-only polygons). Eliminates: tile-seam artifacts, `['within']` incompatibility, NJ/CT building rendering, external tile dependency for buildings.
+- **Tier baking:** `bakeBuildingTiers()` pre-assigns `_tier` property to each building feature via centroid PiP. Runs once per heatmap/timespan change — no per-frame CPU work.
+- **Raytracer eliminated:** Removed `assignBuildingTiersToMap` entirely (queryRenderedFeatures + setFeatureState + moveend/zoomend listeners). No more millions of PiP operations per camera stop.
+- **Color expressions updated:** Use `['get', 'objectid']` for clustering instead of `['id']` (vector tile feature IDs). `_tier` read via `['get', '_tier']` instead of `['feature-state', 'tier']`.
+- **FGB loading:** `loadBuildingFGB()` streams FGB via flatgeobuf `deserialize`, parses string properties to numbers, caches in `buildingFGBRef`. Source `fgb-buildings` created/destroyed with Real3D toggle.
 
 ### MapView — Post-Mortem: Failed Approaches (DO NOT REPEAT)
-- **Failure 8 — `['within']` on MapTiler vector tile fill-extrusions**: `['within', NYC_BBOX_GEOM]` filter on building/baseplate fill-extrusion layers from MapTiler's `openmaptiles` source caused ALL buildings to disappear. Works fine on fill/line layers (parks, roads, landuse) but NOT on fill-extrusion layers from external vector tile sources. Must leave building layers unfiltered and rely on dark default colors + CPU-side `assignBuildingTiersToMap` for NYC-only coloring.
+- **Failure 8 — `['within']` on MapTiler vector tile fill-extrusions**: `['within', NYC_BBOX_GEOM]` filter on building/baseplate fill-extrusion layers from MapTiler's `openmaptiles` source caused ALL buildings to disappear. Works fine on fill/line layers (parks, roads, landuse) but NOT on fill-extrusion layers from external vector tile sources. SOLVED by migrating to local FGB data (no filter needed).
+- **Failure 9 — queryRenderedFeatures + setFeatureState for building tier coloring**: Caused tile-seam artifacts (only styles on-screen tiles), square bleeding, purple fallback on pan, main thread blocking from millions of PiP ops. SOLVED by pre-baking `_tier` into GeoJSON features via `bakeBuildingTiers()`.
 
 ### Favorites System
 - Storage keys: `lapuff_favorites` (IDs), `lapuff_fav_counts` (counts), `lapuff_fav_history` (activity), `lapuff_favorite_event_cache` (snapshots, max 240), `lapuff_sb_favs` (synced set).
