@@ -216,19 +216,21 @@
 All modes (2D, 3D, Real3D) use a single MapLibre canvas. Satellite and topo heatmap are normal layers on the main map. No separate canvases, no camera sync.
 
 #### NYC Restriction via `['within']`:
-Instead of a stencil mask, individual layers use `filter: ['within', NYC_BBOX_GEOM]` to restrict rendering to NYC at the GPU level. Features outside the bounding box are never rendered (true compute savings, not just visual hiding).
+Individual layers use `filter: ['within', NYC_BBOX_GEOM]` to restrict rendering to NYC at the GPU level.
+
+**CRITICAL**: `['within']` does NOT work reliably with MapTiler vector tile fill-extrusion features. Building/baseplate layers MUST NOT use `['within']` — they render all buildings but NJ/CT ones stay in dark default colors that blend with the CSS background. CPU-side `assignBuildingTiersToMap` restricts colorful tier coloring to NYC only.
 
 **NYC-restricted layers** (only render inside NYC bounding box):
 - `real3d-park` (fill)
 - `real3d-roads-primary` (line)
 - `real3d-roads-tertiary` (line)
 - `real3d-landuse-baseplate` (fill)
-- `real3d-buildings-baseplate` (fill-extrusion)
-- `real3d-buildings` (fill-extrusion)
 
 **Unrestricted layers** (intentionally extend past borough edges):
 - `real3d-water` (fill) — rivers/harbor flow past boroughs
 - `real3d-roads-motorway` (line) — highways cross boundaries
+- `real3d-buildings-baseplate` (fill-extrusion) — `['within']` incompatible, uses dark reds
+- `real3d-buildings` (fill-extrusion) — `['within']` incompatible, tier coloring via CPU PiP
 - `borough-outline` (fill-extrusion) — outer NYC perimeter
 - `sat-layer` (raster) — satellite imagery everywhere
 - `heat-underlay` (heatmap) — topo glow radiates past boroughs
@@ -236,15 +238,15 @@ Instead of a stencil mask, individual layers use `filter: ['within', NYC_BBOX_GE
 #### Real3D Layer Stack (back to front):
 ```
 sat-layer (raster, when satellite ON)
+real3d-water (fill, unrestricted — BELOW heat-underlay)
 heat-underlay (heatmap, when heatmap + topo ON)
 real3d-park (fill, NYC-restricted)
 real3d-roads-primary (line, NYC-restricted)
 real3d-roads-tertiary (line, NYC-restricted)
 real3d-landuse-baseplate (fill, NYC-restricted)
-real3d-buildings-baseplate (fill-extrusion, NYC-restricted, z10-11)
-real3d-buildings (fill-extrusion, NYC-restricted, z11+)
-real3d-water (fill, unrestricted)
-real3d-roads-motorway (line, unrestricted)
+real3d-buildings-baseplate (fill-extrusion, unrestricted, z10-11)
+real3d-buildings (fill-extrusion, unrestricted, z11+)
+real3d-roads-motorway (line, unrestricted, moved to top)
 borough-outline (fill-extrusion, unrestricted, topmost)
 ```
 
@@ -262,10 +264,18 @@ borough-outline (fill-extrusion, unrestricted, topmost)
 - Raster layer inserted at bottom of stack, below all other layers.
 
 #### Redundant Computations Found
-- `buildZipEventMap` called twice with identical params in the same heatmap effect (lines 1706 and 1956).
-- `fixSharedBoundaryQuads` re-runs PiP on every zoom/pitch change (~25,000 PiP ops per tick). Should be pre-computed once per borough tier change.
 - `PaginatedSection` component defined inside MapView — recreated on every render. Should be module-level.
 - `ZipHologram` + `ZipHologramMobile` — 95% duplicate code, only differ in canvas size and depth.
+
+#### Toggle Lag — Tier Data Caching
+- `cachedTierDataRef` caches `buildZipEventMap` + `computeTiers` results between effect runs.
+- Paint-only toggles (satellite, topoOn, threeD) skip expensive tier recomputation.
+- Only events/timespanIdx/geoData changes trigger full recomputation.
+
+#### Borough Outline — Safezone Filtering + Height Stagger
+- `removeSafezoneOverlapQuads` replaces `fixSharedBoundaryQuads`. Interior borough edges are KEPT for visual clarity; only quads overlapping safezone ZCTA features are removed.
+- Height stagger: each borough's outline base/height offset by `_boroughIdx * 1m` to prevent Z-fighting at overlapping edges.
+- Width ramp increased from 2x-4x to 2.5x-7x (zoom 11→9) to reduce pixelation at low zoom.
 
 #### Dead Code
 - `HEAT_TONES` constant — marked "legacy", never referenced. REMOVED.
@@ -291,7 +301,7 @@ borough-outline (fill-extrusion, unrestricted, topmost)
 - **Cacheable (compute once)**: ZCTA GeoJSON, borough GeoJSON, ZCTA skeleton, borough skeleton, zip→borough mapping, adjacency matrix, tier geo-collections. All already cached in state or refs except tier geo-collections.
 - **Must recompute on timespan/event change**: `buildZipEventMap`, `computeTiers`, `withHeat` features, borough avg tiers, heat underlay points, building/road tier assignments.
 - **Must recompute on mode toggle only**: Paint properties, layer visibility, camera pitch/bearing. These do NOT need data recomputation.
-- **Optimization path**: Memoize `buildZipEventMap` with `useMemo` keyed on `[events, timespanIdx]`. Pre-compute `fixSharedBoundaryQuads` once per borough tier change (not per zoom tick).
+- **Optimization path**: `cachedTierDataRef` caches `buildZipEventMap` + `computeTiers` results. Paint-only toggles skip expensive recomputation. `removeSafezoneOverlapQuads` pre-computed once per heatmap effect.
 - The map occasionally fails to load on first click but works on refresh — likely a race condition between GeoJSON fetch and `addLayers`.
 
 ### MapView — General Principles
@@ -328,6 +338,18 @@ borough-outline (fill-extrusion, unrestricted, topmost)
 - **Topo unified:** Heat-underlay (topo glow) renders on main map in ALL modes. Guard changed from `!real3D` to just `heatmap && topoOn`.
 - **Single canvas:** All modes use one MapLibre canvas. CSS background `#0d0000` provides dark fill outside NYC. z-index stack simplified.
 - **~200 lines removed.** File reduced from ~2966 to ~2773 lines.
+
+**Round 4 — 5-issue fix batch (post-overhaul):**
+- **Buildings fix (CRITICAL):** Removed `['within', NYC_BBOX_GEOM]` from `real3d-buildings-baseplate` and `real3d-buildings`. MapLibre's `['within']` expression does NOT work reliably with MapTiler vector tile fill-extrusion features — all buildings were being filtered out. NJ/CT buildings now render but blend with dark CSS background; `assignBuildingTiersToMap` handles NYC-only tier coloring.
+- **Water layer ordering:** Water now inserted BELOW heat-underlay via `addLayer(spec, 'heat-underlay')`. Removed `moveLayer('real3d-water')` to top. Stack: satellite → water → heat-underlay → parks/roads/buildings.
+- **Borough outlines — safezone filter:** Replaced `fixSharedBoundaryQuads` (removed ALL internal edges) with `removeSafezoneOverlapQuads` (only removes quads overlapping safezone ZCTA features). Interior borough lines now visible for clarity.
+- **Borough outlines — height stagger:** Base/height offset by `_boroughIdx * 1m` per borough to prevent Z-fighting at overlapping edges.
+- **Borough pixelation:** Width ramp increased from 2x→4x to 2.5x→7x (zoom 11→9) for thicker outlines at low zoom.
+- **Toggle lag:** `cachedTierDataRef` caches `buildZipEventMap` + `computeTiers`. Paint-only toggles (satellite, topoOn, threeD) skip expensive recomputation.
+- **Heat-underlay opacity:** Removed `!real3D` restriction from initial layer creation so topo glow works in Real3D immediately.
+
+### MapView — Post-Mortem: Failed Approaches (DO NOT REPEAT)
+- **Failure 8 — `['within']` on MapTiler vector tile fill-extrusions**: `['within', NYC_BBOX_GEOM]` filter on building/baseplate fill-extrusion layers from MapTiler's `openmaptiles` source caused ALL buildings to disappear. Works fine on fill/line layers (parks, roads, landuse) but NOT on fill-extrusion layers from external vector tile sources. Must leave building layers unfiltered and rely on dark default colors + CPU-side `assignBuildingTiersToMap` for NYC-only coloring.
 
 ### Favorites System
 - Storage keys: `lapuff_favorites` (IDs), `lapuff_fav_counts` (counts), `lapuff_fav_history` (activity), `lapuff_favorite_event_cache` (snapshots, max 240), `lapuff_sb_favs` (synced set).
