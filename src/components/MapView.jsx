@@ -2260,7 +2260,7 @@ export default function MapView({ events }) {
   async function updateBuildingsForViewport(map, isHeatmap) {
     if (buildingFGBLoadingRef.current) return;
     const zoom = map.getZoom();
-    if (zoom < 9.5) return; // too far out — don't fetch
+    if (zoom < 13) return; // only fetch when close enough to show buildings
 
     buildingFGBLoadingRef.current = true;
     try {
@@ -2278,12 +2278,12 @@ export default function MapView({ events }) {
         map.addLayer({
           id: 'real3d-buildings-baseplate', type: 'fill-extrusion',
           source: 'fgb-buildings',
-          minzoom: 10, maxzoom: 11,
+          minzoom: 13, maxzoom: 14,
           paint: {
             'fill-extrusion-color': baseplateColorExpr(isHeatmap),
-            'fill-extrusion-height': 7,
-            'fill-extrusion-base': 2,
-            'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'], 10, 0, 10.5, 0.9],
+            'fill-extrusion-height': 2,
+            'fill-extrusion-base': 0,
+            'fill-extrusion-opacity': 0.9,
             'fill-extrusion-vertical-gradient': false,
           },
         });
@@ -2291,11 +2291,11 @@ export default function MapView({ events }) {
         map.addLayer({
           id: 'real3d-buildings', type: 'fill-extrusion',
           source: 'fgb-buildings',
-          minzoom: 11,
+          minzoom: 14,
           paint: {
             'fill-extrusion-color': buildingColorExprByState(isHeatmap),
             'fill-extrusion-height': ['coalesce', ['get', 'height_roof'], 8],
-            'fill-extrusion-base': 2,
+            'fill-extrusion-base': 0,
             'fill-extrusion-opacity': 0.92,
             'fill-extrusion-vertical-gradient': false,
           },
