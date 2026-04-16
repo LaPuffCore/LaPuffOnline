@@ -143,26 +143,47 @@
 
 ### MapView — Core Facts
 - Library: MapLibre GL JS with MapTiler tiles. Key: `VjoJJ0mSCXFo9kFGYGxJ`.
+- File: `src/components/MapView.jsx` (~2967 lines as of commit 1c3c045).
 - Center: `[-73.94, 40.71]`, zoom 10.5, bounds `[[-75.5, 40.0], [-72.5, 41.5]]`.
 - GeoJSON: `./data/MODZCTA_2010_WGS1984.geo.json` (cleaned) for NYC zip boundaries.
+- Borough GeoJSON: `./data/borough.geo.json` for 5 NYC borough MultiPolygons.
 - Heat tiers: cold (< 0.30), cool (0.30–0.55), warm (0.55–0.80), orange (0.80–1.0), hot (≥ 1.0). 4-pass adjacency blur.
-- Heat colors: `#00ccdd` (cold), `#00dd66` (cool), `#aadd00` (warm), `#dd6600` (orange), `#cc0d00` (hot).
+- Heat colors: `#00ccdd` (cold), `#00dd66` (cool), `#f5c800` (warm/golden-yellow), `#dd6600` (orange), `#cc0d00` (hot).
+- Heat mid colors (borough outlines): `#339eb3` (cold), `#33b366` (cool), `#b39900` (warm), `#cc6622` (orange), `#cc3333` (hot).
+- Heat dark colors (upper border): `#001f29` (cold), `#002910` (cool), `#5c4a00` (warm), `#3d1500` (orange), `#2e0000` (hot).
 - Normalization: logarithmic `Math.log(count+1) / Math.log(max+1)`.
 - Pitch/bearing: 3D on → `{ pitch: 48, bearing: -17 }`, Real3D → `{ pitch: 55, bearing: -17 }`, off → `{ pitch: 0, bearing: 0 }`.
-- ZipHologram: Canvas 460x340 (desktop) or 400x260 (mobile) with sine wave rotation, scanlines, glitch.
+- ZipHologram: Canvas 460x340 (desktop) or 400x260 (mobile) with sine wave rotation, scanlines, glitch. Desktop and mobile versions are separate components (~95% identical code — candidate for merging).
 - Special zips: `99999` or `>11697` → SAFEZONE (white fill, locked).
-- Satellite mode: MapTiler satellite layer, reduced opacity (fill 0.5, glow 0.55).
+- Satellite mode: ArcGIS World Imagery tiles via separate MapLibre canvas instance (z=1 behind main map z=2). Camera synced on every `move` event.
 - Offline: disables 3D features, shows connection notice.
 - Side panel pagination: `PAGE_SIZE = 6`.
 
 ### MapView — Mode Architecture & Toggle Logic
-- **4 buttons**: Satellite, Heatmap, 3D, Real3D.
-- **3 core view categories**: 2D, 3D, Real3D. Only one of these three is active at a time.
-- 2D = both 3D and Real3D are OFF (default view).
-- 3D = 3D is ON, Real3D is OFF. They are mutually exclusive toggles (one swaps off the other).
-- Real3D = Real3D is ON, 3D is OFF.
-- **Satellite and Heatmap are additive overlays** — they can both be ON simultaneously with any of 2D/3D/Real3D, creating combo modes (e.g., 3D + Heatmap + Satellite).
-- All conditionals must cleanly split 2D logic from 3D which is split from Real3D logic and all additive combos for each.
+- **State variables**: `heatmap` (bool), `satellite` (bool), `threeD` (bool), `real3D` (bool), `topoOn` (bool).
+- **3 core view categories**: 2D, 3D, Real3D. Only one active at a time.
+  - **2D** = `threeD === false && real3D === false` (default).
+  - **3D** = `threeD === true && real3D === false`. Toggle handler: `setThreeD(!v)` + if turning ON → `setReal3D(false)`.
+  - **Real3D** = `real3D === true && threeD === false`. Toggle handler: `setReal3D(!v)` + if turning ON → `setThreeD(false)`.
+- **2 additive overlays**: Satellite and Heatmap. Each is independent. Both can be ON simultaneously with any core view.
+- **Topo sub-toggle**: `topoOn` is a child of `heatmap`. Only visible/usable when `heatmap === true`. Turning heatmap OFF does NOT auto-clear `topoOn` — it just hides the button. Turning heatmap ON with topo already toggled means topo is immediately active. `topoOn` is persisted to `localStorage['lapuff_topo_on']`.
+- **12 total mode combinations** (3 core × 4 overlay states):
+
+| Core | Heatmap OFF + Sat OFF | Heatmap ON + Sat OFF | Heatmap OFF + Sat ON | Heatmap ON + Sat ON |
+|---|---|---|---|---|
+| **2D** | Base state | Heatmap colors + topo | Satellite imagery | Full combo |
+| **3D** | Extruded zips | Extruded + heat colors | Extruded + satellite | Full combo |
+| **Real3D** | Buildings (red) | Buildings (tier colors) | Buildings + satellite | Full combo |
+
+- **What each mode owns**:
+  - **2D**: ZCTA fill, ZCTA outline, borough outline (flat), heat-underlay. No extrusions, no stencil, no Real3D layers.
+  - **3D**: Everything in 2D + ZCTA fill-extrusions, upper 3D border extrusions, borough outline extrusions. Pitch/bearing: `{48, -17}`.
+  - **Real3D**: Replaces all 3D layers with own stack: park, roads, landuse-baseplate, buildings-baseplate, buildings, stencil. Adds water. Borough outline shared. Pitch/bearing: `{55, -17}`.
+  - **Satellite**: Separate MapLibre canvas at z=1 (all modes). Camera synced via `map.on('move')`.
+  - **Heatmap**: Recolors ZCTA fills/extrusions by tier. Enables heat-underlay (gaussian kernel). In Real3D: triggers `assignBuildingTiersToMap` for building-to-zip color assignment.
+  - **Topo**: When `heatmap && topoOn`: sets heat-underlay opacity to 0.50 (otherwise 0).
+
+- **Conditionals must cleanly separate** 2D from 3D from Real3D logic. Each overlay combo within a core view may need its own paint property values (e.g., fill opacity differs satellite vs non-satellite).
 
 ### MapView — 2D Mode Rules
 - **2D is DONE and correct. DO NOT TOUCH 2D logic.** All 2D modes (standard, heatmap, satellite, and their combos) work perfectly and must remain exactly as-is unless the 2d mode is specifically asked to change and this will only be later with map theme color customization not during our map overhaul.
@@ -177,41 +198,119 @@
 - **Zip polygon glitching** (e.g., zip 11422): Random flat red vertices/caps appear at certain zoom levels. This is a GeoJSON triangulation issue — broken polygons or bad zoom-out simplification in the source data. Investigate the cleaned GeoJSON for broken polygon rings. If any derived zip data elsewhere in the codebase was generated from an older GeoJSON, regenerate it.
 
 ### MapView — Real3D Mode Rules (Individual Buildings)
-- Real3D renders actual OSM building footprints from the MapTiler 3D buildings source.
-- **3 zoom tiers**:
-  - Far zoom (zoomed out): No 3D building extrusions or baseplates rendered.
-  - Medium zoom: Baseplates only (flat footprints from the API). If the API provides outlines, keep them; if not, skip custom outlines. Just the native baseplates.
-  - Close zoom: Full 3D building extrusions at actual building heights.
-- Current zoom thresholds are too high (buildings appear too late). Reduce the medium and close zoom thresholds by ~1 tick each so buildings render sooner.
+- Real3D renders actual OSM building footprints from the MapTiler 3D buildings source (`openmaptiles` vector tiles, `building` source-layer).
+- **3 zoom tiers** (current thresholds — to be adjusted):
+  - Far zoom (< zoom 10): No 3D building extrusions or baseplates rendered.
+  - Medium zoom (zoom 10–11): Baseplates only (flat building footprints as fill-extrusions at 5m height, opacity fade-in from 0 to 0.9 across z13–13.8). Also landuse proxy fills for coarse area shading (z10–14).
+  - Close zoom (zoom 11+): Full 3D building extrusions at actual building heights (opacity 0.92).
+- **Target zoom thresholds** (user-requested): baseplates at zoom ≥ 10, buildings at zoom ≥ 11.
+- **Current zoom thresholds**: baseplates minzoom 13, buildings minzoom 14. These need lowering.
 - **Two color palettes** with clustering for visual differentiation of adjacent buildings:
-  - **Standard palette (heatmap OFF)**: Dark-red to light-red range. Buildings use `featureId % 5` shading within the red range for clustering. Baseplates use a solid red from the same range.
-  - **Heatmap palette (heatmap ON)**: Buildings inherit the heatmap color of their containing zip code (e.g., warm-yellow zip → yellow-range building colors with clustering). Baseplates use a solid color from that zip's heat tier. This IS bound to the timespan slider — changing from 1d to 6mo may recolor buildings as event density shifts.
-- Buildings must only render within NYC (5 boroughs). Apply a strict `['within', nycPolygonGeometry]` filter to the building layer to exclude NJ/CT/LI buildings.
+  - **Standard palette (heatmap OFF)**: 7 dark-red shades via `['%', ['to-number', ['id'], 0], 7]` for GPU-side clustering. No CPU-side assignment needed. Baseplates use 3 dark reds via ID%3.
+  - **Heatmap palette (heatmap ON)**: Buildings use tier-based colors via `feature-state` tier + ID%5 shade index. This requires CPU-side tier assignment via `assignBuildingTiersToMap`. Baseplates should use simple dark heatmap colors (NOT clustered — clustering causes tile seam artifacts).
+- Buildings must only render within NYC (5 boroughs). `NYC_BBOX_GEOM` bounding box is defined but NOT currently used as a filter — must add `filter: ['within', NYC_BBOX_GEOM]` to building layers.
 
-### MapView — Real3D Known Issues & Desired Fixes
-- **Square bounding artifacts, flashing, Z-fighting**: Caused by `queryRenderedFeatures` + `setFeatureState` styling approach (see post-mortem below). Fix: eliminate `queryRenderedFeatures` for Real3D styling entirely if possible. Consolidate into a single declarative layer using GPU-side data-driven paint expressions. The square bleeding comes from only styling on-screen tiles — panning reveals unqueried buildings in default color.
-- **Double-rendered baseplates**: If the MapTiler API already provides baseplates, do not create a second baseplate layer (causes Z-fighting). If we cannot control API baseplate colors, then create our own baseplates slightly raised above the API ones to avoid Z-interference. Alternatively, use MapLibre zoom interpolation on `fill-extrusion-height`: medium zoom = height 0 (acts as baseplate), high zoom = scales to actual building height. This avoids separate competing layers.
-- **Cyan loading flash**: Default fallback color must be our standard red range (boosted brightness), not cyan/blue. When Heatmap is ON, buildings must strictly inherit their containing zip's heat color with no flash of wrong color during loading.
-- **Building-to-zip assignment**: The current raytracer/centroid approach (`queryRenderedFeatures` → `getGeomCentroid` → `findTierForPoint`) causes artifacts and square blocks. Replace with a simpler declarative system if possible — use data-driven paint expressions (`['%', ['to-number', ['id'], 0], ...]`) on the GPU side to determine shade index, and bind tier coloring to the zip polygon data. Research whether MapLibre GL JS supports `['within', ...]` or point-in-polygon at the expression level for this, or if a pre-computed join is needed.
+### MapView — Real3D Architecture (Audit Findings — commit 1c3c045)
+
+#### Real3D Canvas Stack (back to front):
+```
+z=0   Container CSS background (#0d0000)
+z=1   Satellite canvas (when satellite ON + real3D) — separate MapLibre, camera-synced
+z=2   Topo heatmap canvas (when real3D + heatmap + topoOn) — separate MapLibre, camera-synced
+z=3   Main map canvas (transparent background)
+```
+Separate canvases exist ONLY in Real3D mode. In 2D/3D, satellite is a raster source+layer on the main map (bottom of stack), and topo heat-underlay is a heatmap layer on the main map. No camera sync needed in 2D/3D.
+
+#### Real3D Main Map Layer Stack (back to front):
+BELOW STENCIL (visually masked outside NYC):
+1. `real3d-park` (type: fill) — ✂ masked
+2. `real3d-roads-primary` (type: line) — ✂ masked
+3. `real3d-roads-tertiary` (type: line) — ✂ masked
+4. `real3d-landuse-baseplate` (type: fill) — ✂ masked
+
+FILL-EXTRUSIONS (separate 3D GPU pass — stencil cannot mask):
+5. `real3d-buildings-baseplate` (fill-extrusion) — 🔒 `['within', NYC_BBOX_GEOM]` filter
+6. `real3d-buildings` (fill-extrusion) — 🔒 `['within', NYC_BBOX_GEOM]` filter
+
+THE STENCIL:
+7. `real3d-nyc-stencil` (type: fill, always opacity 1.0)
+
+ABOVE STENCIL (moveLayer'd, unmasked):
+8. `real3d-water` (type: fill) — 🌊 flows past boroughs
+9. `real3d-roads-motorway` (type: line) — 🛣️ extends past boroughs
+10. `borough-outline` (fill-extrusion) — 🏙️ topmost, occluded by buildings naturally
+
+#### Stencil + Satellite Interaction (fill-extrusions bypass 2D stencil)
+- MapLibre renders all `fill-extrusion` layers in a SEPARATE 3D GPU pass, composited ABOVE all 2D fills regardless of layer order.
+- The stencil (type: `fill`) only masks other 2D layers (parks, roads, landuse fills).
+- **Without satellite**: The stencil's dark color (`#0d0000`) matches the page/map background, so building fill-extrusions outside NYC render above the stencil but are visually hidden against the identical dark background. Stencil appears to work correctly.
+- **With satellite + Real3D**: The satellite canvas (z=1) provides a bright background behind the main map (z=2). Buildings outside NYC render above the dark stencil, and now they're visible against the bright satellite imagery instead of blending into darkness. This is the ONLY combo where the stencil "breaks" visually.
+- **Fix**: Add `filter: ['within', NYC_BBOX_GEOM]` to both building fill-extrusion layers for GPU-level restriction. This ensures NJ/CT buildings are never rendered regardless of background.
+
+#### Raytracer System — Performance Bottleneck
+- `assignBuildingTiersToMap` runs on every `moveend`/`zoomend` (800ms throttle).
+- Queries ALL visible building features via `queryRenderedFeatures`.
+- For EACH building: 5-borough PiP check (is it in NYC?), then ~180 ZCTA PiP check (which zip?), then 4-vertex fallback.
+- Potentially 10,000+ buildings × 185 PiP operations = **millions of ray casts per camera stop**.
+- Causes: tile seam artifacts (only styles on-screen tiles), square bounding artifacts, GPU stalls, main thread blocking.
+- **Planned replacement**: Per-tier building layers with `['within', tierGeometry]` filters. Eliminates ALL CPU-side PiP and feature-state assignment. `buildTierGeoCollections()` already generates the tier geometries.
+
+#### Satellite Canvas — Overhead in 2D/3D
+- Satellite is ALWAYS a separate MapLibre canvas instance, even in 2D/3D where no stencil exists.
+- This means double GPU draw calls, double tile fetching, `syncCamera` on every `move` event.
+- **Planned fix**: Use satellite as a normal raster source/layer in 2D/3D. Only keep separate canvas for Real3D.
+
+#### Redundant Computations Found
+- `buildZipEventMap` called twice with identical params in the same heatmap effect (lines 1706 and 1956).
+- `fixSharedBoundaryQuads` re-runs PiP on every zoom/pitch change (~25,000 PiP ops per tick). Should be pre-computed once per borough tier change.
+- `PaginatedSection` component defined inside MapView — recreated on every render. Should be module-level.
+- `ZipHologram` + `ZipHologramMobile` — 95% duplicate code, only differ in canvas size and depth.
+
+#### Dead Code
+- `HEAT_TONES` constant — marked "legacy", never referenced.
+- `PEAK_WEIGHTS` constant — unused after `computeBoroughAvgTiers` rewrite.
+- `REAL3D_ALL_LAYER_IDS` includes `real3d-hm-baseplate-*` and `real3d-hm-buildings-*` IDs that are never created.
+- `buildTierGeoCollections()` — defined but never called (was intended for `['within']` approach).
+- `NYC_BBOX_GEOM` — defined but never used as a filter.
+- `styleVersion` state — was for style-swap cycle, no longer needed with separate canvas approach.
 
 ### MapView — Post-Mortem: Failed Approaches (DO NOT REPEAT)
-- **Failure 1 — queryRenderedFeatures + setFeatureState for Real3D**: Caused "square bleeding" artifacts because it only styles tiles currently rendered on-screen. Panning reveals unqueried buildings flashing the default color. Must use GPU-side data-driven paint expressions instead. Verify this approach works in our MapLibre GL JS + MapTiler setup.
-- **Failure 2 — Borough outline as simple 2D line in 3D mode**: May or may not be occluded by 3D extrusions depending on MapLibre's rendering order. Test whether 2D lines can be naturally hidden behind fill-extrusions. If they cannot, use a fill-extrusion with height just below the cold tier height so the engine occlude it behind taller blocks. Ensure no pixelation.
-- **Failure 3 — Fixed integer values for 3D outline widths**: Browser MSAA handles thin 3D geometries poorly at low zooms. Must use zoom-interpolated expressions like `['interpolate', ['linear'], ['zoom'], 9, 80, 15, 10]` (research exact values for our setup). This was never fully pinned down — needs fresh investigation.
-- **Failure 4 — Zip polygon glitching (e.g., 11422)**: Confirmed as GeoJSON triangulation issue. Random flat red vertices/caps appear at certain zooms. Ensure the cleaned GeoJSON has valid polygon rings and that all derived data in the codebase matches it.
+- **Failure 1 — queryRenderedFeatures + setFeatureState for Real3D**: Caused "square bleeding" artifacts because it only styles tiles currently rendered on-screen. Panning reveals unqueried buildings flashing the default color. Must use GPU-side data-driven paint expressions instead. The current implementation still uses this approach for building-to-zip tier assignment. Planned replacement: per-tier building layers with `['within', tierGeoCollection]` filters.
+- **Failure 2 — Borough outline as simple 2D line in 3D mode**: 2D lines render BELOW fill-extrusions in MapLibre regardless of layer order. Solved by using fill-extrusion annular quads for borough outlines.
+- **Failure 3 — Fixed integer values for 3D outline widths**: Browser MSAA handles thin 3D geometries poorly at low zooms. Must use zoom-interpolated expressions. Current solution: `getZoomAwareOutlineWidth` computes meter-based widths with pitch and zoom ramps.
+- **Failure 4 — Zip polygon glitching (e.g., 11422)**: Confirmed as GeoJSON triangulation issue. Solved by `enforceGeoJSONWinding` on all features at load time.
+- **Failure 5 — Baseplate tier clustering via feature-state (commit 1c3c045)**: Making `baseplateColorExpr(true)` use `buildingColorExprByState(true)` caused tile-seam artifacts because queryRenderedFeatures only assigns tiers to on-screen tiles. Baseplates should use simple uniform dark colors, NOT feature-state dependent clustering.
+- **Failure 6 — Stencil masking fill-extrusions**: A 2D `fill` layer CANNOT mask `fill-extrusion` layers in MapLibre — they render in separate GPU passes. Stencil only works for 2D layers (parks, roads, landuse fills). Building layers need `['within']` GPU-side filter for true NYC restriction.
 
 ### MapView — UI Micro-Fixes
 - **Zoom controls overlap**: The native MapLibre zoom-out (minus) button overlaps the custom Recentering button. Fix: add `marginBottom: '80px'` to the MapLibre NavigationControl container on load, or reposition the custom recentering button so the native minus button is always clickable.
 
 ### MapView — Caching & Reliability
-- Evaluate whether the NYC-only map data (tiles, GeoJSON, building footprints) is small enough to cache on mobile/web devices, especially since we restrict 3D rendering to the 5 boroughs only.
-- The map occasionally fails to load on first click but works on refresh — investigate whether this is a race condition, tile loading failure, or memory overflow. Consider caching the GeoJSON and critical map assets, consistent with how the rest of the app caches events to sessionStorage.
-- Compare map data footprint to existing app caches (`sessionStorage` event cache, `localStorage` favorites/theme) to ensure we are not exceeding mobile storage quotas.
+- **Cacheable (compute once)**: ZCTA GeoJSON, borough GeoJSON, ZCTA skeleton, borough skeleton, zip→borough mapping, adjacency matrix, tier geo-collections. All already cached in state or refs except tier geo-collections.
+- **Must recompute on timespan/event change**: `buildZipEventMap`, `computeTiers`, `withHeat` features, borough avg tiers, heat underlay points, building/road tier assignments.
+- **Must recompute on mode toggle only**: Paint properties, layer visibility, camera pitch/bearing. These do NOT need data recomputation.
+- **Optimization path**: Memoize `buildZipEventMap` with `useMemo` keyed on `[events, timespanIdx]`. Pre-compute `fixSharedBoundaryQuads` once per borough tier change (not per zoom tick).
+- The map occasionally fails to load on first click but works on refresh — likely a race condition between GeoJSON fetch and `addLayers`.
 
 ### MapView — General Principles
 - When fixing map issues, be strictly additive and corrective. Do not remove existing features (leaderboard, holograms, side panel, etc.).
 - Always consult MapLibre GL JS and MapTiler API documentation for the correct approach before implementing map changes.
 - All heatmap-dependent visuals (fill colors, extrusion heights, building colors) MUST respond to the timespan slider — they are bound to event density which changes with the selected time window.
+- 2D fill layers and fill-extrusion layers render in SEPARATE GPU passes. Fill-extrusions ALWAYS render above 2D fills regardless of layer order. Only `moveLayer` ordering within the same layer type matters.
+- Fill-extrusion opacity < 1.0 (e.g., 0.92) forces MapLibre to use framebuffer compositing, which hides tile-seam Z-fighting artifacts. Use this trick for any fill-extrusion that shows tile seams.
+
+### MapView — Changelog (current session, base commit 1c3c045)
+
+**Round 4 — Group A (safe fixes, 2026-04-16):**
+- **A1 — ZCTA outline width lock (3D/Real3D):** Changed `getZoomAwareOutlineWidth` ZCTA path from `Math.max(0, 10.5 - zoom)` to `Math.max(0, 10.5 - Math.min(zoom, 10))`. Outline width at zoom 10 is now the constant for all zooms ≥ 10. Affects 3D and Real3D only (non-3D path unchanged).
+- **A2 — Revert baseplate clustering:** `baseplateColorExpr(true)` no longer delegates to `buildingColorExprByState(true)`. Heatmap ON baseplates now use uniform dark tier colors via `feature-state` tier (no ID%5 clustering). Eliminates tile-seam artifacts caused by per-feature clustering on baseplates. Affects Real3D + Heatmap combo only.
+- **A3 — NYC building filter + stencil fix:** Added `filter: ['within', NYC_BBOX_GEOM]` to `real3d-buildings-baseplate` and `real3d-buildings` layers. GPU-side restriction prevents NJ/CT building rendering in all Real3D combos. Stencil `fill-opacity` set to always `1.0` (was `0` when satellite ON — that broke visual masking). Motorway moved above stencil via `moveLayer`. Affects Real3D only.
+- **A3b — Heat-underlay reorder:** Moved `heat-underlay` below `borough-outline` in the above-stencil stack. New order: water → motorway → heat-underlay → borough-outline. Affects Real3D only.
+- **A4 — Dead code removal:** Removed `HEAT_TONES` constant (legacy, never referenced), `PEAK_WEIGHTS` constant (unused after `computeBoroughAvgTiers` rewrite), `real3d-hm-baseplate-*` and `real3d-hm-buildings-*` from `REAL3D_ALL_LAYER_IDS` (layers never created). Updated `buildTierGeoCollections` comment to mark as planned for C2 optimization. No behavioral change.
+- **Topo heatmap separate canvas (Real3D only):** Added `topoContainerRef` + `topoMapRef` for a dedicated lightweight MapLibre instance at z=2 (between satellite z=1 and main map z=3). When `real3D && heatmap && topoOn`: topo glow renders on this canvas with `heatmap-opacity: 0.50`, unrestricted by the stencil. Main map's heat-underlay is never active in Real3D (opacity 0, no data). For 2D/3D modes, topo canvas is hidden and heat-underlay stays on main map exactly as before — no separate canvas, no camera sync, unchanged behavior. This is the ONLY heatmap element that gets a separate canvas — the heatmap fill recoloring (zcta-fill) stays on main map in all modes.
+- **A1 outline width fix (corrected scope):** Original A1 change was applied to wrong path (3D mode). Reverted 3D path. Applied zoom-lock to non-3D path (2D and Real3D flat outlines) instead: `zoomCompensation = zoom > 10 ? Math.pow(2, zoom - 10) : 1` scales meter width proportionally so visual pixel width stays constant at zoom > 10. 3D mode outline is unchanged.
+- **z-index stack corrected:** satellite z=1, topo canvas z=2, main map z=3 (was z=1, z=1.5, z=2).
+- **C1 — Satellite dual-mode:** Satellite is now a raster source+layer on the main map for 2D/3D (no separate canvas, no camera sync overhead). In Real3D, satellite uses a separate MapLibre canvas at z=1 (needed because stencil mask would hide a main-map raster layer). The satellite effect re-runs on `[satellite, real3D, mapReady]` so toggling between modes cleanly switches approaches: entering Real3D with sat ON removes the raster layer and shows the canvas; leaving Real3D with sat ON hides the canvas and adds the raster layer. This eliminates double GPU draw calls and constant `map.on('move', syncCamera)` overhead in 2D/3D modes. Separate canvases now exist ONLY in Real3D.
 
 ### Favorites System
 - Storage keys: `lapuff_favorites` (IDs), `lapuff_fav_counts` (counts), `lapuff_fav_history` (activity), `lapuff_favorite_event_cache` (snapshots, max 240), `lapuff_sb_favs` (synced set).

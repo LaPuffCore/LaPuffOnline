@@ -50,15 +50,6 @@ const HEAT_MID_COLORS = {
   hot:    '#cc3333',
 };
 
-// Tonal shades per tier (legacy, kept for compatibility)
-const HEAT_TONES = {
-  cold:   ['#003344', '#006688', '#00ccdd'],
-  cool:   ['#003311', '#007733', '#00dd66'],
-  warm:   ['#3d2f00', '#806000', '#f5c800'],
-  orange: ['#441100', '#882200', '#dd6600'],
-  hot:    ['#440400', '#880800', '#cc0d00'],
-};
-
 // FIX REAL3D: 5 wide-range shades per heatmap tier for building cluster coloring.
 // Neighbors get different shades (via featureId % 5). Range is light→dark for differentiation.
 const HEAT_BUILDING_TONES = {
@@ -385,7 +376,7 @@ function getZoomAwareOutlineWidth(map, baseMeters = 14, is3D = false) {
     return baseMeters * multiplier * pitchFactor;
   }
 
-  // Non-3D behavior: apply requested adjustments
+  // Non-3D behavior (2D and Real3D flat outlines): apply requested adjustments
   const zoom = map.getZoom();
   // Increase base starting size by +4 pixels (measured at zoom 9.5)
   const refLat = (map.getCenter && map.getCenter().lat) ? map.getCenter().lat : 40.71;
@@ -408,7 +399,11 @@ function getZoomAwareOutlineWidth(map, baseMeters = 14, is3D = false) {
   const pitch = map.getPitch ? map.getPitch() : 0;
   const pitchFactor = 1 + (pitch / 90) * 0.55;
 
-  return adjBase * multiplier * pitchFactor;
+  // Lock visual pixel width at zoom 10: scale meters up by 2^(zoom-10) for zoom > 10
+  // so the outline maintains the same apparent thickness on screen.
+  const zoomCompensation = zoom > 10 ? Math.pow(2, zoom - 10) : 1;
+
+  return adjBase * multiplier * pitchFactor * zoomCompensation;
 }
 
 function offsetRing(outerRing, widthMeters) {
@@ -881,8 +876,6 @@ const REAL3D_ALL_LAYER_IDS = [
   'real3d-landuse-baseplate',
   'real3d-buildings', 'real3d-buildings-outline', 'real3d-buildings-baseplate',
   'real3d-nyc-stencil',
-  ...Array.from({length: 5}, (_, i) => `real3d-hm-baseplate-${i}`),
-  ...Array.from({length: 5}, (_, i) => `real3d-hm-buildings-${i}`),
 ];
 
 // Douglas-Peucker line simplification — reduces coordinate count while preserving shape.
@@ -959,10 +952,10 @@ function buildNYCStencilGeoJSON(boroughGeoData) {
     properties: {},
   };
 }
+// Build per-tier FeatureCollections for ['within']-based building layers (planned C2 optimization).
 // Features are simplified with Douglas-Peucker so ['within'] filter payload is small.
 // IMPORTANT: ['within'] in MapLibre requires COMPLETE containment — buildings straddling zip
-// borders will be excluded. For coloring we fall back to CPU-side feature-state assignment.
-// These collections are used only for additional heatmap-mode coloring; tier 0 = cold fallback.
+// borders will be excluded. A catch-all fallback layer with cold-tier colors handles those.
 function buildTierGeoCollections(features, tiers) {
   const SIMPLIFY_TOLERANCE = 0.002; // ~200m — reduces points by ~60-70%, preserves general shape
   const groups = [[], [], [], [], []];
@@ -997,7 +990,6 @@ function computeZipBoroughMap(zctaFeatures, boroughFeatures) {
 // Compute borough heat tiers using unique-rank assignment. Each borough gets a
 // unique tier 0–4. Ranked by: (1) count of tier-4 (red/hot) zip codes, (2) tiebreak
 // by total event count. Highest-ranked borough gets tier 4, lowest gets tier 0.
-const PEAK_WEIGHTS = [0, 0.5, 1.5, 3, 5];
 function computeBoroughAvgTiers(tiers, zipBoroughMap, boroughCount, geoDataFeatures, zipMap) {
   const boroughPeaks = new Array(boroughCount).fill(0);
   const boroughEvents = new Array(boroughCount).fill(0);
@@ -1273,6 +1265,10 @@ export default function MapView({ events }) {
   // Satellite canvas — separate MapLibre instance, lazily initialized on first satellite enable.
   const satContainerRef = useRef(null);
   const satMapRef       = useRef(null);
+  // Topo heatmap canvas — separate MapLibre instance for Real3D topo glow.
+  // Renders heat-underlay below stencil (unrestricted by borough mask).
+  const topoContainerRef = useRef(null);
+  const topoMapRef       = useRef(null);
   const hoveredIdRef    = useRef(null);
   const locationMarkerRef = useRef(null);
   const heatmapRef      = useRef(false);
@@ -1432,6 +1428,12 @@ export default function MapView({ events }) {
         satMapRef.current.remove();
         satMapRef.current = null;
       }
+      // Cleanup topo heatmap canvas if initialized
+      if (topoMapRef.current) {
+        if (topoMapRef.current._syncCleanup) topoMapRef.current._syncCleanup();
+        topoMapRef.current.remove();
+        topoMapRef.current = null;
+      }
       map.remove(); mapRef.current = null;
     };
   }, []);
@@ -1484,7 +1486,7 @@ export default function MapView({ events }) {
             0.55, '#ff4d4d',    // red-orange
             0.75, '#cc0d00',    // red
           ],
-          'heatmap-opacity': (heatmap && topoOn) ? 0.50 : 0,
+          'heatmap-opacity': (heatmap && topoOn && !real3D) ? 0.50 : 0,
         },
       });
     }
@@ -1756,13 +1758,14 @@ export default function MapView({ events }) {
 
     // Topographic heat underlay — update point data from zip centroids.
     // Enabled when heatmap is ON and the topo toggle is on. Visible in 2D, 3D and Real3D.
+    // In Real3D: topo glow moves to a separate canvas (topoMapRef) so it radiates under the
+    // stencil unrestricted. Main map heat-underlay stays at opacity 0 in that case.
     if (map.getSource('heat-underlay')) {
-      if (heatmap && topoOn) {
-        // use withHeat so _heat and _tier properties exist on features
+      if (heatmap && topoOn && !real3D) {
         map.getSource('heat-underlay').setData(buildHeatUnderlayPoints(withHeat, tiers));
-        // reduce underlay visibility
         map.setPaintProperty('heat-underlay', 'heatmap-opacity', 0.50);
       } else {
+        // Real3D topo handled by separate canvas effect; non-topo = hidden
         map.setPaintProperty('heat-underlay', 'heatmap-opacity', 0);
       }
     }
@@ -2118,12 +2121,11 @@ export default function MapView({ events }) {
     return () => { map.off('zoom', onZoom); map.off('pitch', onZoom); if (rafId) cancelAnimationFrame(rafId); };
   }, [mapReady]);
 
-  // SATELLITE: Separate canvas approach — no style swap on main map.
-  // Satellite imagery is rendered on a second maplibregl.Map instance positioned behind the main
-  // map canvas. This eliminates the style-swap→styledata→re-add-layers cycle entirely.
-  // The main map canvas background is transparent (no 'bg' layer in darkMapStyle), so the
-  // satellite canvas shows through wherever main map fills have opacity < 1 or are absent.
-  // Layer stack from back to front: CSS bg (#0d0000) → sat canvas (z=1) → main map canvas (z=2).
+  // SATELLITE: Dual-mode approach.
+  // - 2D/3D: Add satellite as a raster source+layer on the MAIN map (bottom of layer stack).
+  //   No separate canvas, no camera sync. Layer moves with main map naturally.
+  // - Real3D: Separate MapLibre canvas at z=1 (needed because stencil mask would hide it
+  //   if it were on the main map — satellite must show through the NYC stencil hole).
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
@@ -2132,13 +2134,98 @@ export default function MapView({ events }) {
     if (!satContainer) return;
 
     if (satellite) {
-      // Show satellite canvas
-      satContainer.style.display = 'block';
-      // Lazy-init the satellite map on first use
-      if (!satMapRef.current) {
-        satMapRef.current = new maplibregl.Map({
-          container: satContainer,
-          style: satelliteMapStyle(),
+      if (real3D) {
+        // REAL3D: separate canvas approach — satellite below stencil via z-order
+        // Remove main-map raster layer if it exists (mode switch from 2D/3D → Real3D)
+        if (map.getLayer('sat-layer')) map.removeLayer('sat-layer');
+        if (map.getSource('sat-source')) map.removeSource('sat-source');
+
+        satContainer.style.display = 'block';
+        if (!satMapRef.current) {
+          satMapRef.current = new maplibregl.Map({
+            container: satContainer,
+            style: satelliteMapStyle(),
+            interactive: false,
+            attributionControl: false,
+            center: map.getCenter(),
+            zoom: map.getZoom(),
+            bearing: map.getBearing(),
+            pitch: map.getPitch(),
+          });
+          const syncCamera = () => {
+            const s = satMapRef.current;
+            if (!s) return;
+            s.jumpTo({ center: map.getCenter(), zoom: map.getZoom(), bearing: map.getBearing(), pitch: map.getPitch() });
+          };
+          map.on('move', syncCamera);
+          satMapRef.current._syncCleanup = () => map.off('move', syncCamera);
+        } else {
+          satMapRef.current.jumpTo({ center: map.getCenter(), zoom: map.getZoom(), bearing: map.getBearing(), pitch: map.getPitch() });
+        }
+      } else {
+        // 2D/3D: raster source+layer on main map — no separate canvas, no sync
+        satContainer.style.display = 'none';
+
+        if (!map.getSource('sat-source')) {
+          map.addSource('sat-source', {
+            type: 'raster',
+            tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+            tileSize: 256,
+            maxzoom: 19,
+          });
+        }
+        if (!map.getLayer('sat-layer')) {
+          // Find the first existing layer to insert satellite below everything
+          const layers = map.getStyle().layers;
+          const firstLayerId = layers.length > 0 ? layers[0].id : undefined;
+          map.addLayer({
+            id: 'sat-layer', type: 'raster', source: 'sat-source',
+            paint: { 'raster-opacity': 1 },
+          }, firstLayerId);
+        }
+      }
+    } else {
+      // Satellite OFF: hide separate canvas and remove raster layer
+      satContainer.style.display = 'none';
+      if (map.getLayer('sat-layer')) map.removeLayer('sat-layer');
+      if (map.getSource('sat-source')) map.removeSource('sat-source');
+    }
+
+    // Real3D stencil: ALWAYS opaque — masks outside-NYC 2D layers (parks, roads, landuse).
+    if (real3D && map.getLayer('real3d-nyc-stencil')) {
+      map.setPaintProperty('real3d-nyc-stencil', 'fill-opacity', 1.0);
+    }
+  }, [satellite, real3D, mapReady]);
+
+  // TOPO HEATMAP CANVAS: separate MapLibre instance for Real3D topo glow.
+  // Renders heat-underlay at z=2 (below main map at z=3), unrestricted by the stencil.
+  // The glow radiates past borough edges as a background layer visible through
+  // the transparent main canvas. Only active when real3D + heatmap + topoOn.
+  // In 2D/3D modes, heat-underlay stays on the main map as normal (no separate canvas).
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+
+    const topoContainer = topoContainerRef.current;
+    if (!topoContainer) return;
+
+    const shouldShow = real3D && heatmap && topoOn;
+
+    if (shouldShow) {
+      topoContainer.style.display = 'block';
+
+      // Build heat-underlay point data from current computed state
+      const withHeat = withHeatRef.current;
+      const tiers = tiersRef.current;
+      const heatData = (withHeat && tiers.length)
+        ? buildHeatUnderlayPoints(withHeat, tiers)
+        : { type: 'FeatureCollection', features: [] };
+
+      if (!topoMapRef.current) {
+        // Create lightweight MapLibre instance — transparent bg, only heat-underlay layer
+        const topoMap = new maplibregl.Map({
+          container: topoContainer,
+          style: { version: 8, sources: {}, layers: [] },
           interactive: false,
           attributionControl: false,
           center: map.getCenter(),
@@ -2146,34 +2233,58 @@ export default function MapView({ events }) {
           bearing: map.getBearing(),
           pitch: map.getPitch(),
         });
-        // Sync camera from main map to sat map on every move
+        topoMap.on('load', () => {
+          topoMap.getCanvas().style.backgroundColor = 'transparent';
+          topoMap.addSource('topo-heat', { type: 'geojson', data: heatData });
+          topoMap.addLayer({
+            id: 'topo-heat-layer', type: 'heatmap', source: 'topo-heat',
+            paint: {
+              'heatmap-weight': ['coalesce', ['get', '_weight'], 0],
+              'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 8, 1.2, 11, 1.6, 13, 1.6],
+              'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 9, 200, 11, 185, 12, 185],
+              'heatmap-color': [
+                'interpolate', ['linear'], ['heatmap-density'],
+                0,    'rgba(0,0,0,0)',
+                0.03, '#092f6f',
+                0.09, '#00a2e8',
+                0.12, '#00dd66',
+                0.22, '#f5c800',
+                0.36, '#ff9a00',
+                0.55, '#ff4d4d',
+                0.75, '#cc0d00',
+              ],
+              'heatmap-opacity': 0.50,
+            },
+          });
+        });
+        // Sync camera
         const syncCamera = () => {
-          const s = satMapRef.current;
-          if (!s) return;
-          s.jumpTo({ center: map.getCenter(), zoom: map.getZoom(), bearing: map.getBearing(), pitch: map.getPitch() });
+          const t = topoMapRef.current;
+          if (!t) return;
+          t.jumpTo({ center: map.getCenter(), zoom: map.getZoom(), bearing: map.getBearing(), pitch: map.getPitch() });
         };
         map.on('move', syncCamera);
-        // Cleanup stored on satMap instance for component unmount
-        satMapRef.current._syncCleanup = () => map.off('move', syncCamera);
+        topoMap._syncCleanup = () => map.off('move', syncCamera);
+        topoMapRef.current = topoMap;
       } else {
-        // Already initialized — sync camera immediately
-        satMapRef.current.jumpTo({ center: map.getCenter(), zoom: map.getZoom(), bearing: map.getBearing(), pitch: map.getPitch() });
+        // Already initialized — update data and sync camera
+        const topoMap = topoMapRef.current;
+        topoMap.jumpTo({ center: map.getCenter(), zoom: map.getZoom(), bearing: map.getBearing(), pitch: map.getPitch() });
+        if (topoMap.getSource('topo-heat')) {
+          topoMap.getSource('topo-heat').setData(heatData);
+        }
+        if (topoMap.getLayer('topo-heat-layer')) {
+          topoMap.setPaintProperty('topo-heat-layer', 'heatmap-opacity', 0.50);
+        }
       }
     } else {
-      // Hide satellite canvas (keep GL context alive to avoid re-init cost)
-      satContainer.style.display = 'none';
+      // Hide topo canvas (keep GL context alive)
+      topoContainer.style.display = 'none';
+      if (topoMapRef.current && topoMapRef.current.getLayer('topo-heat-layer')) {
+        topoMapRef.current.setPaintProperty('topo-heat-layer', 'heatmap-opacity', 0);
+      }
     }
-
-    // Real3D stencil: keep opaque when satellite on (stencil masks the outside-NYC area;
-    // satellite shows through because zcta-fill and stencil have < 1 opacity in sat mode).
-    if (real3D && map.getLayer('real3d-nyc-stencil')) {
-      map.setPaintProperty('real3d-nyc-stencil', 'fill-opacity', satellite ? 0 : 1.0);
-    }
-
-    // Main heatmap effect re-runs on satellite change (satellite is in its dep array)
-    // and re-applies all paint properties (fill opacity, line opacity, extrusion opacity).
-    // No style swap, no layer re-add, no styleVersion increment needed.
-  }, [satellite, mapReady]);
+  }, [real3D, heatmap, topoOn, mapReady, timespanIdx, events]);
 
   // FIX REAL3D: Building color expression using feature-state (tier+shadeIdx) for
   // heatmap mode, or deterministic ID-based red shades for non-heatmap mode.
@@ -2216,8 +2327,9 @@ export default function MapView({ events }) {
     ];
   }
 
-  // Baseplate color expression — tier-aware in heatmap mode (same clustering as buildings).
-  // When heatmap is off: dark reds. When heatmap on: feature-state tier → building tone clustering.
+  // Baseplate color expression — uniform dark colors (no clustering/feature-state).
+  // When heatmap is off: dark reds. When heatmap on: dark version of tier color via feature-state.
+  // NO clustering/neighboring — uniform dark per-tier to avoid tile-seam artifacts.
   function baseplateColorExpr(isHeatmap) {
     if (!isHeatmap) {
       return ['case',
@@ -2226,8 +2338,14 @@ export default function MapView({ events }) {
         '#330909',
       ];
     }
-    // Heatmap ON: same tier-based clustering as buildings for visual consistency
-    return buildingColorExprByState(true);
+    // Heatmap ON: uniform dark color per tier (no ID-based clustering)
+    return ['case',
+      ['==', ['feature-state', 'tier'], 4], '#440400',  // hot: dark crimson
+      ['==', ['feature-state', 'tier'], 3], '#3d1500',  // orange: dark burnt orange
+      ['==', ['feature-state', 'tier'], 2], '#5c4a00',  // warm: dark golden
+      ['==', ['feature-state', 'tier'], 1], '#002910',  // cool: dark forest green
+      '#001f29',                                          // cold (default): dark teal
+    ];
   }
 
   // Road color expression for motorway+trunk.
@@ -2478,10 +2596,13 @@ export default function MapView({ events }) {
       });
 
       // FLAT BUILDING FOOTPRINTS (z13–14.5): 5m height to avoid z-fighting
+      // ['within', NYC_BBOX_GEOM] restricts to NYC only — prevents NJ/CT buildings
+      // from rendering above the 2D stencil when satellite is on.
       map.addLayer({
         id: 'real3d-buildings-baseplate', type: 'fill-extrusion',
         source: 'openmaptiles', 'source-layer': 'building',
         minzoom: 13, maxzoom: 14.5,
+        filter: ['within', NYC_BBOX_GEOM],
         paint: {
           'fill-extrusion-color': baseplateColorExpr(isHeatmap),
           'fill-extrusion-height': 5,
@@ -2497,6 +2618,7 @@ export default function MapView({ events }) {
         id: 'real3d-buildings', type: 'fill-extrusion',
         source: 'openmaptiles', 'source-layer': 'building',
         minzoom: 14,
+        filter: ['within', NYC_BBOX_GEOM],
         paint: {
           'fill-extrusion-color': buildingColorExprByState(isHeatmap),
           'fill-extrusion-height': ['coalesce', ['get', 'render_height'], ['get', 'height'], 8],
@@ -2517,20 +2639,17 @@ export default function MapView({ events }) {
           source: 'real3d-stencil-source',
           paint: {
             'fill-color': '#0d0000',
-            'fill-opacity': satelliteRef.current ? 0 : 1.0,
+            'fill-opacity': 1.0,
           },
         });
-        // Layer ordering (back → front within stencil): stencil → water → borough-outline → heat-underlay
+        // Layer ordering above stencil (back → front): water → motorway → borough-outline
+        // Heat-underlay is NOT moved above stencil in Real3D — topo glow uses separate canvas.
         // Water is unmasked — flows past borough edges naturally.
         if (map.getLayer('real3d-water')) map.moveLayer('real3d-water');
-        // Borough outline is fill-extrusion (3D GPU pass), moved above water.
-        // Naturally occluded by taller 3D buildings via depth buffer — no extra work needed.
+        // Motorway/trunk roads extend past borough edges — must be above stencil.
+        if (map.getLayer('real3d-roads-motorway')) map.moveLayer('real3d-roads-motorway');
+        // Borough outline is fill-extrusion (3D GPU pass) — topmost, occluded by buildings naturally.
         if (map.getLayer('borough-outline')) map.moveLayer('borough-outline');
-        // Move heat-underlay (heatmap kernel + topo) to the very top — above the stencil.
-        // This lets the radial gaussian glow bleed past borough edges as intended.
-        if (map.getLayer('heat-underlay')) {
-          map.moveLayer('heat-underlay');
-        }
       }
 
       map.easeTo({ pitch: 55, bearing: -17, duration: 700 });
@@ -2679,27 +2798,34 @@ export default function MapView({ events }) {
     // Outer div is the positioning root for everything
     <div ref={containerRef} className="absolute inset-0 overflow-hidden" style={{ background: '#0d0000' }}>
 
-      {/* SATELLITE CANVAS: separate MapLibre instance at z=1 — behind main map (z=2).
-          Stack from back to front: CSS bg (#0d0000) → sat canvas → main map (transparent bg) → everything else.
-          Hidden by default; shown when satellite state is true. */}
+      {/* SATELLITE CANVAS: separate MapLibre instance at z=1.
+          Stack from back to front: CSS bg (#0d0000) → sat canvas (z=1) → topo canvas (z=2) → main map (z=3). */}
       <div
         ref={satContainerRef}
         className="absolute inset-0 w-full h-full"
         style={{ zIndex: 1, display: 'none' }}
       />
 
+      {/* TOPO HEATMAP CANVAS: separate MapLibre instance at z=2 — above satellite, below main map.
+          Only active when real3D + heatmap + topoOn. Radiates unrestricted by stencil. */}
+      <div
+        ref={topoContainerRef}
+        className="absolute inset-0 w-full h-full"
+        style={{ zIndex: 2, display: 'none' }}
+      />
+
       {/* FIX CRT: Wrap CRTEffect at z-index 20 so it renders ABOVE the map canvas
-          (z:2) as a visible overlay on all views and combos, while remaining below
+          (z:3) as a visible overlay on all views and combos, while remaining below
           popups (z:30+). pointer-events-none ensures it never blocks interaction. */}
       <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 20 }}>
         <CRTEffect active={true} limitMobile={isMobile} />
       </div>
 
-      {/* Map canvas at z-index 2 */}
+      {/* Map canvas at z-index 3 */}
       <div
         ref={mapContainerRef}
         className="absolute inset-0 w-full h-full"
-        style={{ zIndex: 2, background: 'transparent' }}
+        style={{ zIndex: 3, background: 'transparent' }}
       />
 
       {!entered && <MapIntro onEnter={() => setEntered(true)} />}
