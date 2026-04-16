@@ -7,9 +7,11 @@ import MapIntro from './MapIntro';
 import CRTEffect from './CRTEffect';
 import { getZipColonists } from '../lib/pointsSystem';
 import { pingNYCLocation, getLastLocation } from '../lib/locationService';
+import { deserialize as fgbDeserialize } from 'flatgeobuf/lib/mjs/geojson.js';
 
 const GEOJSON_URL = './data/MODZCTA_2010_WGS1984.geo.json';
 const BOROUGH_GEOJSON_URL = './data/borough.geo.json';
+const BUILDING_FGB_URL = './data/BUILDING.fgb';
 const MAPTILER_KEY = 'VjoJJ0mSCXFo9kFGYGxJ';
 
 const TIMESPAN_STEPS = [
@@ -1256,6 +1258,9 @@ export default function MapView({ events }) {
   const boroughSkeletonRef = useRef(null);
   // Tier computation cache — skip expensive buildZipEventMap + computeTiers when only paint deps change
   const cachedTierDataRef   = useRef({ events: null, timespanIdx: -1, geoData: null, zipMap: null, maxCount: 0, tiers: [] });
+  // FGB building data — loaded once, cached as GeoJSON FeatureCollection
+  const buildingFGBRef      = useRef(null);
+  const buildingFGBLoadingRef = useRef(false);
 
   // Persist topo toggle across sessions
   useEffect(() => {
@@ -1935,12 +1940,13 @@ export default function MapView({ events }) {
         map.getSource('borough-source').setData(filtered);
         // Borough color: read baked _color from features — mid-brightness for visibility
         map.setPaintProperty('borough-outline', 'fill-extrusion-color', ['coalesce', ['get', '_color'], OUTLINE_COLOR]);
-        // Stagger height by boroughIdx (1m each) to avoid Z-fighting at overlapping interior edges
-        map.setPaintProperty('borough-outline', 'fill-extrusion-base', ['+', 2, ['coalesce', ['get', '_boroughIdx'], 0]]);
-        map.setPaintProperty('borough-outline', 'fill-extrusion-height', ['+', 29.5, ['coalesce', ['get', '_boroughIdx'], 0]]);
-        // Solid opacity at all zoom levels — no interpolation so borough color
-        // stays clearly visible and differentiated.
-        map.setPaintProperty('borough-outline', 'fill-extrusion-opacity', 1.0);
+        // Stagger height by tier (0–4) so higher-tier boroughs (red=4) render ON TOP of lower tiers (blue=0).
+        // This structurally prevents Z-fighting at shared borders and ensures color hierarchy.
+        map.setPaintProperty('borough-outline', 'fill-extrusion-base', ['+', 29.5, ['coalesce', ['get', '_tier'], 0]]);
+        map.setPaintProperty('borough-outline', 'fill-extrusion-height', ['+', 31.5, ['coalesce', ['get', '_tier'], 0]]);
+        // Zoom-interpolated opacity — softens thin extrusions at distance to reduce pixelation
+        map.setPaintProperty('borough-outline', 'fill-extrusion-opacity',
+          ['interpolate', ['linear'], ['zoom'], 9, 0.4, 11, 1.0]);
       } else {
         map.setPaintProperty('borough-outline', 'fill-extrusion-opacity', 0);
         boroughWithColorRef.current = null;
@@ -2039,53 +2045,47 @@ export default function MapView({ events }) {
 
   // Outline ring width regeneration on zoom AND pitch — covers 3D and Real3D modes.
   // ZCTA outline only rebuilds in 3D (layer only exists in 3D). Borough outline rebuilds in both.
-  // RAF debounce: coalesces rapid zoom ticks to one rebuild per animation frame for smoothness.
+  // Fires synchronously on zoom tick — skeleton cache is fast enough that RAF debounce just adds visible lag.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
-    let rafId = null;
     const onZoom = () => {
       const is3D  = threeDRef.current;
       const isR3D = real3DRef.current;
-      if (!is3D && !isR3D) return; // nothing to update in 2D mode
-      if (rafId) cancelAnimationFrame(rafId);
-      rafId = requestAnimationFrame(() => {
-        rafId = null;
-        // ZCTA outline — 3D only (layer does not exist in Real3D)
-        if (is3D && map.getSource('zcta-outline')) {
-          if (zctaSkeletonRef.current && withHeatRef.current) {
-            // Build props overrides from withHeat features (_heat, _tier, _special)
-            const overrides = withHeatRef.current.features.map(f => f.properties);
-            map.getSource('zcta-outline').setData(
-              generateZctaQuadsFromSkeleton(zctaSkeletonRef.current, getZoomAwareOutlineWidth(map, undefined, true), overrides)
-            );
-          } else if (withHeatRef.current) {
-            map.getSource('zcta-outline').setData(createZctaOutlineGeoJSON(withHeatRef.current, getZoomAwareOutlineWidth(map, undefined, true)));
-          }
+      if (!is3D && !isR3D) return;
+      // ZCTA outline — 3D only (layer does not exist in Real3D)
+      if (is3D && map.getSource('zcta-outline')) {
+        if (zctaSkeletonRef.current && withHeatRef.current) {
+          const overrides = withHeatRef.current.features.map(f => f.properties);
+          map.getSource('zcta-outline').setData(
+            generateZctaQuadsFromSkeleton(zctaSkeletonRef.current, getZoomAwareOutlineWidth(map, undefined, true), overrides)
+          );
+        } else if (withHeatRef.current) {
+          map.getSource('zcta-outline').setData(createZctaOutlineGeoJSON(withHeatRef.current, getZoomAwareOutlineWidth(map, undefined, true)));
         }
-        // Borough outline — 3D and Real3D. Uses pre-computed filter index for shared boundary fix (no PiP).
-        if ((is3D || isR3D) && map.getSource('borough-source')) {
-          const filterSet = boroughQuadFilterRef.current;
-          if (boroughSkeletonRef.current && boroughWithColorRef.current) {
-            const overrides = boroughWithColorRef.current.features.map(f => f.properties);
-            let quads = generateBoroughQuadsFromSkeleton(boroughSkeletonRef.current, getZoomAwareOutlineWidth(map, 18, true), overrides);
-            if (filterSet && filterSet.size > 0) {
-              quads = { ...quads, features: quads.features.filter((_, i) => !filterSet.has(i)) };
-            }
-            map.getSource('borough-source').setData(quads);
-          } else if (boroughWithColorRef.current) {
-            let quads = createOutlineGeoJSON(boroughWithColorRef.current, getZoomAwareOutlineWidth(map, 18, true));
-            if (filterSet && filterSet.size > 0) {
-              quads = { ...quads, features: quads.features.filter((_, i) => !filterSet.has(i)) };
-            }
-            map.getSource('borough-source').setData(quads);
+      }
+      // Borough outline — 3D and Real3D. Uses pre-computed filter index for safezone fix.
+      if ((is3D || isR3D) && map.getSource('borough-source')) {
+        const filterSet = boroughQuadFilterRef.current;
+        if (boroughSkeletonRef.current && boroughWithColorRef.current) {
+          const overrides = boroughWithColorRef.current.features.map(f => f.properties);
+          let quads = generateBoroughQuadsFromSkeleton(boroughSkeletonRef.current, getZoomAwareOutlineWidth(map, 18, true), overrides);
+          if (filterSet && filterSet.size > 0) {
+            quads = { ...quads, features: quads.features.filter((_, i) => !filterSet.has(i)) };
           }
+          map.getSource('borough-source').setData(quads);
+        } else if (boroughWithColorRef.current) {
+          let quads = createOutlineGeoJSON(boroughWithColorRef.current, getZoomAwareOutlineWidth(map, 18, true));
+          if (filterSet && filterSet.size > 0) {
+            quads = { ...quads, features: quads.features.filter((_, i) => !filterSet.has(i)) };
+          }
+          map.getSource('borough-source').setData(quads);
         }
-      });
+      }
     };
     map.on('zoom', onZoom);
     map.on('pitch', onZoom);
-    return () => { map.off('zoom', onZoom); map.off('pitch', onZoom); if (rafId) cancelAnimationFrame(rafId); };
+    return () => { map.off('zoom', onZoom); map.off('pitch', onZoom); };
   }, [mapReady]);
 
   // SATELLITE: Single raster layer on main map — same approach for ALL modes (2D, 3D, Real3D).
@@ -2119,90 +2119,73 @@ export default function MapView({ events }) {
   }, [satellite, real3D, mapReady]);
 
 
-  // FIX REAL3D: Building color expression using feature-state (tier+shadeIdx) for
-  // heatmap mode, or deterministic ID-based red shades for non-heatmap mode.
-  // In heatmap mode: tier comes from spatial assignment (zip region lookup),
-  // shadeIdx = featureId % 5 for cluster differentiation.
+  // Building color expression — uses _tier property baked into GeoJSON features from FGB data.
+  // Non-heatmap: 7 dark red shades via objectid hash for clustering. Heatmap: tier-based colors.
   function buildingColorExprByState(isHeatmap) {
     if (!isHeatmap) {
-      // 7 dark red shades: 6 very dark + 1 lighter accent for visual pop.
-      // Dark aesthetic is primary; the single lighter shade adds depth.
       return ['case',
-        ['==', ['%', ['to-number', ['id'], 0], 7], 0], '#0d0101',
-        ['==', ['%', ['to-number', ['id'], 0], 7], 1], '#1a0303',
-        ['==', ['%', ['to-number', ['id'], 0], 7], 2], '#260606',
-        ['==', ['%', ['to-number', ['id'], 0], 7], 3], '#330909',
-        ['==', ['%', ['to-number', ['id'], 0], 7], 4], '#400c0c',
-        ['==', ['%', ['to-number', ['id'], 0], 7], 5], '#1f0404',
+        ['==', ['%', ['to-number', ['get', 'objectid'], 0], 7], 0], '#0d0101',
+        ['==', ['%', ['to-number', ['get', 'objectid'], 0], 7], 1], '#1a0303',
+        ['==', ['%', ['to-number', ['get', 'objectid'], 0], 7], 2], '#260606',
+        ['==', ['%', ['to-number', ['get', 'objectid'], 0], 7], 3], '#330909',
+        ['==', ['%', ['to-number', ['get', 'objectid'], 0], 7], 4], '#400c0c',
+        ['==', ['%', ['to-number', ['get', 'objectid'], 0], 7], 5], '#1f0404',
         '#7a1818',
       ];
     }
 
-    // Heatmap: nested case — outer=tier from feature-state, inner=shade index from ID
+    // Heatmap: nested case — outer=tier from GeoJSON property, inner=shade index from objectid
     const shades = (tones) => ['case',
-      ['==', ['%', ['to-number', ['id'], 0], 5], 0], tones[0],
-      ['==', ['%', ['to-number', ['id'], 0], 5], 1], tones[1],
-      ['==', ['%', ['to-number', ['id'], 0], 5], 2], tones[2],
-      ['==', ['%', ['to-number', ['id'], 0], 5], 3], tones[3],
+      ['==', ['%', ['to-number', ['get', 'objectid'], 0], 5], 0], tones[0],
+      ['==', ['%', ['to-number', ['get', 'objectid'], 0], 5], 1], tones[1],
+      ['==', ['%', ['to-number', ['get', 'objectid'], 0], 5], 2], tones[2],
+      ['==', ['%', ['to-number', ['get', 'objectid'], 0], 5], 3], tones[3],
       tones[4],
     ];
 
-    // Purple fallback when tier hasn't been assigned yet — goal is to never see this
-    const PURPLE_FALLBACK_TONES = ['#1a0033', '#2d0055', '#400077', '#5500aa', '#7C3AED'];
-
     return ['case',
-      ['==', ['feature-state', 'tier'], 4], shades(HEAT_BUILDING_TONES.hot),
-      ['==', ['feature-state', 'tier'], 3], shades(HEAT_BUILDING_TONES.orange),
-      ['==', ['feature-state', 'tier'], 2], shades(HEAT_BUILDING_TONES.warm),
-      ['==', ['feature-state', 'tier'], 1], shades(HEAT_BUILDING_TONES.cool),
-      ['==', ['feature-state', 'tier'], 0], shades(HEAT_BUILDING_TONES.cold),
-      shades(PURPLE_FALLBACK_TONES),
+      ['==', ['get', '_tier'], 4], shades(HEAT_BUILDING_TONES.hot),
+      ['==', ['get', '_tier'], 3], shades(HEAT_BUILDING_TONES.orange),
+      ['==', ['get', '_tier'], 2], shades(HEAT_BUILDING_TONES.warm),
+      ['==', ['get', '_tier'], 1], shades(HEAT_BUILDING_TONES.cool),
+      ['==', ['get', '_tier'], 0], shades(HEAT_BUILDING_TONES.cold),
+      shades(HEAT_BUILDING_TONES.cold), // fallback: cold
     ];
   }
 
-  // Baseplate color expression — uniform dark colors (no clustering/feature-state).
-  // When heatmap is off: dark reds. When heatmap on: dark version of tier color via feature-state.
-  // NO clustering/neighboring — uniform dark per-tier to avoid tile-seam artifacts.
+  // Baseplate color expression — uniform dark colors per tier, no clustering.
   function baseplateColorExpr(isHeatmap) {
     if (!isHeatmap) {
       return ['case',
-        ['==', ['%', ['to-number', ['id'], 0], 3], 0], '#1a0303',
-        ['==', ['%', ['to-number', ['id'], 0], 3], 1], '#260606',
+        ['==', ['%', ['to-number', ['get', 'objectid'], 0], 3], 0], '#1a0303',
+        ['==', ['%', ['to-number', ['get', 'objectid'], 0], 3], 1], '#260606',
         '#330909',
       ];
     }
-    // Heatmap ON: uniform dark color per tier (no ID-based clustering)
     return ['case',
-      ['==', ['feature-state', 'tier'], 4], '#440400',  // hot: dark crimson
-      ['==', ['feature-state', 'tier'], 3], '#3d1500',  // orange: dark burnt orange
-      ['==', ['feature-state', 'tier'], 2], '#5c4a00',  // warm: dark golden
-      ['==', ['feature-state', 'tier'], 1], '#002910',  // cool: dark forest green
-      '#001f29',                                          // cold (default): dark teal
+      ['==', ['get', '_tier'], 4], '#440400',
+      ['==', ['get', '_tier'], 3], '#3d1500',
+      ['==', ['get', '_tier'], 2], '#5c4a00',
+      ['==', ['get', '_tier'], 1], '#002910',
+      '#001f29',
     ];
   }
 
 
-  // FIX REAL3D: Building tier assignment — queries extrusion layer for feature-state tier.
-  // Uses multi-sample fallback for buildings whose centroid returns tier 0 (boundary buildings).
-  function assignBuildingTiersToMap(map) {
-    if (!map) return;
+  // Assign _tier property to each building feature in the FGB GeoJSON based on centroid PiP.
+  // Returns a new FeatureCollection with _tier baked into each feature's properties.
+  function bakeBuildingTiers(buildingGeoJSON) {
     const features = geoDataRef.current?.features;
     const tiers = tiersRef.current;
-    if (!features || !tiers.length) return;
+    if (!features || !tiers.length || !buildingGeoJSON?.features) return buildingGeoJSON;
 
-    // Only query the extrusions layer — baseplates use uniform tier colors, no feature-state needed.
-    // NJ/CT buildings will get tier 0 (default dark reds) since they fall outside ZCTA polygons.
-    if (!map.getLayer('real3d-buildings')) return;
-
-    try {
-      const buildings = map.queryRenderedFeatures(undefined, { layers: ['real3d-buildings'] });
-      buildings.forEach(b => {
-        if (b.id == null) return;
+    return {
+      ...buildingGeoJSON,
+      features: buildingGeoJSON.features.map(b => {
         const centroid = getGeomCentroid(b.geometry);
         let tier = findTierForPoint(centroid, features, tiers);
-        // Multi-sample fallback for boundary buildings: if centroid yields tier 0 (cold/default),
-        // try up to 4 polygon vertices and use majority non-zero tier
-        if (tier === 0 && b.geometry && b.geometry.coordinates) {
+        // Multi-sample fallback for boundary buildings
+        if (tier === 0 && b.geometry?.coordinates) {
           const ring = b.geometry.type === 'MultiPolygon'
             ? (b.geometry.coordinates[0]?.[0] || [])
             : (b.geometry.coordinates[0] || []);
@@ -2220,21 +2203,50 @@ export default function MapView({ events }) {
             if (bestTier > 0) tier = bestTier;
           }
         }
-        map.setFeatureState(
-          { source: 'openmaptiles', sourceLayer: 'building', id: b.id },
-          { tier }
-        );
-      });
-    } catch (e) { /* ignore mid-render errors */ }
+        return { ...b, properties: { ...b.properties, _tier: tier } };
+      }),
+    };
   }
 
-  function applyReal3DLayers(map, isHeatmap) {
+  // Load BUILDING.fgb and return GeoJSON FeatureCollection. Caches result.
+  async function loadBuildingFGB() {
+    if (buildingFGBRef.current) return buildingFGBRef.current;
+    if (buildingFGBLoadingRef.current) return null; // already loading
+    buildingFGBLoadingRef.current = true;
+    try {
+      const resp = await fetch(BUILDING_FGB_URL);
+      const features = [];
+      for await (const feature of fgbDeserialize(resp.body)) {
+        // Skip features with null/invalid geometry
+        if (!feature?.geometry?.coordinates) continue;
+        // Coerce string properties to numbers, handle nulls
+        const hr = parseFloat(feature.properties?.height_roof);
+        const ge = parseFloat(feature.properties?.ground_elevation);
+        feature.properties.height_roof = isNaN(hr) ? 8 : hr;
+        feature.properties.ground_elevation = isNaN(ge) ? 0 : ge;
+        feature.properties.objectid = feature.properties.objectid || '0';
+        features.push(feature);
+      }
+      const geojson = { type: 'FeatureCollection', features };
+      buildingFGBRef.current = geojson;
+      buildingFGBLoadingRef.current = false;
+      return geojson;
+    } catch (err) {
+      console.error('Failed to load BUILDING.fgb:', err);
+      buildingFGBLoadingRef.current = false;
+      return null;
+    }
+  }
+
+  async function applyReal3DLayers(map, isHeatmap) {
     if (buildingAssignCleanupRef.current) {
       buildingAssignCleanupRef.current();
       buildingAssignCleanupRef.current = null;
     }
 
     REAL3D_ALL_LAYER_IDS.forEach(id => { if (map.getLayer(id)) map.removeLayer(id); });
+    // Remove FGB source so it gets re-created with fresh data
+    if (map.getSource('fgb-buildings')) map.removeSource('fgb-buildings');
 
     if (!map.getSource('openmaptiles')) {
       try {
@@ -2243,7 +2255,6 @@ export default function MapView({ events }) {
     }
 
     try {
-      // Fix tile-seam shimmering during pitch/rotation — must be set before layers render.
       map.setLight({ anchor: 'map' });
 
       // WATER: unrestricted — rivers/harbor flow past borough edges naturally.
@@ -2258,7 +2269,7 @@ export default function MapView({ events }) {
         },
       }, waterBeforeId);
 
-      // PARKS — NYC-restricted via ['within'] filter so stencil can be transparent.
+      // PARKS — NYC-restricted via ['within'] filter.
       map.addLayer({
         id: 'real3d-park', type: 'fill',
         source: 'openmaptiles', 'source-layer': 'landuse',
@@ -2269,7 +2280,7 @@ export default function MapView({ events }) {
         },
       });
 
-      // ROADS — MOTORWAY + TRUNK (z9–13): thick neon veins, stencil-bound.
+      // ROADS — MOTORWAY + TRUNK (z9–13): unrestricted.
       map.addLayer({
         id: 'real3d-roads-motorway', type: 'line',
         source: 'openmaptiles', 'source-layer': 'transportation',
@@ -2283,7 +2294,7 @@ export default function MapView({ events }) {
         },
       });
 
-      // ROADS — PRIMARY + SECONDARY (z10–13): NYC-restricted via ['within'].
+      // ROADS — PRIMARY + SECONDARY (z10–13): NYC-restricted.
       map.addLayer({
         id: 'real3d-roads-primary', type: 'line',
         source: 'openmaptiles', 'source-layer': 'transportation',
@@ -2297,7 +2308,7 @@ export default function MapView({ events }) {
         },
       });
 
-      // ROADS — TERTIARY + RESIDENTIAL (z12–13): NYC-restricted via ['within'].
+      // ROADS — TERTIARY + RESIDENTIAL (z12–13): NYC-restricted.
       map.addLayer({
         id: 'real3d-roads-tertiary', type: 'line',
         source: 'openmaptiles', 'source-layer': 'transportation',
@@ -2311,7 +2322,7 @@ export default function MapView({ events }) {
         },
       });
 
-      // LANDUSE PROXY (z9–13): coarse block shapes — NYC-restricted via ['within'].
+      // LANDUSE PROXY (z9–13): coarse block shapes — NYC-restricted.
       map.addLayer({
         id: 'real3d-landuse-baseplate', type: 'fill',
         source: 'openmaptiles', 'source-layer': 'landuse',
@@ -2322,66 +2333,58 @@ export default function MapView({ events }) {
         },
       });
 
-      // FLAT BUILDING FOOTPRINTS (z10–11): low-height extrusion as baseplate proxy
-      // NO ['within'] filter — MapLibre's within expression does not reliably filter
-      // features from external vector tile sources (MapTiler). NJ/CT baseplates render
-      // in dark reds that blend with the #0d0000 CSS background, making them invisible.
-      // Base 2m ensures baseplates sit above safezone extrusion (1m) in safezone areas.
-      map.addLayer({
-        id: 'real3d-buildings-baseplate', type: 'fill-extrusion',
-        source: 'openmaptiles', 'source-layer': 'building',
-        minzoom: 10, maxzoom: 11,
-        paint: {
-          'fill-extrusion-color': baseplateColorExpr(isHeatmap),
-          'fill-extrusion-height': 7,
-          'fill-extrusion-base': 2,
-          'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'], 10, 0, 10.5, 0.9],
-          'fill-extrusion-vertical-gradient': false,
-        },
-      });
+      // BUILDINGS from BUILDING.fgb — NYC-only GeoJSON source (no tile artifacts).
+      // Load FGB data asynchronously, then add building layers.
+      const buildingData = await loadBuildingFGB();
+      if (buildingData && map.getLayer('real3d-landuse-baseplate')) {
+        // Bake tier data if heatmap is on
+        const tieredData = isHeatmap ? bakeBuildingTiers(buildingData) : buildingData;
 
-      // FULL 3D EXTRUSIONS (z11+): vertical-gradient off + opacity < 1 forces framebuffer
-      // compositing which hides tile-seam Z-fighting artifacts at full building height.
-      // NO ['within'] filter — see baseplate comment above. assignBuildingTiersToMap
-      // handles NYC-only tier coloring via CPU-side PiP.
-      map.addLayer({
-        id: 'real3d-buildings', type: 'fill-extrusion',
-        source: 'openmaptiles', 'source-layer': 'building',
-        minzoom: 11,
-        paint: {
-          'fill-extrusion-color': buildingColorExprByState(isHeatmap),
-          'fill-extrusion-height': ['coalesce', ['get', 'render_height'], ['get', 'height'], 8],
-          'fill-extrusion-base': ['max', 2, ['coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0]],
-          'fill-extrusion-opacity': 0.92,
-          'fill-extrusion-vertical-gradient': false,
-        },
-      });
+        if (!map.getSource('fgb-buildings')) {
+          map.addSource('fgb-buildings', {
+            type: 'geojson',
+            data: tieredData,
+            generateId: true,
+          });
+        } else {
+          map.getSource('fgb-buildings').setData(tieredData);
+        }
+
+        // FLAT BUILDING FOOTPRINTS (z10–11): baseplate proxy
+        map.addLayer({
+          id: 'real3d-buildings-baseplate', type: 'fill-extrusion',
+          source: 'fgb-buildings',
+          minzoom: 10, maxzoom: 11,
+          paint: {
+            'fill-extrusion-color': baseplateColorExpr(isHeatmap),
+            'fill-extrusion-height': 7,
+            'fill-extrusion-base': 2,
+            'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'], 10, 0, 10.5, 0.9],
+            'fill-extrusion-vertical-gradient': false,
+          },
+        });
+
+        // FULL 3D EXTRUSIONS (z11+): uses height_roof from FGB data
+        map.addLayer({
+          id: 'real3d-buildings', type: 'fill-extrusion',
+          source: 'fgb-buildings',
+          minzoom: 11,
+          paint: {
+            'fill-extrusion-color': buildingColorExprByState(isHeatmap),
+            'fill-extrusion-height': ['coalesce', ['get', 'height_roof'], 8],
+            'fill-extrusion-base': 2,
+            'fill-extrusion-opacity': 0.92,
+            'fill-extrusion-vertical-gradient': false,
+          },
+        });
+      }
 
       // Layer ordering: move unrestricted layers to top of stack.
-      // Water is already positioned below heat-underlay via addLayer beforeId.
-      // Motorway/trunk roads extend past borough edges — above everything except borough outline.
       if (map.getLayer('real3d-roads-motorway')) map.moveLayer('real3d-roads-motorway');
-      // Borough outline is fill-extrusion (3D GPU pass) — topmost, occluded by buildings naturally.
       if (map.getLayer('borough-outline')) map.moveLayer('borough-outline');
 
       map.easeTo({ pitch: 55, bearing: -17, duration: 700 });
 
-      if (isHeatmap) {
-        // Throttled assign — max once per 800ms to prevent repaint thrashing
-        let assignTimer = null;
-        const assignFn = () => {
-          if (assignTimer) return;
-          assignTimer = setTimeout(() => { assignTimer = null; assignBuildingTiersToMap(map); }, 800);
-        };
-        setTimeout(() => assignBuildingTiersToMap(map), 700);
-        map.on('moveend', assignFn);
-        map.on('zoomend', assignFn);
-        buildingAssignCleanupRef.current = () => {
-          map.off('moveend', assignFn);
-          map.off('zoomend', assignFn);
-          if (assignTimer) { clearTimeout(assignTimer); assignTimer = null; }
-        };
-      }
     } catch (err) { console.error('Real3D layer add failed:', err); }
   }
 
@@ -2391,6 +2394,8 @@ export default function MapView({ events }) {
     if (!map || !mapReady) return;
     if (!real3D) {
       REAL3D_ALL_LAYER_IDS.forEach(id => { if (map.getLayer(id)) map.removeLayer(id); });
+      // Clean up FGB source
+      if (map.getSource('fgb-buildings')) map.removeSource('fgb-buildings');
       // Clean up stencil source from old sessions (may exist from previous code)
       if (map.getLayer('real3d-nyc-stencil')) map.removeLayer('real3d-nyc-stencil');
       if (map.getSource('real3d-stencil-source')) map.removeSource('real3d-stencil-source');
@@ -2401,15 +2406,20 @@ export default function MapView({ events }) {
     applyReal3DLayers(map, heatmapRef.current);
   }, [real3D, mapReady]);
 
-  // Heatmap/timespan change in Real3D — update paint + re-run tier assignment
-  // Does NOT call applyReal3DLayers to avoid double-add race condition on toggle.
+  // Heatmap/timespan change in Real3D — re-bake tier data into GeoJSON source and update paint
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady || !real3D) return;
     if (!map.getLayer('real3d-buildings')) return;
 
+    // Re-bake tiers into FGB GeoJSON when heatmap/timespan changes
+    const src = map.getSource('fgb-buildings');
+    if (src && buildingFGBRef.current) {
+      const tieredData = heatmap ? bakeBuildingTiers(buildingFGBRef.current) : buildingFGBRef.current;
+      src.setData(tieredData);
+    }
+
     map.setPaintProperty('real3d-buildings', 'fill-extrusion-color', buildingColorExprByState(heatmap));
-    // Ensure safezone extrusion stays white and visible — sole white renderer in Real3D mode
     if (map.getLayer('zcta-safezone-extrusion')) map.setPaintProperty('zcta-safezone-extrusion', 'fill-extrusion-opacity', 1.0);
     if (map.getLayer('real3d-buildings-baseplate')) {
       map.setPaintProperty('real3d-buildings-baseplate', 'fill-extrusion-color', baseplateColorExpr(heatmap));
@@ -2417,26 +2427,11 @@ export default function MapView({ events }) {
     if (map.getLayer('real3d-landuse-baseplate')) {
       map.setPaintProperty('real3d-landuse-baseplate', 'fill-color', baseplateColorExpr(heatmap));
     }
-    // Heatmap staining for Digital Skeleton roads — static warm tones when heatmap on,
-    // neon reds when heatmap off. No per-feature tier assignment (eliminated for performance).
     if (map.getLayer('real3d-roads-motorway')) {
       map.setPaintProperty('real3d-roads-motorway', 'line-color', heatmap ? '#884400' : '#ff2200');
     }
     if (map.getLayer('real3d-roads-primary')) {
       map.setPaintProperty('real3d-roads-primary', 'line-color', heatmap ? '#662200' : '#cc1800');
-    }
-
-    if (buildingAssignCleanupRef.current) { buildingAssignCleanupRef.current(); buildingAssignCleanupRef.current = null; }
-    if (heatmap) {
-      let assignTimer = null;
-      const assignFn = () => {
-        if (assignTimer) return;
-        assignTimer = setTimeout(() => { assignTimer = null; assignBuildingTiersToMap(map); }, 800);
-      };
-      setTimeout(() => assignBuildingTiersToMap(map), 500);
-      map.on('moveend', assignFn);
-      map.on('zoomend', assignFn);
-      buildingAssignCleanupRef.current = () => { map.off('moveend', assignFn); map.off('zoomend', assignFn); if (assignTimer) clearTimeout(assignTimer); };
     }
   }, [heatmap, real3D, mapReady, timespanIdx]);
 
