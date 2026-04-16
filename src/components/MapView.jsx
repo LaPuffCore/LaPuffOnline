@@ -358,13 +358,13 @@ function getZoomAwareOutlineWidth(map, baseMeters = 14, is3D = false) {
     if (baseMeters >= 15) {
       let meters;
       if (zoom >= 11) {
-        meters = baseMeters * 2; // 2x (200%) at close zoom
+        meters = baseMeters * 2.5; // 2.5x at close zoom — thicker to reduce aliasing
       } else if (zoom >= 9) {
-        // linear ramp 2x → 4x from zoom 11 → 9
+        // linear ramp 2.5x → 7x from zoom 11 → 9 — aggressive scaling fights pixelation
         const t = (11 - zoom) / 2; // 0 at zoom11, 1 at zoom9
-        meters = baseMeters * (2 + 2 * t);
+        meters = baseMeters * (2.5 + 4.5 * t);
       } else {
-        meters = baseMeters * 4; // 4x (400%) flat below zoom 9
+        meters = baseMeters * 7; // 7x flat below zoom 9
       }
       return meters * pitchFactor;
     }
@@ -1008,36 +1008,29 @@ function buildColoredBoroughFeatures(boroughGeoData, avgTiers, isHeatmap) {
   };
 }
 
-// Fix shared borough boundary overlap: at interior land borders where two boroughs
-// draw overlapping outward quads, keep only the higher-tier borough's quads.
-// This eliminates the color clash at shared boundaries (Brooklyn-Queens, Bronx-Manhattan, etc).
-// Only applies when heatmap is on — when off, all boroughs have the same color and blend naturally.
-// Shared boundary fix: removes quads whose outward edge midpoint falls inside ANY
-// neighboring borough (internal edges). Only external perimeter edges survive.
-// Returns { filtered, removedIdxSet }. The removedIdxSet is stable across zooms
-// and can be reused in the zoom listener for O(1) index-based filtering.
-function fixSharedBoundaryQuads(quadsGeoJSON, boroughFeatures) {
+// Remove borough outline quads that overlap safezone areas (ZCTA features with _special=true).
+// Interior borough edges are KEPT for visual clarity; only safezone-adjacent quads are removed
+// because their extrusion conflicts with the white safezone fill-extrusion.
+// Returns { filtered, removedIdxSet } — removedIdxSet is stable across zooms for O(1) re-filtering.
+function removeSafezoneOverlapQuads(quadsGeoJSON, safezoneFeatures) {
   const removedIdxSet = new Set();
-  if (!boroughFeatures) return { filtered: quadsGeoJSON, removedIdxSet };
+  if (!safezoneFeatures || !safezoneFeatures.length) return { filtered: quadsGeoJSON, removedIdxSet };
   const kept = [];
   quadsGeoJSON.features.forEach((quad, idx) => {
     const coords = quad.geometry.coordinates[0];
-    const bi = quad.properties._boroughIdx;
-    if (bi == null) { kept.push(quad); return; }
     // Outward edge midpoint (coords[0] and coords[1] are outer vertices)
     const mx = (coords[0][0] + coords[1][0]) / 2;
     const my = (coords[0][1] + coords[1][1]) / 2;
-    let isInternal = false;
-    for (let j = 0; j < boroughFeatures.length; j++) {
-      if (j === bi) continue;
-      const bGeom = boroughFeatures[j].geometry;
-      const polys = bGeom.type === 'MultiPolygon' ? bGeom.coordinates : [bGeom.coordinates];
+    let isInSafezone = false;
+    for (const sf of safezoneFeatures) {
+      const geom = sf.geometry;
+      const polys = geom.type === 'MultiPolygon' ? geom.coordinates : [geom.coordinates];
       for (const poly of polys) {
-        if (pointInRing(mx, my, poly[0])) { isInternal = true; break; }
+        if (pointInRing(mx, my, poly[0])) { isInSafezone = true; break; }
       }
-      if (isInternal) break;
+      if (isInSafezone) break;
     }
-    if (isInternal) removedIdxSet.add(idx);
+    if (isInSafezone) removedIdxSet.add(idx);
     else kept.push(quad);
   });
   return { filtered: { ...quadsGeoJSON, features: kept }, removedIdxSet };
@@ -1258,9 +1251,11 @@ export default function MapView({ events }) {
   const zipBoroughMapRef   = useRef({});
   const boroughWithColorRef = useRef(null);
   const boroughAvgTiersRef = useRef([]);
-  const boroughQuadFilterRef = useRef(null); // Pre-computed Set of skeleton segment indices to KEEP after fixSharedBoundaryQuads
+  const boroughQuadFilterRef = useRef(null); // Pre-computed Set of skeleton segment indices removed by safezone filter
   const zctaSkeletonRef    = useRef(null);
   const boroughSkeletonRef = useRef(null);
+  // Tier computation cache — skip expensive buildZipEventMap + computeTiers when only paint deps change
+  const cachedTierDataRef   = useRef({ events: null, timespanIdx: -1, geoData: null, zipMap: null, maxCount: 0, tiers: [] });
 
   // Persist topo toggle across sessions
   useEffect(() => {
@@ -1445,7 +1440,7 @@ export default function MapView({ events }) {
             0.55, '#ff4d4d',    // red-orange
             0.75, '#cc0d00',    // red
           ],
-          'heatmap-opacity': (heatmap && topoOn && !real3D) ? 0.50 : 0,
+          'heatmap-opacity': (heatmap && topoOn) ? 0.50 : 0,
         },
       });
     }
@@ -1664,24 +1659,33 @@ export default function MapView({ events }) {
     const map = mapRef.current;
     if (!map || !mapReady || !geoData || !map.getLayer('zcta-fill')) return;
 
-    const { zipMap, maxCount } = buildZipEventMap(events, TIMESPAN_STEPS[timespanIdx].days);
-    const tiers = computeTiers(geoData.features, zipMap, maxCount, adjacency);
-    tiersRef.current = tiers;
+    // Cache tier computations — only recompute when data deps change (events, timespan, geoData).
+    // Paint-only toggles (satellite, topoOn, threeD) skip the expensive buildZipEventMap + computeTiers.
+    const cached = cachedTierDataRef.current;
+    const dataChanged = events !== cached.events || timespanIdx !== cached.timespanIdx || geoData !== cached.geoData;
+    let zipMap, maxCount, tiers, withHeat;
 
-    const withHeat = {
-      ...geoData,
-      features: geoData.features.map((f, i) => {
-        const tier = tiers[i];
-        const zip = String(f.properties.MODZCTA || '');
-        const rawHeat = f.properties._special ? 0 : normalizeHeat(zipMap[zip]?.length || 0, maxCount);
-        return { ...f, properties: { ...f.properties, _heat: rawHeat, _tier: tier < 0 ? 0 : tier } };
-      }),
-    };
-    if (map.getSource('zcta')) map.getSource('zcta').setData(withHeat);
-    // Store so zoom/pitch listener can regenerate outline width without full recompute
-    withHeatRef.current = withHeat;
-    if (map.getSource('zcta-outline')) {
-      map.getSource('zcta-outline').setData(createZctaOutlineGeoJSON(withHeat, getZoomAwareOutlineWidth(map, undefined, threeD)));
+    if (dataChanged) {
+      ({ zipMap, maxCount } = buildZipEventMap(events, TIMESPAN_STEPS[timespanIdx].days));
+      tiers = computeTiers(geoData.features, zipMap, maxCount, adjacency);
+      withHeat = {
+        ...geoData,
+        features: geoData.features.map((f, i) => {
+          const tier = tiers[i];
+          const zip = String(f.properties.MODZCTA || '');
+          const rawHeat = f.properties._special ? 0 : normalizeHeat(zipMap[zip]?.length || 0, maxCount);
+          return { ...f, properties: { ...f.properties, _heat: rawHeat, _tier: tier < 0 ? 0 : tier } };
+        }),
+      };
+      cachedTierDataRef.current = { events, timespanIdx, geoData, zipMap, maxCount, tiers, withHeat };
+      tiersRef.current = tiers;
+      withHeatRef.current = withHeat;
+      if (map.getSource('zcta')) map.getSource('zcta').setData(withHeat);
+      if (map.getSource('zcta-outline')) {
+        map.getSource('zcta-outline').setData(createZctaOutlineGeoJSON(withHeat, getZoomAwareOutlineWidth(map, undefined, threeD)));
+      }
+    } else {
+      ({ zipMap, maxCount, tiers, withHeat } = cached);
     }
 
     // Enforce 2D/Real3D outline widths & colors to match 3D upper border constant (zoom 9.5 reference)
@@ -1923,13 +1927,17 @@ export default function MapView({ events }) {
         boroughAvgTiersRef.current = avgTiers;
         const coloredBorough = buildColoredBoroughFeatures(boroughGeoDataRef.current, avgTiers, heatmap);
         boroughWithColorRef.current = coloredBorough;
-        // Generate quads and remove internal shared boundary edges (only outer perimeter survives)
+        // Generate quads and remove quads overlapping safezone areas (interior edges preserved)
         let boroughQuads = createOutlineGeoJSON(coloredBorough, getZoomAwareOutlineWidth(map, 18, threeD || real3D));
-        const { filtered, removedIdxSet } = fixSharedBoundaryQuads(boroughQuads, boroughGeoDataRef.current.features);
+        const safezoneFeatures = geoData?.features?.filter(f => f.properties?._special) || [];
+        const { filtered, removedIdxSet } = removeSafezoneOverlapQuads(boroughQuads, safezoneFeatures);
         boroughQuadFilterRef.current = removedIdxSet;
         map.getSource('borough-source').setData(filtered);
         // Borough color: read baked _color from features — mid-brightness for visibility
         map.setPaintProperty('borough-outline', 'fill-extrusion-color', ['coalesce', ['get', '_color'], OUTLINE_COLOR]);
+        // Stagger height by boroughIdx (1m each) to avoid Z-fighting at overlapping interior edges
+        map.setPaintProperty('borough-outline', 'fill-extrusion-base', ['+', 2, ['coalesce', ['get', '_boroughIdx'], 0]]);
+        map.setPaintProperty('borough-outline', 'fill-extrusion-height', ['+', 29.5, ['coalesce', ['get', '_boroughIdx'], 0]]);
         // Solid opacity at all zoom levels — no interpolation so borough color
         // stays clearly visible and differentiated.
         map.setPaintProperty('borough-outline', 'fill-extrusion-opacity', 1.0);
@@ -2183,7 +2191,7 @@ export default function MapView({ events }) {
     if (!features || !tiers.length) return;
 
     // Only query the extrusions layer — baseplates use uniform tier colors, no feature-state needed.
-    // Buildings already have ['within', NYC_BBOX_GEOM] filter, so no NJ/CT buildings exist.
+    // NJ/CT buildings will get tier 0 (default dark reds) since they fall outside ZCTA polygons.
     if (!map.getLayer('real3d-buildings')) return;
 
     try {
@@ -2239,6 +2247,8 @@ export default function MapView({ events }) {
       map.setLight({ anchor: 'map' });
 
       // WATER: unrestricted — rivers/harbor flow past borough edges naturally.
+      // Inserted BELOW heat-underlay so topo glow radiates above water, not behind it.
+      const waterBeforeId = map.getLayer('heat-underlay') ? 'heat-underlay' : undefined;
       map.addLayer({
         id: 'real3d-water', type: 'fill',
         source: 'openmaptiles', 'source-layer': 'water',
@@ -2246,7 +2256,7 @@ export default function MapView({ events }) {
           'fill-color': '#0e1f35',
           'fill-opacity': 0.6,
         },
-      });
+      }, waterBeforeId);
 
       // PARKS — NYC-restricted via ['within'] filter so stencil can be transparent.
       map.addLayer({
@@ -2313,13 +2323,14 @@ export default function MapView({ events }) {
       });
 
       // FLAT BUILDING FOOTPRINTS (z10–11): low-height extrusion as baseplate proxy
-      // ['within', NYC_BBOX_GEOM] restricts to NYC only — prevents NJ/CT buildings.
+      // NO ['within'] filter — MapLibre's within expression does not reliably filter
+      // features from external vector tile sources (MapTiler). NJ/CT baseplates render
+      // in dark reds that blend with the #0d0000 CSS background, making them invisible.
       // Base 2m ensures baseplates sit above safezone extrusion (1m) in safezone areas.
       map.addLayer({
         id: 'real3d-buildings-baseplate', type: 'fill-extrusion',
         source: 'openmaptiles', 'source-layer': 'building',
         minzoom: 10, maxzoom: 11,
-        filter: ['within', NYC_BBOX_GEOM],
         paint: {
           'fill-extrusion-color': baseplateColorExpr(isHeatmap),
           'fill-extrusion-height': 7,
@@ -2331,11 +2342,12 @@ export default function MapView({ events }) {
 
       // FULL 3D EXTRUSIONS (z11+): vertical-gradient off + opacity < 1 forces framebuffer
       // compositing which hides tile-seam Z-fighting artifacts at full building height.
+      // NO ['within'] filter — see baseplate comment above. assignBuildingTiersToMap
+      // handles NYC-only tier coloring via CPU-side PiP.
       map.addLayer({
         id: 'real3d-buildings', type: 'fill-extrusion',
         source: 'openmaptiles', 'source-layer': 'building',
         minzoom: 11,
-        filter: ['within', NYC_BBOX_GEOM],
         paint: {
           'fill-extrusion-color': buildingColorExprByState(isHeatmap),
           'fill-extrusion-height': ['coalesce', ['get', 'render_height'], ['get', 'height'], 8],
@@ -2346,8 +2358,7 @@ export default function MapView({ events }) {
       });
 
       // Layer ordering: move unrestricted layers to top of stack.
-      // Water is unmasked — flows past borough edges naturally.
-      if (map.getLayer('real3d-water')) map.moveLayer('real3d-water');
+      // Water is already positioned below heat-underlay via addLayer beforeId.
       // Motorway/trunk roads extend past borough edges — above everything except borough outline.
       if (map.getLayer('real3d-roads-motorway')) map.moveLayer('real3d-roads-motorway');
       // Borough outline is fill-extrusion (3D GPU pass) — topmost, occluded by buildings naturally.
