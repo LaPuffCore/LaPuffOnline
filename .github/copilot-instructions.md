@@ -296,10 +296,12 @@ borough-outline (fill-extrusion, unrestricted, topmost)
 - **Zoom controls overlap**: The native MapLibre zoom-out (minus) button overlaps the custom Recentering button. Fix: add `marginBottom: '80px'` to the MapLibre NavigationControl container on load, or reposition the custom recentering button so the native minus button is always clickable.
 
 ### MapView — Caching & Reliability
-- **Cacheable (compute once)**: ZCTA GeoJSON, borough GeoJSON, ZCTA skeleton, borough skeleton, zip→borough mapping, adjacency matrix, tier geo-collections. All already cached in state or refs except tier geo-collections.
-- **Must recompute on timespan/event change**: `buildZipEventMap`, `computeTiers`, `withHeat` features, borough avg tiers, heat underlay points, building/road tier assignments.
+- **Cacheable (compute once)**: ZCTA GeoJSON, borough GeoJSON, ZCTA skeleton, borough skeleton, zip→borough mapping, adjacency matrix. All already cached in state or refs.
+- **Pre-computed per session**: All 5 timespan tiers stored in `precomputedTiersRef`. Time slider reads from here (no recomputation).
+- **Must recompute on timespan/event change**: Only `withHeat` features (for ZCTA fill colors) and borough avg tiers. Building tiers read from pre-computed.
 - **Must recompute on mode toggle only**: Paint properties, layer visibility, camera pitch/bearing. These do NOT need data recomputation.
-- **Optimization path**: `cachedTierDataRef` caches `buildZipEventMap` + `computeTiers` results. Paint-only toggles skip expensive recomputation. `removeSafezoneOverlapQuads` pre-computed once per heatmap effect.
+- **Building tier updates**: Feature-state only (no setData). `applyBuildingTiersChunked` is non-blocking and cancellable.
+- **Optimization path**: `cachedTierDataRef` caches per-effect run. `precomputedTiersRef` caches all timespans. Paint-only toggles skip expensive recomputation. `removeSafezoneOverlapQuads` pre-computed once per heatmap effect.
 - The map occasionally fails to load on first click but works on refresh — likely a race condition between GeoJSON fetch and `addLayers`.
 
 ### MapView — General Principles
@@ -347,18 +349,39 @@ borough-outline (fill-extrusion, unrestricted, topmost)
 - **Heat-underlay opacity:** Removed `!real3D` restriction from initial layer creation so topo glow works in Real3D immediately.
 - **Zoom handler:** Removed RAF debounce — fires synchronously on zoom/pitch for instant outline response.
 
-**Round 4 — FGB Building Migration (commit 9dd1a94 → 910502b):**
-- **BUILDING.fgb source:** Replaced MapTiler `openmaptiles` building source with local FlatGeobuf file (348K NYC-only polygons). Eliminates: tile-seam artifacts, `['within']` incompatibility, NJ/CT building rendering, external tile dependency for buildings.
-- **ZCTA index map:** `buildingZctaMapRef` = `Int16Array(n)` built once at FGB load time via centroid PiP. Maps each building feature index → ZCTA feature index (-1 = not found). Built synchronously at load but only ONCE per session.
-- **O(n) re-tier:** `retierBuildings(geojson, tiers)` — uses cached ZCTA index map. No PiP. Rebuilds `_tier` per building in one pass. Called only when `timespanIdx` changes.
-- **Heatmap toggle = paint-only:** Two separate effects: `[heatmap, real3D, mapReady]` runs `setPaintProperty` only (no setData, instant). `[timespanIdx, real3D, mapReady]` runs `retierBuildings` + `setData` (fast O(n), no freeze).
+**Round 4 — FGB Building Migration (commit 9dd1a94 → 910502b → 25b9e99):**
+- **BUILDING.fgb source:** Replaced MapTiler `openmaptiles` building source with local FlatGeobuf file (381K NYC-only polygons). Eliminates: tile-seam artifacts, `['within']` incompatibility, NJ/CT building rendering, external tile dependency for buildings.
+- **ZCTA index map:** `buildingZctaMapRef` = `Int16Array(n)` built once at FGB load time via centroid PiP. Maps each building feature index → ZCTA feature index (-1 = not found). Built with yielding (5K chunks) to avoid blocking.
+- **Feature-state tier coloring (25b9e99):** Replaced `retierBuildings` + `setData` with `applyBuildingTiersChunked` + `setFeatureState`. Buildings never re-upload geometry on timespan change.
+- **Pre-computed tiers (25b9e99):** All 5 timespan tiers computed in background on map init. Time slider reads from `precomputedTiersRef` — no recomputation.
+- **Deferred load (25b9e99):** `addBuildingLayers` creates empty source (instant toggle), then `setTimeout(0)` pushes data from cache or viewport fetch.
+- **Heatmap toggle = paint-only:** `[heatmap, real3D, mapReady]` effect runs `setPaintProperty` + `applyBuildingTiersChunked` (no setData).
 - **Raytracer eliminated:** Removed `assignBuildingTiersToMap`, `bakeBuildingTiers`, and all `moveend`/`zoomend` building tier listeners.
 - **Building cache persistence:** `buildingFGBRef.current` NEVER cleared on Real3D toggle-off. Only the MapLibre source is removed (GPU memory). On re-activation, tiles are re-added from in-memory cache instantly.
-- **FGB spatial index:** `BUILDING.fgb` lacks a Hilbert R-tree spatial index (built without one). Bbox range queries return 0 features silently. Rebuild with `ogr2ogr -f FlatGeobuf BUILDING_indexed.fgb BUILDING.fgb` to enable HTTP range-based spatial filtering. GitHub Pages supports Range headers.
+- **FGB spatial index:** `building_indexed.fgb` has Hilbert R-tree spatial index. Bbox range queries work for viewport fetch.
 
 ### MapView — Post-Mortem: Failed Approaches (DO NOT REPEAT)
 - **Failure 8 — `['within']` on MapTiler vector tile fill-extrusions**: `['within', NYC_BBOX_GEOM]` filter on building/baseplate fill-extrusion layers from MapTiler's `openmaptiles` source caused ALL buildings to disappear. Works fine on fill/line layers (parks, roads, landuse) but NOT on fill-extrusion layers from external vector tile sources. SOLVED by migrating to local FGB data (no filter needed).
-- **Failure 9 — queryRenderedFeatures + setFeatureState for building tier coloring**: Caused tile-seam artifacts (only styles on-screen tiles), square bleeding, purple fallback on pan, main thread blocking from millions of PiP ops. SOLVED by pre-baking `_tier` into GeoJSON features via `bakeBuildingTiers()`.
+- **Failure 9 — queryRenderedFeatures + setFeatureState for building tier coloring**: Caused tile-seam artifacts (only styles on-screen tiles), square bleeding, purple fallback on pan, main thread blocking from millions of PiP ops. SOLVED by pre-baking `_tier` into GeoJSON features via `bakeBuildingTiers()`. Later SUPERSEDED by feature-state approach using `generateId: true` + `applyBuildingTiersChunked()` which sets state on ALL features by sequential ID (no queryRenderedFeatures).
+
+### MapView — Feature-State Tier Architecture (commit 25b9e99)
+- **Building tier colors via feature-state**: `setFeatureState({source: 'fgb-buildings', id: i}, {tier: X})` updates per-feature tier. Paint expressions use `['coalesce', ['feature-state', 'tier'], 0]` instead of `['get', '_tier']`.
+- **applyBuildingTiersChunked(map, tiers)**: Non-blocking chunked application. Desktop: 10K per chunk, mobile: 2K. Uses `tierUpdateVersionRef` for cancellation if timespan changes mid-apply.
+- **setData clears feature-state**: After any `setData()` call on `fgb-buildings`, feature-state must be re-applied via `applyBuildingTiersChunked`.
+- **Pre-computed tiers**: `precomputedTiersRef.current[timespanIdx]` = `{ tiers, zipMap, maxCount }` for all 5 timespans. Computed in background on `[events, geoData, adjacency]` change. Time slider reads pre-computed (near-instant).
+- **Deferred building load**: `addBuildingLayers` adds empty source + layers (instant), then `setTimeout(0)` pushes data from cache or viewport fetch. Real3D toggle never freezes.
+- **Zoom thresholds**: Baseplates z10-11 (opacity fade z10-10.5), buildings z11+ (was z14). Building base 2m above ground.
+
+### MapView — Safezone Hover (commit 25b9e99)
+- **`zcta-safezone-hover`** fill layer: transparent, captures mouse events for safezone features.
+- **Hover/click handlers** registered on both `zcta-fill` and `zcta-safezone-hover`.
+- **HoveredZip encoding**: safezone hover sets `hoveredZip` to `SAFE:{zip}` prefix. `isSafezoneHover` boolean derived from prefix.
+- **Side panel**: `openSidePanel('SAFE:{zip}')` → sets `sideZip='SAFEZONE'`, shows events for that zip, colonists section replaced with "🛡️ There are no colonists in safezones".
+- **Upper 3D outline**: `createZctaOutlineGeoJSON` now skips `_special` features — safezones don't get 3D border quads.
+
+### MapView — Borough Outline Improvements (commit 25b9e99)
+- **computeBoroughAvgTiers**: Weighted average of zip tiers (sum/count), ranked 0-4. Replaced peak-count ranking that produced visually incorrect results.
+- **Width at z12+**: 1.5x constant (was 2.5x), smooth ramp 1.5x→2.5x at z11-12, then 2.5x→7x at z9-11.
 
 ### Favorites System
 - Storage keys: `lapuff_favorites` (IDs), `lapuff_fav_counts` (counts), `lapuff_fav_history` (activity), `lapuff_favorite_event_cache` (snapshots, max 240), `lapuff_sb_favs` (synced set).
