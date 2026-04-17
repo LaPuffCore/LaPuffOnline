@@ -2212,10 +2212,11 @@ export default function MapView({ events }) {
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
+    let prevZoom = map.getZoom();
     const onZoom = () => {
       const is3D  = threeDRef.current;
       const isR3D = real3DRef.current;
-      if (!is3D && !isR3D) return;
+      if (!is3D && !isR3D) { prevZoom = map.getZoom(); return; }
       // ZCTA outline — 3D only (layer does not exist in Real3D)
       if (is3D && map.getSource('zcta-outline')) {
         if (zctaSkeletonRef.current && withHeatRef.current) {
@@ -2245,6 +2246,15 @@ export default function MapView({ events }) {
           map.getSource('borough-source').setData(quads);
         }
       }
+      // Real3D: confirm building/baseplate colors when crossing into render zoom ranges.
+      // This guards against stale paint expressions after zoom-driven layer transitions.
+      if (isR3D && heatmapRef.current) {
+        const zoom = map.getZoom();
+        const crossedBaseplates = (prevZoom < 13 && zoom >= 13) || (prevZoom >= 13 && zoom < 13);
+        const crossedBuildings  = (prevZoom < 14 && zoom >= 14) || (prevZoom >= 14 && zoom < 14);
+        if (crossedBaseplates || crossedBuildings) refreshBuildingColors();
+      }
+      prevZoom = map.getZoom();
     };
     map.on('zoom', onZoom);
     map.on('pitch', onZoom);
@@ -2323,6 +2333,25 @@ export default function MapView({ events }) {
     }
     memoizedExprs.current[key] = expr;
     return expr;
+  }
+
+  // Central helper — clears stale memoized exprs and re-applies building/baseplate colors.
+  // Called after any setData or toggle that may invalidate the current GPU expression.
+  function refreshBuildingColors() {
+    const map = mapRef.current;
+    if (!map || !map.getStyle()) return;
+    const isHm = heatmapRef.current;
+    const tsIdx = timespanIdxRef.current ?? 4;
+    memoizedExprs.current = {};
+    if (map.getLayer('real3d-buildings')) {
+      map.setPaintProperty('real3d-buildings', 'fill-extrusion-color', buildingColorExprByState(isHm, tsIdx));
+    }
+    if (map.getLayer('real3d-buildings-baseplate')) {
+      map.setPaintProperty('real3d-buildings-baseplate', 'fill-extrusion-color', baseplateColorExpr(isHm, tsIdx));
+    }
+    if (map.getLayer('real3d-landuse-baseplate')) {
+      map.setPaintProperty('real3d-landuse-baseplate', 'fill-color', baseplateColorExpr(isHm, tsIdx));
+    }
   }
 
   // Baseplate color expression — one flat dark contrast color per tier. No clustering.
@@ -2564,17 +2593,30 @@ export default function MapView({ events }) {
 
         const props = normalizeFGBProps(feature.properties);
 
-        // Inline PiP for viewport buildings (fast — only ~1000-5000 with padding)
-        if (zctaFeatures?.length && tiers?.length) {
+        // Inline PiP for viewport buildings — bake all 5 tier columns using precomputed data.
+        // This ensures _tier_0.._tier_4 are correct even before the full FGB cache arrives.
+        const precomputed = precomputedTiersRef.current;
+        if (zctaFeatures?.length && (tiers?.length || precomputed)) {
           const centroid = getGeomCentroid(feature.geometry);
+          let foundZctaIdx = -1;
           for (let j = 0; j < zctaFeatures.length; j++) {
             if (zctaFeatures[j].properties?._special) continue;
             const geom = zctaFeatures[j].geometry;
             const polys = geom.type === 'MultiPolygon' ? geom.coordinates : [geom.coordinates];
             for (const poly of polys) {
-              if (pointInRing(centroid[0], centroid[1], poly[0])) { props._tier = Math.max(0, tiers[j] ?? 0); break; }
+              if (pointInRing(centroid[0], centroid[1], poly[0])) { foundZctaIdx = j; break; }
             }
-            if (props._tier > 0) break;
+            if (foundZctaIdx >= 0) break;
+          }
+          if (foundZctaIdx >= 0) {
+            for (let t = 0; t < TIMESPAN_STEPS.length; t++) {
+              const trs = precomputed?.[t]?.tiers;
+              // Fallback to current timespan tiers if precomputed not ready for this slot
+              const tierVal = (trs && trs.length > foundZctaIdx) ? (trs[foundZctaIdx] ?? 0)
+                : (t === (timespanIdxRef.current ?? 4) ? (tiers?.[foundZctaIdx] ?? 0) : 0);
+              props[`_tier_${t}`] = Math.max(0, tierVal);
+            }
+            props._tier = props[`_tier_${timespanIdxRef.current ?? 4}`];
           }
         }
 
@@ -2585,6 +2627,8 @@ export default function MapView({ events }) {
       // Only set data if cache hasn't arrived in the meantime
       if (!buildingFGBRef.current && map.getSource('fgb-buildings') && map.getStyle()) {
         map.getSource('fgb-buildings').setData({ type: 'FeatureCollection', features });
+        // Refresh paint so GPU reads updated _tier_X columns immediately
+        if (real3DRef.current) refreshBuildingColors();
       }
     } catch (err) {
       if (err.name !== 'AbortError') console.error('FGB viewport fetch failed:', err);
@@ -2621,15 +2665,9 @@ export default function MapView({ events }) {
     const map = mapRef.current;
     if (map?.getSource('fgb-buildings') && map.getStyle()) {
       map.getSource('fgb-buildings').setData(geojson);
-      // Re-apply paint expressions with current heatmap mode + timespan so GPU reads the right _tier_X column
-      if (map.getLayer('real3d-buildings')) {
-        const isHm = heatmapRef.current;
-        const tsIdx = timespanIdxRef.current ?? 4;
-        map.setPaintProperty('real3d-buildings', 'fill-extrusion-color', buildingColorExprByState(isHm, tsIdx));
-        if (map.getLayer('real3d-buildings-baseplate')) {
-          map.setPaintProperty('real3d-buildings-baseplate', 'fill-extrusion-color', baseplateColorExpr(isHm, tsIdx));
-        }
-      }
+      // refreshBuildingColors clears memoized cache and re-applies paint for all building layers.
+      // Called unconditionally — setPaintProperty guards exist inside refreshBuildingColors.
+      refreshBuildingColors();
     }
     return true;
   }
@@ -2683,8 +2721,10 @@ export default function MapView({ events }) {
       if (!map.getSource('fgb-buildings')) return;
       if (buildingFGBRef.current) {
         map.getSource('fgb-buildings').setData(buildingFGBRef.current);
+        // Refresh colors in case data was loaded before baking completed
+        refreshBuildingColors();
       } else {
-        fetchViewportBuildings(map);
+        fetchViewportBuildings(map); // fetchViewportBuildings handles its own color refresh
       }
     }, 0);
   }
@@ -2817,22 +2857,15 @@ export default function MapView({ events }) {
       // First activation — create all layers
       initReal3DLayers(map, isHm, tsIdx);
     } else {
-      // Subsequent activation — just show layers + update paint
+      // Subsequent activation — just show layers + refresh paint with current hm/tsIdx state
       setReal3DLayersVisible(map, true);
-      // Refresh paint in case heatmap/timespan changed while hidden
-      if (map.getLayer('real3d-buildings')) {
-        map.setPaintProperty('real3d-buildings', 'fill-extrusion-color', buildingColorExprByState(isHm, tsIdx));
-      }
-      if (map.getLayer('real3d-buildings-baseplate')) {
-        map.setPaintProperty('real3d-buildings-baseplate', 'fill-extrusion-color', baseplateColorExpr(isHm, tsIdx));
-      }
-      if (map.getLayer('real3d-landuse-baseplate')) {
-        map.setPaintProperty('real3d-landuse-baseplate', 'fill-color', baseplateColorExpr(isHm, tsIdx));
-      }
+      refreshBuildingColors();
       if (map.getLayer('real3d-roads-motorway')) {
+        const isHm = heatmapRef.current;
         map.setPaintProperty('real3d-roads-motorway', 'line-color', isHm ? '#884400' : '#ff2200');
       }
       if (map.getLayer('real3d-roads-primary')) {
+        const isHm = heatmapRef.current;
         map.setPaintProperty('real3d-roads-primary', 'line-color', isHm ? '#662200' : '#cc1800');
       }
     }
@@ -2845,20 +2878,7 @@ export default function MapView({ events }) {
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady || !real3D) return;
-
-    // Invalidate memoized expressions since heatmap changed
-    memoizedExprs.current = {};
-    const tsIdx = timespanIdxRef.current ?? 4;
-
-    if (map.getLayer('real3d-buildings')) {
-      map.setPaintProperty('real3d-buildings', 'fill-extrusion-color', buildingColorExprByState(heatmap, tsIdx));
-    }
-    if (map.getLayer('real3d-buildings-baseplate')) {
-      map.setPaintProperty('real3d-buildings-baseplate', 'fill-extrusion-color', baseplateColorExpr(heatmap, tsIdx));
-    }
-    if (map.getLayer('real3d-landuse-baseplate')) {
-      map.setPaintProperty('real3d-landuse-baseplate', 'fill-color', baseplateColorExpr(heatmap, tsIdx));
-    }
+    refreshBuildingColors();
     if (map.getLayer('real3d-roads-motorway')) {
       map.setPaintProperty('real3d-roads-motorway', 'line-color', heatmap ? '#884400' : '#ff2200');
     }
@@ -2875,18 +2895,7 @@ export default function MapView({ events }) {
     const map = mapRef.current;
     if (!map || !mapReady || !real3D) return;
     if (!heatmapRef.current) return;
-
-    memoizedExprs.current = {};
-
-    if (map.getLayer('real3d-buildings')) {
-      map.setPaintProperty('real3d-buildings', 'fill-extrusion-color', buildingColorExprByState(true, timespanIdx));
-    }
-    if (map.getLayer('real3d-buildings-baseplate')) {
-      map.setPaintProperty('real3d-buildings-baseplate', 'fill-extrusion-color', baseplateColorExpr(true, timespanIdx));
-    }
-    if (map.getLayer('real3d-landuse-baseplate')) {
-      map.setPaintProperty('real3d-landuse-baseplate', 'fill-color', baseplateColorExpr(true, timespanIdx));
-    }
+    refreshBuildingColors();
   }, [timespanIdx, real3D, mapReady]);
 
   const handleThreeDToggle = () => {
