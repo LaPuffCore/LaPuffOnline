@@ -1244,6 +1244,7 @@ export default function MapView({ events }) {
   const heatmapRef      = useRef(false);
   const threeDRef       = useRef(false);
   const tiersRef        = useRef([]);
+  const timespanIdxRef  = useRef(4);
   const geoDataRef      = useRef(null);
   const layerHandlersRef = useRef({ handleZctaHover: null, handleZctaLeave: null, handleZctaClick: null });
   // FIX ADDITIVE STATE: refs for satellite and real3D for use in async callbacks
@@ -1264,13 +1265,15 @@ export default function MapView({ events }) {
   // Tier computation cache — skip expensive buildZipEventMap + computeTiers when only paint deps change
   const cachedTierDataRef   = useRef({ events: null, timespanIdx: -1, geoData: null, zipMap: null, maxCount: 0, tiers: [] });
   // Pre-computed tiers for all 5 timespans — slider reads from here (no recomputation)
-  const precomputedTiersRef = useRef(null); // { [timespanIdx]: { tiers, zipMap, maxCount, withHeat } }
-  // Version counter for tier update cancellation — incremented on each new tier apply
-  const tierUpdateVersionRef = useRef(0);
+  const precomputedTiersRef = useRef(null); // { [timespanIdx]: { tiers, zipMap, maxCount } }
   // FGB building data — full-file load, cached forever after first parse
   const buildingFGBRef      = useRef(null);  // parsed FeatureCollection (all 381K buildings)
   const buildingZctaMapRef  = useRef(null);  // Int16Array: building index → ZCTA feature index (-1 = not found)
   const fgbLoadingRef       = useRef(false); // prevents concurrent loads
+  // Real3D layer lifecycle — create once, toggle visibility
+  const real3dLayersCreatedRef = useRef(false); // true after first initReal3DLayers
+  // Tracks whether _tier_0.._tier_4 have been baked into building properties
+  const buildingTiersBakedRef = useRef(false);
 
   // Persist topo toggle across sessions
   useEffect(() => {
@@ -1321,6 +1324,7 @@ export default function MapView({ events }) {
   threeDRef.current    = threeD;
   real3DRef.current    = real3D;
   satelliteRef.current = satellite;
+  timespanIdxRef.current = timespanIdx;
   geoDataRef.current   = geoData;
   boroughGeoDataRef.current = boroughGeoData;
 
@@ -1687,10 +1691,15 @@ export default function MapView({ events }) {
         const { zipMap, maxCount } = buildZipEventMap(events, TIMESPAN_STEPS[idx].days);
         const tiers = computeTiers(geoData.features, zipMap, maxCount, adjacency);
         result[idx] = { tiers, zipMap, maxCount };
-        // Yield between timespan computations
         await new Promise(r => setTimeout(r, 0));
       }
-      if (!cancelled) precomputedTiersRef.current = result;
+      if (!cancelled) {
+        precomputedTiersRef.current = result;
+        // Bake tiers into buildings if FGB data + ZCTA index are ready
+        if (buildingFGBRef.current && buildingZctaMapRef.current) {
+          bakeAllTiersIntoBuildings();
+        }
+      }
     })();
     return () => { cancelled = true; };
   }, [events, geoData, adjacency]);
@@ -2208,12 +2217,12 @@ export default function MapView({ events }) {
 
 
   // Building color expression — uses pre-computed _s7 (shade index mod 7).
-  // For heatmap mode, tier comes from feature-state (NOT baked property).
-  // This allows tier updates via setFeatureState without re-uploading geometry.
+  // For heatmap mode, tier comes from baked _tier_X property (X = timespanIdx).
+  // GPU reads property directly — no feature-state needed, no CPU loop.
   const memoizedExprs = useRef({});
 
-  function buildingColorExprByState(isHeatmap) {
-    const key = `bldg_${isHeatmap}`;
+  function buildingColorExprByState(isHeatmap, tsIdx = 0) {
+    const key = `bldg_${isHeatmap}_${tsIdx}`;
     if (memoizedExprs.current[key]) return memoizedExprs.current[key];
 
     let expr;
@@ -2228,8 +2237,8 @@ export default function MapView({ events }) {
         '#7a1818',
       ];
     } else {
-      // Tier from feature-state — updated via setFeatureState, never re-uploaded
-      const tierExpr = ['coalesce', ['feature-state', 'tier'], 0];
+      // Tier from baked property — switches column on timespan change (GPU-only)
+      const tierExpr = ['coalesce', ['get', `_tier_${tsIdx}`], 0];
       const shades = (tones) => ['case',
         ['==', ['get', '_s5'], 0], tones[0],
         ['==', ['get', '_s5'], 1], tones[1],
@@ -2250,9 +2259,9 @@ export default function MapView({ events }) {
     return expr;
   }
 
-  // Baseplate color expression — uniform dark colors per tier from feature-state, no clustering.
-  function baseplateColorExpr(isHeatmap) {
-    const key = `bp_${isHeatmap}`;
+  // Baseplate color expression — uniform dark colors per tier from baked property, no clustering.
+  function baseplateColorExpr(isHeatmap, tsIdx = 0) {
+    const key = `bp_${isHeatmap}_${tsIdx}`;
     if (memoizedExprs.current[key]) return memoizedExprs.current[key];
 
     let expr;
@@ -2263,7 +2272,7 @@ export default function MapView({ events }) {
         '#330909',
       ];
     } else {
-      const tierExpr = ['coalesce', ['feature-state', 'tier'], 0];
+      const tierExpr = ['coalesce', ['get', `_tier_${tsIdx}`], 0];
       expr = ['case',
         ['==', tierExpr, 4], '#440400',
         ['==', tierExpr, 3], '#3d1500',
@@ -2293,7 +2302,7 @@ export default function MapView({ events }) {
       objectid: String(oid),
       _s5: oid % 5,
       _s7: oid % 7,
-      _tier: 0,
+      _tier_0: 0, _tier_1: 0, _tier_2: 0, _tier_3: 0, _tier_4: 0,
     };
   }
 
@@ -2443,12 +2452,12 @@ export default function MapView({ events }) {
       setFgbCacheProgress(100);
       setFgbCacheStatus('done');
 
-      // Push to map if Real3D active — setData then apply feature-state tiers
+      // Push to map if Real3D active + bake all timespan tiers if pre-computed
       const map = mapRef.current;
       if (map && map.getSource('fgb-buildings') && map.getStyle()) {
+        // Bake tiers if pre-computed data is ready, then push once
+        if (precomputedTiersRef.current) bakeAllTiersIntoBuildings();
         map.getSource('fgb-buildings').setData(geojson);
-        // Feature-state is cleared by setData — re-apply tier colors
-        applyBuildingTiersChunked(map, tiersRef.current);
       }
     } catch (err) {
       console.error('FGB cache build failed:', err);
@@ -2516,50 +2525,38 @@ export default function MapView({ events }) {
     }
   }
 
-  // Re-tier buildings using cached ZCTA index map. O(n) — no PiP.
-  // LEGACY — only used when setData is called and feature-state needs re-application.
-  function retierBuildings(geojson, tiers) {
-    if (!geojson?.features?.length || !tiers?.length) return geojson;
+  // Bake all 5 timespan tiers into building properties (_tier_0.._tier_4).
+  // After this, GPU reads ['get', '_tier_X'] directly — no feature-state or setData needed on timespan change.
+  // Only called when BOTH pre-computed tiers AND building ZCTA index are ready.
+  // Mutates features in place, then one final setData pushes the baked GeoJSON.
+  function bakeAllTiersIntoBuildings() {
+    const geojson = buildingFGBRef.current;
     const idxMap = buildingZctaMapRef.current;
+    const precomputed = precomputedTiersRef.current;
+    if (!geojson?.features?.length || !idxMap || !precomputed) return false;
+
     const features = geojson.features;
     for (let i = 0; i < features.length; i++) {
-      const zIdx = idxMap ? idxMap[i] : -1;
-      features[i].properties._tier = (zIdx >= 0 && tiers.length > zIdx) ? (tiers[zIdx] ?? 0) : 0;
-    }
-    return geojson;
-  }
-
-  // Apply building tier colors via feature-state — NO setData, NO geometry re-upload.
-  // Chunked by ZCTA groups so colors fill cleanly by zip code.
-  // Non-blocking: yields between chunks to keep UI responsive.
-  async function applyBuildingTiersChunked(map, tiers) {
-    const version = ++tierUpdateVersionRef.current;
-    const idxMap = buildingZctaMapRef.current;
-    const geojson = buildingFGBRef.current;
-    if (!idxMap || !geojson?.features?.length || !tiers?.length) return;
-    if (!map.getSource('fgb-buildings')) return;
-
-    const chunkSize = isMobile ? 2000 : 10000;
-    const features = geojson.features;
-
-    for (let start = 0; start < features.length; start += chunkSize) {
-      if (tierUpdateVersionRef.current !== version) return; // cancelled
-      const end = Math.min(start + chunkSize, features.length);
-      for (let i = start; i < end; i++) {
-        const zIdx = idxMap[i];
-        const tier = (zIdx >= 0 && tiers.length > zIdx) ? (tiers[zIdx] ?? 0) : 0;
-        try {
-          map.setFeatureState({ source: 'fgb-buildings', id: i }, { tier });
-        } catch { /* source may have been removed during toggle */ }
+      const zIdx = idxMap[i];
+      const props = features[i].properties;
+      for (let t = 0; t < TIMESPAN_STEPS.length; t++) {
+        const tiers = precomputed[t]?.tiers;
+        props[`_tier_${t}`] = (zIdx >= 0 && tiers && tiers.length > zIdx) ? (tiers[zIdx] ?? 0) : 0;
       }
-      // Yield between chunks to keep UI thread free
-      if (end < features.length) await new Promise(r => setTimeout(r, 0));
     }
+    buildingTiersBakedRef.current = true;
+
+    // Push baked data to map if source exists
+    const map = mapRef.current;
+    if (map?.getSource('fgb-buildings') && map.getStyle()) {
+      map.getSource('fgb-buildings').setData(geojson);
+    }
+    return true;
   }
 
   // Create fgb-buildings source + building layers. Source starts empty.
   // Data loaded separately via deferred loading (instant toggle).
-  function addBuildingLayers(map, isHeatmap) {
+  function addBuildingLayers(map, isHeatmap, tsIdx = 0) {
     if (!map.getSource('fgb-buildings')) {
       map.addSource('fgb-buildings', {
         type: 'geojson',
@@ -2574,7 +2571,7 @@ export default function MapView({ events }) {
         source: 'fgb-buildings',
         minzoom: 10, maxzoom: 11,
         paint: {
-          'fill-extrusion-color': baseplateColorExpr(isHeatmap),
+          'fill-extrusion-color': baseplateColorExpr(isHeatmap, tsIdx),
           'fill-extrusion-height': 7,
           'fill-extrusion-base': 2,
           'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'], 10, 0, 10.5, 0.9],
@@ -2589,7 +2586,7 @@ export default function MapView({ events }) {
         source: 'fgb-buildings',
         minzoom: 11,
         paint: {
-          'fill-extrusion-color': buildingColorExprByState(isHeatmap),
+          'fill-extrusion-color': buildingColorExprByState(isHeatmap, tsIdx),
           'fill-extrusion-height': ['coalesce', ['get', 'height_roof'], 8],
           'fill-extrusion-base': ['max', 2, ['coalesce', ['get', 'ground_elevation'], 0]],
           'fill-extrusion-opacity': 0.92,
@@ -2605,25 +2602,17 @@ export default function MapView({ events }) {
     setTimeout(() => {
       if (!map.getSource('fgb-buildings')) return;
       if (buildingFGBRef.current) {
-        // Cache is ready — push full data + apply tiers via feature-state
         map.getSource('fgb-buildings').setData(buildingFGBRef.current);
-        applyBuildingTiersChunked(map, tiersRef.current);
       } else {
-        // No cache yet — do viewport fetch, then cache will replace it later
         fetchViewportBuildings(map);
       }
     }, 0);
   }
 
-  function applyReal3DLayers(map, isHeatmap) {
-    if (buildingAssignCleanupRef.current) {
-      buildingAssignCleanupRef.current();
-      buildingAssignCleanupRef.current = null;
-    }
-
-    REAL3D_ALL_LAYER_IDS.forEach(id => { if (map.getLayer(id)) map.removeLayer(id); });
-    // Remove FGB source so layers can be re-created cleanly (data stays in buildingFGBRef)
-    if (map.getSource('fgb-buildings')) map.removeSource('fgb-buildings');
+  // Initialize Real3D layers ONCE. After first call, all subsequent activations
+  // just toggle visibility — no WebGL context rebuild, no source re-creation.
+  function initReal3DLayers(map, isHeatmap, tsIdx = 0) {
+    map.setLight({ anchor: 'map' });
 
     if (!map.getSource('openmaptiles')) {
       try {
@@ -2632,32 +2621,20 @@ export default function MapView({ events }) {
     }
 
     try {
-      map.setLight({ anchor: 'map' });
-
-      // WATER: unrestricted — rivers/harbor flow past borough edges naturally.
-      // Inserted BELOW heat-underlay so topo glow radiates above water, not behind it.
       const waterBeforeId = map.getLayer('heat-underlay') ? 'heat-underlay' : undefined;
       map.addLayer({
         id: 'real3d-water', type: 'fill',
         source: 'openmaptiles', 'source-layer': 'water',
-        paint: {
-          'fill-color': '#0e1f35',
-          'fill-opacity': 0.6,
-        },
+        paint: { 'fill-color': '#0e1f35', 'fill-opacity': 0.6 },
       }, waterBeforeId);
 
-      // PARKS — NYC-restricted via ['within'] filter.
       map.addLayer({
         id: 'real3d-park', type: 'fill',
         source: 'openmaptiles', 'source-layer': 'landuse',
         filter: ['all', ['==', ['get', 'class'], 'park'], ['within', NYC_BBOX_GEOM]],
-        paint: {
-          'fill-color': '#081408',
-          'fill-opacity': 0.8,
-        },
+        paint: { 'fill-color': '#081408', 'fill-opacity': 0.8 },
       });
 
-      // ROADS — MOTORWAY + TRUNK (z9–13): unrestricted.
       map.addLayer({
         id: 'real3d-roads-motorway', type: 'line',
         source: 'openmaptiles', 'source-layer': 'transportation',
@@ -2666,12 +2643,10 @@ export default function MapView({ events }) {
         paint: {
           'line-color': isHeatmap ? '#884400' : '#ff2200',
           'line-width': ['interpolate', ['linear'], ['zoom'], 9, 1.5, 13, 5],
-          'line-blur': 1.5,
-          'line-opacity': 0.9,
+          'line-blur': 1.5, 'line-opacity': 0.9,
         },
       });
 
-      // ROADS — PRIMARY + SECONDARY (z10–13): NYC-restricted.
       map.addLayer({
         id: 'real3d-roads-primary', type: 'line',
         source: 'openmaptiles', 'source-layer': 'transportation',
@@ -2680,12 +2655,10 @@ export default function MapView({ events }) {
         paint: {
           'line-color': isHeatmap ? '#662200' : '#cc1800',
           'line-width': ['interpolate', ['linear'], ['zoom'], 10, 0.8, 13, 3],
-          'line-blur': 0.8,
-          'line-opacity': 0.75,
+          'line-blur': 0.8, 'line-opacity': 0.75,
         },
       });
 
-      // ROADS — TERTIARY + RESIDENTIAL (z12–13): NYC-restricted.
       map.addLayer({
         id: 'real3d-roads-tertiary', type: 'line',
         source: 'openmaptiles', 'source-layer': 'transportation',
@@ -2694,26 +2667,23 @@ export default function MapView({ events }) {
         paint: {
           'line-color': '#771100',
           'line-width': ['interpolate', ['linear'], ['zoom'], 12, 0.5, 13, 1.5],
-          'line-blur': 0.3,
-          'line-opacity': 0.65,
+          'line-blur': 0.3, 'line-opacity': 0.65,
         },
       });
 
-      // LANDUSE PROXY (z9–13): coarse block shapes — NYC-restricted.
       map.addLayer({
         id: 'real3d-landuse-baseplate', type: 'fill',
         source: 'openmaptiles', 'source-layer': 'landuse',
         filter: ['all', ['match', ['get', 'class'], ['residential', 'commercial', 'industrial', 'retail'], true, false], ['within', NYC_BBOX_GEOM]],
         paint: {
-          'fill-color': baseplateColorExpr(isHeatmap),
+          'fill-color': baseplateColorExpr(isHeatmap, tsIdx),
           'fill-opacity': ['interpolate', ['linear'], ['zoom'], 9, 0, 10, 0.45, 11, 0.45, 12, 0],
         },
       });
 
-      // BUILDINGS from building_indexed.fgb — persistent Cache API + instant viewport fallback.
-      addBuildingLayers(map, isHeatmap);
+      addBuildingLayers(map, isHeatmap, tsIdx);
 
-      // Viewport listener — for instant render when cache isn't ready
+      // Viewport listener for instant render when cache isn't ready
       let vpTimer = null;
       const onViewportChange = () => {
         if (vpTimer) clearTimeout(vpTimer);
@@ -2727,48 +2697,86 @@ export default function MapView({ events }) {
         if (vpTimer) clearTimeout(vpTimer);
       };
 
-      // Layer ordering: move unrestricted layers to top of stack.
       if (map.getLayer('real3d-roads-motorway')) map.moveLayer('real3d-roads-motorway');
       if (map.getLayer('borough-outline')) map.moveLayer('borough-outline');
 
-      map.easeTo({ pitch: 55, bearing: -17, duration: 700 });
-
-    } catch (err) { console.error('Real3D layer add failed:', err); }
+      real3dLayersCreatedRef.current = true;
+    } catch (err) { console.error('Real3D layer init failed:', err); }
   }
 
-  // Real3D toggle effect — only fires when real3D or mapReady changes
+  // Show/hide all Real3D layers. No source or layer destruction.
+  function setReal3DLayersVisible(map, visible) {
+    const vis = visible ? 'visible' : 'none';
+    REAL3D_ALL_LAYER_IDS.forEach(id => {
+      if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', vis);
+    });
+  }
+
+  // Real3D toggle effect — create once, then toggle visibility
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
+
     if (!real3D) {
-      REAL3D_ALL_LAYER_IDS.forEach(id => { if (map.getLayer(id)) map.removeLayer(id); });
-      // Remove FGB source (GPU memory cleanup) but KEEP buildingFGBRef + buildingZctaMapRef in memory
-      if (map.getSource('fgb-buildings')) map.removeSource('fgb-buildings');
+      // Hide all Real3D layers (don't destroy)
+      if (real3dLayersCreatedRef.current) {
+        setReal3DLayersVisible(map, false);
+      }
+      // Stencil cleanup (legacy)
       if (map.getLayer('real3d-nyc-stencil')) map.removeLayer('real3d-nyc-stencil');
       if (map.getSource('real3d-stencil-source')) map.removeSource('real3d-stencil-source');
-      if (buildingAssignCleanupRef.current) { buildingAssignCleanupRef.current(); buildingAssignCleanupRef.current = null; }
       if (!threeD) map.easeTo({ pitch: 0, bearing: 0, duration: 700 });
       return;
     }
-    applyReal3DLayers(map, heatmapRef.current);
+
+    const isHm = heatmapRef.current;
+    const tsIdx = timespanIdxRef.current ?? 4;
+
+    if (!real3dLayersCreatedRef.current) {
+      // First activation — create all layers
+      initReal3DLayers(map, isHm, tsIdx);
+    } else {
+      // Subsequent activation — just show layers + update paint
+      setReal3DLayersVisible(map, true);
+      // Refresh paint in case heatmap/timespan changed while hidden
+      if (map.getLayer('real3d-buildings')) {
+        map.setPaintProperty('real3d-buildings', 'fill-extrusion-color', buildingColorExprByState(isHm, tsIdx));
+      }
+      if (map.getLayer('real3d-buildings-baseplate')) {
+        map.setPaintProperty('real3d-buildings-baseplate', 'fill-extrusion-color', baseplateColorExpr(isHm, tsIdx));
+      }
+      if (map.getLayer('real3d-landuse-baseplate')) {
+        map.setPaintProperty('real3d-landuse-baseplate', 'fill-color', baseplateColorExpr(isHm, tsIdx));
+      }
+      if (map.getLayer('real3d-roads-motorway')) {
+        map.setPaintProperty('real3d-roads-motorway', 'line-color', isHm ? '#884400' : '#ff2200');
+      }
+      if (map.getLayer('real3d-roads-primary')) {
+        map.setPaintProperty('real3d-roads-primary', 'line-color', isHm ? '#662200' : '#cc1800');
+      }
+    }
+
+    map.setLight({ anchor: 'map' });
+    map.easeTo({ pitch: 55, bearing: -17, duration: 700 });
   }, [real3D, mapReady]);
 
-  // Heatmap toggle in Real3D — updates paint expressions AND re-applies tier colors via feature-state
+  // Heatmap toggle in Real3D — just swap paint expressions (GPU-only, instant)
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady || !real3D) return;
 
     // Invalidate memoized expressions since heatmap changed
     memoizedExprs.current = {};
+    const tsIdx = timespanIdxRef.current ?? 4;
 
     if (map.getLayer('real3d-buildings')) {
-      map.setPaintProperty('real3d-buildings', 'fill-extrusion-color', buildingColorExprByState(heatmap));
+      map.setPaintProperty('real3d-buildings', 'fill-extrusion-color', buildingColorExprByState(heatmap, tsIdx));
     }
     if (map.getLayer('real3d-buildings-baseplate')) {
-      map.setPaintProperty('real3d-buildings-baseplate', 'fill-extrusion-color', baseplateColorExpr(heatmap));
+      map.setPaintProperty('real3d-buildings-baseplate', 'fill-extrusion-color', baseplateColorExpr(heatmap, tsIdx));
     }
     if (map.getLayer('real3d-landuse-baseplate')) {
-      map.setPaintProperty('real3d-landuse-baseplate', 'fill-color', baseplateColorExpr(heatmap));
+      map.setPaintProperty('real3d-landuse-baseplate', 'fill-color', baseplateColorExpr(heatmap, tsIdx));
     }
     if (map.getLayer('real3d-roads-motorway')) {
       map.setPaintProperty('real3d-roads-motorway', 'line-color', heatmap ? '#884400' : '#ff2200');
@@ -2779,19 +2787,25 @@ export default function MapView({ events }) {
     if (map.getLayer('zcta-safezone-extrusion')) {
       map.setPaintProperty('zcta-safezone-extrusion', 'fill-extrusion-opacity', 1.0);
     }
-    // Re-apply tier feature-state (heatmap paint expr now reads it)
-    if (heatmap && buildingFGBRef.current) {
-      applyBuildingTiersChunked(map, tiersRef.current);
-    }
   }, [heatmap, real3D, mapReady]);
 
-  // Timespan/events change in Real3D — update tier colors via feature-state (NO setData)
+  // Timespan change in Real3D — just swap which _tier_X column the paint reads (GPU-only, instant)
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady || !real3D) return;
-    if (!map.getSource('fgb-buildings') || !buildingFGBRef.current) return;
-    if (!heatmapRef.current) return; // only need tier update when heatmap is on
-    applyBuildingTiersChunked(map, tiersRef.current);
+    if (!heatmapRef.current) return;
+
+    memoizedExprs.current = {};
+
+    if (map.getLayer('real3d-buildings')) {
+      map.setPaintProperty('real3d-buildings', 'fill-extrusion-color', buildingColorExprByState(true, timespanIdx));
+    }
+    if (map.getLayer('real3d-buildings-baseplate')) {
+      map.setPaintProperty('real3d-buildings-baseplate', 'fill-extrusion-color', baseplateColorExpr(true, timespanIdx));
+    }
+    if (map.getLayer('real3d-landuse-baseplate')) {
+      map.setPaintProperty('real3d-landuse-baseplate', 'fill-color', baseplateColorExpr(true, timespanIdx));
+    }
   }, [timespanIdx, real3D, mapReady]);
 
   const handleThreeDToggle = () => {
