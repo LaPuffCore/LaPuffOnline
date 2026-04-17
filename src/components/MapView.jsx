@@ -2457,9 +2457,10 @@ export default function MapView({ events }) {
       // Push to map if Real3D active + bake all timespan tiers if pre-computed
       const map = mapRef.current;
       if (map && map.getSource('fgb-buildings') && map.getStyle()) {
-        // Bake tiers if pre-computed data is ready, then push once
-        if (precomputedTiersRef.current) bakeAllTiersIntoBuildings();
-        map.getSource('fgb-buildings').setData(geojson);
+        // bakeAllTiersIntoBuildings calls setData internally (+ refreshes paint expressions).
+        // Only call setData directly when baking is skipped (precomputed tiers not ready yet).
+        const baked = precomputedTiersRef.current ? bakeAllTiersIntoBuildings() : false;
+        if (!baked) map.getSource('fgb-buildings').setData(geojson);
       }
     } catch (err) {
       console.error('FGB cache build failed:', err);
@@ -2475,7 +2476,7 @@ export default function MapView({ events }) {
   // so panning doesn't show empty edges.
   async function fetchViewportBuildings(map) {
     if (!map || !map.getStyle() || !map.getSource('fgb-buildings')) return;
-    if (map.getZoom() < 10) return; // below baseplate zoom threshold
+    if (map.getZoom() < 13) return; // below baseplate zoom threshold (baseplates start at z13)
     if (buildingFGBRef.current) return; // cache is ready, no need for viewport fetch
 
     const bounds = map.getBounds();
@@ -2548,10 +2549,24 @@ export default function MapView({ events }) {
     }
     buildingTiersBakedRef.current = true;
 
-    // Push baked data to map if source exists
+    // Clear stale memoized expressions — they were built before baking when _tier_X were all 0.
+    // Ensures subsequent paint calls regenerate correct expressions against real tier data.
+    memoizedExprs.current = {};
+
+    // Push baked data to map if source exists, then refresh paint expressions.
+    // This guarantees correct colors even if the paint was set before baking completed.
     const map = mapRef.current;
     if (map?.getSource('fgb-buildings') && map.getStyle()) {
       map.getSource('fgb-buildings').setData(geojson);
+      // Re-apply paint expressions with current heatmap mode + timespan so GPU reads the right _tier_X column
+      if (map.getLayer('real3d-buildings')) {
+        const isHm = heatmapRef.current;
+        const tsIdx = timespanIdxRef.current ?? 4;
+        map.setPaintProperty('real3d-buildings', 'fill-extrusion-color', buildingColorExprByState(isHm, tsIdx));
+        if (map.getLayer('real3d-buildings-baseplate')) {
+          map.setPaintProperty('real3d-buildings-baseplate', 'fill-extrusion-color', baseplateColorExpr(isHm, tsIdx));
+        }
+      }
     }
     return true;
   }
