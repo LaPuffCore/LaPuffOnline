@@ -340,19 +340,21 @@ borough-outline (fill-extrusion, unrestricted, topmost)
 **Round 4 — 5-issue fix batch (post-overhaul):**
 - **Water layer ordering:** Water now inserted BELOW heat-underlay via `addLayer(spec, 'heat-underlay')`. Removed `moveLayer('real3d-water')` to top. Stack: satellite → water → heat-underlay → parks/roads/buildings.
 - **Borough outlines — safezone filter:** Replaced `fixSharedBoundaryQuads` (removed ALL internal edges) with `removeSafezoneOverlapQuads` (only removes quads overlapping safezone ZCTA features). Interior borough lines now visible for clarity.
-- **Borough outlines — height stagger:** Base/height offset by `_tier * 1m` (not `_boroughIdx`) so red (tier 4) always renders on top.
+- **Borough outlines — height stagger:** Base/height offset by `_boroughIdx * 0.1m`. Features sorted by `avgTier` ascending before assigning `_boroughIdx`, so higher-tier (red) boroughs get higher `_boroughIdx` and render on top. Subpixel 0.1m gap is invisible but prevents Z-fighting.
 - **Borough pixelation:** Width ramp increased from 2x→4x to 2.5x→7x (zoom 11→9) for thicker outlines at low zoom.
 - **Borough opacity:** Zoom-interpolated opacity `['interpolate', ['linear'], ['zoom'], 9, 0.4, 11, 1.0]` softens thin extrusions at distance.
 - **Toggle lag:** `cachedTierDataRef` caches `buildZipEventMap` + `computeTiers`. Paint-only toggles (satellite, topoOn, threeD) skip expensive recomputation.
 - **Heat-underlay opacity:** Removed `!real3D` restriction from initial layer creation so topo glow works in Real3D immediately.
 - **Zoom handler:** Removed RAF debounce — fires synchronously on zoom/pitch for instant outline response.
 
-**Round 4 — FGB Building Migration (commit 9dd1a94):**
+**Round 4 — FGB Building Migration (commit 9dd1a94 → 910502b):**
 - **BUILDING.fgb source:** Replaced MapTiler `openmaptiles` building source with local FlatGeobuf file (348K NYC-only polygons). Eliminates: tile-seam artifacts, `['within']` incompatibility, NJ/CT building rendering, external tile dependency for buildings.
-- **Tier baking:** `bakeBuildingTiers()` pre-assigns `_tier` property to each building feature via centroid PiP. Runs once per heatmap/timespan change — no per-frame CPU work.
-- **Raytracer eliminated:** Removed `assignBuildingTiersToMap` entirely (queryRenderedFeatures + setFeatureState + moveend/zoomend listeners). No more millions of PiP operations per camera stop.
-- **Color expressions updated:** Use `['get', 'objectid']` for clustering instead of `['id']` (vector tile feature IDs). `_tier` read via `['get', '_tier']` instead of `['feature-state', 'tier']`.
-- **FGB loading:** `loadBuildingFGB()` streams FGB via flatgeobuf `deserialize`, parses string properties to numbers, caches in `buildingFGBRef`. Source `fgb-buildings` created/destroyed with Real3D toggle.
+- **ZCTA index map:** `buildingZctaMapRef` = `Int16Array(n)` built once at FGB load time via centroid PiP. Maps each building feature index → ZCTA feature index (-1 = not found). Built synchronously at load but only ONCE per session.
+- **O(n) re-tier:** `retierBuildings(geojson, tiers)` — uses cached ZCTA index map. No PiP. Rebuilds `_tier` per building in one pass. Called only when `timespanIdx` changes.
+- **Heatmap toggle = paint-only:** Two separate effects: `[heatmap, real3D, mapReady]` runs `setPaintProperty` only (no setData, instant). `[timespanIdx, real3D, mapReady]` runs `retierBuildings` + `setData` (fast O(n), no freeze).
+- **Raytracer eliminated:** Removed `assignBuildingTiersToMap`, `bakeBuildingTiers`, and all `moveend`/`zoomend` building tier listeners.
+- **Building cache persistence:** `buildingFGBRef.current` NEVER cleared on Real3D toggle-off. Only the MapLibre source is removed (GPU memory). On re-activation, tiles are re-added from in-memory cache instantly.
+- **FGB spatial index:** `BUILDING.fgb` lacks a Hilbert R-tree spatial index (built without one). Bbox range queries return 0 features silently. Rebuild with `ogr2ogr -f FlatGeobuf BUILDING_indexed.fgb BUILDING.fgb` to enable HTTP range-based spatial filtering. GitHub Pages supports Range headers.
 
 ### MapView — Post-Mortem: Failed Approaches (DO NOT REPEAT)
 - **Failure 8 — `['within']` on MapTiler vector tile fill-extrusions**: `['within', NYC_BBOX_GEOM]` filter on building/baseplate fill-extrusion layers from MapTiler's `openmaptiles` source caused ALL buildings to disappear. Works fine on fill/line layers (parks, roads, landuse) but NOT on fill-extrusion layers from external vector tile sources. SOLVED by migrating to local FGB data (no filter needed).
