@@ -377,20 +377,20 @@ borough-outline (fill-extrusion, unrestricted, topmost)
 - **Failure 8 — `['within']` on MapTiler vector tile fill-extrusions**: `['within', NYC_BBOX_GEOM]` filter on building/baseplate fill-extrusion layers from MapTiler's `openmaptiles` source caused ALL buildings to disappear. Works fine on fill/line layers (parks, roads, landuse) but NOT on fill-extrusion layers from external vector tile sources. SOLVED by migrating to local FGB data (no filter needed).
 - **Failure 9 — queryRenderedFeatures + setFeatureState for building tier coloring**: Caused tile-seam artifacts (only styles on-screen tiles), square bleeding, purple fallback on pan, main thread blocking from millions of PiP ops. SOLVED by baking `_tier_0.._tier_4` into GeoJSON properties — GPU reads directly, zero CPU work.
 
-### MapView — Baked Tier Architecture (commit 5b9ef99+, replaces feature-state approach)
+### MapView — Baked Tier Architecture (commit 690b888+, replaces feature-state approach)
 - **Building tier colors via baked properties**: Each building has `_tier_0.._tier_4` in its GeoJSON properties. Paint expressions use `['get', '_tier_X']` where X = active timespan index. GPU evaluates directly from properties — no feature-state, no CPU loop.
-- **`bakeAllTiersIntoBuildings()`**: Iterates all 381K buildings once, writing all 5 tier values from `precomputedTiersRef` using `buildingZctaMapRef`. Called when both pre-computed tiers AND ZCTA index are ready. After baking:
-  1. Clears `memoizedExprs.current = {}` to purge stale expressions built before baking (when `_tier_X` were all 0)
-  2. Calls `setData(geojson)` to push baked data to map source
-  3. Re-applies paint expressions via `setPaintProperty` with current `heatmapRef.current + timespanIdxRef.current` so the GPU reads the correct `_tier_X` column immediately
+- **`bakeAllTiersIntoBuildings()`**: Iterates all 381K buildings once, writing all 5 tier values from `precomputedTiersRef` using `buildingZctaMapRef`. Called when both pre-computed tiers AND ZCTA index are ready. After baking: clears `memoizedExprs.current`, calls `setData`, then calls `refreshBuildingColors()`.
+- **`refreshBuildingColors()`**: Central helper — clears `memoizedExprs.current = {}` and calls `setPaintProperty` for `real3d-buildings`, `real3d-buildings-baseplate`, and `real3d-landuse-baseplate` using current `heatmapRef.current + timespanIdxRef.current`. Called from: bake completion, heatmap effect, timespan effect, Real3D toggle (subsequent activation), addBuildingLayers setTimeout, fetchViewportBuildings (after setData), zoom listener (z13/z14 boundary crossing).
 - **`buildFGBCache` setData logic**: If `bakeAllTiersIntoBuildings()` ran (returns true), skip the second `setData` call — bake already called it + refreshed paint. Only call `setData` directly when baking is skipped (precomputed tiers not yet ready).
-- **Timespan change = `setPaintProperty` only**: Switches `['get', '_tier_3']` to `['get', '_tier_4']` etc. GPU recompiles shader — near-instant, zero per-building work.
-- **Heatmap toggle = `setPaintProperty` only**: Switches between red palette (reads `_s7`) and tier palette (reads `_tier_X`).
+- **`fetchViewportBuildings`**: Now bakes all 5 `_tier_X` columns from `precomputedTiersRef` for each viewport feature (not just `_tier` for current timespan). Calls `refreshBuildingColors()` after setData if Real3D is active. Guard: `if (buildingFGBRef.current) return` prevents overwriting baked full-cache data.
+- **Timespan change = `refreshBuildingColors()` only**: Switches `['get', '_tier_X']` column. GPU recompiles shader — near-instant.
+- **Heatmap toggle = `refreshBuildingColors()` only**: Switches between red palette (reads `_s7`) and tier palette (reads `_tier_X`).
 - **Pre-computed tiers**: `precomputedTiersRef.current[timespanIdx]` = `{ tiers, zipMap, maxCount }` for all 5 timespans. Computed in background on `[events, geoData, adjacency]` change. Time slider reads pre-computed (near-instant).
-- **Deferred building load**: `addBuildingLayers` adds empty source + layers (instant), then `setTimeout(0)` pushes data from cache or viewport fetch. Real3D toggle never freezes.
+- **Deferred building load**: `addBuildingLayers` adds empty source + layers (instant), then `setTimeout(0)` pushes data from cache or viewport fetch + calls `refreshBuildingColors()`. Real3D toggle never freezes.
 - **Zoom thresholds**: Baseplates z13-14 (opacity fade z13-13.5), buildings z14+. Building base 2m above ground.
 - **Layer visibility toggle**: `initReal3DLayers()` creates all 9 Real3D layers + sources once. `setReal3DLayersVisible()` toggles visibility. No layer/source destroy/recreate on toggle.
-- **`fetchViewportBuildings` zoom guard**: `< 13` (was `< 10`) — no viewport fetch needed below z13 since baseplates don't appear until z13. Full cache guard at line 2479 (`if (buildingFGBRef.current) return`) prevents viewport data from ever overwriting baked data.
+- **`fetchViewportBuildings` zoom guard**: `< 13` — no viewport fetch needed below z13 since baseplates don't appear until z13. Full cache guard prevents viewport data from ever overwriting baked data.
+- **Zoom boundary color refresh**: `onZoom` listener detects crossing z13 (baseplates appear) or z14 (buildings appear) thresholds in Real3D+heatmap mode and calls `refreshBuildingColors()` — guards against stale expressions after zoom-driven layer transitions.
 
 ### MapView — Safezone Hover (commit 25b9e99)
 - **`zcta-safezone-hover`** fill layer: transparent, captures mouse events for safezone features.
