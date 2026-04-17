@@ -2677,6 +2677,7 @@ export default function MapView({ events }) {
       map.addLayer({
         id: 'real3d-landuse-baseplate', type: 'fill',
         source: 'openmaptiles', 'source-layer': 'landuse',
+        maxzoom: 13,
         filter: ['all', ['match', ['get', 'class'], ['residential', 'commercial', 'industrial', 'retail'], true, false], ['within', NYC_BBOX_GEOM]],
         paint: {
           'fill-color': baseplateColorExpr(isHeatmap, tsIdx),
