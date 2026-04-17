@@ -2262,26 +2262,25 @@ export default function MapView({ events }) {
     return expr;
   }
 
-  // Baseplate color expression — uniform dark colors per tier from baked property, no clustering.
+  // Baseplate color expression — one flat dark contrast color per tier. No clustering.
+  // Baseplates (z13-14) are a visual proxy layer — no need for shade differentiation.
   function baseplateColorExpr(isHeatmap, tsIdx = 0) {
     const key = `bp_${isHeatmap}_${tsIdx}`;
     if (memoizedExprs.current[key]) return memoizedExprs.current[key];
 
     let expr;
     if (!isHeatmap) {
-      expr = ['case',
-        ['==', ['get', '_s7'], 0], '#1a0303',
-        ['==', ['get', '_s7'], 1], '#260606',
-        '#330909',
-      ];
+      // Standard: single flat dark red for all baseplates
+      expr = '#220505';
     } else {
+      // Heatmap: one dark contrast color per tier, matching the heat zone color family
       const tierExpr = ['coalesce', ['get', `_tier_${tsIdx}`], 0];
       expr = ['case',
-        ['==', tierExpr, 4], '#440400',
-        ['==', tierExpr, 3], '#3d1500',
-        ['==', tierExpr, 2], '#5c4a00',
-        ['==', tierExpr, 1], '#002910',
-        '#001f29',
+        ['==', tierExpr, 4], '#440400',   // hot → dark red
+        ['==', tierExpr, 3], '#3d1500',   // orange → dark orange-brown
+        ['==', tierExpr, 2], '#5c4a00',   // warm → dark yellow-brown
+        ['==', tierExpr, 1], '#002910',   // cool → dark green
+        '#001f29',                         // cold → dark blue-grey
       ];
     }
     memoizedExprs.current[key] = expr;
@@ -2592,7 +2591,7 @@ export default function MapView({ events }) {
           'fill-extrusion-color': buildingColorExprByState(isHeatmap, tsIdx),
           'fill-extrusion-height': ['coalesce', ['get', 'height_roof'], 8],
           'fill-extrusion-base': ['max', 2, ['coalesce', ['get', 'ground_elevation'], 0]],
-          'fill-extrusion-opacity': 0.92,
+          'fill-extrusion-opacity': 1.0,
           'fill-extrusion-vertical-gradient': false,
         },
       });
