@@ -995,21 +995,24 @@ function computeBoroughAvgTiers(tiers, zipBoroughMap, boroughCount) {
 
 // Inject _tier, _color, and _boroughIdx onto each borough feature. avgTiers are integer
 // tiers from unique ranking — use HEAT_MID_COLORS for visible outline differentiation.
-// Features sorted by tier ascending so higher-tier (red) boroughs render on top.
+// Features stay in ORIGINAL order (must match skeleton index for zoom updates).
+// _boroughIdx assigned by tier rank (ascending) so higher-tier (red) boroughs render on top via height stagger.
 function buildColoredBoroughFeatures(boroughGeoData, avgTiers, isHeatmap) {
-  // Pair each feature with its tier, sort ascending, then re-assign _boroughIdx by sorted position.
-  // This guarantees unique heights AND ensures red (tier 4) always renders on top.
-  const paired = boroughGeoData.features.map((f, i) => ({ f, tier: avgTiers[i] ?? 0 }));
-  paired.sort((a, b) => a.tier - b.tier);
+  // Compute rank order by tier (ascending) — lowest tier gets rank 0, highest gets rank 4.
+  const indexed = avgTiers.map((tier, i) => ({ tier: tier ?? 0, i }));
+  indexed.sort((a, b) => a.tier - b.tier);
+  const rankMap = new Array(avgTiers.length);
+  indexed.forEach(({ i }, rank) => { rankMap[i] = rank; });
+
   return {
     ...boroughGeoData,
-    features: paired.map(({ f, tier }, sortedIdx) => ({
+    features: boroughGeoData.features.map((f, i) => ({
       ...f,
       properties: {
         ...f.properties,
-        _tier: isHeatmap ? tier : 0,
-        _color: isHeatmap ? midTierColor(tier) : OUTLINE_COLOR,
-        _boroughIdx: sortedIdx,  // 0=lowest tier … 4=highest tier (red always last/on top)
+        _tier: isHeatmap ? (avgTiers[i] ?? 0) : 0,
+        _color: isHeatmap ? midTierColor(avgTiers[i] ?? 0) : OUTLINE_COLOR,
+        _boroughIdx: rankMap[i],  // 0=lowest tier … 4=highest tier (red always last/on top)
       },
     })),
   };
@@ -2056,7 +2059,7 @@ export default function MapView({ events }) {
     // applyReal3DLayers handles this via the dedicated Real3D useEffect below.
     // Only update landuse proxy here (safe to set without full rebuild).
     if (real3D && map.getLayer('real3d-landuse-baseplate')) {
-      map.setPaintProperty('real3d-landuse-baseplate', 'fill-color', baseplateColorExpr(heatmap));
+      map.setPaintProperty('real3d-landuse-baseplate', 'fill-color', baseplateColorExpr(heatmap, timespanIdx));
     }
   }, [heatmap, topoOn, threeD, real3D, timespanIdx, events, geoData, boroughGeoData, mapReady, satellite, adjacency, styleVersion]);
 
@@ -2569,12 +2572,12 @@ export default function MapView({ events }) {
       map.addLayer({
         id: 'real3d-buildings-baseplate', type: 'fill-extrusion',
         source: 'fgb-buildings',
-        minzoom: 10, maxzoom: 11,
+        minzoom: 13, maxzoom: 14,
         paint: {
           'fill-extrusion-color': baseplateColorExpr(isHeatmap, tsIdx),
           'fill-extrusion-height': 7,
           'fill-extrusion-base': 2,
-          'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'], 10, 0, 10.5, 0.9],
+          'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'], 13, 0, 13.5, 0.9],
           'fill-extrusion-vertical-gradient': false,
         },
       });
@@ -2584,7 +2587,7 @@ export default function MapView({ events }) {
       map.addLayer({
         id: 'real3d-buildings', type: 'fill-extrusion',
         source: 'fgb-buildings',
-        minzoom: 11,
+        minzoom: 14,
         paint: {
           'fill-extrusion-color': buildingColorExprByState(isHeatmap, tsIdx),
           'fill-extrusion-height': ['coalesce', ['get', 'height_roof'], 8],
@@ -2650,11 +2653,11 @@ export default function MapView({ events }) {
       map.addLayer({
         id: 'real3d-roads-primary', type: 'line',
         source: 'openmaptiles', 'source-layer': 'transportation',
-        minzoom: 10, maxzoom: 13,
+        minzoom: 11, maxzoom: 13,
         filter: ['all', ['match', ['get', 'class'], ['primary', 'secondary'], true, false], ['within', NYC_BBOX_GEOM]],
         paint: {
           'line-color': isHeatmap ? '#662200' : '#cc1800',
-          'line-width': ['interpolate', ['linear'], ['zoom'], 10, 0.8, 13, 3],
+          'line-width': ['interpolate', ['linear'], ['zoom'], 11, 0.8, 13, 3],
           'line-blur': 0.8, 'line-opacity': 0.75,
         },
       });
@@ -2677,7 +2680,7 @@ export default function MapView({ events }) {
         filter: ['all', ['match', ['get', 'class'], ['residential', 'commercial', 'industrial', 'retail'], true, false], ['within', NYC_BBOX_GEOM]],
         paint: {
           'fill-color': baseplateColorExpr(isHeatmap, tsIdx),
-          'fill-opacity': ['interpolate', ['linear'], ['zoom'], 9, 0, 10, 0.45, 11, 0.45, 12, 0],
+          'fill-opacity': ['interpolate', ['linear'], ['zoom'], 9, 0, 10, 0.45, 12, 0.45, 13, 0],
         },
       });
 
