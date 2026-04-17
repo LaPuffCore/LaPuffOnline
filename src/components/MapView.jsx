@@ -992,21 +992,23 @@ function computeBoroughAvgTiers(tiers, zipBoroughMap, boroughCount, geoDataFeatu
 
 // Inject _tier, _color, and _boroughIdx onto each borough feature. avgTiers are integer
 // tiers from unique ranking — use HEAT_MID_COLORS for visible outline differentiation.
+// Features sorted by tier ascending so higher-tier (red) boroughs render on top.
 function buildColoredBoroughFeatures(boroughGeoData, avgTiers, isHeatmap) {
+  // Pair each feature with its tier, sort ascending, then re-assign _boroughIdx by sorted position.
+  // This guarantees unique heights AND ensures red (tier 4) always renders on top.
+  const paired = boroughGeoData.features.map((f, i) => ({ f, tier: avgTiers[i] ?? 0 }));
+  paired.sort((a, b) => a.tier - b.tier);
   return {
     ...boroughGeoData,
-    features: boroughGeoData.features.map((f, i) => {
-      const tier = avgTiers[i] ?? 0;
-      return {
-        ...f,
-        properties: {
-          ...f.properties,
-          _tier: isHeatmap ? tier : 0,
-          _color: isHeatmap ? midTierColor(tier) : OUTLINE_COLOR,
-          _boroughIdx: i,
-        },
-      };
-    }),
+    features: paired.map(({ f, tier }, sortedIdx) => ({
+      ...f,
+      properties: {
+        ...f.properties,
+        _tier: isHeatmap ? tier : 0,
+        _color: isHeatmap ? midTierColor(tier) : OUTLINE_COLOR,
+        _boroughIdx: sortedIdx,  // 0=lowest tier … 4=highest tier (red always last/on top)
+      },
+    })),
   };
 }
 
@@ -1259,9 +1261,10 @@ export default function MapView({ events }) {
   // Tier computation cache — skip expensive buildZipEventMap + computeTiers when only paint deps change
   const cachedTierDataRef   = useRef({ events: null, timespanIdx: -1, geoData: null, zipMap: null, maxCount: 0, tiers: [] });
   // FGB building data — loaded once as full GeoJSON FeatureCollection, cached
-  const buildingFGBRef      = useRef(null);  // FeatureCollection | null
+  const buildingFGBRef      = useRef(null);  // FeatureCollection with _tier always baked in
   const buildingFGBLoadingRef = useRef(false);
   const fgbAbortRef         = useRef(null);  // AbortController for in-flight FGB fetch
+  const buildingZctaMapRef  = useRef(null);  // Int16Array: feature idx → ZCTA feature idx (-1=none)
 
   // Persist topo toggle across sessions
   useEffect(() => {
@@ -1941,10 +1944,10 @@ export default function MapView({ events }) {
         map.getSource('borough-source').setData(filtered);
         // Borough color: read baked _color from features — mid-brightness for visibility
         map.setPaintProperty('borough-outline', 'fill-extrusion-color', ['coalesce', ['get', '_color'], OUTLINE_COLOR]);
-        // Stagger height by tier (0–4) so higher-tier boroughs (red=4) render ON TOP of lower tiers (blue=0).
-        // This structurally prevents Z-fighting at shared borders and ensures color hierarchy.
-        map.setPaintProperty('borough-outline', 'fill-extrusion-base', ['+', 29.5, ['coalesce', ['get', '_tier'], 0]]);
-        map.setPaintProperty('borough-outline', 'fill-extrusion-height', ['+', 31.5, ['coalesce', ['get', '_tier'], 0]]);
+        // Stagger height by _boroughIdx * 0.1m — unique per borough (guarantees no Z-fighting),
+        // subpixel gap (invisible), and sorted so highest tier renders on top.
+        map.setPaintProperty('borough-outline', 'fill-extrusion-base',   ['+', 29.5, ['*', 0.1, ['coalesce', ['get', '_boroughIdx'], 0]]]);
+        map.setPaintProperty('borough-outline', 'fill-extrusion-height', ['+', 31.5, ['*', 0.1, ['coalesce', ['get', '_boroughIdx'], 0]]]);
         // Zoom-interpolated opacity — softens thin extrusions at distance to reduce pixelation
         map.setPaintProperty('borough-outline', 'fill-extrusion-opacity',
           ['interpolate', ['linear'], ['zoom'], 9, 0.4, 11, 1.0]);
@@ -2173,44 +2176,73 @@ export default function MapView({ events }) {
   }
 
 
-  // Assign _tier property to each building feature in the FGB GeoJSON based on centroid PiP.
-  // Returns a new FeatureCollection with _tier baked into each feature's properties.
-  function bakeBuildingTiers(buildingGeoJSON) {
-    const features = geoDataRef.current?.features;
-    const tiers = tiersRef.current;
-    if (!features || !tiers.length || !buildingGeoJSON?.features) return buildingGeoJSON;
+  // ─── FGB building tier caching system ─────────────────────────────────────
+  // buildingZctaMapRef: Int16Array mapping each building feature index → its
+  // ZCTA feature index in geoDataRef.current.features (-1 = no ZCTA found).
+  // Built once at load time from PiP; re-tier is then O(n) via index lookup.
 
-    return {
-      ...buildingGeoJSON,
-      features: buildingGeoJSON.features.map(b => {
-        const centroid = getGeomCentroid(b.geometry);
-        let tier = findTierForPoint(centroid, features, tiers);
-        // Multi-sample fallback for boundary buildings
-        if (tier === 0 && b.geometry?.coordinates) {
-          const ring = b.geometry.type === 'MultiPolygon'
-            ? (b.geometry.coordinates[0]?.[0] || [])
-            : (b.geometry.coordinates[0] || []);
-          if (ring.length > 1) {
-            const step = Math.max(1, Math.floor(ring.length / 4));
-            const tierVotes = {};
-            for (let i = 0; i < ring.length && i < step * 4; i += step) {
-              const vTier = findTierForPoint(ring[i], features, tiers);
-              if (vTier > 0) tierVotes[vTier] = (tierVotes[vTier] || 0) + 1;
-            }
-            let bestTier = 0, bestCount = 0;
-            for (const [t, c] of Object.entries(tierVotes)) {
-              if (c > bestCount) { bestTier = parseInt(t); bestCount = c; }
-            }
-            if (bestTier > 0) tier = bestTier;
-          }
+  // Build the building→ZCTA index map from a loaded FeatureCollection.
+  // Runs on a background microtask to avoid blocking the UI during FGB load.
+  function buildZctaIndexMap(features) {
+    const zctaFeatures = geoDataRef.current?.features;
+    if (!zctaFeatures?.length) return null;
+    const map = new Int16Array(features.length).fill(-1);
+    for (let i = 0; i < features.length; i++) {
+      const centroid = getGeomCentroid(features[i].geometry);
+      const idx = findZctaIdxForPoint(centroid, zctaFeatures);
+      if (idx >= 0) { map[i] = idx; continue; }
+      // Boundary fallback: sample up to 4 ring vertices
+      const ring = features[i].geometry.type === 'MultiPolygon'
+        ? (features[i].geometry.coordinates[0]?.[0] || [])
+        : (features[i].geometry.coordinates[0] || []);
+      if (ring.length > 1) {
+        const step = Math.max(1, Math.floor(ring.length / 4));
+        const votes = {};
+        for (let j = 0; j < ring.length && j < step * 4; j += step) {
+          const vi = findZctaIdxForPoint(ring[j], zctaFeatures);
+          if (vi >= 0) votes[vi] = (votes[vi] || 0) + 1;
         }
+        let bestIdx = -1, bestCount = 0;
+        for (const [vi, c] of Object.entries(votes)) {
+          if (c > bestCount) { bestIdx = parseInt(vi); bestCount = c; }
+        }
+        map[i] = bestIdx;
+      }
+    }
+    return map;
+  }
+
+  // Look up the ZCTA feature index that contains a given point. Returns -1 if none.
+  function findZctaIdxForPoint([px, py], zctaFeatures) {
+    for (let i = 0; i < zctaFeatures.length; i++) {
+      if (zctaFeatures[i].properties?._special) continue;
+      const geom = zctaFeatures[i].geometry;
+      const polys = geom.type === 'MultiPolygon' ? geom.coordinates : [geom.coordinates];
+      for (const poly of polys) {
+        if (pointInRing(px, py, poly[0])) return i;
+      }
+    }
+    return -1;
+  }
+
+  // Fast O(n) re-tier using cached ZCTA index map. Updates _tier on every building feature.
+  // Returns a new FeatureCollection with _tier baked (does NOT call setData — caller does that).
+  function retierBuildings(geojson, tiers) {
+    const indexMap = buildingZctaMapRef.current;
+    if (!indexMap || !tiers?.length) return geojson;
+    return {
+      ...geojson,
+      features: geojson.features.map((b, i) => {
+        const zctaIdx = indexMap[i];
+        const tier = zctaIdx >= 0 ? (tiers[zctaIdx] ?? 0) : 0;
+        if (b.properties._tier === tier) return b;  // no change, avoid object allocation
         return { ...b, properties: { ...b.properties, _tier: tier } };
       }),
     };
   }
 
-  // Stream BUILDING.fgb in full, parse properties, cache as GeoJSON FeatureCollection.
-  // Called once on first Real3D activation; result stays cached until Real3D is toggled off.
+  // Stream BUILDING.fgb in full, parse properties, build ZCTA index, bake initial tiers, cache.
+  // Called once on first Real3D activation; result stays cached indefinitely.
   async function loadBuildingFGB() {
     if (buildingFGBRef.current) return buildingFGBRef.current;
     if (buildingFGBLoadingRef.current) return null;
@@ -2231,12 +2263,24 @@ export default function MapView({ events }) {
         feature.properties.height_roof = isNaN(hr) ? 8 : hr;
         feature.properties.ground_elevation = isNaN(ge) ? 0 : ge;
         feature.properties.objectid = feature.properties.objectid || '0';
+        feature.properties._tier = 0;  // default; retierBuildings sets real value
         features.push(feature);
       }
       if (ac.signal.aborted) return null;
+
       const geojson = { type: 'FeatureCollection', features };
-      buildingFGBRef.current = geojson;
-      return geojson;
+
+      // Build ZCTA index map (one-time PiP — runs synchronously but only once ever).
+      // This is the slow part (~1-3s for 348K buildings) but happens ONCE in the background.
+      buildingZctaMapRef.current = buildZctaIndexMap(features);
+
+      // Bake initial tiers using current tiersRef
+      const tiered = tiersRef.current?.length
+        ? retierBuildings(geojson, tiersRef.current)
+        : geojson;
+
+      buildingFGBRef.current = tiered;
+      return tiered;
     } catch (err) {
       if (err.name !== 'AbortError') console.error('Failed to load BUILDING.fgb:', err);
       return null;
@@ -2248,13 +2292,12 @@ export default function MapView({ events }) {
 
   // Add fgb-buildings source + building layers to the map.
   // Layers use minzoom/maxzoom to control visibility by zoom level.
+  // buildingFGBRef.current always has current _tier values baked in.
   function addBuildingLayers(map, geojson, isHeatmap) {
-    const tieredData = isHeatmap ? bakeBuildingTiers(geojson) : geojson;
-
     if (map.getSource('fgb-buildings')) {
-      map.getSource('fgb-buildings').setData(tieredData);
+      map.getSource('fgb-buildings').setData(geojson);
     } else {
-      map.addSource('fgb-buildings', { type: 'geojson', data: tieredData, generateId: true });
+      map.addSource('fgb-buildings', { type: 'geojson', data: geojson, generateId: true });
     }
 
     if (!map.getLayer('real3d-buildings-baseplate')) {
@@ -2391,7 +2434,13 @@ export default function MapView({ events }) {
       // Load asynchronously so other layers appear immediately.
       loadBuildingFGB().then(geojson => {
         if (!geojson || !map.getStyle()) return;
-        addBuildingLayers(map, geojson, isHeatmap);
+        // Re-tier with current tiers in case timespan changed while Real3D was off
+        let data = geojson;
+        if (buildingZctaMapRef.current && tiersRef.current?.length) {
+          data = retierBuildings(geojson, tiersRef.current);
+          buildingFGBRef.current = data;
+        }
+        addBuildingLayers(map, data, isHeatmap);
       });
 
       // Layer ordering: move unrestricted layers to top of stack.
@@ -2409,9 +2458,8 @@ export default function MapView({ events }) {
     if (!map || !mapReady) return;
     if (!real3D) {
       REAL3D_ALL_LAYER_IDS.forEach(id => { if (map.getLayer(id)) map.removeLayer(id); });
-      // Clean up FGB source and accumulated data
+      // Remove FGB source (GPU memory cleanup) but KEEP buildingFGBRef in memory — reuse on next activation
       if (map.getSource('fgb-buildings')) map.removeSource('fgb-buildings');
-      buildingFGBRef.current = null;
       if (fgbAbortRef.current) { fgbAbortRef.current.abort(); fgbAbortRef.current = null; }
       // Clean up stencil source from old sessions (may exist from previous code)
       if (map.getLayer('real3d-nyc-stencil')) map.removeLayer('real3d-nyc-stencil');
@@ -2423,21 +2471,14 @@ export default function MapView({ events }) {
     applyReal3DLayers(map, heatmapRef.current);
   }, [real3D, mapReady]);
 
-  // Heatmap/timespan change in Real3D — re-bake tier data into GeoJSON source and update paint
+  // Heatmap toggle in Real3D — ONLY updates paint expressions, no setData (fast, no freeze)
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady || !real3D) return;
-    if (!map.getLayer('real3d-buildings')) return;
 
-    // Re-bake tiers into FGB GeoJSON when heatmap/timespan changes
-    const src = map.getSource('fgb-buildings');
-    if (src && buildingFGBRef.current) {
-      const tieredData = heatmap ? bakeBuildingTiers(buildingFGBRef.current) : buildingFGBRef.current;
-      src.setData(tieredData);
+    if (map.getLayer('real3d-buildings')) {
+      map.setPaintProperty('real3d-buildings', 'fill-extrusion-color', buildingColorExprByState(heatmap));
     }
-
-    map.setPaintProperty('real3d-buildings', 'fill-extrusion-color', buildingColorExprByState(heatmap));
-    if (map.getLayer('zcta-safezone-extrusion')) map.setPaintProperty('zcta-safezone-extrusion', 'fill-extrusion-opacity', 1.0);
     if (map.getLayer('real3d-buildings-baseplate')) {
       map.setPaintProperty('real3d-buildings-baseplate', 'fill-extrusion-color', baseplateColorExpr(heatmap));
     }
@@ -2450,7 +2491,22 @@ export default function MapView({ events }) {
     if (map.getLayer('real3d-roads-primary')) {
       map.setPaintProperty('real3d-roads-primary', 'line-color', heatmap ? '#662200' : '#cc1800');
     }
-  }, [heatmap, real3D, mapReady, timespanIdx]);
+    if (map.getLayer('zcta-safezone-extrusion')) {
+      map.setPaintProperty('zcta-safezone-extrusion', 'fill-extrusion-opacity', 1.0);
+    }
+  }, [heatmap, real3D, mapReady]);
+
+  // Timespan/events change in Real3D — fast O(n) re-tier via cached ZCTA index, then setData once
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady || !real3D) return;
+    if (!buildingFGBRef.current || !buildingZctaMapRef.current) return;
+    if (!map.getSource('fgb-buildings')) return;
+
+    const retiered = retierBuildings(buildingFGBRef.current, tiersRef.current);
+    buildingFGBRef.current = retiered;  // keep cache fresh
+    map.getSource('fgb-buildings').setData(retiered);
+  }, [timespanIdx, real3D, mapReady]);
 
   const handleThreeDToggle = () => {
     if (isOffline) {
