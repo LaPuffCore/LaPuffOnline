@@ -1575,8 +1575,8 @@ export default function MapView({ events }) {
         id: 'borough-outline', type: 'fill-extrusion', source: 'borough-source',
         paint: {
           'fill-extrusion-color': ['coalesce', ['get', '_color'], OUTLINE_COLOR],
-          'fill-extrusion-height': 29.5,
-          'fill-extrusion-base': 2,
+          'fill-extrusion-height': 32,
+          'fill-extrusion-base': 0,
           'fill-extrusion-opacity': 0,
           'fill-extrusion-vertical-gradient': false,
         },
@@ -1942,10 +1942,10 @@ export default function MapView({ events }) {
         map.getSource('borough-source').setData(filtered);
         // Borough color: read baked _color from features — mid-brightness for visibility
         map.setPaintProperty('borough-outline', 'fill-extrusion-color', ['coalesce', ['get', '_color'], OUTLINE_COLOR]);
-        // Stagger height by _boroughIdx * 0.1m — unique per borough (guarantees no Z-fighting),
-        // subpixel gap (invisible), and sorted so highest tier renders on top.
-        map.setPaintProperty('borough-outline', 'fill-extrusion-base',   ['+', 29.5, ['*', 0.1, ['coalesce', ['get', '_boroughIdx'], 0]]]);
-        map.setPaintProperty('borough-outline', 'fill-extrusion-height', ['+', 31.5, ['*', 0.1, ['coalesce', ['get', '_boroughIdx'], 0]]]);
+        // Base 0 → full extrusion blocks from ground to max height.
+        // Height stagger by _boroughIdx * 0.1m prevents Z-fighting at shared top edges.
+        map.setPaintProperty('borough-outline', 'fill-extrusion-base',   0);
+        map.setPaintProperty('borough-outline', 'fill-extrusion-height', ['+', 32, ['*', 0.1, ['coalesce', ['get', '_boroughIdx'], 0]]]);
         // Zoom-interpolated opacity — softens thin extrusions at distance to reduce pixelation
         map.setPaintProperty('borough-outline', 'fill-extrusion-opacity',
           ['interpolate', ['linear'], ['zoom'], 9, 0.4, 11, 1.0]);
