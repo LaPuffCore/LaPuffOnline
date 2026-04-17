@@ -89,7 +89,39 @@ function midTierColor(tier) {
 }
 
 function isSpecialZip(zip) {
-  return !zip || zip === '' || zip === '99999' || parseInt(zip) > 11697;
+  return !zip || zip === '' || zip === '99999' || parseInt(zip) > 11697 || (typeof zip === 'string' && zip.startsWith('SAFEZONE'));
+}
+
+// True if the sideZip / MODZCTA string is any safezone (SAFEZONE, SAFEZONE_1 … SAFEZONE_N)
+function isSafezoneModzcta(zip) {
+  return typeof zip === 'string' && (zip === 'SAFEZONE' || zip.startsWith('SAFEZONE_'));
+}
+
+// Human-readable label: "Safe Zone 3", "Safe Zone" (generic), or "" for non-safezone
+function getSafezoneLabel(zip) {
+  if (!zip) return '';
+  if (zip.startsWith('SAFEZONE_')) return `Safe Zone ${zip.slice(9)}`;
+  return 'Safe Zone';
+}
+
+// Find events geographically within a safezone feature polygon (by lat/lng).
+// Used when the user opens a safezone's side panel — zipMap doesn't have SAFEZONE_N keys.
+function getEventsInSafezone(szFeature, events, timespanIdx) {
+  if (!szFeature?.geometry || !events?.length) return [];
+  const now = new Date(); now.setHours(0, 0, 0, 0);
+  const maxDate = new Date(now.getTime() + TIMESPAN_STEPS[timespanIdx].days * 86400000);
+  const geom = szFeature.geometry;
+  const polys = geom.type === 'MultiPolygon' ? geom.coordinates : [geom.coordinates];
+  return events.filter(e => {
+    const lat = parseFloat(e.lat); const lng = parseFloat(e.lng);
+    if (isNaN(lat) || isNaN(lng)) return false;
+    const ed = new Date(e.event_date + 'T00:00:00');
+    if (ed < now || ed > maxDate) return false;
+    for (const poly of polys) {
+      if (pointInRing(lng, lat, poly[0])) return true;
+    }
+    return false;
+  });
 }
 
 function buildZipEventMap(events, days) {
@@ -1360,13 +1392,44 @@ export default function MapView({ events }) {
   // GeoJSON
   useEffect(() => {
     fetch(GEOJSON_URL).then(r => r.json()).then(data => {
-      const features = data.features.map((f, i) => {
+      const features = [];
+      let safezoneCounter = 0;
+
+      data.features.forEach((f, i) => {
         let zip = String(f.properties.MODZCTA || f.properties.modzcta || '');
-        if (isSpecialZip(zip)) f = { ...f, properties: { ...f.properties, MODZCTA: 'SAFEZONE', _special: true } };
-        // D6: enforce correct GeoJSON winding on all features (especially safe zones)
-        // to prevent GPU triangulation artifacts from reversed polygon rings.
-        f = enforceGeoJSONWinding(f);
-        return { ...f, id: i };
+
+        if (isSpecialZip(zip) && f.geometry?.type === 'MultiPolygon') {
+          // Split each sub-polygon into its own individually numbered safezone feature.
+          // This lets events and hover labels target the exact zone (e.g. "Safe Zone 3").
+          f.geometry.coordinates.forEach((polyCoords, pi) => {
+            const szNum = ++safezoneCounter;
+            const modzcta = `SAFEZONE_${szNum}`;
+            let szFeature = {
+              ...f,
+              geometry: { type: 'Polygon', coordinates: polyCoords },
+              properties: {
+                ...f.properties,
+                MODZCTA: modzcta,
+                _special: true,
+                _safezoneNum: szNum,
+                label: `Safezone ${szNum}`,
+              },
+            };
+            szFeature = enforceGeoJSONWinding(szFeature);
+            features.push({ ...szFeature, id: i * 1000 + pi });
+          });
+        } else {
+          // Normal zip or already-encoded safezone
+          if (isSpecialZip(zip) && !zip.startsWith('SAFEZONE')) {
+            // Single-polygon special zip — assign as SAFEZONE_N
+            const szNum = ++safezoneCounter;
+            const modzcta = `SAFEZONE_${szNum}`;
+            f = { ...f, properties: { ...f.properties, MODZCTA: modzcta, _special: true, _safezoneNum: szNum, label: `Safezone ${szNum}` } };
+          }
+          // D6: enforce correct GeoJSON winding on all features
+          f = enforceGeoJSONWinding(f);
+          features.push({ ...f, id: i });
+        }
       });
       setGeoData({ ...data, features });
       setAdjacency(buildAdjacency(features));
@@ -2854,14 +2917,17 @@ export default function MapView({ events }) {
     if (!hoveredZip) { setHoveredEvents([]); setHoveredColonists(null); return; }
     const isSafe = hoveredZip.startsWith('SAFE:');
     const rawZip = isSafe ? hoveredZip.slice(5) : hoveredZip;
-    // Use cached tier data if available, otherwise compute
-    const { zipMap } = cachedTierDataRef.current.zipMap
-      ? { zipMap: cachedTierDataRef.current.zipMap }
-      : buildZipEventMap(events, TIMESPAN_STEPS[timespanIdx].days);
-    setHoveredEvents(zipMap[rawZip] || []);
-    if (isSafe) {
-      setHoveredColonists(0); // safezones have no colonists
+    if (isSafe && isSafezoneModzcta(rawZip)) {
+      // Safezone: find events geographically within this zone's polygon
+      const szFeature = geoData?.features?.find(f => f.properties.MODZCTA === rawZip);
+      setHoveredEvents(szFeature ? getEventsInSafezone(szFeature, events, timespanIdx) : []);
+      setHoveredColonists(0);
     } else {
+      // Normal zip — use cached zipMap
+      const { zipMap } = cachedTierDataRef.current.zipMap
+        ? { zipMap: cachedTierDataRef.current.zipMap }
+        : buildZipEventMap(events, TIMESPAN_STEPS[timespanIdx].days);
+      setHoveredEvents(zipMap[rawZip] || []);
       getZipColonists(rawZip).then(c => setHoveredColonists(c.length)).catch(() => setHoveredColonists(0));
     }
   }, [hoveredZip, timespanIdx, events]);
@@ -2869,15 +2935,19 @@ export default function MapView({ events }) {
   async function openSidePanel(zip) {
     const isSafezone = zip.startsWith('SAFE:');
     const rawZip = isSafezone ? zip.slice(5) : zip;
-    setSideZip(isSafezone ? 'SAFEZONE' : rawZip);
-    // Use cached zipMap when available, fallback to compute
-    const { zipMap } = cachedTierDataRef.current.zipMap
-      ? { zipMap: cachedTierDataRef.current.zipMap }
-      : buildZipEventMap(events, TIMESPAN_STEPS[timespanIdx].days);
-    setSideEvents(zipMap[rawZip] || []);
-    if (isSafezone) {
+    // Store the full SAFEZONE_N string so the label can show "Safe Zone 3" etc.
+    setSideZip(rawZip);
+    if (isSafezone && isSafezoneModzcta(rawZip)) {
+      // Look up events geographically within this specific safezone polygon
+      const szFeature = geoData?.features?.find(f => f.properties.MODZCTA === rawZip);
+      setSideEvents(szFeature ? getEventsInSafezone(szFeature, events, timespanIdx) : []);
       setSideColonists([]);
     } else {
+      // Normal zip — use cached zipMap
+      const { zipMap } = cachedTierDataRef.current.zipMap
+        ? { zipMap: cachedTierDataRef.current.zipMap }
+        : buildZipEventMap(events, TIMESPAN_STEPS[timespanIdx].days);
+      setSideEvents(zipMap[rawZip] || []);
       setSideColonists(await getZipColonists(rawZip).catch(() => []));
     }
   }
@@ -2902,8 +2972,8 @@ export default function MapView({ events }) {
 
   const isSafezoneHover = hoveredZip?.startsWith('SAFE:');
   const displayHoverZip = isSafezoneHover ? hoveredZip.slice(5) : hoveredZip;
-  const zipLabel  = isSafezoneHover ? 'Safe Zone' : hoveredZip ? `ZIP ${hoveredZip}` : '';
-  const sideLabel = sideZip   === 'SAFEZONE' ? 'Safe Zone' : sideZip   ? `ZIP ${sideZip}`   : '';
+  const zipLabel  = isSafezoneHover ? getSafezoneLabel(displayHoverZip) : hoveredZip ? `ZIP ${hoveredZip}` : '';
+  const sideLabel = isSafezoneModzcta(sideZip) ? getSafezoneLabel(sideZip) : sideZip ? `ZIP ${sideZip}` : '';
 
   return (
     // Outer div is the positioning root for everything
@@ -3012,7 +3082,7 @@ export default function MapView({ events }) {
                 <div className="px-3 py-2 border-b border-white/10">
                   <p className="text-red-400 font-black text-xs">{zipLabel}</p>
                   {isSafezoneHover
-                    ? <p className="text-white/40 text-xs italic">🛡️ Safe zone — {hoveredEvents.length} event{hoveredEvents.length !== 1 ? 's' : ''}</p>
+                   ? <p className="text-white/40 text-xs italic">🛡️ {zipLabel} — {hoveredEvents.length} event{hoveredEvents.length !== 1 ? 's' : ''}</p>
                     : <p className="text-white/60 text-xs">{hoveredEvents.length} upcoming events</p>
                   }
                 </div>
@@ -3044,7 +3114,7 @@ export default function MapView({ events }) {
               <div className="flex items-center justify-between px-5 py-3 border-b border-white/10 bg-black/30 flex-shrink-0">
                 <div>
                   <p className="text-red-400 font-black">{sideLabel}</p>
-                  <p className="text-white/40 text-xs">{sideZip === 'SAFEZONE' ? `🛡️ Safe zone · ${sideEvents.length} events` : `${sideEvents.length} events · ${sideColonists.length} colonists`}</p>
+                  <p className="text-white/40 text-xs">{isSafezoneModzcta(sideZip) ? `🛡️ ${getSafezoneLabel(sideZip)} · ${sideEvents.length} events` : `${sideEvents.length} events · ${sideColonists.length} colonists`}</p>
                 </div>
                 <button onClick={() => { setSideZip(null); setSideEvents([]); setSideColonists([]); setHoloFeature(null); }}
                   className="text-white/40 hover:text-white text-xl w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10">✕</button>
@@ -3080,7 +3150,7 @@ export default function MapView({ events }) {
                 />
               </div>
 
-              {sideZip !== 'SAFEZONE' && (
+              {!isSafezoneModzcta(sideZip) && (
                 <div className="flex-1 overflow-y-auto" style={{ maxHeight: '50%' }}>
                   <PaginatedSection
                     items={sideColonists}
@@ -3110,7 +3180,7 @@ export default function MapView({ events }) {
                   />
                 </div>
               )}
-              {sideZip === 'SAFEZONE' && (
+              {isSafezoneModzcta(sideZip) && (
                 <div className="flex-1 flex items-center justify-center p-6">
                   <div className="text-center">
                     <p className="text-4xl mb-3">🛡️</p>
@@ -3133,7 +3203,7 @@ export default function MapView({ events }) {
               <div className="flex items-center justify-between px-4 py-2 border-b border-white/10 flex-shrink-0">
                 <div>
                   <p className="text-red-400 font-black text-sm">{sideLabel}</p>
-                  <p className="text-white/40 text-xs">{sideZip === 'SAFEZONE' ? `🛡️ Safe zone · ${sideEvents.length} events` : `${sideEvents.length} events · ${sideColonists.length} colonists`}</p>
+                  <p className="text-white/40 text-xs">{isSafezoneModzcta(sideZip) ? `🛡️ ${getSafezoneLabel(sideZip)} · ${sideEvents.length} events` : `${sideEvents.length} events · ${sideColonists.length} colonists`}</p>
                 </div>
                 <button onClick={() => { setSideZip(null); setSideEvents([]); setSideColonists([]); setHoloFeature(null); }}
                   className="text-white/40 text-lg w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10">✕</button>
@@ -3159,7 +3229,7 @@ export default function MapView({ events }) {
                     )}
                   />
                 </div>
-                {sideZip !== 'SAFEZONE' && (
+                {!isSafezoneModzcta(sideZip) && (
                   <div className="flex-1 flex flex-col overflow-hidden min-h-0">
                     <PaginatedSection
                       items={sideColonists}
@@ -3185,7 +3255,7 @@ export default function MapView({ events }) {
                     />
                   </div>
                 )}
-                {sideZip === 'SAFEZONE' && (
+                {isSafezoneModzcta(sideZip) && (
                   <div className="flex-1 flex items-center justify-center p-4">
                     <div className="text-center">
                       <p className="text-2xl mb-2">🛡️</p>
