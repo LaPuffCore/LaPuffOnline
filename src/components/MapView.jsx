@@ -2140,56 +2140,70 @@ export default function MapView({ events }) {
   }, [satellite, real3D, mapReady]);
 
 
-  // Building color expression — uses _tier property baked into GeoJSON features from FGB data.
-  // Non-heatmap: 7 dark red shades via objectid hash for clustering. Heatmap: tier-based colors.
+  // Building color expression — uses pre-computed _s7 (shade index mod 7) and _tier.
+  // Non-heatmap: 7 dark red shades. Heatmap: tier-based colors with _s5 clustering.
+  // Pre-computed shade indices eliminate per-pixel GPU math (%/to-number).
+  const memoizedExprs = useRef({});
+
   function buildingColorExprByState(isHeatmap) {
+    const key = `bldg_${isHeatmap}`;
+    if (memoizedExprs.current[key]) return memoizedExprs.current[key];
+
+    let expr;
     if (!isHeatmap) {
-      return ['case',
-        ['==', ['%', ['to-number', ['get', 'objectid'], 0], 7], 0], '#0d0101',
-        ['==', ['%', ['to-number', ['get', 'objectid'], 0], 7], 1], '#1a0303',
-        ['==', ['%', ['to-number', ['get', 'objectid'], 0], 7], 2], '#260606',
-        ['==', ['%', ['to-number', ['get', 'objectid'], 0], 7], 3], '#330909',
-        ['==', ['%', ['to-number', ['get', 'objectid'], 0], 7], 4], '#400c0c',
-        ['==', ['%', ['to-number', ['get', 'objectid'], 0], 7], 5], '#1f0404',
+      expr = ['case',
+        ['==', ['get', '_s7'], 0], '#0d0101',
+        ['==', ['get', '_s7'], 1], '#1a0303',
+        ['==', ['get', '_s7'], 2], '#260606',
+        ['==', ['get', '_s7'], 3], '#330909',
+        ['==', ['get', '_s7'], 4], '#400c0c',
+        ['==', ['get', '_s7'], 5], '#1f0404',
         '#7a1818',
       ];
+    } else {
+      const shades = (tones) => ['case',
+        ['==', ['get', '_s5'], 0], tones[0],
+        ['==', ['get', '_s5'], 1], tones[1],
+        ['==', ['get', '_s5'], 2], tones[2],
+        ['==', ['get', '_s5'], 3], tones[3],
+        tones[4],
+      ];
+      expr = ['case',
+        ['==', ['get', '_tier'], 4], shades(HEAT_BUILDING_TONES.hot),
+        ['==', ['get', '_tier'], 3], shades(HEAT_BUILDING_TONES.orange),
+        ['==', ['get', '_tier'], 2], shades(HEAT_BUILDING_TONES.warm),
+        ['==', ['get', '_tier'], 1], shades(HEAT_BUILDING_TONES.cool),
+        ['==', ['get', '_tier'], 0], shades(HEAT_BUILDING_TONES.cold),
+        shades(HEAT_BUILDING_TONES.cold),
+      ];
     }
-
-    // Heatmap: nested case — outer=tier from GeoJSON property, inner=shade index from objectid
-    const shades = (tones) => ['case',
-      ['==', ['%', ['to-number', ['get', 'objectid'], 0], 5], 0], tones[0],
-      ['==', ['%', ['to-number', ['get', 'objectid'], 0], 5], 1], tones[1],
-      ['==', ['%', ['to-number', ['get', 'objectid'], 0], 5], 2], tones[2],
-      ['==', ['%', ['to-number', ['get', 'objectid'], 0], 5], 3], tones[3],
-      tones[4],
-    ];
-
-    return ['case',
-      ['==', ['get', '_tier'], 4], shades(HEAT_BUILDING_TONES.hot),
-      ['==', ['get', '_tier'], 3], shades(HEAT_BUILDING_TONES.orange),
-      ['==', ['get', '_tier'], 2], shades(HEAT_BUILDING_TONES.warm),
-      ['==', ['get', '_tier'], 1], shades(HEAT_BUILDING_TONES.cool),
-      ['==', ['get', '_tier'], 0], shades(HEAT_BUILDING_TONES.cold),
-      shades(HEAT_BUILDING_TONES.cold), // fallback: cold
-    ];
+    memoizedExprs.current[key] = expr;
+    return expr;
   }
 
   // Baseplate color expression — uniform dark colors per tier, no clustering.
   function baseplateColorExpr(isHeatmap) {
+    const key = `bp_${isHeatmap}`;
+    if (memoizedExprs.current[key]) return memoizedExprs.current[key];
+
+    let expr;
     if (!isHeatmap) {
-      return ['case',
-        ['==', ['%', ['to-number', ['get', 'objectid'], 0], 3], 0], '#1a0303',
-        ['==', ['%', ['to-number', ['get', 'objectid'], 0], 3], 1], '#260606',
+      expr = ['case',
+        ['==', ['get', '_s7'], 0], '#1a0303',
+        ['==', ['get', '_s7'], 1], '#260606',
         '#330909',
       ];
+    } else {
+      expr = ['case',
+        ['==', ['get', '_tier'], 4], '#440400',
+        ['==', ['get', '_tier'], 3], '#3d1500',
+        ['==', ['get', '_tier'], 2], '#5c4a00',
+        ['==', ['get', '_tier'], 1], '#002910',
+        '#001f29',
+      ];
     }
-    return ['case',
-      ['==', ['get', '_tier'], 4], '#440400',
-      ['==', ['get', '_tier'], 3], '#3d1500',
-      ['==', ['get', '_tier'], 2], '#5c4a00',
-      ['==', ['get', '_tier'], 1], '#002910',
-      '#001f29',
-    ];
+    memoizedExprs.current[key] = expr;
+    return expr;
   }
 
 
@@ -2198,20 +2212,27 @@ export default function MapView({ events }) {
   // Path 2 (background): Full-file fetch → Cache API → parse → ZCTA index. Persists across sessions.
   // When cache is ready, viewport render uses cached data instead of network.
 
-  // Parse a Uint8Array of FGB data into a FeatureCollection. Normalizes property names.
+  // Normalize a single FGB feature's properties. Pre-computes shade indices for GPU.
+  function normalizeFGBProps(props) {
+    const hr = parseFloat(props?.HEIGHT_ROOF ?? props?.height_roof);
+    const ge = parseFloat(props?.GROUND_ELEVATION ?? props?.ground_elevation);
+    const oid = parseInt(props?.OBJECTID ?? props?.objectid ?? '0', 10) || 0;
+    return {
+      height_roof: isNaN(hr) ? 8 : hr,
+      ground_elevation: isNaN(ge) ? 0 : ge,
+      objectid: String(oid),
+      _s5: oid % 5,
+      _s7: oid % 7,
+      _tier: 0,
+    };
+  }
+
+  // Parse a Uint8Array of FGB data into a FeatureCollection.
   async function parseFGBBuffer(buf) {
     const features = [];
     for await (const feature of fgbDeserialize(buf)) {
       if (!feature?.geometry?.coordinates) continue;
-      const hr = parseFloat(feature.properties?.HEIGHT_ROOF ?? feature.properties?.height_roof);
-      const ge = parseFloat(feature.properties?.GROUND_ELEVATION ?? feature.properties?.ground_elevation);
-      const oid = String(feature.properties?.OBJECTID ?? feature.properties?.objectid ?? '0');
-      feature.properties = {
-        height_roof: isNaN(hr) ? 8 : hr,
-        ground_elevation: isNaN(ge) ? 0 : ge,
-        objectid: oid,
-        _tier: 0,
-      };
+      feature.properties = normalizeFGBProps(feature.properties);
       features.push(feature);
     }
     return { type: 'FeatureCollection', features };
@@ -2239,6 +2260,7 @@ export default function MapView({ events }) {
 
   // Background cache builder — fetches full FGB file, stores in Cache API,
   // parses into buildingFGBRef, builds ZCTA index. Runs once per session.
+  // On warm loads: reads parsed GeoJSON + ZCTA index from cache (skips parse + PiP entirely).
   async function buildFGBCache() {
     if (buildingFGBRef.current) { setFgbCacheStatus('done'); return; }
     if (fgbLoadingRef.current) return;
@@ -2246,51 +2268,94 @@ export default function MapView({ events }) {
     setFgbCacheStatus('building');
 
     try {
+      // ── Try loading pre-parsed GeoJSON + ZCTA index from cache (instant warm path) ──
+      if ('caches' in window) {
+        try {
+          const cache = await caches.open(FGB_CACHE_NAME);
+          const [parsedResp, idxResp] = await Promise.all([
+            cache.match('building_parsed.json'),
+            cache.match('building_zcta_index.bin'),
+          ]);
+          if (parsedResp && idxResp) {
+            const geojson = await parsedResp.json();
+            const idxBuf = await idxResp.arrayBuffer();
+            buildingFGBRef.current = geojson;
+            buildingZctaMapRef.current = new Int16Array(idxBuf);
+            console.log(`FGB warm load: ${geojson.features.length} buildings from cache`);
+            setFgbCacheStatus('done');
+            const map = mapRef.current;
+            if (map && map.getSource('fgb-buildings') && map.getStyle()) {
+              retierBuildings(geojson, tiersRef.current);
+              map.getSource('fgb-buildings').setData(geojson);
+            }
+            fgbLoadingRef.current = false;
+            return;
+          }
+        } catch (e) { console.warn('Cache warm load failed, falling back:', e); }
+      }
+
+      // ── Cold path: fetch FGB bytes → parse → build index → cache everything ──
       let buf = null;
 
-      // Try Cache API first (persistent across sessions)
+      // Try raw FGB bytes from cache
       if ('caches' in window) {
         try {
           const cache = await caches.open(FGB_CACHE_NAME);
           const cached = await cache.match(FGB_CACHE_KEY);
           if (cached) {
             buf = new Uint8Array(await cached.arrayBuffer());
-            console.log('FGB loaded from Cache API');
+            console.log('FGB bytes loaded from cache');
           }
         } catch (e) { console.warn('Cache API read failed:', e); }
       }
 
-      // If not in cache, fetch from network and store
+      // Fetch from network if not cached
       if (!buf) {
         const resp = await fetch(BUILDING_FGB_URL);
         if (!resp.ok) throw new Error(`FGB fetch failed: ${resp.status}`);
         const arrayBuf = await resp.arrayBuffer();
         buf = new Uint8Array(arrayBuf);
 
-        // Store in Cache API for future sessions
         if ('caches' in window) {
           try {
             const cache = await caches.open(FGB_CACHE_NAME);
             await cache.put(FGB_CACHE_KEY, new Response(arrayBuf.slice(0), {
               headers: { 'Content-Type': 'application/octet-stream' },
             }));
-            console.log('FGB stored in Cache API');
+            console.log('FGB bytes stored in cache');
           } catch (e) { console.warn('Cache API write failed:', e); }
         }
       }
 
-      // Parse
+      // Parse FGB binary → GeoJSON
       const geojson = await parseFGBBuffer(buf);
       buildingFGBRef.current = geojson;
 
-      // Build ZCTA index
+      // Build ZCTA index map (PiP)
       const idxMap = buildZctaIndexMap(geojson.features);
       if (idxMap) buildingZctaMapRef.current = idxMap;
 
-      console.log(`FGB cache complete: ${geojson.features.length} buildings, ZCTA index built`);
+      console.log(`FGB cold load: ${geojson.features.length} buildings, ZCTA index built`);
+
+      // Cache parsed GeoJSON + ZCTA index for instant warm loads
+      if ('caches' in window) {
+        try {
+          const cache = await caches.open(FGB_CACHE_NAME);
+          await Promise.all([
+            cache.put('building_parsed.json', new Response(JSON.stringify(geojson), {
+              headers: { 'Content-Type': 'application/json' },
+            })),
+            idxMap ? cache.put('building_zcta_index.bin', new Response(idxMap.buffer.slice(0), {
+              headers: { 'Content-Type': 'application/octet-stream' },
+            })) : Promise.resolve(),
+          ]);
+          console.log('Parsed GeoJSON + ZCTA index stored in cache');
+        } catch (e) { console.warn('Cache write failed:', e); }
+      }
+
       setFgbCacheStatus('done');
 
-      // If Real3D is active and source exists, push cached data to the map
+      // Push to map if Real3D active
       const map = mapRef.current;
       if (map && map.getSource('fgb-buildings') && map.getStyle()) {
         retierBuildings(geojson, tiersRef.current);
@@ -2304,17 +2369,24 @@ export default function MapView({ events }) {
     }
   }
 
-  // Instant viewport render — fetches only visible buildings via HTTP Range requests.
-  // Used as fallback when full cache isn't ready yet.
+  // Instant viewport render — fetches buildings in visible area + padding via HTTP Range.
+  // Used as fallback when full cache isn't ready yet. Padded bbox catches nearby buildings
+  // so panning doesn't show empty edges.
   async function fetchViewportBuildings(map) {
     if (!map || !map.getStyle() || !map.getSource('fgb-buildings')) return;
     if (map.getZoom() < 13) return;
     if (buildingFGBRef.current) return; // cache is ready, no need for viewport fetch
 
     const bounds = map.getBounds();
+    // Pad the viewport bbox by 50% in each direction for pan coverage
+    const lngSpan = bounds.getEast() - bounds.getWest();
+    const latSpan = bounds.getNorth() - bounds.getSouth();
+    const pad = 0.5;
     const rect = {
-      minX: bounds.getWest(), minY: bounds.getSouth(),
-      maxX: bounds.getEast(), maxY: bounds.getNorth(),
+      minX: bounds.getWest()  - lngSpan * pad,
+      minY: bounds.getSouth() - latSpan * pad,
+      maxX: bounds.getEast()  + lngSpan * pad,
+      maxY: bounds.getNorth() + latSpan * pad,
     };
 
     const zctaFeatures = geoDataRef.current?.features;
@@ -2324,12 +2396,10 @@ export default function MapView({ events }) {
       const features = [];
       for await (const feature of fgbDeserialize(BUILDING_FGB_URL, rect)) {
         if (!feature?.geometry?.coordinates) continue;
-        const hr = parseFloat(feature.properties?.HEIGHT_ROOF ?? feature.properties?.height_roof);
-        const ge = parseFloat(feature.properties?.GROUND_ELEVATION ?? feature.properties?.ground_elevation);
-        const oid = String(feature.properties?.OBJECTID ?? feature.properties?.objectid ?? '0');
 
-        // Inline PiP for viewport buildings (fast — only ~500-3000 at z13-14)
-        let tier = 0;
+        const props = normalizeFGBProps(feature.properties);
+
+        // Inline PiP for viewport buildings (fast — only ~1000-5000 with padding)
         if (zctaFeatures?.length && tiers?.length) {
           const centroid = getGeomCentroid(feature.geometry);
           for (let j = 0; j < zctaFeatures.length; j++) {
@@ -2337,18 +2407,13 @@ export default function MapView({ events }) {
             const geom = zctaFeatures[j].geometry;
             const polys = geom.type === 'MultiPolygon' ? geom.coordinates : [geom.coordinates];
             for (const poly of polys) {
-              if (pointInRing(centroid[0], centroid[1], poly[0])) { tier = tiers[j] ?? 0; break; }
+              if (pointInRing(centroid[0], centroid[1], poly[0])) { props._tier = Math.max(0, tiers[j] ?? 0); break; }
             }
-            if (tier > 0) break;
+            if (props._tier > 0) break;
           }
         }
 
-        feature.properties = {
-          height_roof: isNaN(hr) ? 8 : hr,
-          ground_elevation: isNaN(ge) ? 0 : ge,
-          objectid: oid,
-          _tier: Math.max(0, tier),
-        };
+        feature.properties = props;
         features.push(feature);
       }
 
