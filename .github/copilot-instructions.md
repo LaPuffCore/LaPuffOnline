@@ -297,10 +297,11 @@ borough-outline (fill-extrusion, unrestricted, topmost)
 
 ### MapView — Caching & Reliability
 - **Cacheable (compute once)**: ZCTA GeoJSON, borough GeoJSON, ZCTA skeleton, borough skeleton, zip→borough mapping, adjacency matrix. All already cached in state or refs.
-- **Pre-computed per session**: All 5 timespan tiers stored in `precomputedTiersRef`. Time slider reads from here (no recomputation).
-- **Must recompute on timespan/event change**: Only `withHeat` features (for ZCTA fill colors) and borough avg tiers. Building tiers read from pre-computed.
+- **Pre-computed per session**: All 5 timespan tiers stored in `precomputedTiersRef`. Baked into building properties as `_tier_0.._tier_4` via `bakeAllTiersIntoBuildings()`.
+- **Must recompute on timespan/event change**: Only `withHeat` features (for ZCTA fill colors) and borough avg tiers. Building tiers read from baked properties (GPU-side).
 - **Must recompute on mode toggle only**: Paint properties, layer visibility, camera pitch/bearing. These do NOT need data recomputation.
-- **Building tier updates**: Feature-state only (no setData). `applyBuildingTiersChunked` is non-blocking and cancellable.
+- **Building tier updates**: Paint expression swap only. `setPaintProperty` switches `['get', '_tier_X']` column — GPU recompiles shader, no per-building CPU work.
+- **Layer lifecycle**: Real3D layers created once (`initReal3DLayers`), toggled via `setLayoutProperty('visibility')`. No destroy/recreate.
 - **Optimization path**: `cachedTierDataRef` caches per-effect run. `precomputedTiersRef` caches all timespans. Paint-only toggles skip expensive recomputation. `removeSafezoneOverlapQuads` pre-computed once per heatmap effect.
 - The map occasionally fails to load on first click but works on refresh — likely a race condition between GeoJSON fetch and `addLayers`.
 
@@ -349,28 +350,32 @@ borough-outline (fill-extrusion, unrestricted, topmost)
 - **Heat-underlay opacity:** Removed `!real3D` restriction from initial layer creation so topo glow works in Real3D immediately.
 - **Zoom handler:** Removed RAF debounce — fires synchronously on zoom/pitch for instant outline response.
 
-**Round 4 — FGB Building Migration (commit 9dd1a94 → 910502b → 25b9e99):**
+**Round 4 — FGB Building Migration (commit 9dd1a94 → 910502b → 25b9e99 → 5b9ef99):**
 - **BUILDING.fgb source:** Replaced MapTiler `openmaptiles` building source with local FlatGeobuf file (381K NYC-only polygons). Eliminates: tile-seam artifacts, `['within']` incompatibility, NJ/CT building rendering, external tile dependency for buildings.
 - **ZCTA index map:** `buildingZctaMapRef` = `Int16Array(n)` built once at FGB load time via centroid PiP. Maps each building feature index → ZCTA feature index (-1 = not found). Built with yielding (5K chunks) to avoid blocking.
-- **Feature-state tier coloring (25b9e99):** Replaced `retierBuildings` + `setData` with `applyBuildingTiersChunked` + `setFeatureState`. Buildings never re-upload geometry on timespan change.
+- **Baked tier properties (5b9ef99):** All 5 timespan tiers baked into building properties as `_tier_0.._tier_4` via `bakeAllTiersIntoBuildings()`. Paint expressions read `['get', '_tier_X']` — GPU evaluates directly. On timespan change, `setPaintProperty` switches column (instant). Zero per-building CPU work on timespan change.
+- **Layer visibility toggle (5b9ef99):** Real3D layers created once via `initReal3DLayers()`, never destroyed. Toggle uses `setReal3DLayersVisible(map, true/false)` — zero WebGL rebuild. `real3dLayersCreatedRef` tracks init state.
 - **Pre-computed tiers (25b9e99):** All 5 timespan tiers computed in background on map init. Time slider reads from `precomputedTiersRef` — no recomputation.
 - **Deferred load (25b9e99):** `addBuildingLayers` creates empty source (instant toggle), then `setTimeout(0)` pushes data from cache or viewport fetch.
-- **Heatmap toggle = paint-only:** `[heatmap, real3D, mapReady]` effect runs `setPaintProperty` + `applyBuildingTiersChunked` (no setData).
+- **Heatmap toggle = paint-only:** `[heatmap, real3D, mapReady]` effect runs `setPaintProperty` only (no setData, no feature-state loop).
+- **Timespan toggle = paint-only:** `[timespanIdx, real3D, mapReady]` effect runs `setPaintProperty` to switch `_tier_X` column.
 - **Raytracer eliminated:** Removed `assignBuildingTiersToMap`, `bakeBuildingTiers`, and all `moveend`/`zoomend` building tier listeners.
-- **Building cache persistence:** `buildingFGBRef.current` NEVER cleared on Real3D toggle-off. Only the MapLibre source is removed (GPU memory). On re-activation, tiles are re-added from in-memory cache instantly.
+- **Building cache persistence:** `buildingFGBRef.current` NEVER cleared on Real3D toggle-off. Layers hidden via visibility, source persists. On re-activation, layers shown instantly.
 - **FGB spatial index:** `building_indexed.fgb` has Hilbert R-tree spatial index. Bbox range queries work for viewport fetch.
 
 ### MapView — Post-Mortem: Failed Approaches (DO NOT REPEAT)
 - **Failure 8 — `['within']` on MapTiler vector tile fill-extrusions**: `['within', NYC_BBOX_GEOM]` filter on building/baseplate fill-extrusion layers from MapTiler's `openmaptiles` source caused ALL buildings to disappear. Works fine on fill/line layers (parks, roads, landuse) but NOT on fill-extrusion layers from external vector tile sources. SOLVED by migrating to local FGB data (no filter needed).
 - **Failure 9 — queryRenderedFeatures + setFeatureState for building tier coloring**: Caused tile-seam artifacts (only styles on-screen tiles), square bleeding, purple fallback on pan, main thread blocking from millions of PiP ops. SOLVED by pre-baking `_tier` into GeoJSON features via `bakeBuildingTiers()`. Later SUPERSEDED by feature-state approach using `generateId: true` + `applyBuildingTiersChunked()` which sets state on ALL features by sequential ID (no queryRenderedFeatures).
 
-### MapView — Feature-State Tier Architecture (commit 25b9e99)
-- **Building tier colors via feature-state**: `setFeatureState({source: 'fgb-buildings', id: i}, {tier: X})` updates per-feature tier. Paint expressions use `['coalesce', ['feature-state', 'tier'], 0]` instead of `['get', '_tier']`.
-- **applyBuildingTiersChunked(map, tiers)**: Non-blocking chunked application. Desktop: 10K per chunk, mobile: 2K. Uses `tierUpdateVersionRef` for cancellation if timespan changes mid-apply.
-- **setData clears feature-state**: After any `setData()` call on `fgb-buildings`, feature-state must be re-applied via `applyBuildingTiersChunked`.
+### MapView — Baked Tier Architecture (commit 5b9ef99, replaces feature-state approach)
+- **Building tier colors via baked properties**: Each building has `_tier_0.._tier_4` in its GeoJSON properties. Paint expressions use `['get', '_tier_X']` where X = active timespan index. GPU evaluates directly from properties — no feature-state, no CPU loop.
+- **`bakeAllTiersIntoBuildings()`**: Iterates all 381K buildings once, writing all 5 tier values from `precomputedTiersRef` using `buildingZctaMapRef`. Single `setData` push after baking. Called when both pre-computed tiers AND ZCTA index are ready.
+- **Timespan change = `setPaintProperty` only**: Switches `['get', '_tier_3']` to `['get', '_tier_4']` etc. GPU recompiles shader — near-instant, zero per-building work.
+- **Heatmap toggle = `setPaintProperty` only**: Switches between red palette (reads `_s7`) and tier palette (reads `_tier_X`).
 - **Pre-computed tiers**: `precomputedTiersRef.current[timespanIdx]` = `{ tiers, zipMap, maxCount }` for all 5 timespans. Computed in background on `[events, geoData, adjacency]` change. Time slider reads pre-computed (near-instant).
 - **Deferred building load**: `addBuildingLayers` adds empty source + layers (instant), then `setTimeout(0)` pushes data from cache or viewport fetch. Real3D toggle never freezes.
 - **Zoom thresholds**: Baseplates z10-11 (opacity fade z10-10.5), buildings z11+ (was z14). Building base 2m above ground.
+- **Layer visibility toggle**: `initReal3DLayers()` creates all 9 Real3D layers + sources once. `setReal3DLayersVisible()` toggles visibility. No layer/source destroy/recreate on toggle.
 
 ### MapView — Safezone Hover (commit 25b9e99)
 - **`zcta-safezone-hover`** fill layer: transparent, captures mouse events for safezone features.
