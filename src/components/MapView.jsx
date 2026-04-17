@@ -1517,7 +1517,8 @@ export default function MapView({ events }) {
       id: 'zcta-safezone-extrusion', type: 'fill-extrusion', source: 'zcta',
       filter: ['==', ['get', '_special'], true],
       paint: {
-        'fill-extrusion-color': '#ffffff',
+        // Purple on hover, white otherwise — consistent hover feedback in all 3D modes
+        'fill-extrusion-color': ['case', ['boolean', ['feature-state', 'hovered'], false], '#7C3AED', '#ffffff'],
         'fill-extrusion-height': 1,
         'fill-extrusion-base': 0,
         'fill-extrusion-opacity': 1.0,
@@ -1532,11 +1533,11 @@ export default function MapView({ events }) {
       paint: { 'fill-color': '#7C3AED', 'fill-opacity': ['case', ['boolean', ['feature-state', 'hovered'], false], 0.5, 0] },
     });
 
-    // Safezone hover — transparent fill that captures mouse events
+    // Safezone hover — purple fill that captures mouse events (2D/Real3D)
     map.addLayer({
       id: 'zcta-safezone-hover', type: 'fill', source: 'zcta',
       filter: ['==', ['get', '_special'], true],
-      paint: { 'fill-color': '#7C3AED', 'fill-opacity': ['case', ['boolean', ['feature-state', 'hovered'], false], 0.3, 0] },
+      paint: { 'fill-color': '#7C3AED', 'fill-opacity': ['case', ['boolean', ['feature-state', 'hovered'], false], 0.5, 0] },
     });
 
     // Cap — thin slab on top of each zip block, same polygon as the block (source: 'zcta').
@@ -1694,7 +1695,11 @@ export default function MapView({ events }) {
     return () => { cancelled = true; };
   }, [events, geoData, adjacency]);
 
-  // Manage hover layer based on 3D state — switch from fill to extrude when 3D is on
+  // Manage hover layers based on 3D/Real3D state.
+  // 3D: hover on zcta-extrude + zcta-safezone-extrusion (fill-extrusion layers).
+  // 2D: hover on zcta-fill + zcta-safezone-hover (fill layers).
+  // Real3D: hover on zcta-fill + zcta-safezone-hover + zcta-safezone-extrusion
+  //         (safezone extrusion covers the 2D fill, so we need both).
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady || !map.getLayer('zcta-fill')) return;
@@ -1702,30 +1707,38 @@ export default function MapView({ events }) {
     const { handleZctaHover, handleZctaLeave, handleZctaClick } = layerHandlersRef.current;
     if (!handleZctaHover) return;
 
+    // Clear all previous hover registrations first
+    ['zcta-fill', 'zcta-extrude', 'zcta-safezone-hover', 'zcta-safezone-extrusion'].forEach(layerId => {
+      if (!map.getLayer(layerId)) return;
+      map.off('mousemove', layerId, handleZctaHover);
+      map.off('mouseleave', layerId, handleZctaLeave);
+      map.off('click', layerId, handleZctaClick);
+    });
+
     if (threeD) {
-      map.off('mousemove', 'zcta-fill', handleZctaHover);
-      map.off('mouseleave', 'zcta-fill', handleZctaLeave);
-      map.off('click', 'zcta-fill', handleZctaClick);
-      map.off('mousemove', 'zcta-safezone-hover', handleZctaHover);
-      map.off('mouseleave', 'zcta-safezone-hover', handleZctaLeave);
-      map.off('click', 'zcta-safezone-hover', handleZctaClick);
-      
+      // 3D mode: hover on extruded zips + safezone extrusion
       map.on('mousemove', 'zcta-extrude', handleZctaHover);
       map.on('mouseleave', 'zcta-extrude', handleZctaLeave);
       map.on('click', 'zcta-extrude', handleZctaClick);
+      map.on('mousemove', 'zcta-safezone-extrusion', handleZctaHover);
+      map.on('mouseleave', 'zcta-safezone-extrusion', handleZctaLeave);
+      map.on('click', 'zcta-safezone-extrusion', handleZctaClick);
     } else {
-      map.off('mousemove', 'zcta-extrude', handleZctaHover);
-      map.off('mouseleave', 'zcta-extrude', handleZctaLeave);
-      map.off('click', 'zcta-extrude', handleZctaClick);
-      
+      // 2D / Real3D: hover on flat fill + safezone hover fill
       map.on('mousemove', 'zcta-fill', handleZctaHover);
       map.on('mouseleave', 'zcta-fill', handleZctaLeave);
       map.on('click', 'zcta-fill', handleZctaClick);
       map.on('mousemove', 'zcta-safezone-hover', handleZctaHover);
       map.on('mouseleave', 'zcta-safezone-hover', handleZctaLeave);
       map.on('click', 'zcta-safezone-hover', handleZctaClick);
+      // In Real3D, safezone extrusion covers the 2D fill — also register on it
+      if (real3D && map.getLayer('zcta-safezone-extrusion')) {
+        map.on('mousemove', 'zcta-safezone-extrusion', handleZctaHover);
+        map.on('mouseleave', 'zcta-safezone-extrusion', handleZctaLeave);
+        map.on('click', 'zcta-safezone-extrusion', handleZctaClick);
+      }
     }
-  }, [threeD, mapReady]);
+  }, [threeD, real3D, mapReady]);
 
   // ── Main heatmap + 3D update ──────────────────────────────────────────────
   // FIX ADDITIVE STATE: added `styleVersion` and `real3D` to deps so this re-runs
