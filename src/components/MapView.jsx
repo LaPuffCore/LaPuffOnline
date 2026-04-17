@@ -1260,9 +1260,10 @@ export default function MapView({ events }) {
   const boroughSkeletonRef = useRef(null);
   // Tier computation cache — skip expensive buildZipEventMap + computeTiers when only paint deps change
   const cachedTierDataRef   = useRef({ events: null, timespanIdx: -1, geoData: null, zipMap: null, maxCount: 0, tiers: [] });
-  // FGB building data — viewport-based range fetch; stores current viewport GeoJSON
-  const buildingFGBRef      = useRef(null);  // current viewport FeatureCollection
-  const fgbAbortRef         = useRef(null);  // AbortController for in-flight FGB viewport fetch
+  // FGB building data — full-file load, cached forever after first parse
+  const buildingFGBRef      = useRef(null);  // parsed FeatureCollection (all 381K buildings)
+  const buildingZctaMapRef  = useRef(null);  // Int16Array: building index → ZCTA feature index (-1 = not found)
+  const fgbLoadingRef       = useRef(false); // prevents concurrent loads
 
   // Persist topo toggle across sessions
   useEffect(() => {
@@ -2174,92 +2175,88 @@ export default function MapView({ events }) {
   }
 
 
-  // ─── FGB building viewport-based range fetching ────────────────────────────
-  // building_indexed.fgb has a spatial index — HTTP Range requests fetch only
-  // buildings in the current viewport (~50-500KB) instead of the full file.
+  // ─── FGB building data — full-file load, cached forever ────────────────────
+  // Loads building_indexed.fgb as a Uint8Array (one fetch, no Range headers needed).
+  // Parses all features in-memory via flatgeobuf. Builds ZCTA index map for O(n) re-tier.
+  // Data persists in buildingFGBRef across Real3D toggle-off/on — only GPU source is removed.
 
-  // Look up which ZCTA feature index contains a point. Returns -1 if none found.
-  function findZctaIdxForPoint([px, py], zctaFeatures) {
-    for (let i = 0; i < zctaFeatures.length; i++) {
-      if (zctaFeatures[i].properties?._special) continue;
-      const geom = zctaFeatures[i].geometry;
-      const polys = geom.type === 'MultiPolygon' ? geom.coordinates : [geom.coordinates];
-      for (const poly of polys) {
-        if (pointInRing(px, py, poly[0])) return i;
-      }
-    }
-    return -1;
-  }
-
-  // Fetch buildings for the current map viewport via FGB spatial index.
-  // Inline PiP per feature (fast — only viewport buildings, ~500-3000 at z13-14).
-  // Updates fgb-buildings source data when complete.
-  async function fetchAndDisplayBuildings(map) {
-    if (!map || map.getZoom() < 13 || !map.getStyle()) return;
-    if (!map.getSource('fgb-buildings')) return;
-
-    // Abort any in-flight fetch before starting a new one
-    if (fgbAbortRef.current) fgbAbortRef.current.abort();
-    const ac = new AbortController();
-    fgbAbortRef.current = ac;
-
-    const bounds = map.getBounds();
-    const rect = {
-      minX: bounds.getWest(), minY: bounds.getSouth(),
-      maxX: bounds.getEast(), maxY: bounds.getNorth(),
-    };
-
-    const zctaFeatures = geoDataRef.current?.features;
-    const tiers = tiersRef.current;
+  // Load and parse the full FGB file. Returns cached FeatureCollection on repeat calls.
+  async function loadBuildingFGB() {
+    if (buildingFGBRef.current) return buildingFGBRef.current;
+    if (fgbLoadingRef.current) return null; // another load in progress
+    fgbLoadingRef.current = true;
 
     try {
+      const resp = await fetch(BUILDING_FGB_URL);
+      if (!resp.ok) throw new Error(`FGB fetch failed: ${resp.status}`);
+      const buf = new Uint8Array(await resp.arrayBuffer());
+
       const features = [];
-      // fgbDeserialize dispatches URL strings → HTTP Range fetch via spatial index.
-      // No signal passthrough (flatgeobuf doesn't support it); abort checked in loop.
-      for await (const feature of fgbDeserialize(BUILDING_FGB_URL, rect)) {
-        if (ac.signal.aborted) break;
+      for await (const feature of fgbDeserialize(buf)) {
         if (!feature?.geometry?.coordinates) continue;
-
-        const hr = parseFloat(feature.properties?.height_roof);
-        const ge = parseFloat(feature.properties?.ground_elevation);
-        feature.properties.height_roof = isNaN(hr) ? 8 : hr;
-        feature.properties.ground_elevation = isNaN(ge) ? 0 : ge;
-        feature.properties.objectid = feature.properties.objectid || '0';
-
-        // Inline PiP — only viewport buildings, so much faster than full-file PiP
-        if (zctaFeatures?.length) {
-          const centroid = getGeomCentroid(feature.geometry);
-          const zctaIdx = findZctaIdxForPoint(centroid, zctaFeatures);
-          feature.properties._tier = (zctaIdx >= 0 && tiers?.length) ? (tiers[zctaIdx] ?? 0) : 0;
-        } else {
-          feature.properties._tier = 0;
-        }
-
+        const hr = parseFloat(feature.properties?.HEIGHT_ROOF ?? feature.properties?.height_roof);
+        const ge = parseFloat(feature.properties?.GROUND_ELEVATION ?? feature.properties?.ground_elevation);
+        const oid = String(feature.properties?.OBJECTID ?? feature.properties?.objectid ?? '0');
+        feature.properties = {
+          height_roof: isNaN(hr) ? 8 : hr,
+          ground_elevation: isNaN(ge) ? 0 : ge,
+          objectid: oid,
+          _tier: 0,
+        };
         features.push(feature);
       }
-
-      if (ac.signal.aborted) return;
 
       const geojson = { type: 'FeatureCollection', features };
       buildingFGBRef.current = geojson;
 
-      if (map.getSource('fgb-buildings') && map.getStyle()) {
-        map.getSource('fgb-buildings').setData(geojson);
+      // Build ZCTA index map — one-time PiP for each building centroid → ZCTA index.
+      // Int16Array supports up to 32767 ZCTA features (we have ~180). -1 = not found.
+      const zctaFeatures = geoDataRef.current?.features;
+      if (zctaFeatures?.length) {
+        const idxMap = new Int16Array(features.length).fill(-1);
+        for (let i = 0; i < features.length; i++) {
+          const centroid = getGeomCentroid(features[i].geometry);
+          for (let j = 0; j < zctaFeatures.length; j++) {
+            if (zctaFeatures[j].properties?._special) continue;
+            const geom = zctaFeatures[j].geometry;
+            const polys = geom.type === 'MultiPolygon' ? geom.coordinates : [geom.coordinates];
+            for (const poly of polys) {
+              if (pointInRing(centroid[0], centroid[1], poly[0])) { idxMap[i] = j; break; }
+            }
+            if (idxMap[i] >= 0) break;
+          }
+        }
+        buildingZctaMapRef.current = idxMap;
       }
+
+      console.log(`FGB loaded: ${features.length} buildings, ZCTA index built`);
+      return geojson;
     } catch (err) {
-      if (err.name !== 'AbortError') console.error('FGB viewport fetch failed:', err);
+      console.error('FGB load failed:', err);
+      return null;
     } finally {
-      if (fgbAbortRef.current === ac) fgbAbortRef.current = null;
+      fgbLoadingRef.current = false;
     }
   }
 
-  // Create fgb-buildings source (empty) + building layers. Trigger initial viewport fetch.
-  // Empty source means layers appear immediately; data arrives async without blocking.
+  // Re-tier buildings using cached ZCTA index map. O(n) — no PiP.
+  function retierBuildings(geojson, tiers) {
+    if (!geojson?.features?.length || !tiers?.length) return geojson;
+    const idxMap = buildingZctaMapRef.current;
+    const features = geojson.features;
+    for (let i = 0; i < features.length; i++) {
+      const zIdx = idxMap ? idxMap[i] : -1;
+      features[i].properties._tier = (zIdx >= 0 && tiers.length > zIdx) ? (tiers[zIdx] ?? 0) : 0;
+    }
+    return geojson;
+  }
+
+  // Create fgb-buildings source + building layers. Load data async if not cached.
   function addBuildingLayers(map, isHeatmap) {
     if (!map.getSource('fgb-buildings')) {
       map.addSource('fgb-buildings', {
         type: 'geojson',
-        data: { type: 'FeatureCollection', features: [] },
+        data: buildingFGBRef.current || { type: 'FeatureCollection', features: [] },
         generateId: true,
       });
     }
@@ -2268,12 +2265,12 @@ export default function MapView({ events }) {
       map.addLayer({
         id: 'real3d-buildings-baseplate', type: 'fill-extrusion',
         source: 'fgb-buildings',
-        minzoom: 13, maxzoom: 14,
+        minzoom: 10, maxzoom: 11,
         paint: {
           'fill-extrusion-color': baseplateColorExpr(isHeatmap),
-          'fill-extrusion-height': 2,
+          'fill-extrusion-height': 7,
           'fill-extrusion-base': 0,
-          'fill-extrusion-opacity': 0.9,
+          'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'], 10, 0, 10.5, 0.9],
           'fill-extrusion-vertical-gradient': false,
         },
       });
@@ -2283,7 +2280,7 @@ export default function MapView({ events }) {
       map.addLayer({
         id: 'real3d-buildings', type: 'fill-extrusion',
         source: 'fgb-buildings',
-        minzoom: 14,
+        minzoom: 11,
         paint: {
           'fill-extrusion-color': buildingColorExprByState(isHeatmap),
           'fill-extrusion-height': ['coalesce', ['get', 'height_roof'], 8],
@@ -2297,8 +2294,17 @@ export default function MapView({ events }) {
     if (map.getLayer('real3d-roads-motorway')) map.moveLayer('real3d-roads-motorway');
     if (map.getLayer('borough-outline')) map.moveLayer('borough-outline');
 
-    // Initial fetch for the current viewport
-    fetchAndDisplayBuildings(map);
+    // If data is already cached, set it immediately. Otherwise load async.
+    if (buildingFGBRef.current) {
+      retierBuildings(buildingFGBRef.current, tiersRef.current);
+      map.getSource('fgb-buildings')?.setData(buildingFGBRef.current);
+    } else {
+      loadBuildingFGB().then(geojson => {
+        if (!geojson || !map.getSource('fgb-buildings') || !map.getStyle()) return;
+        retierBuildings(geojson, tiersRef.current);
+        map.getSource('fgb-buildings').setData(geojson);
+      });
+    }
   }
 
   function applyReal3DLayers(map, isHeatmap) {
@@ -2308,7 +2314,7 @@ export default function MapView({ events }) {
     }
 
     REAL3D_ALL_LAYER_IDS.forEach(id => { if (map.getLayer(id)) map.removeLayer(id); });
-    // Remove FGB source so it gets re-created with fresh data
+    // Remove FGB source so layers can be re-created cleanly (data stays in buildingFGBRef)
     if (map.getSource('fgb-buildings')) map.removeSource('fgb-buildings');
 
     if (!map.getSource('openmaptiles')) {
@@ -2396,23 +2402,9 @@ export default function MapView({ events }) {
         },
       });
 
-      // BUILDINGS from building_indexed.fgb — indexed file, viewport-based range fetch.
-      // Source created with empty data; layers register immediately; data arrives async.
+      // BUILDINGS from building_indexed.fgb — full-file load, cached in memory.
+      // Source created with cached data (or empty); layers register immediately.
       addBuildingLayers(map, isHeatmap);
-
-      // Debounced viewport listener — re-fetches buildings when user pans/zooms at z13+
-      let vpTimer = null;
-      const onViewportChange = () => {
-        if (vpTimer) clearTimeout(vpTimer);
-        vpTimer = setTimeout(() => fetchAndDisplayBuildings(mapRef.current), 200);
-      };
-      map.on('moveend', onViewportChange);
-      map.on('zoomend', onViewportChange);
-      buildingAssignCleanupRef.current = () => {
-        map.off('moveend', onViewportChange);
-        map.off('zoomend', onViewportChange);
-        if (vpTimer) clearTimeout(vpTimer);
-      };
 
       // Layer ordering: move unrestricted layers to top of stack.
       if (map.getLayer('real3d-roads-motorway')) map.moveLayer('real3d-roads-motorway');
@@ -2429,10 +2421,8 @@ export default function MapView({ events }) {
     if (!map || !mapReady) return;
     if (!real3D) {
       REAL3D_ALL_LAYER_IDS.forEach(id => { if (map.getLayer(id)) map.removeLayer(id); });
-      // Remove FGB source (GPU memory cleanup) but KEEP buildingFGBRef in memory — reuse on next activation
+      // Remove FGB source (GPU memory cleanup) but KEEP buildingFGBRef + buildingZctaMapRef in memory
       if (map.getSource('fgb-buildings')) map.removeSource('fgb-buildings');
-      if (fgbAbortRef.current) { fgbAbortRef.current.abort(); fgbAbortRef.current = null; }
-      // Clean up stencil source from old sessions (may exist from previous code)
       if (map.getLayer('real3d-nyc-stencil')) map.removeLayer('real3d-nyc-stencil');
       if (map.getSource('real3d-stencil-source')) map.removeSource('real3d-stencil-source');
       if (buildingAssignCleanupRef.current) { buildingAssignCleanupRef.current(); buildingAssignCleanupRef.current = null; }
@@ -2467,12 +2457,13 @@ export default function MapView({ events }) {
     }
   }, [heatmap, real3D, mapReady]);
 
-  // Timespan/events change in Real3D — re-fetch current viewport with updated tiers
+  // Timespan/events change in Real3D — re-tier cached buildings and update source
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady || !real3D) return;
-    if (!map.getSource('fgb-buildings')) return;
-    fetchAndDisplayBuildings(map);
+    if (!map.getSource('fgb-buildings') || !buildingFGBRef.current) return;
+    retierBuildings(buildingFGBRef.current, tiersRef.current);
+    map.getSource('fgb-buildings').setData(buildingFGBRef.current);
   }, [timespanIdx, real3D, mapReady]);
 
   const handleThreeDToggle = () => {
