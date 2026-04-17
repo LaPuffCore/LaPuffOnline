@@ -12,7 +12,7 @@ import { deserialize as fgbDeserialize } from 'flatgeobuf/lib/mjs/geojson.js';
 const GEOJSON_URL = './data/MODZCTA_2010_WGS1984.geo.json';
 const BOROUGH_GEOJSON_URL = './data/borough.geo.json';
 const BUILDING_FGB_URL = './data/building_indexed.fgb';
-const FGB_CACHE_NAME = 'lapuff-fgb-v1';
+const FGB_CACHE_NAME = 'lapuff-fgb-v2';
 const FGB_CACHE_KEY  = 'building_indexed.fgb';
 const MAPTILER_KEY = 'VjoJJ0mSCXFo9kFGYGxJ';
 
@@ -1303,6 +1303,7 @@ export default function MapView({ events }) {
   const [styleVersion,  setStyleVersion]  = useState(0);
   // Cache status for FGB loading indicator: 'idle' | 'building' | 'paused' | 'done'
   const [fgbCacheStatus, setFgbCacheStatus] = useState('idle');
+  const [fgbCacheProgress, setFgbCacheProgress] = useState(0); // 0-100
 
   // Auto-dismiss cache indicator 2 seconds after "done"
   useEffect(() => {
@@ -2228,18 +2229,30 @@ export default function MapView({ events }) {
   }
 
   // Parse a Uint8Array of FGB data into a FeatureCollection.
-  async function parseFGBBuffer(buf) {
+  // Yields to the event loop every CHUNK features to prevent main-thread freeze.
+  const FGB_YIELD_CHUNK = 5000;
+  const FGB_ESTIMATED_TOTAL = 381000;
+
+  async function parseFGBBuffer(buf, onProgress) {
     const features = [];
+    let count = 0;
     for await (const feature of fgbDeserialize(buf)) {
       if (!feature?.geometry?.coordinates) continue;
       feature.properties = normalizeFGBProps(feature.properties);
       features.push(feature);
+      count++;
+      if (count % FGB_YIELD_CHUNK === 0) {
+        if (onProgress) onProgress(count);
+        await new Promise(r => setTimeout(r, 0)); // yield to event loop
+      }
     }
+    if (onProgress) onProgress(count);
     return { type: 'FeatureCollection', features };
   }
 
   // Build ZCTA index map — one-time PiP for each building centroid → ZCTA index.
-  function buildZctaIndexMap(features) {
+  // Yields every CHUNK buildings to prevent main-thread freeze.
+  async function buildZctaIndexMap(features, onProgress) {
     const zctaFeatures = geoDataRef.current?.features;
     if (!zctaFeatures?.length) return null;
     const idxMap = new Int16Array(features.length).fill(-1);
@@ -2254,50 +2267,52 @@ export default function MapView({ events }) {
         }
         if (idxMap[i] >= 0) break;
       }
+      if (i % FGB_YIELD_CHUNK === 0 && i > 0) {
+        if (onProgress) onProgress(i);
+        await new Promise(r => setTimeout(r, 0));
+      }
     }
+    if (onProgress) onProgress(features.length);
     return idxMap;
   }
 
-  // Background cache builder — fetches full FGB file, stores in Cache API,
-  // parses into buildingFGBRef, builds ZCTA index. Runs once per session.
-  // On warm loads: reads parsed GeoJSON + ZCTA index from cache (skips parse + PiP entirely).
+  // Background cache builder — non-blocking with yielding every 5K features.
+  // Warm path: FGB bytes from Cache API + ZCTA index from Cache API → parse (skip PiP).
+  // Cold path: fetch FGB from network → parse → PiP → cache bytes + index.
+  // Never caches parsed GeoJSON (too large, causes freeze on stringify/parse).
   async function buildFGBCache() {
-    if (buildingFGBRef.current) { setFgbCacheStatus('done'); return; }
+    if (buildingFGBRef.current) { setFgbCacheStatus('done'); setFgbCacheProgress(100); return; }
     if (fgbLoadingRef.current) return;
     fgbLoadingRef.current = true;
     setFgbCacheStatus('building');
+    setFgbCacheProgress(0);
+
+    // Progress: parse = 0-60%, PiP = 60-95%, finalize = 95-100%
+    const reportParseProgress = (count) => {
+      const pct = Math.min(60, Math.round((count / FGB_ESTIMATED_TOTAL) * 60));
+      setFgbCacheProgress(pct);
+    };
+    const reportPipProgress = (count) => {
+      const pct = 60 + Math.min(35, Math.round((count / FGB_ESTIMATED_TOTAL) * 35));
+      setFgbCacheProgress(pct);
+    };
 
     try {
-      // ── Try loading pre-parsed GeoJSON + ZCTA index from cache (instant warm path) ──
+      // ── Check for cached ZCTA index (skip PiP on warm loads) ──
+      let cachedZctaIndex = null;
       if ('caches' in window) {
         try {
           const cache = await caches.open(FGB_CACHE_NAME);
-          const [parsedResp, idxResp] = await Promise.all([
-            cache.match('building_parsed.json'),
-            cache.match('building_zcta_index.bin'),
-          ]);
-          if (parsedResp && idxResp) {
-            const geojson = await parsedResp.json();
-            const idxBuf = await idxResp.arrayBuffer();
-            buildingFGBRef.current = geojson;
-            buildingZctaMapRef.current = new Int16Array(idxBuf);
-            console.log(`FGB warm load: ${geojson.features.length} buildings from cache`);
-            setFgbCacheStatus('done');
-            const map = mapRef.current;
-            if (map && map.getSource('fgb-buildings') && map.getStyle()) {
-              retierBuildings(geojson, tiersRef.current);
-              map.getSource('fgb-buildings').setData(geojson);
-            }
-            fgbLoadingRef.current = false;
-            return;
+          const idxResp = await cache.match('building_zcta_index.bin');
+          if (idxResp) {
+            cachedZctaIndex = new Int16Array(await idxResp.arrayBuffer());
+            console.log('ZCTA index loaded from cache — PiP will be skipped');
           }
-        } catch (e) { console.warn('Cache warm load failed, falling back:', e); }
+        } catch (e) { /* ignore */ }
       }
 
-      // ── Cold path: fetch FGB bytes → parse → build index → cache everything ──
+      // ── Get FGB bytes (cache or network) ──
       let buf = null;
-
-      // Try raw FGB bytes from cache
       if ('caches' in window) {
         try {
           const cache = await caches.open(FGB_CACHE_NAME);
@@ -2306,16 +2321,16 @@ export default function MapView({ events }) {
             buf = new Uint8Array(await cached.arrayBuffer());
             console.log('FGB bytes loaded from cache');
           }
-        } catch (e) { console.warn('Cache API read failed:', e); }
+        } catch (e) { /* ignore */ }
       }
 
-      // Fetch from network if not cached
       if (!buf) {
         const resp = await fetch(BUILDING_FGB_URL);
         if (!resp.ok) throw new Error(`FGB fetch failed: ${resp.status}`);
         const arrayBuf = await resp.arrayBuffer();
         buf = new Uint8Array(arrayBuf);
 
+        // Store raw bytes in Cache API for next session
         if ('caches' in window) {
           try {
             const cache = await caches.open(FGB_CACHE_NAME);
@@ -2327,32 +2342,36 @@ export default function MapView({ events }) {
         }
       }
 
-      // Parse FGB binary → GeoJSON
-      const geojson = await parseFGBBuffer(buf);
+      // ── Parse FGB binary → GeoJSON (yielding, non-blocking) ──
+      const geojson = await parseFGBBuffer(buf, reportParseProgress);
       buildingFGBRef.current = geojson;
 
-      // Build ZCTA index map (PiP)
-      const idxMap = buildZctaIndexMap(geojson.features);
-      if (idxMap) buildingZctaMapRef.current = idxMap;
-
-      console.log(`FGB cold load: ${geojson.features.length} buildings, ZCTA index built`);
-
-      // Cache parsed GeoJSON + ZCTA index for instant warm loads
-      if ('caches' in window) {
-        try {
-          const cache = await caches.open(FGB_CACHE_NAME);
-          await Promise.all([
-            cache.put('building_parsed.json', new Response(JSON.stringify(geojson), {
-              headers: { 'Content-Type': 'application/json' },
-            })),
-            idxMap ? cache.put('building_zcta_index.bin', new Response(idxMap.buffer.slice(0), {
-              headers: { 'Content-Type': 'application/octet-stream' },
-            })) : Promise.resolve(),
-          ]);
-          console.log('Parsed GeoJSON + ZCTA index stored in cache');
-        } catch (e) { console.warn('Cache write failed:', e); }
+      // ── ZCTA index: use cached or build with yielding ──
+      let idxMap = cachedZctaIndex;
+      if (idxMap && idxMap.length === geojson.features.length) {
+        buildingZctaMapRef.current = idxMap;
+        setFgbCacheProgress(95);
+        console.log(`FGB warm load: ${geojson.features.length} buildings, ZCTA index from cache`);
+      } else {
+        // Cold PiP — yields every 5K features
+        idxMap = await buildZctaIndexMap(geojson.features, reportPipProgress);
+        if (idxMap) {
+          buildingZctaMapRef.current = idxMap;
+          // Store ZCTA index for future warm loads (~762KB — instant cache write)
+          if ('caches' in window) {
+            try {
+              const cache = await caches.open(FGB_CACHE_NAME);
+              await cache.put('building_zcta_index.bin', new Response(idxMap.buffer.slice(0), {
+                headers: { 'Content-Type': 'application/octet-stream' },
+              }));
+              console.log('ZCTA index stored in cache');
+            } catch (e) { /* ignore */ }
+          }
+        }
+        console.log(`FGB cold load: ${geojson.features.length} buildings, ZCTA index built`);
       }
 
+      setFgbCacheProgress(100);
       setFgbCacheStatus('done');
 
       // Push to map if Real3D active
@@ -2364,6 +2383,7 @@ export default function MapView({ events }) {
     } catch (err) {
       console.error('FGB cache build failed:', err);
       setFgbCacheStatus('idle');
+      setFgbCacheProgress(0);
     } finally {
       fgbLoadingRef.current = false;
     }
@@ -3004,41 +3024,52 @@ export default function MapView({ events }) {
 
       {selectedEvent && <EventDetailPopup event={selectedEvent} onClose={() => setSelectedEvent(null)} />}
 
-      {/* FGB cache status indicator — bottom-left corner */}
+      {/* FGB cache status indicator — bottom-left corner with progress bar */}
       {fgbCacheStatus !== 'idle' && (
         <div
-          className="fixed z-50 flex items-center gap-2 px-3 py-2 rounded-xl border border-white/20 bg-black/75 backdrop-blur-sm shadow-lg"
+          className="fixed z-50 flex flex-col gap-1.5 px-3 py-2 rounded-xl border border-white/20 bg-black/75 backdrop-blur-sm shadow-lg"
           style={{
-            bottom: 28, left: 28, pointerEvents: 'none',
+            bottom: 28, left: 28, pointerEvents: 'none', minWidth: 180,
             transition: 'opacity 0.4s ease',
             opacity: fgbCacheStatus === 'done' ? 0 : 1,
           }}
         >
-          {fgbCacheStatus === 'building' && (
-            <>
-              <svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5">
-                <circle cx="12" cy="12" r="10" strokeOpacity="0.3" />
-                <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round" />
-              </svg>
+          <div className="flex items-center gap-2">
+            {fgbCacheStatus === 'building' && (
               <span className="text-white text-[11px] font-bold tracking-wide">Map cache is building</span>
-            </>
-          )}
-          {fgbCacheStatus === 'paused' && (
-            <>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="white">
-                <rect x="6" y="4" width="4" height="16" rx="1" />
-                <rect x="14" y="4" width="4" height="16" rx="1" />
-              </svg>
-              <span className="text-white text-[11px] font-bold tracking-wide">Cache building is paused</span>
-            </>
-          )}
-          {fgbCacheStatus === 'done' && (
-            <>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="4 12 9 17 20 6" />
-              </svg>
-              <span className="text-[#4ade80] text-[11px] font-bold tracking-wide">Cache building complete</span>
-            </>
+            )}
+            {fgbCacheStatus === 'paused' && (
+              <>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="white">
+                  <rect x="6" y="4" width="4" height="16" rx="1" />
+                  <rect x="14" y="4" width="4" height="16" rx="1" />
+                </svg>
+                <span className="text-white text-[11px] font-bold tracking-wide">Cache building is paused</span>
+              </>
+            )}
+            {fgbCacheStatus === 'done' && (
+              <>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="4 12 9 17 20 6" />
+                </svg>
+                <span className="text-[#4ade80] text-[11px] font-bold tracking-wide">Cache building complete</span>
+              </>
+            )}
+            {fgbCacheStatus === 'building' && (
+              <span className="text-white/60 text-[10px] font-semibold ml-auto">{Math.round(fgbCacheProgress)}%</span>
+            )}
+          </div>
+          {(fgbCacheStatus === 'building' || fgbCacheStatus === 'paused') && (
+            <div className="w-full h-1.5 rounded-full bg-white/15 overflow-hidden">
+              <div
+                className="h-full rounded-full"
+                style={{
+                  width: `${fgbCacheProgress}%`,
+                  backgroundColor: fgbCacheStatus === 'paused' ? '#f59e0b' : '#7C3AED',
+                  transition: 'width 0.3s ease',
+                }}
+              />
+            </div>
           )}
         </div>
       )}
