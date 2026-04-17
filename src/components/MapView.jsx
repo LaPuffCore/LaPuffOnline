@@ -358,17 +358,19 @@ function getZoomAwareOutlineWidth(map, baseMeters = 14, is3D = false) {
     const zoom = map.getZoom();
     const pitch = map.getPitch ? map.getPitch() : 0;
     const pitchFactor = 1 + (pitch / 90) * 0.55;
-    // Borough outline (baseMeters=18): 2x at zoom>=11, ramp to 4x at zoom<=9.
+    // Borough outline (baseMeters=18): constant 1.5x at zoom>=12, 2.5x at zoom 11-12, ramp to 7x at zoom<=9.
     if (baseMeters >= 15) {
       let meters;
-      if (zoom >= 11) {
-        meters = baseMeters * 2.5; // 2.5x at close zoom — thicker to reduce aliasing
+      if (zoom >= 12) {
+        meters = baseMeters * 1.5; // locked smaller width at close zoom
+      } else if (zoom >= 11) {
+        const t = (12 - zoom); // 0 at zoom12, 1 at zoom11
+        meters = baseMeters * (1.5 + 1.0 * t); // 1.5x → 2.5x
       } else if (zoom >= 9) {
-        // linear ramp 2.5x → 7x from zoom 11 → 9 — aggressive scaling fights pixelation
         const t = (11 - zoom) / 2; // 0 at zoom11, 1 at zoom9
         meters = baseMeters * (2.5 + 4.5 * t);
       } else {
-        meters = baseMeters * 7; // 7x flat below zoom 9
+        meters = baseMeters * 7;
       }
       return meters * pitchFactor;
     }
@@ -800,6 +802,8 @@ function createZctaOutlineGeoJSON(sourceGeoJSON, widthMeters = 12) {
 
   const features = [];
   for (const feature of sourceGeoJSON.features) {
+    // Skip safezone features — they should NOT get an upper 3D border
+    if (feature.properties?._special) continue;
     const geom = feature.geometry;
     const props = feature.properties || {};
     if (geom.type === 'Polygon') {
@@ -963,28 +967,25 @@ function computeZipBoroughMap(zctaFeatures, boroughFeatures) {
   return result;
 }
 
-// Compute borough heat tiers using unique-rank assignment. Each borough gets a
-// unique tier 0–4. Ranked by: (1) count of tier-4 (red/hot) zip codes, (2) tiebreak
-// by total event count. Highest-ranked borough gets tier 4, lowest gets tier 0.
-function computeBoroughAvgTiers(tiers, zipBoroughMap, boroughCount, geoDataFeatures, zipMap) {
-  const boroughPeaks = new Array(boroughCount).fill(0);
-  const boroughEvents = new Array(boroughCount).fill(0);
+// Compute borough heat tiers using weighted average of all zip tiers within each borough.
+// Each borough gets a unique tier 0–4 ranked by its mean zip tier value. This produces
+// visually correct results: boroughs with more hot zips get higher tiers.
+function computeBoroughAvgTiers(tiers, zipBoroughMap, boroughCount) {
+  const boroughTierSum   = new Array(boroughCount).fill(0);
+  const boroughZipCount  = new Array(boroughCount).fill(0);
   Object.entries(zipBoroughMap).forEach(([idx, bi]) => {
     const i = parseInt(idx);
-    const tier = tiers[i];
-    if (tier === 4) boroughPeaks[bi]++;
-    if (geoDataFeatures) {
-      const zip = String(geoDataFeatures[i]?.properties?.MODZCTA || '');
-      boroughEvents[bi] += (zipMap?.[zip]?.length || 0);
-    }
+    const tier = tiers[i] ?? 0;
+    boroughTierSum[bi] += Math.max(0, tier);
+    boroughZipCount[bi]++;
   });
-  // Sort: most peaks first, tiebreak by most events
-  const indexed = boroughPeaks.map((peaks, i) => ({ peaks, events: boroughEvents[i], i }));
-  indexed.sort((a, b) => {
-    if (b.peaks !== a.peaks) return b.peaks - a.peaks;
-    return b.events - a.events;
-  });
-  // Assign unique tiers: rank 0 → tier 4, rank 1 → tier 3, etc.
+  // Compute mean tier per borough
+  const indexed = boroughTierSum.map((sum, i) => ({
+    avg: boroughZipCount[i] > 0 ? sum / boroughZipCount[i] : 0,
+    i,
+  }));
+  // Sort by mean tier descending — highest average gets tier 4
+  indexed.sort((a, b) => b.avg - a.avg);
   const ranked = new Array(boroughCount).fill(0);
   for (let pos = 0; pos < indexed.length; pos++) {
     ranked[indexed[pos].i] = Math.max(0, 4 - pos);
@@ -1262,6 +1263,10 @@ export default function MapView({ events }) {
   const boroughSkeletonRef = useRef(null);
   // Tier computation cache — skip expensive buildZipEventMap + computeTiers when only paint deps change
   const cachedTierDataRef   = useRef({ events: null, timespanIdx: -1, geoData: null, zipMap: null, maxCount: 0, tiers: [] });
+  // Pre-computed tiers for all 5 timespans — slider reads from here (no recomputation)
+  const precomputedTiersRef = useRef(null); // { [timespanIdx]: { tiers, zipMap, maxCount, withHeat } }
+  // Version counter for tier update cancellation — incremented on each new tier apply
+  const tierUpdateVersionRef = useRef(0);
   // FGB building data — full-file load, cached forever after first parse
   const buildingFGBRef      = useRef(null);  // parsed FeatureCollection (all 381K buildings)
   const buildingZctaMapRef  = useRef(null);  // Int16Array: building index → ZCTA feature index (-1 = not found)
@@ -1520,10 +1525,18 @@ export default function MapView({ events }) {
       },
     });
 
-    // Hover — electric purple (2D fill overlay)
+    // Hover — electric purple (2D fill overlay, non-safezone)
     map.addLayer({
       id: 'zcta-hover', type: 'fill', source: 'zcta',
+      filter: ['!=', ['get', '_special'], true],
       paint: { 'fill-color': '#7C3AED', 'fill-opacity': ['case', ['boolean', ['feature-state', 'hovered'], false], 0.5, 0] },
+    });
+
+    // Safezone hover — transparent fill that captures mouse events
+    map.addLayer({
+      id: 'zcta-safezone-hover', type: 'fill', source: 'zcta',
+      filter: ['==', ['get', '_special'], true],
+      paint: { 'fill-color': '#7C3AED', 'fill-opacity': ['case', ['boolean', ['feature-state', 'hovered'], false], 0.3, 0] },
     });
 
     // Cap — thin slab on top of each zip block, same polygon as the block (source: 'zcta').
@@ -1603,7 +1616,9 @@ export default function MapView({ events }) {
       hoveredIdRef.current = f.id;
       map.setFeatureState({ source: 'zcta', id: f.id }, { hovered: true });
       map.getCanvas().style.cursor = 'pointer';
-      setHoveredZip(String(f.properties.MODZCTA || ''));
+      const zip = String(f.properties.MODZCTA || '');
+      const isSafezone = !!f.properties._special;
+      setHoveredZip(isSafezone ? `SAFE:${zip}` : zip);
       setTooltipPos({ x: e.point.x, y: e.point.y });
     };
 
@@ -1618,15 +1633,22 @@ export default function MapView({ events }) {
 
     const handleZctaClick = e => {
       if (!e.features.length) return;
-      openSidePanel(String(e.features[0].properties.MODZCTA || ''));
-      openHologram(e.features[0]);
+      const f = e.features[0];
+      const zip = String(f.properties.MODZCTA || '');
+      const isSafezone = !!f.properties._special;
+      openSidePanel(isSafezone ? `SAFE:${zip}` : zip);
+      openHologram(f);
     };
 
     layerHandlersRef.current = { handleZctaHover, handleZctaLeave, handleZctaClick };
 
+    // Register hover/click on both regular zips and safezone areas
     map.on('mousemove', 'zcta-fill', handleZctaHover);
     map.on('mouseleave', 'zcta-fill', handleZctaLeave);
     map.on('click', 'zcta-fill', handleZctaClick);
+    map.on('mousemove', 'zcta-safezone-hover', handleZctaHover);
+    map.on('mouseleave', 'zcta-safezone-hover', handleZctaLeave);
+    map.on('click', 'zcta-safezone-hover', handleZctaClick);
   }
 
   function openHologram(clickedFeature) {
@@ -1652,6 +1674,26 @@ export default function MapView({ events }) {
     buildFGBCache();
   }, [mapReady, geoData]);
 
+  // Pre-compute tiers for all 5 timespans in background.
+  // This makes time slider changes near-instant: just read from pre-computed cache.
+  useEffect(() => {
+    if (!geoData || !adjacency || !events?.length) return;
+    let cancelled = false;
+    (async () => {
+      const result = {};
+      for (let idx = 0; idx < TIMESPAN_STEPS.length; idx++) {
+        if (cancelled) return;
+        const { zipMap, maxCount } = buildZipEventMap(events, TIMESPAN_STEPS[idx].days);
+        const tiers = computeTiers(geoData.features, zipMap, maxCount, adjacency);
+        result[idx] = { tiers, zipMap, maxCount };
+        // Yield between timespan computations
+        await new Promise(r => setTimeout(r, 0));
+      }
+      if (!cancelled) precomputedTiersRef.current = result;
+    })();
+    return () => { cancelled = true; };
+  }, [events, geoData, adjacency]);
+
   // Manage hover layer based on 3D state — switch from fill to extrude when 3D is on
   useEffect(() => {
     const map = mapRef.current;
@@ -1664,6 +1706,9 @@ export default function MapView({ events }) {
       map.off('mousemove', 'zcta-fill', handleZctaHover);
       map.off('mouseleave', 'zcta-fill', handleZctaLeave);
       map.off('click', 'zcta-fill', handleZctaClick);
+      map.off('mousemove', 'zcta-safezone-hover', handleZctaHover);
+      map.off('mouseleave', 'zcta-safezone-hover', handleZctaLeave);
+      map.off('click', 'zcta-safezone-hover', handleZctaClick);
       
       map.on('mousemove', 'zcta-extrude', handleZctaHover);
       map.on('mouseleave', 'zcta-extrude', handleZctaLeave);
@@ -1676,6 +1721,9 @@ export default function MapView({ events }) {
       map.on('mousemove', 'zcta-fill', handleZctaHover);
       map.on('mouseleave', 'zcta-fill', handleZctaLeave);
       map.on('click', 'zcta-fill', handleZctaClick);
+      map.on('mousemove', 'zcta-safezone-hover', handleZctaHover);
+      map.on('mouseleave', 'zcta-safezone-hover', handleZctaLeave);
+      map.on('click', 'zcta-safezone-hover', handleZctaClick);
     }
   }, [threeD, mapReady]);
 
@@ -1688,13 +1736,20 @@ export default function MapView({ events }) {
 
     // Cache tier computations — only recompute when data deps change (events, timespan, geoData).
     // Paint-only toggles (satellite, topoOn, threeD) skip the expensive buildZipEventMap + computeTiers.
+    // Uses pre-computed tiers if available (from background pre-computation).
     const cached = cachedTierDataRef.current;
     const dataChanged = events !== cached.events || timespanIdx !== cached.timespanIdx || geoData !== cached.geoData;
     let zipMap, maxCount, tiers, withHeat;
 
     if (dataChanged) {
-      ({ zipMap, maxCount } = buildZipEventMap(events, TIMESPAN_STEPS[timespanIdx].days));
-      tiers = computeTiers(geoData.features, zipMap, maxCount, adjacency);
+      // Try pre-computed first (instant). Fallback to live computation.
+      const precomputed = precomputedTiersRef.current?.[timespanIdx];
+      if (precomputed) {
+        ({ zipMap, maxCount, tiers } = precomputed);
+      } else {
+        ({ zipMap, maxCount } = buildZipEventMap(events, TIMESPAN_STEPS[timespanIdx].days));
+        tiers = computeTiers(geoData.features, zipMap, maxCount, adjacency);
+      }
       withHeat = {
         ...geoData,
         features: geoData.features.map((f, i) => {
@@ -1947,9 +2002,7 @@ export default function MapView({ events }) {
         const avgTiers = computeBoroughAvgTiers(
           tiers,
           zipBoroughMapRef.current,
-          boroughGeoDataRef.current.features.length,
-          geoData?.features,
-          zipMap  // reuse from line 1713 — same events+timespan
+          boroughGeoDataRef.current.features.length
         );
         boroughAvgTiersRef.current = avgTiers;
         const coloredBorough = buildColoredBoroughFeatures(boroughGeoDataRef.current, avgTiers, heatmap);
@@ -2141,9 +2194,9 @@ export default function MapView({ events }) {
   }, [satellite, real3D, mapReady]);
 
 
-  // Building color expression — uses pre-computed _s7 (shade index mod 7) and _tier.
-  // Non-heatmap: 7 dark red shades. Heatmap: tier-based colors with _s5 clustering.
-  // Pre-computed shade indices eliminate per-pixel GPU math (%/to-number).
+  // Building color expression — uses pre-computed _s7 (shade index mod 7).
+  // For heatmap mode, tier comes from feature-state (NOT baked property).
+  // This allows tier updates via setFeatureState without re-uploading geometry.
   const memoizedExprs = useRef({});
 
   function buildingColorExprByState(isHeatmap) {
@@ -2162,6 +2215,8 @@ export default function MapView({ events }) {
         '#7a1818',
       ];
     } else {
+      // Tier from feature-state — updated via setFeatureState, never re-uploaded
+      const tierExpr = ['coalesce', ['feature-state', 'tier'], 0];
       const shades = (tones) => ['case',
         ['==', ['get', '_s5'], 0], tones[0],
         ['==', ['get', '_s5'], 1], tones[1],
@@ -2170,11 +2225,11 @@ export default function MapView({ events }) {
         tones[4],
       ];
       expr = ['case',
-        ['==', ['get', '_tier'], 4], shades(HEAT_BUILDING_TONES.hot),
-        ['==', ['get', '_tier'], 3], shades(HEAT_BUILDING_TONES.orange),
-        ['==', ['get', '_tier'], 2], shades(HEAT_BUILDING_TONES.warm),
-        ['==', ['get', '_tier'], 1], shades(HEAT_BUILDING_TONES.cool),
-        ['==', ['get', '_tier'], 0], shades(HEAT_BUILDING_TONES.cold),
+        ['==', tierExpr, 4], shades(HEAT_BUILDING_TONES.hot),
+        ['==', tierExpr, 3], shades(HEAT_BUILDING_TONES.orange),
+        ['==', tierExpr, 2], shades(HEAT_BUILDING_TONES.warm),
+        ['==', tierExpr, 1], shades(HEAT_BUILDING_TONES.cool),
+        ['==', tierExpr, 0], shades(HEAT_BUILDING_TONES.cold),
         shades(HEAT_BUILDING_TONES.cold),
       ];
     }
@@ -2182,7 +2237,7 @@ export default function MapView({ events }) {
     return expr;
   }
 
-  // Baseplate color expression — uniform dark colors per tier, no clustering.
+  // Baseplate color expression — uniform dark colors per tier from feature-state, no clustering.
   function baseplateColorExpr(isHeatmap) {
     const key = `bp_${isHeatmap}`;
     if (memoizedExprs.current[key]) return memoizedExprs.current[key];
@@ -2195,11 +2250,12 @@ export default function MapView({ events }) {
         '#330909',
       ];
     } else {
+      const tierExpr = ['coalesce', ['feature-state', 'tier'], 0];
       expr = ['case',
-        ['==', ['get', '_tier'], 4], '#440400',
-        ['==', ['get', '_tier'], 3], '#3d1500',
-        ['==', ['get', '_tier'], 2], '#5c4a00',
-        ['==', ['get', '_tier'], 1], '#002910',
+        ['==', tierExpr, 4], '#440400',
+        ['==', tierExpr, 3], '#3d1500',
+        ['==', tierExpr, 2], '#5c4a00',
+        ['==', tierExpr, 1], '#002910',
         '#001f29',
       ];
     }
@@ -2374,11 +2430,12 @@ export default function MapView({ events }) {
       setFgbCacheProgress(100);
       setFgbCacheStatus('done');
 
-      // Push to map if Real3D active
+      // Push to map if Real3D active — setData then apply feature-state tiers
       const map = mapRef.current;
       if (map && map.getSource('fgb-buildings') && map.getStyle()) {
-        retierBuildings(geojson, tiersRef.current);
         map.getSource('fgb-buildings').setData(geojson);
+        // Feature-state is cleared by setData — re-apply tier colors
+        applyBuildingTiersChunked(map, tiersRef.current);
       }
     } catch (err) {
       console.error('FGB cache build failed:', err);
@@ -2394,7 +2451,7 @@ export default function MapView({ events }) {
   // so panning doesn't show empty edges.
   async function fetchViewportBuildings(map) {
     if (!map || !map.getStyle() || !map.getSource('fgb-buildings')) return;
-    if (map.getZoom() < 13) return;
+    if (map.getZoom() < 10) return; // below baseplate zoom threshold
     if (buildingFGBRef.current) return; // cache is ready, no need for viewport fetch
 
     const bounds = map.getBounds();
@@ -2447,6 +2504,7 @@ export default function MapView({ events }) {
   }
 
   // Re-tier buildings using cached ZCTA index map. O(n) — no PiP.
+  // LEGACY — only used when setData is called and feature-state needs re-application.
   function retierBuildings(geojson, tiers) {
     if (!geojson?.features?.length || !tiers?.length) return geojson;
     const idxMap = buildingZctaMapRef.current;
@@ -2458,12 +2516,41 @@ export default function MapView({ events }) {
     return geojson;
   }
 
-  // Create fgb-buildings source + building layers.
+  // Apply building tier colors via feature-state — NO setData, NO geometry re-upload.
+  // Chunked by ZCTA groups so colors fill cleanly by zip code.
+  // Non-blocking: yields between chunks to keep UI responsive.
+  async function applyBuildingTiersChunked(map, tiers) {
+    const version = ++tierUpdateVersionRef.current;
+    const idxMap = buildingZctaMapRef.current;
+    const geojson = buildingFGBRef.current;
+    if (!idxMap || !geojson?.features?.length || !tiers?.length) return;
+    if (!map.getSource('fgb-buildings')) return;
+
+    const chunkSize = isMobile ? 2000 : 10000;
+    const features = geojson.features;
+
+    for (let start = 0; start < features.length; start += chunkSize) {
+      if (tierUpdateVersionRef.current !== version) return; // cancelled
+      const end = Math.min(start + chunkSize, features.length);
+      for (let i = start; i < end; i++) {
+        const zIdx = idxMap[i];
+        const tier = (zIdx >= 0 && tiers.length > zIdx) ? (tiers[zIdx] ?? 0) : 0;
+        try {
+          map.setFeatureState({ source: 'fgb-buildings', id: i }, { tier });
+        } catch { /* source may have been removed during toggle */ }
+      }
+      // Yield between chunks to keep UI thread free
+      if (end < features.length) await new Promise(r => setTimeout(r, 0));
+    }
+  }
+
+  // Create fgb-buildings source + building layers. Source starts empty.
+  // Data loaded separately via deferred loading (instant toggle).
   function addBuildingLayers(map, isHeatmap) {
     if (!map.getSource('fgb-buildings')) {
       map.addSource('fgb-buildings', {
         type: 'geojson',
-        data: buildingFGBRef.current || { type: 'FeatureCollection', features: [] },
+        data: { type: 'FeatureCollection', features: [] },
         generateId: true,
       });
     }
@@ -2472,12 +2559,12 @@ export default function MapView({ events }) {
       map.addLayer({
         id: 'real3d-buildings-baseplate', type: 'fill-extrusion',
         source: 'fgb-buildings',
-        minzoom: 13, maxzoom: 14,
+        minzoom: 10, maxzoom: 11,
         paint: {
           'fill-extrusion-color': baseplateColorExpr(isHeatmap),
-          'fill-extrusion-height': 5,
-          'fill-extrusion-base': 0,
-          'fill-extrusion-opacity': 0.9,
+          'fill-extrusion-height': 7,
+          'fill-extrusion-base': 2,
+          'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'], 10, 0, 10.5, 0.9],
           'fill-extrusion-vertical-gradient': false,
         },
       });
@@ -2487,11 +2574,11 @@ export default function MapView({ events }) {
       map.addLayer({
         id: 'real3d-buildings', type: 'fill-extrusion',
         source: 'fgb-buildings',
-        minzoom: 14,
+        minzoom: 11,
         paint: {
           'fill-extrusion-color': buildingColorExprByState(isHeatmap),
           'fill-extrusion-height': ['coalesce', ['get', 'height_roof'], 8],
-          'fill-extrusion-base': 0,
+          'fill-extrusion-base': ['max', 2, ['coalesce', ['get', 'ground_elevation'], 0]],
           'fill-extrusion-opacity': 0.92,
           'fill-extrusion-vertical-gradient': false,
         },
@@ -2501,15 +2588,18 @@ export default function MapView({ events }) {
     if (map.getLayer('real3d-roads-motorway')) map.moveLayer('real3d-roads-motorway');
     if (map.getLayer('borough-outline')) map.moveLayer('borough-outline');
 
-    // If cache is ready, push tiered data immediately. Otherwise start viewport render.
-    if (buildingFGBRef.current) {
-      retierBuildings(buildingFGBRef.current, tiersRef.current);
-      map.getSource('fgb-buildings')?.setData(buildingFGBRef.current);
-    } else {
-      // Pause background cache if it's building — Real3D needs instant render
-      if (fgbLoadingRef.current) setFgbCacheStatus('paused');
-      fetchViewportBuildings(map);
-    }
+    // Deferred data loading — does not block Real3D toggle
+    setTimeout(() => {
+      if (!map.getSource('fgb-buildings')) return;
+      if (buildingFGBRef.current) {
+        // Cache is ready — push full data + apply tiers via feature-state
+        map.getSource('fgb-buildings').setData(buildingFGBRef.current);
+        applyBuildingTiersChunked(map, tiersRef.current);
+      } else {
+        // No cache yet — do viewport fetch, then cache will replace it later
+        fetchViewportBuildings(map);
+      }
+    }, 0);
   }
 
   function applyReal3DLayers(map, isHeatmap) {
@@ -2650,10 +2740,13 @@ export default function MapView({ events }) {
     applyReal3DLayers(map, heatmapRef.current);
   }, [real3D, mapReady]);
 
-  // Heatmap toggle in Real3D — ONLY updates paint expressions, no setData (fast, no freeze)
+  // Heatmap toggle in Real3D — updates paint expressions AND re-applies tier colors via feature-state
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady || !real3D) return;
+
+    // Invalidate memoized expressions since heatmap changed
+    memoizedExprs.current = {};
 
     if (map.getLayer('real3d-buildings')) {
       map.setPaintProperty('real3d-buildings', 'fill-extrusion-color', buildingColorExprByState(heatmap));
@@ -2673,15 +2766,19 @@ export default function MapView({ events }) {
     if (map.getLayer('zcta-safezone-extrusion')) {
       map.setPaintProperty('zcta-safezone-extrusion', 'fill-extrusion-opacity', 1.0);
     }
+    // Re-apply tier feature-state (heatmap paint expr now reads it)
+    if (heatmap && buildingFGBRef.current) {
+      applyBuildingTiersChunked(map, tiersRef.current);
+    }
   }, [heatmap, real3D, mapReady]);
 
-  // Timespan/events change in Real3D — re-tier cached buildings and update source
+  // Timespan/events change in Real3D — update tier colors via feature-state (NO setData)
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady || !real3D) return;
     if (!map.getSource('fgb-buildings') || !buildingFGBRef.current) return;
-    retierBuildings(buildingFGBRef.current, tiersRef.current);
-    map.getSource('fgb-buildings').setData(buildingFGBRef.current);
+    if (!heatmapRef.current) return; // only need tier update when heatmap is on
+    applyBuildingTiersChunked(map, tiersRef.current);
   }, [timespanIdx, real3D, mapReady]);
 
   const handleThreeDToggle = () => {
@@ -2710,18 +2807,34 @@ export default function MapView({ events }) {
 
   useEffect(() => {
     if (!hoveredZip) { setHoveredEvents([]); setHoveredColonists(null); return; }
-    if (hoveredZip === 'SAFEZONE') { setHoveredEvents([]); setHoveredColonists(0); return; }
-    const { zipMap } = buildZipEventMap(events, TIMESPAN_STEPS[timespanIdx].days);
-    setHoveredEvents(zipMap[hoveredZip] || []);
-    getZipColonists(hoveredZip).then(c => setHoveredColonists(c.length)).catch(() => setHoveredColonists(0));
+    const isSafe = hoveredZip.startsWith('SAFE:');
+    const rawZip = isSafe ? hoveredZip.slice(5) : hoveredZip;
+    // Use cached tier data if available, otherwise compute
+    const { zipMap } = cachedTierDataRef.current.zipMap
+      ? { zipMap: cachedTierDataRef.current.zipMap }
+      : buildZipEventMap(events, TIMESPAN_STEPS[timespanIdx].days);
+    setHoveredEvents(zipMap[rawZip] || []);
+    if (isSafe) {
+      setHoveredColonists(0); // safezones have no colonists
+    } else {
+      getZipColonists(rawZip).then(c => setHoveredColonists(c.length)).catch(() => setHoveredColonists(0));
+    }
   }, [hoveredZip, timespanIdx, events]);
 
   async function openSidePanel(zip) {
-    setSideZip(zip);
-    if (zip === 'SAFEZONE') { setSideEvents([]); setSideColonists([]); return; }
-    const { zipMap } = buildZipEventMap(events, TIMESPAN_STEPS[timespanIdx].days);
-    setSideEvents(zipMap[zip] || []);
-    setSideColonists(await getZipColonists(zip).catch(() => []));
+    const isSafezone = zip.startsWith('SAFE:');
+    const rawZip = isSafezone ? zip.slice(5) : zip;
+    setSideZip(isSafezone ? 'SAFEZONE' : rawZip);
+    // Use cached zipMap when available, fallback to compute
+    const { zipMap } = cachedTierDataRef.current.zipMap
+      ? { zipMap: cachedTierDataRef.current.zipMap }
+      : buildZipEventMap(events, TIMESPAN_STEPS[timespanIdx].days);
+    setSideEvents(zipMap[rawZip] || []);
+    if (isSafezone) {
+      setSideColonists([]);
+    } else {
+      setSideColonists(await getZipColonists(rawZip).catch(() => []));
+    }
   }
 
   async function handleCenterLocation() {
@@ -2742,7 +2855,9 @@ export default function MapView({ events }) {
     return () => window.removeEventListener('keydown', h);
   }, []);
 
-  const zipLabel  = hoveredZip === 'SAFEZONE' ? 'Safe Zone' : hoveredZip ? `ZIP ${hoveredZip}` : '';
+  const isSafezoneHover = hoveredZip?.startsWith('SAFE:');
+  const displayHoverZip = isSafezoneHover ? hoveredZip.slice(5) : hoveredZip;
+  const zipLabel  = isSafezoneHover ? 'Safe Zone' : hoveredZip ? `ZIP ${hoveredZip}` : '';
   const sideLabel = sideZip   === 'SAFEZONE' ? 'Safe Zone' : sideZip   ? `ZIP ${sideZip}`   : '';
 
   return (
@@ -2851,19 +2966,26 @@ export default function MapView({ events }) {
               <div className="bg-gray-950/95 border border-red-900/60 rounded-2xl overflow-hidden shadow-[0_0_15px_rgba(255,20,0,0.3)]">
                 <div className="px-3 py-2 border-b border-white/10">
                   <p className="text-red-400 font-black text-xs">{zipLabel}</p>
-                  {hoveredZip !== 'SAFEZONE' && <p className="text-white/60 text-xs">{hoveredEvents.length} upcoming events</p>}
-                  {hoveredZip === 'SAFEZONE' && <p className="text-white/40 text-xs italic">Safe zone</p>}
+                  {isSafezoneHover
+                    ? <p className="text-white/40 text-xs italic">🛡️ Safe zone — {hoveredEvents.length} event{hoveredEvents.length !== 1 ? 's' : ''}</p>
+                    : <p className="text-white/60 text-xs">{hoveredEvents.length} upcoming events</p>
+                  }
                 </div>
-                {hoveredZip !== 'SAFEZONE' && hoveredEvents.slice(0, 3).map(e => (
+                {hoveredEvents.slice(0, 3).map(e => (
                   <div key={e.id} className="px-3 py-1.5 border-b border-white/5">
                     <p className="text-white text-xs font-bold truncate">{e.representative_emoji} {e.event_name}</p>
                     <p className="text-white/40 text-xs">{e.event_date}</p>
                   </div>
                 ))}
                 {hoveredEvents.length > 3 && <p className="text-white/30 text-xs px-3 py-1">+{hoveredEvents.length - 3} more</p>}
-                {hoveredColonists !== null && hoveredZip !== 'SAFEZONE' && (
+                {hoveredColonists !== null && !isSafezoneHover && (
                   <div className="px-3 py-2 border-t border-white/10">
                     <p className="text-green-400/70 text-xs italic">{hoveredColonists} colonist{hoveredColonists !== 1 ? 's' : ''} in {zipLabel}</p>
+                  </div>
+                )}
+                {isSafezoneHover && (
+                  <div className="px-3 py-2 border-t border-white/10">
+                    <p className="text-emerald-400/70 text-xs italic">🛡️ There are no colonists in safezones</p>
                   </div>
                 )}
               </div>
@@ -2877,7 +2999,7 @@ export default function MapView({ events }) {
               <div className="flex items-center justify-between px-5 py-3 border-b border-white/10 bg-black/30 flex-shrink-0">
                 <div>
                   <p className="text-red-400 font-black">{sideLabel}</p>
-                  <p className="text-white/40 text-xs">{sideZip === 'SAFEZONE' ? 'Safe zone' : `${sideEvents.length} events · ${sideColonists.length} colonists`}</p>
+                  <p className="text-white/40 text-xs">{sideZip === 'SAFEZONE' ? `🛡️ Safe zone · ${sideEvents.length} events` : `${sideEvents.length} events · ${sideColonists.length} colonists`}</p>
                 </div>
                 <button onClick={() => { setSideZip(null); setSideEvents([]); setSideColonists([]); setHoloFeature(null); }}
                   className="text-white/40 hover:text-white text-xl w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10">✕</button>
@@ -2943,6 +3065,15 @@ export default function MapView({ events }) {
                   />
                 </div>
               )}
+              {sideZip === 'SAFEZONE' && (
+                <div className="flex-1 flex items-center justify-center p-6">
+                  <div className="text-center">
+                    <p className="text-4xl mb-3">🛡️</p>
+                    <p className="text-emerald-400 font-black text-sm">There are no colonists in safezones</p>
+                    <p className="text-white/30 text-xs mt-1">Protected area</p>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -2957,7 +3088,7 @@ export default function MapView({ events }) {
               <div className="flex items-center justify-between px-4 py-2 border-b border-white/10 flex-shrink-0">
                 <div>
                   <p className="text-red-400 font-black text-sm">{sideLabel}</p>
-                  <p className="text-white/40 text-xs">{sideZip === 'SAFEZONE' ? 'Safe zone' : `${sideEvents.length} events · ${sideColonists.length} colonists`}</p>
+                  <p className="text-white/40 text-xs">{sideZip === 'SAFEZONE' ? `🛡️ Safe zone · ${sideEvents.length} events` : `${sideEvents.length} events · ${sideColonists.length} colonists`}</p>
                 </div>
                 <button onClick={() => { setSideZip(null); setSideEvents([]); setSideColonists([]); setHoloFeature(null); }}
                   className="text-white/40 text-lg w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10">✕</button>
@@ -3007,6 +3138,14 @@ export default function MapView({ events }) {
                         );
                       }}
                     />
+                  </div>
+                )}
+                {sideZip === 'SAFEZONE' && (
+                  <div className="flex-1 flex items-center justify-center p-4">
+                    <div className="text-center">
+                      <p className="text-2xl mb-2">🛡️</p>
+                      <p className="text-emerald-400 font-black text-xs">No colonists in safezones</p>
+                    </div>
                   </div>
                 )}
               </div>
