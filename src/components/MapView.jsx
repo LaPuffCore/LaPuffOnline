@@ -1258,8 +1258,8 @@ export default function MapView({ events }) {
   const boroughSkeletonRef = useRef(null);
   // Tier computation cache — skip expensive buildZipEventMap + computeTiers when only paint deps change
   const cachedTierDataRef   = useRef({ events: null, timespanIdx: -1, geoData: null, zipMap: null, maxCount: 0, tiers: [] });
-  // FGB building data — accumulated features from spatial queries, keyed by objectid
-  const buildingFGBRef      = useRef(null);  // Map<objectid, feature>
+  // FGB building data — loaded once as full GeoJSON FeatureCollection, cached
+  const buildingFGBRef      = useRef(null);  // FeatureCollection | null
   const buildingFGBLoadingRef = useRef(false);
   const fgbAbortRef         = useRef(null);  // AbortController for in-flight FGB fetch
 
@@ -2209,108 +2209,89 @@ export default function MapView({ events }) {
     };
   }
 
-  // Fetch buildings from BUILDING.fgb for a given bounding box using HTTP range requests.
-  // Accumulates features in buildingFGBRef (Map keyed by objectid) across pans.
-  // Returns a GeoJSON FeatureCollection of ALL accumulated features.
-  async function fetchBuildingsForBounds(map) {
-    if (!map) return null;
-    const bounds = map.getBounds();
-    const bbox = {
-      minX: bounds.getWest(),
-      minY: bounds.getSouth(),
-      maxX: bounds.getEast(),
-      maxY: bounds.getNorth(),
-    };
+  // Stream BUILDING.fgb in full, parse properties, cache as GeoJSON FeatureCollection.
+  // Called once on first Real3D activation; result stays cached until Real3D is toggled off.
+  async function loadBuildingFGB() {
+    if (buildingFGBRef.current) return buildingFGBRef.current;
+    if (buildingFGBLoadingRef.current) return null;
+    buildingFGBLoadingRef.current = true;
 
-    // Initialize accumulator on first call
-    if (!buildingFGBRef.current) buildingFGBRef.current = new Map();
-
-    // Abort any in-flight fetch
     if (fgbAbortRef.current) fgbAbortRef.current.abort();
     const ac = new AbortController();
     fgbAbortRef.current = ac;
 
     try {
-      // fgbDeserialize with a URL string + rect uses HTTP range requests (spatial index)
-      const iter = fgbDeserialize(BUILDING_FGB_URL, bbox);
-      for await (const feature of iter) {
+      const resp = await fetch(BUILDING_FGB_URL, { signal: ac.signal });
+      const features = [];
+      for await (const feature of fgbDeserialize(resp.body)) {
         if (ac.signal.aborted) break;
         if (!feature?.geometry?.coordinates) continue;
-        const oid = feature.properties?.objectid || '0';
-        if (buildingFGBRef.current.has(oid)) continue; // already accumulated
-        // Coerce string properties to numbers
         const hr = parseFloat(feature.properties?.height_roof);
         const ge = parseFloat(feature.properties?.ground_elevation);
         feature.properties.height_roof = isNaN(hr) ? 8 : hr;
         feature.properties.ground_elevation = isNaN(ge) ? 0 : ge;
-        feature.properties.objectid = oid;
-        buildingFGBRef.current.set(oid, feature);
+        feature.properties.objectid = feature.properties.objectid || '0';
+        features.push(feature);
       }
+      if (ac.signal.aborted) return null;
+      const geojson = { type: 'FeatureCollection', features };
+      buildingFGBRef.current = geojson;
+      return geojson;
     } catch (err) {
-      if (err.name === 'AbortError') return null;
-      console.error('FGB spatial fetch failed:', err);
-    }
-
-    fgbAbortRef.current = null;
-    return { type: 'FeatureCollection', features: Array.from(buildingFGBRef.current.values()) };
-  }
-
-  // Update the fgb-buildings GeoJSON source with buildings for the current viewport.
-  // Creates source + layers if they don't exist yet.
-  async function updateBuildingsForViewport(map, isHeatmap) {
-    if (buildingFGBLoadingRef.current) return;
-    const zoom = map.getZoom();
-    if (zoom < 13) return; // only fetch when close enough to show buildings
-
-    buildingFGBLoadingRef.current = true;
-    try {
-      const geojson = await fetchBuildingsForBounds(map);
-      if (!geojson || !map.getStyle()) return; // aborted or map destroyed
-
-      const tieredData = isHeatmap ? bakeBuildingTiers(geojson) : geojson;
-      const src = map.getSource('fgb-buildings');
-      if (src) {
-        src.setData(tieredData);
-      } else {
-        // First load — create source + layers
-        map.addSource('fgb-buildings', { type: 'geojson', data: tieredData, generateId: true });
-
-        map.addLayer({
-          id: 'real3d-buildings-baseplate', type: 'fill-extrusion',
-          source: 'fgb-buildings',
-          minzoom: 13, maxzoom: 14,
-          paint: {
-            'fill-extrusion-color': baseplateColorExpr(isHeatmap),
-            'fill-extrusion-height': 2,
-            'fill-extrusion-base': 0,
-            'fill-extrusion-opacity': 0.9,
-            'fill-extrusion-vertical-gradient': false,
-          },
-        });
-
-        map.addLayer({
-          id: 'real3d-buildings', type: 'fill-extrusion',
-          source: 'fgb-buildings',
-          minzoom: 14,
-          paint: {
-            'fill-extrusion-color': buildingColorExprByState(isHeatmap),
-            'fill-extrusion-height': ['coalesce', ['get', 'height_roof'], 8],
-            'fill-extrusion-base': 0,
-            'fill-extrusion-opacity': 0.92,
-            'fill-extrusion-vertical-gradient': false,
-          },
-        });
-
-        // Maintain layer ordering
-        if (map.getLayer('real3d-roads-motorway')) map.moveLayer('real3d-roads-motorway');
-        if (map.getLayer('borough-outline')) map.moveLayer('borough-outline');
-      }
+      if (err.name !== 'AbortError') console.error('Failed to load BUILDING.fgb:', err);
+      return null;
     } finally {
       buildingFGBLoadingRef.current = false;
+      fgbAbortRef.current = null;
     }
   }
 
-  async function applyReal3DLayers(map, isHeatmap) {
+  // Add fgb-buildings source + building layers to the map.
+  // Layers use minzoom/maxzoom to control visibility by zoom level.
+  function addBuildingLayers(map, geojson, isHeatmap) {
+    const tieredData = isHeatmap ? bakeBuildingTiers(geojson) : geojson;
+
+    if (map.getSource('fgb-buildings')) {
+      map.getSource('fgb-buildings').setData(tieredData);
+    } else {
+      map.addSource('fgb-buildings', { type: 'geojson', data: tieredData, generateId: true });
+    }
+
+    if (!map.getLayer('real3d-buildings-baseplate')) {
+      map.addLayer({
+        id: 'real3d-buildings-baseplate', type: 'fill-extrusion',
+        source: 'fgb-buildings',
+        minzoom: 13, maxzoom: 14,
+        paint: {
+          'fill-extrusion-color': baseplateColorExpr(isHeatmap),
+          'fill-extrusion-height': 2,
+          'fill-extrusion-base': 0,
+          'fill-extrusion-opacity': 0.9,
+          'fill-extrusion-vertical-gradient': false,
+        },
+      });
+    }
+
+    if (!map.getLayer('real3d-buildings')) {
+      map.addLayer({
+        id: 'real3d-buildings', type: 'fill-extrusion',
+        source: 'fgb-buildings',
+        minzoom: 14,
+        paint: {
+          'fill-extrusion-color': buildingColorExprByState(isHeatmap),
+          'fill-extrusion-height': ['coalesce', ['get', 'height_roof'], 8],
+          'fill-extrusion-base': 0,
+          'fill-extrusion-opacity': 0.92,
+          'fill-extrusion-vertical-gradient': false,
+        },
+      });
+    }
+
+    if (map.getLayer('real3d-roads-motorway')) map.moveLayer('real3d-roads-motorway');
+    if (map.getLayer('borough-outline')) map.moveLayer('borough-outline');
+  }
+
+  function applyReal3DLayers(map, isHeatmap) {
     if (buildingAssignCleanupRef.current) {
       buildingAssignCleanupRef.current();
       buildingAssignCleanupRef.current = null;
@@ -2405,17 +2386,13 @@ export default function MapView({ events }) {
         },
       });
 
-      // BUILDINGS from BUILDING.fgb — loaded via spatial HTTP range requests.
-      // Initial fetch for current viewport; moveend listener keeps it updated.
-      await updateBuildingsForViewport(map, isHeatmap);
-
-      // Set up moveend listener to fetch new buildings as user pans/zooms
-      const onMoveEnd = () => updateBuildingsForViewport(map, heatmapRef.current);
-      map.on('moveend', onMoveEnd);
-      buildingAssignCleanupRef.current = () => {
-        map.off('moveend', onMoveEnd);
-        if (fgbAbortRef.current) { fgbAbortRef.current.abort(); fgbAbortRef.current = null; }
-      };
+      // BUILDINGS from BUILDING.fgb — stream full file once, cache it.
+      // Layers use minzoom/maxzoom to control when they render.
+      // Load asynchronously so other layers appear immediately.
+      loadBuildingFGB().then(geojson => {
+        if (!geojson || !map.getStyle()) return;
+        addBuildingLayers(map, geojson, isHeatmap);
+      });
 
       // Layer ordering: move unrestricted layers to top of stack.
       if (map.getLayer('real3d-roads-motorway')) map.moveLayer('real3d-roads-motorway');
@@ -2454,9 +2431,8 @@ export default function MapView({ events }) {
 
     // Re-bake tiers into FGB GeoJSON when heatmap/timespan changes
     const src = map.getSource('fgb-buildings');
-    if (src && buildingFGBRef.current?.size > 0) {
-      const geojson = { type: 'FeatureCollection', features: Array.from(buildingFGBRef.current.values()) };
-      const tieredData = heatmap ? bakeBuildingTiers(geojson) : geojson;
+    if (src && buildingFGBRef.current) {
+      const tieredData = heatmap ? bakeBuildingTiers(buildingFGBRef.current) : buildingFGBRef.current;
       src.setData(tieredData);
     }
 
