@@ -2357,18 +2357,17 @@ export default function MapView({ events }) {
   }
 
   // Update 2D ZCTA line widths based on current zoom — called on every zoom event and on
-  // heatmap effect for initial state. Applies world-space compensation at z10+ so outlines
-  // maintain apparent visual thickness as zip polygons scale up on screen.
+  // heatmap effect for initial state. Gentle linear increase at z10+ so lines don't
+  // appear to shrink relative to the growing zip polygons, without becoming too thick.
   // z9-z10: original ramp/lock — DO NOT change this range.
-  // z10+: double per zoom level (world-space constant), capped at 30px.
+  // z10+: +1px per zoom level from 6px base, capped at 12px at z16.
   function applyZctaLineWidths(map) {
     if (!map || typeof map.getZoom !== 'function') return;
     const zoom = map.getZoom();
     let base;
     if (zoom >= 10) {
-      // World-space compensation: doubles per zoom tick (same rate map scales),
-      // capped at 30px so it stays visually reasonable at max zoom.
-      base = Math.min(30, 6 * Math.pow(2, zoom - 10));
+      // +1px per zoom level starting at 6px. Cap at 12px so it stays tasteful.
+      base = Math.min(12, 6 + (zoom - 10));
     } else if (zoom >= 9.5) {
       base = 5.6; // original flat lock at z9.5
     } else if (zoom >= 9) {
