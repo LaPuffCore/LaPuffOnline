@@ -2058,23 +2058,23 @@ export default function MapView({ events }) {
 
     // Re-apply locked outline widths for 2D / Real3D (defensive: enforce after any style swap)
     if (!threeD) {
-      // Lock ZCTA outline at a constant screen-pixel size for all zoom >= 10.
-      // Below z10: linear ramp from z9 up to the lock value so far-out zooms are still visible.
-      // At z10+: flat constant — outlines stay the same screen-pixel thickness and don't shrink.
-      // Values slightly larger than the old z9.5 lock (×1.5 vs ×1.4) as requested.
-      const lockBase  = 4 * 1.5;  // 6px at z10+ (was 5.6 locked at z9.5)
-      const lockGlow  = 5 * 1.5;  // 7.5px
-      const lockGlow2 = 7 * 1.5;  // 10.5px
-      const lockSafe  = 6 * 1.5;  // 9px
-      const lockedWidthExprBase  = ['case', ['>=', ['zoom'], 10], lockBase,  ['interpolate', ['linear'], ['zoom'], 9, 4 * 0.5, 10, lockBase]];
-      const lockedWidthExprGlow  = ['case', ['>=', ['zoom'], 10], lockGlow,  ['interpolate', ['linear'], ['zoom'], 9, 5 * 0.5, 10, lockGlow]];
-      const lockedWidthExprGlow2 = ['case', ['>=', ['zoom'], 10], lockGlow2, ['interpolate', ['linear'], ['zoom'], 9, 7 * 0.5, 10, lockGlow2]];
-      const lockedWidthExprSafe  = ['case', ['>=', ['zoom'], 10], lockSafe,  ['interpolate', ['linear'], ['zoom'], 9, 6 * 0.5, 10, lockSafe]];
+      // z9 → z9.5: ramp 2px → 5.6px  (ORIGINAL — do not touch)
+      // z9.5 → z10: flat 5.6px        (ORIGINAL — do not touch)
+      // z10+: flat 6px                (slightly larger lock, new behaviour)
+      const origBase  = 4 * 1.4;  const lockBase  = 4 * 1.5;
+      const origGlow  = 5 * 1.4;  const lockGlow  = 5 * 1.5;
+      const origGlow2 = 7 * 1.4;  const lockGlow2 = 7 * 1.5;
+      const origSafe  = 6 * 1.4;  const lockSafe  = 6 * 1.5;
+      const mkExpr = (half, orig, lock) => [
+        'case', ['>=', ['zoom'], 10], lock,
+        ['case', ['>=', ['zoom'], 9.5], orig,
+          ['interpolate', ['linear'], ['zoom'], 9, half, 9.5, orig]],
+      ];
       try {
-        if (map.getLayer('zcta-safe-line')) map.setPaintProperty('zcta-safe-line', 'line-width', lockedWidthExprSafe);
-        if (map.getLayer('zcta-line-glow2')) map.setPaintProperty('zcta-line-glow2', 'line-width', lockedWidthExprGlow2);
-        if (map.getLayer('zcta-line-glow')) map.setPaintProperty('zcta-line-glow', 'line-width', lockedWidthExprGlow);
-        if (map.getLayer('zcta-line')) map.setPaintProperty('zcta-line', 'line-width', lockedWidthExprBase);
+        if (map.getLayer('zcta-safe-line'))  map.setPaintProperty('zcta-safe-line',  'line-width', mkExpr(6 * 0.5, origSafe,  lockSafe));
+        if (map.getLayer('zcta-line-glow2')) map.setPaintProperty('zcta-line-glow2', 'line-width', mkExpr(7 * 0.5, origGlow2, lockGlow2));
+        if (map.getLayer('zcta-line-glow'))  map.setPaintProperty('zcta-line-glow',  'line-width', mkExpr(5 * 0.5, origGlow,  lockGlow));
+        if (map.getLayer('zcta-line'))       map.setPaintProperty('zcta-line',        'line-width', mkExpr(4 * 0.5, origBase,  lockBase));
       } catch (e) {
         // ignore if layers not present yet
       }
