@@ -380,6 +380,17 @@ function normalizeFeatureGeometry(feature) {
   return null;
 }
 
+// MapLibre line-width expression for 2D/Real3D ZCTA outlines.
+// z9→z9.5: original ramp 2→5.6px. z9.5+: gentle linear growth to 8px at z16.
+// GPU-evaluated per-frame — no JS zoom listener needed.
+function zctaLineWidthExpr(mult = 1) {
+  return ['interpolate', ['linear'], ['zoom'],
+    9,   2.0 * mult,   // original z9 ramp start
+    9.5, 5.6 * mult,   // original z9.5 lock point
+    16,  8.0 * mult,   // gentle growth target (stays visually consistent)
+  ];
+}
+
 // T3 3D PIXELIZATION: Smooth continuous zoom-aware width scaling.
 // ZCTA (base 14m): 14m flat until zoom 10.5, then ramps to 64m at zoom 9.
 // Borough (base 18m): 1x at zoom≥11, 2x ramp at zoom 10-11, 3x ramp at zoom ≤9.
@@ -1493,19 +1504,7 @@ export default function MapView({ events }) {
     const isReal3D = real3DRef.current;
     map.addSource('zcta', { type: 'geojson', data, generateId: false });
 
-    // Compute 3D upper border constant in meters (same logic as 3D branch at zoom >=9.5)
-    const refLat = (map.getCenter && map.getCenter().lat) ? map.getCenter().lat : 40.71;
-    const baseMeters3D = 14;
-    const pitch = map.getPitch ? map.getPitch() : 0;
-    const pitchFactor = 1 + (pitch / 90) * 0.55;
-    const meters3DConstant = baseMeters3D * pitchFactor; // constant meters used by 3D upper border at zoom >=9.5
-    const metersPerPixelAt95 = 156543.03392 * Math.cos(refLat * Math.PI / 180) / Math.pow(2, 9.5);
-    const px95 = Math.max(1, meters3DConstant / metersPerPixelAt95);
-    // Translate to pixel widths for our 2D lines (base + glows)
-    const lineBasePx = Number(px95.toFixed(2));
-    const lineGlowPx = Number((lineBasePx * 1.25).toFixed(2));
-    const lineGlow2Px = Number((lineBasePx * 1.6).toFixed(2));
-    const safePx = Number((lineBasePx * 1.5).toFixed(2));
+
 
     // Topographic heat underlay — MapLibre native heatmap from multiple centroids per zip.
     // Single heatmap layer will receive multiple point features per zip so each local
@@ -1626,24 +1625,24 @@ export default function MapView({ events }) {
     map.addLayer({
       id: 'zcta-safe-line', type: 'line', source: 'zcta',
       filter: ['==', ['get', '_special'], true],
-      paint: { 'line-color': '#000000', 'line-width': safePx, 'line-opacity': (is3D || isReal3D) ? 0 : 1 },
+      paint: { 'line-color': '#000000', 'line-width': zctaLineWidthExpr(1.5), 'line-opacity': (is3D || isReal3D) ? 0 : 1 },
     });
 
     // Ground boundary glows (non-special) — hidden in 3D mode
     map.addLayer({
       id: 'zcta-line-glow2', type: 'line', source: 'zcta',
       filter: ['!=', ['get', '_special'], true],
-      paint: { 'line-color': OUTLINE_GLOW, 'line-width': lineGlow2Px, 'line-opacity': is3D ? 0 : (sat ? 0.25 : 0.35), 'line-blur': 10 },
+      paint: { 'line-color': OUTLINE_GLOW, 'line-width': zctaLineWidthExpr(1.6), 'line-opacity': is3D ? 0 : (sat ? 0.25 : 0.35), 'line-blur': 10 },
     });
     map.addLayer({
       id: 'zcta-line-glow', type: 'line', source: 'zcta',
       filter: ['!=', ['get', '_special'], true],
-      paint: { 'line-color': OUTLINE_COLOR, 'line-width': lineGlowPx, 'line-opacity': is3D ? 0 : (sat ? 0.55 : 0.75), 'line-blur': 3 },
+      paint: { 'line-color': OUTLINE_COLOR, 'line-width': zctaLineWidthExpr(1.25), 'line-opacity': is3D ? 0 : (sat ? 0.55 : 0.75), 'line-blur': 3 },
     });
     map.addLayer({
       id: 'zcta-line', type: 'line', source: 'zcta',
       filter: ['!=', ['get', '_special'], true],
-      paint: { 'line-color': OUTLINE_COLOR, 'line-width': lineBasePx, 'line-opacity': is3D ? 0 : 1 },
+      paint: { 'line-color': OUTLINE_COLOR, 'line-width': zctaLineWidthExpr(1), 'line-opacity': is3D ? 0 : 1 },
     });
 
     // Upper 3D border — annular ring using createZctaOutlineGeoJSON.
@@ -1868,34 +1867,13 @@ export default function MapView({ events }) {
       ({ zipMap, maxCount, tiers, withHeat } = cached);
     }
 
-    // Enforce 2D/Real3D outline widths & colors to match 3D upper border constant (zoom 9.5 reference)
-    if (!threeD) {
+    // Non-heatmap 2D/Real3D: restore standard line colors
+    if (!threeD && !heatmap) {
       try {
-        const refLat2 = (map.getCenter && map.getCenter().lat) ? map.getCenter().lat : 40.71;
-        const baseMeters3D_ = 14;
-        const pitch_ = map.getPitch ? map.getPitch() : 0;
-        const pitchFactor_ = 1 + (pitch_ / 90) * 0.55;
-        const meters3DConst_ = baseMeters3D_ * pitchFactor_; // meters used by 3D upper border at zoom >=9.5
-        const metersPerPixelAt95_ = 156543.03392 * Math.cos(refLat2 * Math.PI / 180) / Math.pow(2, 9.5);
-        const px95_ = Math.max(1, meters3DConst_ / metersPerPixelAt95_);
-        const lineBasePx_ = Number(px95_.toFixed(2));
-        const lineGlowPx_ = Number((lineBasePx_ * 1.25).toFixed(2));
-        const lineGlow2Px_ = Number((lineBasePx_ * 1.6).toFixed(2));
-        const safePx_ = Number((lineBasePx_ * 1.5).toFixed(2));
-
-
-        if (map.getLayer('zcta-safe-line')) map.setPaintProperty('zcta-safe-line', 'line-width', safePx_);
-        if (map.getLayer('zcta-line-glow2')) map.setPaintProperty('zcta-line-glow2', 'line-width', lineGlow2Px_);
-        if (map.getLayer('zcta-line-glow')) map.setPaintProperty('zcta-line-glow', 'line-width', lineGlowPx_);
-        if (map.getLayer('zcta-line')) map.setPaintProperty('zcta-line', 'line-width', lineBasePx_);
-
-        // Make sure non-heatmap (standard) 2D lines match 3D upper-extrusion color
-        if (!heatmap) {
-          if (map.getLayer('zcta-line')) map.setPaintProperty('zcta-line', 'line-color', OUTLINE_COLOR);
-          if (map.getLayer('zcta-line-glow')) map.setPaintProperty('zcta-line-glow', 'line-color', OUTLINE_COLOR);
-          if (map.getLayer('zcta-line-glow2')) map.setPaintProperty('zcta-line-glow2', 'line-color', OUTLINE_GLOW);
-          if (map.getLayer('zcta-safe-line')) map.setPaintProperty('zcta-safe-line', 'line-color', '#000000');
-        }
+        if (map.getLayer('zcta-line')) map.setPaintProperty('zcta-line', 'line-color', OUTLINE_COLOR);
+        if (map.getLayer('zcta-line-glow')) map.setPaintProperty('zcta-line-glow', 'line-color', OUTLINE_COLOR);
+        if (map.getLayer('zcta-line-glow2')) map.setPaintProperty('zcta-line-glow2', 'line-color', OUTLINE_GLOW);
+        if (map.getLayer('zcta-safe-line')) map.setPaintProperty('zcta-safe-line', 'line-color', '#000000');
       } catch (e) { /* ignore */ }
     }
 
@@ -2056,9 +2034,14 @@ export default function MapView({ events }) {
     const hoverOpacity = satellite ? 0.5 : 0.85;
     map.setPaintProperty('zcta-hover', 'fill-opacity', threeD ? 0 : ['case', ['boolean', ['feature-state', 'hovered'], false], hoverOpacity, 0]);
 
-    // Re-apply locked outline widths for 2D / Real3D (defensive: enforce after any style swap)
+    // Re-apply line-width expressions for 2D/Real3D (GPU-evaluated per-frame — defensive re-assert)
     if (!threeD) {
-      applyZctaLineWidths(map);
+      try {
+        if (map.getLayer('zcta-line'))       map.setPaintProperty('zcta-line',       'line-width', zctaLineWidthExpr(1));
+        if (map.getLayer('zcta-line-glow'))  map.setPaintProperty('zcta-line-glow',  'line-width', zctaLineWidthExpr(1.25));
+        if (map.getLayer('zcta-line-glow2')) map.setPaintProperty('zcta-line-glow2', 'line-width', zctaLineWidthExpr(1.6));
+        if (map.getLayer('zcta-safe-line'))  map.setPaintProperty('zcta-safe-line',  'line-width', zctaLineWidthExpr(1.5));
+      } catch (e) { /* ignore */ }
     }
 
     // Upper 3D border color: themed to zip's heat tier when heatmap on, red when off
@@ -2215,10 +2198,9 @@ export default function MapView({ events }) {
     const onZoom = () => {
       const is3D  = threeDRef.current;
       const isR3D = real3DRef.current;
-      // 2D and Real3D: update flat ZCTA line widths on every zoom so lines maintain
-      // apparent visual thickness (world-space compensation doubles px per zoom tick).
-      if (!is3D) applyZctaLineWidths(map);
+      // 2D/Real3D: line-width is a MapLibre expression (GPU-evaluated per-frame) — no JS update needed.
       if (!is3D && !isR3D) { prevZoom = map.getZoom(); return; }
+      if (!is3D && isR3D)  { prevZoom = map.getZoom(); }
       // ZCTA outline — 3D only (layer does not exist in Real3D)
       if (is3D && map.getSource('zcta-outline')) {
         if (zctaSkeletonRef.current && withHeatRef.current) {
@@ -2361,29 +2343,6 @@ export default function MapView({ events }) {
   // appear to shrink relative to the growing zip polygons, without becoming too thick.
   // z9-z10: original ramp/lock — DO NOT change this range.
   // z10+: +1px per zoom level from 6px base, capped at 12px at z16.
-  function applyZctaLineWidths(map) {
-    if (!map || typeof map.getZoom !== 'function') return;
-    const zoom = map.getZoom();
-    let base;
-    if (zoom >= 10) {
-      // +1px per zoom level starting at 6px. Cap at 12px so it stays tasteful.
-      base = Math.min(12, 6 + (zoom - 10));
-    } else if (zoom >= 9.5) {
-      base = 5.6; // original flat lock at z9.5
-    } else if (zoom >= 9) {
-      const t = (zoom - 9) / 0.5; // 0→1 from z9 to z9.5
-      base = 2 + t * 3.6;         // 2px → 5.6px linear ramp
-    } else {
-      base = 2;
-    }
-    try {
-      if (map.getLayer('zcta-line'))       map.setPaintProperty('zcta-line',       'line-width', Number(base.toFixed(2)));
-      if (map.getLayer('zcta-line-glow'))  map.setPaintProperty('zcta-line-glow',  'line-width', Number((base * 1.25).toFixed(2)));
-      if (map.getLayer('zcta-line-glow2')) map.setPaintProperty('zcta-line-glow2', 'line-width', Number((base * 1.6).toFixed(2)));
-      if (map.getLayer('zcta-safe-line'))  map.setPaintProperty('zcta-safe-line',  'line-width', Number((base * 1.5).toFixed(2)));
-    } catch (e) { /* ignore if layers not present */ }
-  }
-
   // Baseplate color expression — one flat dark contrast color per tier. No clustering.
   // Baseplates (z13-14) are a visual proxy layer — no need for shade differentiation.
   function baseplateColorExpr(isHeatmap, tsIdx = 0) {
