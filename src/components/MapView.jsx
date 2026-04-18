@@ -2058,17 +2058,18 @@ export default function MapView({ events }) {
 
     // Re-apply locked outline widths for 2D / Real3D (defensive: enforce after any style swap)
     if (!threeD) {
-      // Lock ZCTA outline to constant apparent (world-space) width at zoom >= 10.
-      // Below z10, use existing ramp (z9→z10). At z10+, exponential base 2 compensates for zoom scaling
-      // so the outline stays the same visual size on the map surface.
-      const z10Safe  = 6 * 1.4;  // 8.4px at z10
-      const z10Glow2 = 7 * 1.4;  // 9.8px at z10
-      const z10Glow  = 5 * 1.4;  // 7px at z10
-      const z10Base  = 4 * 1.4;  // 5.6px at z10
-      const lockedWidthExprSafe  = ['interpolate', ['exponential', 2], ['zoom'], 9, 6 * 0.5, 10, z10Safe, 16, z10Safe * 64];
-      const lockedWidthExprGlow2 = ['interpolate', ['exponential', 2], ['zoom'], 9, 7 * 0.5, 10, z10Glow2, 16, z10Glow2 * 64];
-      const lockedWidthExprGlow  = ['interpolate', ['exponential', 2], ['zoom'], 9, 5 * 0.5, 10, z10Glow, 16, z10Glow * 64];
-      const lockedWidthExprBase  = ['interpolate', ['exponential', 2], ['zoom'], 9, 4 * 0.5, 10, z10Base, 16, z10Base * 64];
+      // Lock ZCTA outline at a constant screen-pixel size for all zoom >= 10.
+      // Below z10: linear ramp from z9 up to the lock value so far-out zooms are still visible.
+      // At z10+: flat constant — outlines stay the same screen-pixel thickness and don't shrink.
+      // Values slightly larger than the old z9.5 lock (×1.5 vs ×1.4) as requested.
+      const lockBase  = 4 * 1.5;  // 6px at z10+ (was 5.6 locked at z9.5)
+      const lockGlow  = 5 * 1.5;  // 7.5px
+      const lockGlow2 = 7 * 1.5;  // 10.5px
+      const lockSafe  = 6 * 1.5;  // 9px
+      const lockedWidthExprBase  = ['case', ['>=', ['zoom'], 10], lockBase,  ['interpolate', ['linear'], ['zoom'], 9, 4 * 0.5, 10, lockBase]];
+      const lockedWidthExprGlow  = ['case', ['>=', ['zoom'], 10], lockGlow,  ['interpolate', ['linear'], ['zoom'], 9, 5 * 0.5, 10, lockGlow]];
+      const lockedWidthExprGlow2 = ['case', ['>=', ['zoom'], 10], lockGlow2, ['interpolate', ['linear'], ['zoom'], 9, 7 * 0.5, 10, lockGlow2]];
+      const lockedWidthExprSafe  = ['case', ['>=', ['zoom'], 10], lockSafe,  ['interpolate', ['linear'], ['zoom'], 9, 6 * 0.5, 10, lockSafe]];
       try {
         if (map.getLayer('zcta-safe-line')) map.setPaintProperty('zcta-safe-line', 'line-width', lockedWidthExprSafe);
         if (map.getLayer('zcta-line-glow2')) map.setPaintProperty('zcta-line-glow2', 'line-width', lockedWidthExprGlow2);
