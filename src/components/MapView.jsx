@@ -2058,31 +2058,7 @@ export default function MapView({ events }) {
 
     // Re-apply locked outline widths for 2D / Real3D (defensive: enforce after any style swap)
     if (!threeD) {
-      // z9 → z9.5: ramp 2px → 5.6px  (ORIGINAL — do not touch)
-      // z9.5 → z10: flat 5.6px        (ORIGINAL — do not touch)
-      // z10+: gentle exponential growth (base 1.4) so lines maintain relative visual
-      //   thickness as zip polygons scale larger on screen.
-      //   z10=6px, z11≈8.4px, z12≈11.8px, z13≈16.5px, z14≈23px, z16≈45px.
-      //   (base-2 gave 358px at z16 — too aggressive; base-1.4 stays reasonable)
-      const EXP = 1.4;
-      const origBase = 4 * 1.4; const startBase = 4 * 1.5; // 5.6 → 6px
-      const origGlow = 5 * 1.4; const startGlow = 5 * 1.5;
-      const origGlow2= 7 * 1.4; const startGlow2= 7 * 1.5;
-      const origSafe = 6 * 1.4; const startSafe = 6 * 1.5;
-      const mkExpr = (half, orig, start) => [
-        'case', ['>=', ['zoom'], 10],
-          ['interpolate', ['exponential', EXP], ['zoom'], 10, start, 16, start * Math.pow(EXP, 6)],
-        ['case', ['>=', ['zoom'], 9.5], orig,
-          ['interpolate', ['linear'], ['zoom'], 9, half, 9.5, orig]],
-      ];
-      try {
-        if (map.getLayer('zcta-safe-line'))  map.setPaintProperty('zcta-safe-line',  'line-width', mkExpr(6 * 0.5, origSafe,  startSafe));
-        if (map.getLayer('zcta-line-glow2')) map.setPaintProperty('zcta-line-glow2', 'line-width', mkExpr(7 * 0.5, origGlow2, startGlow2));
-        if (map.getLayer('zcta-line-glow'))  map.setPaintProperty('zcta-line-glow',  'line-width', mkExpr(5 * 0.5, origGlow,  startGlow));
-        if (map.getLayer('zcta-line'))       map.setPaintProperty('zcta-line',        'line-width', mkExpr(4 * 0.5, origBase,  startBase));
-      } catch (e) {
-        // ignore if layers not present yet
-      }
+      applyZctaLineWidths(map);
     }
 
     // Upper 3D border color: themed to zip's heat tier when heatmap on, red when off
@@ -2239,6 +2215,9 @@ export default function MapView({ events }) {
     const onZoom = () => {
       const is3D  = threeDRef.current;
       const isR3D = real3DRef.current;
+      // 2D and Real3D: update flat ZCTA line widths on every zoom so lines maintain
+      // apparent visual thickness (world-space compensation doubles px per zoom tick).
+      if (!is3D) applyZctaLineWidths(map);
       if (!is3D && !isR3D) { prevZoom = map.getZoom(); return; }
       // ZCTA outline — 3D only (layer does not exist in Real3D)
       if (is3D && map.getSource('zcta-outline')) {
@@ -2375,6 +2354,35 @@ export default function MapView({ events }) {
     if (map.getLayer('real3d-landuse-baseplate')) {
       map.setPaintProperty('real3d-landuse-baseplate', 'fill-color', baseplateColorExpr(isHm, tsIdx));
     }
+  }
+
+  // Update 2D ZCTA line widths based on current zoom — called on every zoom event and on
+  // heatmap effect for initial state. Applies world-space compensation at z10+ so outlines
+  // maintain apparent visual thickness as zip polygons scale up on screen.
+  // z9-z10: original ramp/lock — DO NOT change this range.
+  // z10+: double per zoom level (world-space constant), capped at 30px.
+  function applyZctaLineWidths(map) {
+    if (!map || typeof map.getZoom !== 'function') return;
+    const zoom = map.getZoom();
+    let base;
+    if (zoom >= 10) {
+      // World-space compensation: doubles per zoom tick (same rate map scales),
+      // capped at 30px so it stays visually reasonable at max zoom.
+      base = Math.min(30, 6 * Math.pow(2, zoom - 10));
+    } else if (zoom >= 9.5) {
+      base = 5.6; // original flat lock at z9.5
+    } else if (zoom >= 9) {
+      const t = (zoom - 9) / 0.5; // 0→1 from z9 to z9.5
+      base = 2 + t * 3.6;         // 2px → 5.6px linear ramp
+    } else {
+      base = 2;
+    }
+    try {
+      if (map.getLayer('zcta-line'))       map.setPaintProperty('zcta-line',       'line-width', Number(base.toFixed(2)));
+      if (map.getLayer('zcta-line-glow'))  map.setPaintProperty('zcta-line-glow',  'line-width', Number((base * 1.25).toFixed(2)));
+      if (map.getLayer('zcta-line-glow2')) map.setPaintProperty('zcta-line-glow2', 'line-width', Number((base * 1.6).toFixed(2)));
+      if (map.getLayer('zcta-safe-line'))  map.setPaintProperty('zcta-safe-line',  'line-width', Number((base * 1.5).toFixed(2)));
+    } catch (e) { /* ignore if layers not present */ }
   }
 
   // Baseplate color expression — one flat dark contrast color per tier. No clustering.
