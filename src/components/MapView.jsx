@@ -1736,6 +1736,18 @@ export default function MapView({ events }) {
     addLayers(map, geoData, satellite);
   }, [mapReady, geoData]);
 
+  // Pre-create Real3D layers at map init so first toggle is instant (just a visibility flip).
+  // Runs right after addLayers (same deps, defined after it — React fires in order).
+  // All layers are immediately hidden. Zero GPU cost for hidden layers.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady || !geoData) return;
+    if (real3dLayersCreatedRef.current) return; // already created (shouldn't happen, safety guard)
+    initReal3DLayers(map, heatmapRef.current, timespanIdxRef.current ?? 4);
+    // Hide immediately — user hasn't toggled Real3D on yet
+    setReal3DLayersVisible(map, false);
+  }, [mapReady, geoData]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Start background FGB cache building once map + ZCTA data are ready.
   // Runs once per session — Cache API persists data across sessions.
   useEffect(() => {
@@ -2814,9 +2826,11 @@ export default function MapView({ events }) {
 
       addBuildingLayers(map, isHeatmap, tsIdx);
 
-      // Viewport listener for instant render when cache isn't ready
+      // Viewport listener for instant render when cache isn't ready.
+      // Skip fetch when Real3D layers are hidden — no visible output to fill.
       let vpTimer = null;
       const onViewportChange = () => {
+        if (!real3DRef.current) return; // Real3D not active, skip unnecessary fetch
         if (vpTimer) clearTimeout(vpTimer);
         vpTimer = setTimeout(() => fetchViewportBuildings(mapRef.current), 200);
       };
@@ -2861,27 +2875,23 @@ export default function MapView({ events }) {
     }
 
     const isHm = heatmapRef.current;
-    const tsIdx = timespanIdxRef.current ?? 4;
 
     if (!real3dLayersCreatedRef.current) {
-      // First activation — create all layers
-      initReal3DLayers(map, isHm, tsIdx);
+      // Fallback — layers weren't pre-created (geoData was nil at map load). Create now.
+      initReal3DLayers(map, isHm, timespanIdxRef.current ?? 4);
     } else {
-      // Subsequent activation — just show layers + refresh paint with current hm/tsIdx state
+      // Normal path — layers already exist (pre-created at map init). Just flip visibility.
       setReal3DLayersVisible(map, true);
-      // If data exists but hasn't been baked, bake now (covers case where baking
-      // was skipped because source didn't exist when tiers completed)
+      // Ensure correct colors — bake if tiers are ready but not yet baked
       if (!buildingTiersBakedRef.current && buildingFGBRef.current && buildingZctaMapRef.current && precomputedTiersRef.current) {
-        bakeAllTiersIntoBuildings(); // bake handles setData + refreshBuildingColors internally
+        bakeAllTiersIntoBuildings();
       } else {
         refreshBuildingColors();
       }
       if (map.getLayer('real3d-roads-motorway')) {
-        const isHm = heatmapRef.current;
         map.setPaintProperty('real3d-roads-motorway', 'line-color', isHm ? '#884400' : '#ff2200');
       }
       if (map.getLayer('real3d-roads-primary')) {
-        const isHm = heatmapRef.current;
         map.setPaintProperty('real3d-roads-primary', 'line-color', isHm ? '#662200' : '#cc1800');
       }
     }
