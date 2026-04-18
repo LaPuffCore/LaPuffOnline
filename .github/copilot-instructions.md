@@ -206,11 +206,11 @@
 - **3 zoom tiers**:
   - Far zoom (< zoom 13): No 3D building extrusions or baseplates rendered. Roads and landuse visible.
   - Medium zoom (zoom 13–14): Baseplates only (flat footprints at 7m height, opacity fade-in z13–13.5).
-  - Close zoom (zoom 14+): Full 3D building extrusions at actual `height_roof` heights (opacity 0.92).
+  - Close zoom (zoom 14+): Full 3D building extrusions at actual `height_roof` heights (opacity 1.0, solid — enables GPU depth occlusion).
 - **Road feature zoom schema** (roads disappear when baseplates appear):
   - Motorway/trunk: z9 to z13.
-  - Primary/secondary: z11 to z13.
-  - Tertiary/residential: z12 to z13.
+  - Primary/secondary: z10 to z13 (updated from z11).
+  - Tertiary/residential: z11 to z13 (updated from z12).
   - Landuse proxy: maxzoom 13, fades out z12-13.
 - **Two color palettes** with clustering via `objectid % N` for GPU-side differentiation:
   - **Standard palette (heatmap OFF)**: 7 dark-red shades via `_s7` (objectid%7). Baseplates use 3 dark reds via `_s7`.
@@ -381,26 +381,30 @@ borough-outline (fill-extrusion, unrestricted, topmost)
 - **Building tier colors via baked properties**: Each building has `_tier_0.._tier_4` in its GeoJSON properties. Paint expressions use `['get', '_tier_X']` where X = active timespan index. GPU evaluates directly from properties — no feature-state, no CPU loop.
 - **`bakeAllTiersIntoBuildings()`**: Iterates all 381K buildings once, writing all 5 tier values from `precomputedTiersRef` using `buildingZctaMapRef`. Called when both pre-computed tiers AND ZCTA index are ready. After baking: clears `memoizedExprs.current`, calls `setData`, then calls `refreshBuildingColors()`.
 - **`refreshBuildingColors()`**: Central helper — clears `memoizedExprs.current = {}` and calls `setPaintProperty` for `real3d-buildings`, `real3d-buildings-baseplate`, and `real3d-landuse-baseplate` using current `heatmapRef.current + timespanIdxRef.current`. Called from: bake completion, heatmap effect, timespan effect, Real3D toggle (subsequent activation), addBuildingLayers setTimeout, fetchViewportBuildings (after setData), zoom listener (z13/z14 boundary crossing).
+- **Baking safety nets (commit c163dac)**: Every point where building data enters the map or paint is refreshed checks `!buildingTiersBakedRef.current && buildingFGBRef.current && buildingZctaMapRef.current && precomputedTiersRef.current` — if all prerequisites exist but baking hasn't run, it triggers `bakeAllTiersIntoBuildings()` immediately. This covers timing gaps where FGB cache and precomputed tiers complete in either order.
 - **`buildFGBCache` setData logic**: If `bakeAllTiersIntoBuildings()` ran (returns true), skip the second `setData` call — bake already called it + refreshed paint. Only call `setData` directly when baking is skipped (precomputed tiers not yet ready).
 - **`fetchViewportBuildings`**: Now bakes all 5 `_tier_X` columns from `precomputedTiersRef` for each viewport feature (not just `_tier` for current timespan). Calls `refreshBuildingColors()` after setData if Real3D is active. Guard: `if (buildingFGBRef.current) return` prevents overwriting baked full-cache data.
 - **Timespan change = `refreshBuildingColors()` only**: Switches `['get', '_tier_X']` column. GPU recompiles shader — near-instant.
 - **Heatmap toggle = `refreshBuildingColors()` only**: Switches between red palette (reads `_s7`) and tier palette (reads `_tier_X`).
 - **Pre-computed tiers**: `precomputedTiersRef.current[timespanIdx]` = `{ tiers, zipMap, maxCount }` for all 5 timespans. Computed in background on `[events, geoData, adjacency]` change. Time slider reads pre-computed (near-instant).
-- **Deferred building load**: `addBuildingLayers` adds empty source + layers (instant), then `setTimeout(0)` pushes data from cache or viewport fetch + calls `refreshBuildingColors()`. Real3D toggle never freezes.
+- **Deferred building load**: `addBuildingLayers` adds empty source + layers (instant), then `setTimeout(0)` pushes data from cache or viewport fetch. Tries baking if prerequisites ready — avoids blue flash from unbaked data.
 - **Zoom thresholds**: Baseplates z13-14 (opacity fade z13-13.5), buildings z14+. Building base 2m above ground.
 - **Layer visibility toggle**: `initReal3DLayers()` creates all 9 Real3D layers + sources once. `setReal3DLayersVisible()` toggles visibility. No layer/source destroy/recreate on toggle.
 - **`fetchViewportBuildings` zoom guard**: `< 13` — no viewport fetch needed below z13 since baseplates don't appear until z13. Full cache guard prevents viewport data from ever overwriting baked data.
 - **Zoom boundary color refresh**: `onZoom` listener detects crossing z13 (baseplates appear) or z14 (buildings appear) thresholds in Real3D+heatmap mode and calls `refreshBuildingColors()` — guards against stale expressions after zoom-driven layer transitions.
 
-### MapView — Safezone Hover (commit 25b9e99)
-- **`zcta-safezone-hover`** fill layer: transparent, captures mouse events for safezone features.
-- **Hover/click handlers** registered on both `zcta-fill` and `zcta-safezone-hover`.
-- **HoveredZip encoding**: safezone hover sets `hoveredZip` to `SAFE:{zip}` prefix. `isSafezoneHover` boolean derived from prefix.
-- **Side panel**: `openSidePanel('SAFE:{zip}')` → sets `sideZip='SAFEZONE'`, shows events for that zip, colonists section replaced with "🛡️ There are no colonists in safezones".
-- **Upper 3D outline**: `createZctaOutlineGeoJSON` now skips `_special` features — safezones don't get 3D border quads.
+### MapView — Safezone Architecture (commit 351b0cc+)
+- **Safezone split**: The original `99999` MultiPolygon (20 sub-polygons) is split at GeoJSON load time into individual `SAFEZONE_N` features, each a single Polygon with `_special: true`, `_safezoneNum: N`.
+- **`isSafezoneModzcta(zip)`**: Recognizes both `'SAFEZONE'` (legacy) and `'SAFEZONE_N'` prefixed strings.
+- **`getSafezoneLabel(zip)`**: Returns "Safe Zone N" from `SAFEZONE_N` string.
+- **`getEventsInSafezone(szFeature, events, timespanIdx)`**: PiP-based event lookup per individual safezone polygon. Used in hover info and side panel.
+- **Side panel**: `openSidePanel('SAFE:SAFEZONE_3')` → stores `sideZip = 'SAFEZONE_3'`, does PiP for that specific polygon only.
+- **3D outlines**: Both `createZctaOutlineGeoJSON` AND `buildZctaSkeleton` skip `_special` features — safezones get no 3D upper border quads.
+- **Hover**: `hoveredZip` set to `SAFE:SAFEZONE_N`, `isSafezoneHover` derived from prefix.
+- **Properties preserved**: white fill, locked extrusion height, all visual safezone properties unchanged.
 
-### MapView — Borough Outline Improvements (commit 25b9e99)
-- **computeBoroughAvgTiers**: Weighted average of zip tiers (sum/count), ranked 0-4. Replaced peak-count ranking that produced visually incorrect results.
+### MapView — Borough Outline Improvements (commit c163dac+)
+- **computeBoroughAvgTiers**: Uses TOTAL tier points (not average). Tier 4=5pts, 3=4pts, 2=3pts, 1=2pts, 0=0pts. Boroughs with many hot zips rank higher regardless of cold zip count. Prevents boroughs with more zips from being penalized.
 - **Width at z12+**: 1.5x constant (was 2.5x), smooth ramp 1.5x→2.5x at z11-12, then 2.5x→7x at z9-11.
 
 ### Favorites System
