@@ -665,6 +665,8 @@ function buildRingSkeleton(rawRing, direction) {
 
 function buildZctaSkeleton(sourceGeoJSON) {
   return sourceGeoJSON.features.map(feature => {
+    // Skip safezone features — they should NOT get an upper 3D border
+    if (feature.properties?._special) return null;
     const geom = feature.geometry;
     const props = feature.properties || {};
     if (geom.type === 'Polygon') {
@@ -999,25 +1001,21 @@ function computeZipBoroughMap(zctaFeatures, boroughFeatures) {
   return result;
 }
 
-// Compute borough heat tiers using weighted average of all zip tiers within each borough.
-// Each borough gets a unique tier 0–4 ranked by its mean zip tier value. This produces
-// visually correct results: boroughs with more hot zips get higher tiers.
+// Compute borough heat tiers using TOTAL tier points across all zips in each borough.
+// No averaging — boroughs with more hot zips rank higher regardless of how many cold zips they have.
+// Tier points: tier 4 = 5pts, tier 3 = 4pts, tier 2 = 3pts, tier 1 = 2pts, tier 0 = 0pts.
+// This prevents boroughs with many zips from being penalized by averaging down.
 function computeBoroughAvgTiers(tiers, zipBoroughMap, boroughCount) {
-  const boroughTierSum   = new Array(boroughCount).fill(0);
-  const boroughZipCount  = new Array(boroughCount).fill(0);
+  const TIER_POINTS = [0, 2, 3, 4, 5]; // tier 0 contributes nothing
+  const boroughTotalPts = new Array(boroughCount).fill(0);
   Object.entries(zipBoroughMap).forEach(([idx, bi]) => {
     const i = parseInt(idx);
-    const tier = tiers[i] ?? 0;
-    boroughTierSum[bi] += Math.max(0, tier);
-    boroughZipCount[bi]++;
+    const tier = Math.min(4, Math.max(0, tiers[i] ?? 0));
+    boroughTotalPts[bi] += TIER_POINTS[tier];
   });
-  // Compute mean tier per borough
-  const indexed = boroughTierSum.map((sum, i) => ({
-    avg: boroughZipCount[i] > 0 ? sum / boroughZipCount[i] : 0,
-    i,
-  }));
-  // Sort by mean tier descending — highest average gets tier 4
-  indexed.sort((a, b) => b.avg - a.avg);
+  // Sort by total points descending — highest total gets tier 4
+  const indexed = boroughTotalPts.map((pts, i) => ({ pts, i }));
+  indexed.sort((a, b) => b.pts - a.pts);
   const ranked = new Array(boroughCount).fill(0);
   for (let pos = 0; pos < indexed.length; pos++) {
     ranked[indexed[pos].i] = Math.max(0, 4 - pos);
@@ -2048,10 +2046,17 @@ export default function MapView({ events }) {
 
     // Re-apply locked outline widths for 2D / Real3D (defensive: enforce after any style swap)
     if (!threeD) {
-      const lockedWidthExprSafe = ['case', ['>=', ['zoom'], 9.5], 6 * 1.4, ['interpolate', ['linear'], ['zoom'], 9, 6 * 0.5, 9.5, 6 * 1.4]];
-      const lockedWidthExprGlow2 = ['case', ['>=', ['zoom'], 9.5], 7 * 1.4, ['interpolate', ['linear'], ['zoom'], 9, 7 * 0.5, 9.5, 7 * 1.4]];
-      const lockedWidthExprGlow = ['case', ['>=', ['zoom'], 9.5], 5 * 1.4, ['interpolate', ['linear'], ['zoom'], 9, 5 * 0.5, 9.5, 5 * 1.4]];
-      const lockedWidthExprBase = ['case', ['>=', ['zoom'], 9.5], 4 * 1.4, ['interpolate', ['linear'], ['zoom'], 9, 4 * 0.5, 9.5, 4 * 1.4]];
+      // Lock ZCTA outline to constant apparent (world-space) width at zoom >= 10.
+      // Below z10, use existing ramp (z9→z10). At z10+, exponential base 2 compensates for zoom scaling
+      // so the outline stays the same visual size on the map surface.
+      const z10Safe  = 6 * 1.4;  // 8.4px at z10
+      const z10Glow2 = 7 * 1.4;  // 9.8px at z10
+      const z10Glow  = 5 * 1.4;  // 7px at z10
+      const z10Base  = 4 * 1.4;  // 5.6px at z10
+      const lockedWidthExprSafe  = ['interpolate', ['exponential', 2], ['zoom'], 9, 6 * 0.5, 10, z10Safe, 16, z10Safe * 64];
+      const lockedWidthExprGlow2 = ['interpolate', ['exponential', 2], ['zoom'], 9, 7 * 0.5, 10, z10Glow2, 16, z10Glow2 * 64];
+      const lockedWidthExprGlow  = ['interpolate', ['exponential', 2], ['zoom'], 9, 5 * 0.5, 10, z10Glow, 16, z10Glow * 64];
+      const lockedWidthExprBase  = ['interpolate', ['exponential', 2], ['zoom'], 9, 4 * 0.5, 10, z10Base, 16, z10Base * 64];
       try {
         if (map.getLayer('zcta-safe-line')) map.setPaintProperty('zcta-safe-line', 'line-width', lockedWidthExprSafe);
         if (map.getLayer('zcta-line-glow2')) map.setPaintProperty('zcta-line-glow2', 'line-width', lockedWidthExprGlow2);
@@ -2720,9 +2725,14 @@ export default function MapView({ events }) {
     setTimeout(() => {
       if (!map.getSource('fgb-buildings')) return;
       if (buildingFGBRef.current) {
-        map.getSource('fgb-buildings').setData(buildingFGBRef.current);
-        // Refresh colors in case data was loaded before baking completed
-        refreshBuildingColors();
+        // If data is loaded but tiers not yet baked, bake now (covers race condition
+        // where FGB cache finished before precomputed tiers, skipping bake at cache time)
+        if (!buildingTiersBakedRef.current && buildingZctaMapRef.current && precomputedTiersRef.current) {
+          bakeAllTiersIntoBuildings(); // bake handles setData + refreshBuildingColors internally
+        } else {
+          map.getSource('fgb-buildings').setData(buildingFGBRef.current);
+          refreshBuildingColors();
+        }
       } else {
         fetchViewportBuildings(map); // fetchViewportBuildings handles its own color refresh
       }
@@ -2770,11 +2780,11 @@ export default function MapView({ events }) {
       map.addLayer({
         id: 'real3d-roads-primary', type: 'line',
         source: 'openmaptiles', 'source-layer': 'transportation',
-        minzoom: 11, maxzoom: 13,
+        minzoom: 10, maxzoom: 13,
         filter: ['all', ['match', ['get', 'class'], ['primary', 'secondary'], true, false], ['within', NYC_BBOX_GEOM]],
         paint: {
           'line-color': isHeatmap ? '#662200' : '#cc1800',
-          'line-width': ['interpolate', ['linear'], ['zoom'], 11, 0.8, 13, 3],
+          'line-width': ['interpolate', ['linear'], ['zoom'], 10, 0.5, 13, 3],
           'line-blur': 0.8, 'line-opacity': 0.75,
         },
       });
@@ -2782,11 +2792,11 @@ export default function MapView({ events }) {
       map.addLayer({
         id: 'real3d-roads-tertiary', type: 'line',
         source: 'openmaptiles', 'source-layer': 'transportation',
-        minzoom: 12, maxzoom: 13,
+        minzoom: 11, maxzoom: 13,
         filter: ['all', ['match', ['get', 'class'], ['tertiary', 'minor', 'residential'], true, false], ['within', NYC_BBOX_GEOM]],
         paint: {
           'line-color': '#771100',
-          'line-width': ['interpolate', ['linear'], ['zoom'], 12, 0.5, 13, 1.5],
+          'line-width': ['interpolate', ['linear'], ['zoom'], 11, 0.3, 13, 1.5],
           'line-blur': 0.3, 'line-opacity': 0.65,
         },
       });
@@ -2859,7 +2869,13 @@ export default function MapView({ events }) {
     } else {
       // Subsequent activation — just show layers + refresh paint with current hm/tsIdx state
       setReal3DLayersVisible(map, true);
-      refreshBuildingColors();
+      // If data exists but hasn't been baked, bake now (covers case where baking
+      // was skipped because source didn't exist when tiers completed)
+      if (!buildingTiersBakedRef.current && buildingFGBRef.current && buildingZctaMapRef.current && precomputedTiersRef.current) {
+        bakeAllTiersIntoBuildings(); // bake handles setData + refreshBuildingColors internally
+      } else {
+        refreshBuildingColors();
+      }
       if (map.getLayer('real3d-roads-motorway')) {
         const isHm = heatmapRef.current;
         map.setPaintProperty('real3d-roads-motorway', 'line-color', isHm ? '#884400' : '#ff2200');
@@ -2878,7 +2894,12 @@ export default function MapView({ events }) {
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady || !real3D) return;
-    refreshBuildingColors();
+    // Safety: if tiers not yet baked but all prerequisites exist, bake now
+    if (!buildingTiersBakedRef.current && buildingFGBRef.current && buildingZctaMapRef.current && precomputedTiersRef.current) {
+      bakeAllTiersIntoBuildings(); // bake handles setData + refreshBuildingColors internally
+    } else {
+      refreshBuildingColors();
+    }
     if (map.getLayer('real3d-roads-motorway')) {
       map.setPaintProperty('real3d-roads-motorway', 'line-color', heatmap ? '#884400' : '#ff2200');
     }
@@ -2895,7 +2916,12 @@ export default function MapView({ events }) {
     const map = mapRef.current;
     if (!map || !mapReady || !real3D) return;
     if (!heatmapRef.current) return;
-    refreshBuildingColors();
+    // Safety: if tiers not yet baked but all prerequisites exist, bake now
+    if (!buildingTiersBakedRef.current && buildingFGBRef.current && buildingZctaMapRef.current && precomputedTiersRef.current) {
+      bakeAllTiersIntoBuildings();
+    } else {
+      refreshBuildingColors();
+    }
   }, [timespanIdx, real3D, mapReady]);
 
   const handleThreeDToggle = () => {
