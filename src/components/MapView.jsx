@@ -2060,21 +2060,26 @@ export default function MapView({ events }) {
     if (!threeD) {
       // z9 → z9.5: ramp 2px → 5.6px  (ORIGINAL — do not touch)
       // z9.5 → z10: flat 5.6px        (ORIGINAL — do not touch)
-      // z10+: flat 6px                (slightly larger lock, new behaviour)
-      const origBase  = 4 * 1.4;  const lockBase  = 4 * 1.5;
-      const origGlow  = 5 * 1.4;  const lockGlow  = 5 * 1.5;
-      const origGlow2 = 7 * 1.4;  const lockGlow2 = 7 * 1.5;
-      const origSafe  = 6 * 1.4;  const lockSafe  = 6 * 1.5;
-      const mkExpr = (half, orig, lock) => [
-        'case', ['>=', ['zoom'], 10], lock,
+      // z10+: gentle exponential growth (base 1.4) so lines maintain relative visual
+      //   thickness as zip polygons scale larger on screen.
+      //   z10=6px, z11≈8.4px, z12≈11.8px, z13≈16.5px, z14≈23px, z16≈45px.
+      //   (base-2 gave 358px at z16 — too aggressive; base-1.4 stays reasonable)
+      const EXP = 1.4;
+      const origBase = 4 * 1.4; const startBase = 4 * 1.5; // 5.6 → 6px
+      const origGlow = 5 * 1.4; const startGlow = 5 * 1.5;
+      const origGlow2= 7 * 1.4; const startGlow2= 7 * 1.5;
+      const origSafe = 6 * 1.4; const startSafe = 6 * 1.5;
+      const mkExpr = (half, orig, start) => [
+        'case', ['>=', ['zoom'], 10],
+          ['interpolate', ['exponential', EXP], ['zoom'], 10, start, 16, start * Math.pow(EXP, 6)],
         ['case', ['>=', ['zoom'], 9.5], orig,
           ['interpolate', ['linear'], ['zoom'], 9, half, 9.5, orig]],
       ];
       try {
-        if (map.getLayer('zcta-safe-line'))  map.setPaintProperty('zcta-safe-line',  'line-width', mkExpr(6 * 0.5, origSafe,  lockSafe));
-        if (map.getLayer('zcta-line-glow2')) map.setPaintProperty('zcta-line-glow2', 'line-width', mkExpr(7 * 0.5, origGlow2, lockGlow2));
-        if (map.getLayer('zcta-line-glow'))  map.setPaintProperty('zcta-line-glow',  'line-width', mkExpr(5 * 0.5, origGlow,  lockGlow));
-        if (map.getLayer('zcta-line'))       map.setPaintProperty('zcta-line',        'line-width', mkExpr(4 * 0.5, origBase,  lockBase));
+        if (map.getLayer('zcta-safe-line'))  map.setPaintProperty('zcta-safe-line',  'line-width', mkExpr(6 * 0.5, origSafe,  startSafe));
+        if (map.getLayer('zcta-line-glow2')) map.setPaintProperty('zcta-line-glow2', 'line-width', mkExpr(7 * 0.5, origGlow2, startGlow2));
+        if (map.getLayer('zcta-line-glow'))  map.setPaintProperty('zcta-line-glow',  'line-width', mkExpr(5 * 0.5, origGlow,  startGlow));
+        if (map.getLayer('zcta-line'))       map.setPaintProperty('zcta-line',        'line-width', mkExpr(4 * 0.5, origBase,  startBase));
       } catch (e) {
         // ignore if layers not present yet
       }
