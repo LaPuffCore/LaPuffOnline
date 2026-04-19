@@ -401,10 +401,10 @@ function normalizeFeatureGeometry(feature) {
 function zctaLineWidthExpr(mult = 1) {
   return ['interpolate', ['linear'], ['zoom'],
     9,   1.5 * mult,   // z9 start — thin far out
-    9.5, 2.0 * mult,   // z9.5 — subtle, not heavy
-    10,  2.2 * mult,   // z10 — slightly thicker
-    11,  2.8 * mult,   // z11 — moderate
-    12,  4.0 * mult,   // z12 — close zoom growth
+    9.5, 1.7 * mult,   // z9.5 — subtle, not heavy
+    10,  1.8 * mult,   // z10 — slightly thicker
+    11,  2.3 * mult,   // z11 — moderate
+    12,  3.2 * mult,   // z12 — close zoom growth
     16,  8.0 * mult,   // z16 — full visual weight at close
   ];
 }
@@ -3079,13 +3079,40 @@ export default function MapView({ events, headerCollapsed = false }) {
     pinMarkersRef.current = [];
     if (!map || !mapReady || !showPins || !events?.length) return;
 
-    const eventsWithCoords = events.filter(e => {
-      const lat = parseFloat(e.lat), lng = parseFloat(e.lng);
-      return !isNaN(lat) && !isNaN(lng) && !e._sample;
-    });
+    // Build zip → centroid lookup from ZCTA GeoJSON for events missing lat/lng
+    const zipCentroidMap = {};
+    const geo = geoDataRef.current;
+    if (geo?.features) {
+      geo.features.forEach(f => {
+        const zip = f.properties?.MODZCTA || f.properties?.modzcta;
+        if (!zip || isSpecialZip(zip)) return;
+        const coords = f.geometry?.coordinates;
+        if (!coords?.length) return;
+        // Compute centroid from first ring of first polygon
+        const ring = f.geometry.type === 'MultiPolygon' ? coords[0][0] : (f.geometry.type === 'Polygon' ? coords[0] : null);
+        if (!ring?.length) return;
+        let cx = 0, cy = 0;
+        for (const pt of ring) { cx += pt[0]; cy += pt[1]; }
+        zipCentroidMap[zip] = [cx / ring.length, cy / ring.length];
+      });
+    }
 
-    eventsWithCoords.forEach(evt => {
-      const lat = parseFloat(evt.lat), lng = parseFloat(evt.lng);
+    // Resolve lat/lng for each event — use direct coords or zip centroid fallback
+    const resolvedEvents = events.map(e => {
+      let lat = parseFloat(e.lat), lng = parseFloat(e.lng);
+      if (!isNaN(lat) && !isNaN(lng)) return { ...e, _pinLat: lat, _pinLng: lng };
+      const zip = e.zip_code || e.zipcode;
+      if (zip && zipCentroidMap[zip]) {
+        const [cLng, cLat] = zipCentroidMap[zip];
+        // Add slight jitter so pins in same zip don't stack exactly
+        const jitter = () => (Math.random() - 0.5) * 0.003;
+        return { ...e, _pinLat: cLat + jitter(), _pinLng: cLng + jitter() };
+      }
+      return null;
+    }).filter(Boolean);
+
+    resolvedEvents.forEach(evt => {
+      const lat = evt._pinLat, lng = evt._pinLng;
       const fillColor = evt.hex_color || '#7C3AED';
       // Darken fill color for outline
       const darken = (hex) => {
@@ -3173,18 +3200,20 @@ export default function MapView({ events, headerCollapsed = false }) {
 
       {entered && (
         <>
-          {/* Controls — shift down when header collapsed to make room for expand button */}
-          <div className={`absolute left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-2 ${headerCollapsed ? 'top-14' : 'top-3'}`}>
-            <div className="flex items-center gap-1 bg-black/80 backdrop-blur border border-white/20 rounded-2xl px-3 py-1.5">
-              <span className="text-white text-xs font-black mr-1">📅</span>
-              {TIMESPAN_STEPS.map((s, i) => (
-                <button key={s.label} onClick={() => setTimespanIdx(i)}
-                  className={`px-3 py-1 rounded-xl text-xs font-black border transition-all ${timespanIdx === i ? 'bg-[#7C3AED] border-[#7C3AED] text-white' : 'bg-transparent text-white border-white/30 hover:border-white/60'}`}>
-                  {s.label}
-                </button>
-              ))}
+          {/* Controls — below header when expanded, below expand button when collapsed */}
+          <div className={`absolute left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-2 transition-[top] duration-300 ${headerCollapsed ? 'top-[68px]' : 'top-[104px] md:top-[72px]'}`}>
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1 bg-black/80 backdrop-blur border border-white/20 rounded-2xl px-3 py-1.5">
+                <span className="text-white text-xs font-black mr-1">📅</span>
+                {TIMESPAN_STEPS.map((s, i) => (
+                  <button key={s.label} onClick={() => setTimespanIdx(i)}
+                    className={`px-3 py-1 rounded-xl text-xs font-black border transition-all ${timespanIdx === i ? 'bg-[#7C3AED] border-[#7C3AED] text-white' : 'bg-transparent text-white border-white/30 hover:border-white/60'}`}>
+                    {s.label}
+                  </button>
+                ))}
+              </div>
               <button onClick={() => setShowPins(v => !v)}
-                className={`ml-1 px-2 py-1 rounded-xl text-xs font-black border transition-all ${showPins ? 'bg-[#7C3AED] border-[#7C3AED] text-white' : 'bg-transparent text-white border-white/30 hover:border-white/60'}`}
+                className={`px-2 py-1 rounded-xl text-xs font-black border transition-all bg-black/80 backdrop-blur ${showPins ? 'bg-[#7C3AED] border-[#7C3AED] text-white' : 'border-white/20 text-white hover:border-white/60'}`}
                 title={showPins ? 'Hide event pins' : 'Show event pins'}>
                 📍
               </button>
