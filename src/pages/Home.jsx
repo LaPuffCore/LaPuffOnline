@@ -131,7 +131,7 @@ export default function Home({ events = [], eventsLoading = false }) {
   return (
     <div className="h-[100dvh] lp-page-bg flex flex-col overflow-hidden" style={{ fontFamily: "'Nunito', cursive, sans-serif" }}>
       {/* Header — hidden when map is active and user collapsed it */}
-      <header className={`lp-topbar bg-white border-b-4 border-black z-50 shadow-[0_4px_0px_black] flex-shrink-0 transition-transform duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform ${(!showHeader || (isMap && headerCollapsed)) ? '-translate-y-full absolute w-full' : 'translate-y-0 relative'}`}>
+      <header className={`lp-topbar bg-white border-b-4 border-black z-50 shadow-[0_4px_0px_black] flex-shrink-0 transition-[transform,opacity] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform ${(!showHeader || (isMap && headerCollapsed)) ? '-translate-y-full opacity-0' : 'translate-y-0 opacity-100'} ${isMap ? 'absolute w-full' : 'relative'}`}>
         <div className="max-w-7xl mx-auto px-3 py-2 md:px-4 md:py-3">
           {/* Top Row: Logo, Nav, Menu */}
           <div className="flex items-center justify-between gap-2">
@@ -191,13 +191,13 @@ export default function Home({ events = [], eventsLoading = false }) {
               {/* Map-only collapse button (desktop) */}
               {isMap && (
                 <button onClick={() => setHeaderCollapsed(true)}
-                  className="hidden md:flex items-center gap-1 px-3 py-1.5 rounded-full text-[11px] font-black border-2 border-black bg-white shadow-[2px_2px_0px_black] transition-all whitespace-nowrap"
+                  className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-black border-2 border-black bg-white shadow-[2px_2px_0px_black] transition-all whitespace-nowrap"
                   title="Collapse header to see more map"
                   onMouseEnter={e => { e.currentTarget.style.backgroundColor = accentColor; e.currentTarget.style.color = '#fff'; e.currentTarget.style.borderColor = accentColor; }}
                   onMouseLeave={e => { e.currentTarget.style.backgroundColor = ''; e.currentTarget.style.color = ''; e.currentTarget.style.borderColor = ''; }}>
-                  <svg width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="2 7 5.5 3.5 9 7"/>
-                    <polyline points="2 10 5.5 6.5 9 10"/>
+                  <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="2 6 6 2 10 6"/>
+                    <polyline points="2 10 6 6 10 10"/>
                   </svg>
                   Collapse
                 </button>
@@ -263,13 +263,13 @@ export default function Home({ events = [], eventsLoading = false }) {
              {/* Map-only collapse button (mobile) */}
              {isMap && (
                <button onClick={() => setHeaderCollapsed(true)}
-                 className="flex items-center gap-1 px-3 py-1.5 rounded-full text-[11px] font-black border-2 border-black bg-white shadow-[2px_2px_0px_black] transition-all"
+                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-black border-2 border-black bg-white shadow-[2px_2px_0px_black] transition-all"
                  title="Collapse header"
                  onMouseEnter={e => { e.currentTarget.style.backgroundColor = accentColor; e.currentTarget.style.color = '#fff'; e.currentTarget.style.borderColor = accentColor; }}
                  onMouseLeave={e => { e.currentTarget.style.backgroundColor = ''; e.currentTarget.style.color = ''; e.currentTarget.style.borderColor = ''; }}>
-                 <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                   <polyline points="1.5 6.5 5 3 8.5 6.5"/>
-                   <polyline points="1.5 9.5 5 6 8.5 9.5"/>
+                 <svg width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                   <polyline points="2 6 6 2 10 6"/>
+                   <polyline points="2 10 6 6 10 10"/>
                  </svg>
                  Collapse
                </button>
@@ -290,9 +290,9 @@ export default function Home({ events = [], eventsLoading = false }) {
                   title="Expand header"
                   onMouseEnter={e => { e.currentTarget.style.backgroundColor = accentColor; e.currentTarget.style.color = '#fff'; e.currentTarget.style.borderColor = accentColor; }}
                   onMouseLeave={e => { e.currentTarget.style.backgroundColor = ''; e.currentTarget.style.color = ''; e.currentTarget.style.borderColor = ''; }}>
-                  <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="2 4.5 6.5 9 11 4.5"/>
-                    <polyline points="2 1.5 6.5 6 11 1.5"/>
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="2 6 6 10 10 6"/>
+                    <polyline points="2 2 6 6 10 2"/>
                   </svg>
                   Expand
                 </button>

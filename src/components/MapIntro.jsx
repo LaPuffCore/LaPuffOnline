@@ -5,10 +5,9 @@ export default function MapIntro({ onEnter }) {
 
   function handleEnter() {
     setPhase('opening');
-    // After doors open (1.2s), start fading title
     setTimeout(() => setPhase('fading'), 1200);
-    // After fade (0.8s more), call onEnter
-    setTimeout(onEnter, 2000);
+    // Use requestAnimationFrame to avoid blocking during heavy map computation
+    setTimeout(() => requestAnimationFrame(onEnter), 2000);
   }
 
   const doorsOpen = phase === 'opening' || phase === 'fading';

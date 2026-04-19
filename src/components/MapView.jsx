@@ -383,14 +383,15 @@ function normalizeFeatureGeometry(feature) {
 }
 
 // MapLibre line-width expression for 2D/Real3D ZCTA outlines.
-// z9→z9.5: thin ramp. z9.5→z11: gradual growth. z11→z16: smooth scaling to maintain visual weight.
+// z9→z9.5: thin ramp. z10→z12: reduced. z12+: scales up for visual weight.
 // GPU-evaluated per-frame — no JS zoom listener needed.
 function zctaLineWidthExpr(mult = 1) {
   return ['interpolate', ['linear'], ['zoom'],
     9,   1.5 * mult,   // z9 start — thin far out
     9.5, 2.0 * mult,   // z9.5 — subtle, not heavy
-    11,  3.5 * mult,   // z11 — moderate, transition to close zoom
-    12,  5.0 * mult,   // z12 — close zoom grows
+    10,  2.2 * mult,   // z10 — slightly thicker
+    11,  2.8 * mult,   // z11 — moderate
+    12,  4.0 * mult,   // z12 — close zoom growth
     16,  8.0 * mult,   // z16 — full visual weight at close
   ];
 }
@@ -1360,6 +1361,11 @@ export default function MapView({ events, headerCollapsed = false }) {
   // Cache status for FGB loading indicator: 'idle' | 'building' | 'paused' | 'done'
   const [fgbCacheStatus, setFgbCacheStatus] = useState('idle');
   const [fgbCacheProgress, setFgbCacheProgress] = useState(0); // 0-100
+  // Event pin markers toggle
+  const [showPins, setShowPins] = useState(false);
+  const [hoveredPinEvent, setHoveredPinEvent] = useState(null);
+  const [hoveredPinPos, setHoveredPinPos] = useState(null);
+  const pinMarkersRef = useRef([]);
 
   // Auto-dismiss cache indicator 2 seconds after "done"
   useEffect(() => {
@@ -2756,7 +2762,7 @@ export default function MapView({ events, headerCollapsed = false }) {
       map.addLayer({
         id: 'real3d-roads-motorway', type: 'line',
         source: 'openmaptiles', 'source-layer': 'transportation',
-        minzoom: 9, maxzoom: 14,
+        minzoom: 9,
         filter: ['in', ['get', 'class'], ['literal', ['motorway', 'trunk']]],
         paint: {
           'line-color': isHeatmap ? '#6b3300' : '#991000',
@@ -2768,7 +2774,7 @@ export default function MapView({ events, headerCollapsed = false }) {
       map.addLayer({
         id: 'real3d-roads-primary', type: 'line',
         source: 'openmaptiles', 'source-layer': 'transportation',
-        minzoom: 10, maxzoom: 14,
+        minzoom: 10,
         filter: ['in', ['get', 'class'], ['literal', ['primary', 'secondary']]],
         paint: {
           'line-color': isHeatmap ? '#553300' : '#aa1400',
@@ -2780,7 +2786,7 @@ export default function MapView({ events, headerCollapsed = false }) {
       map.addLayer({
         id: 'real3d-roads-tertiary', type: 'line',
         source: 'openmaptiles', 'source-layer': 'transportation',
-        minzoom: 11, maxzoom: 14,
+        minzoom: 11,
         filter: ['in', ['get', 'class'], ['literal', ['tertiary', 'minor', 'service']]],
         paint: {
           'line-color': isHeatmap ? '#553300' : '#771100',
@@ -2955,7 +2961,14 @@ export default function MapView({ events, headerCollapsed = false }) {
         ? { zipMap: cachedTierDataRef.current.zipMap }
         : buildZipEventMap(events, TIMESPAN_STEPS[timespanIdx].days);
       setHoveredEvents(zipMap[rawZip] || []);
-      getZipColonists(rawZip).then(c => setHoveredColonists(c.length)).catch(() => setHoveredColonists(0));
+      getZipColonists(rawZip).then(c => {
+        let total = c.length;
+        if (SAMPLE_MODE) total += getSampleUsersForZip(rawZip).length;
+        setHoveredColonists(total);
+      }).catch(() => {
+        const sampleCount = SAMPLE_MODE ? getSampleUsersForZip(rawZip).length : 0;
+        setHoveredColonists(sampleCount);
+      });
     }
   }, [hoveredZip, timespanIdx, events]);
 
@@ -2995,6 +3008,74 @@ export default function MapView({ events, headerCollapsed = false }) {
     } catch { setNotInNYC(true); setTimeout(() => setNotInNYC(false), 6000); }
     setLocLoading(false);
   }
+
+  // ── Event pin markers ──
+  useEffect(() => {
+    const map = mapRef.current;
+    // Remove existing markers
+    pinMarkersRef.current.forEach(m => m.remove());
+    pinMarkersRef.current = [];
+    if (!map || !mapReady || !showPins || !events?.length) return;
+
+    const eventsWithCoords = events.filter(e => {
+      const lat = parseFloat(e.lat), lng = parseFloat(e.lng);
+      return !isNaN(lat) && !isNaN(lng) && !e._sample;
+    });
+
+    eventsWithCoords.forEach(evt => {
+      const lat = parseFloat(evt.lat), lng = parseFloat(evt.lng);
+      const fillColor = evt.hex_color || '#7C3AED';
+      // Darken fill color for outline
+      const darken = (hex) => {
+        const r = Math.max(0, parseInt(hex.slice(1,3), 16) - 40);
+        const g = Math.max(0, parseInt(hex.slice(3,5), 16) - 40);
+        const b = Math.max(0, parseInt(hex.slice(5,7), 16) - 40);
+        return `rgb(${r},${g},${b})`;
+      };
+      const outlineColor = darken(fillColor);
+      const emoji = evt.representative_emoji || '🎉';
+
+      // Create pin SVG element
+      const el = document.createElement('div');
+      el.className = 'lp-event-pin';
+      el.style.cssText = 'cursor:pointer;width:32px;height:42px;position:relative;filter:drop-shadow(1px 2px 2px rgba(0,0,0,0.5));';
+      el.innerHTML = `
+        <svg width="32" height="42" viewBox="0 0 32 42" xmlns="http://www.w3.org/2000/svg">
+          <path d="M16 40 C16 40 2 24 2 14 C2 6.3 8.3 1 16 1 C23.7 1 30 6.3 30 14 C30 24 16 40 16 40Z"
+            fill="${fillColor}" stroke="${outlineColor}" stroke-width="2"/>
+          <circle cx="16" cy="14" r="8" fill="white" stroke="${outlineColor}" stroke-width="1.5"/>
+        </svg>
+        <span style="position:absolute;top:5px;left:50%;transform:translateX(-50%);font-size:12px;line-height:1;pointer-events:none;">${emoji}</span>
+      `;
+
+      el.addEventListener('mouseenter', (e) => {
+        setHoveredPinEvent(evt);
+        setHoveredPinPos({ x: e.clientX, y: e.clientY });
+      });
+      el.addEventListener('mousemove', (e) => {
+        setHoveredPinPos({ x: e.clientX, y: e.clientY });
+      });
+      el.addEventListener('mouseleave', () => {
+        setHoveredPinEvent(null);
+        setHoveredPinPos(null);
+      });
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        setHoveredPinEvent(null);
+        setSelectedEvent(evt);
+      });
+
+      const marker = new maplibregl.Marker({ element: el, anchor: 'bottom' })
+        .setLngLat([lng, lat])
+        .addTo(map);
+      pinMarkersRef.current.push(marker);
+    });
+
+    return () => {
+      pinMarkersRef.current.forEach(m => m.remove());
+      pinMarkersRef.current = [];
+    };
+  }, [showPins, events, mapReady]);
 
   useEffect(() => {
     const h = e => { if (e.key === 'Escape') { setHoloFeature(null); setSideZip(null); setSideEvents([]); setSideColonists([]); } };
@@ -3040,6 +3121,11 @@ export default function MapView({ events, headerCollapsed = false }) {
                   {s.label}
                 </button>
               ))}
+              <button onClick={() => setShowPins(v => !v)}
+                className={`ml-1 px-2 py-1 rounded-xl text-xs font-black border transition-all ${showPins ? 'bg-[#7C3AED] border-[#7C3AED] text-white' : 'bg-transparent text-white border-white/30 hover:border-white/60'}`}
+                title={showPins ? 'Hide event pins' : 'Show event pins'}>
+                📍
+              </button>
             </div>
             <div className="flex gap-2 flex-wrap justify-center">
               <div className="flex flex-col items-center gap-2">
@@ -3135,6 +3221,27 @@ export default function MapView({ events, headerCollapsed = false }) {
                     <p className="text-emerald-400/70 text-xs italic">🛡️ There are no colonists in safezones</p>
                   </div>
                 )}
+              </div>
+            </div>
+          )}
+
+          {/* ── Pin hover popup ── */}
+          {hoveredPinEvent && hoveredPinPos && (
+            <div className="fixed z-[100001] pointer-events-none"
+              style={{ left: Math.min(hoveredPinPos.x + 14, window.innerWidth - 260), top: Math.max(hoveredPinPos.y - 60, 10), width: 240 }}>
+              <div className="bg-gray-950/95 border border-white/20 rounded-2xl overflow-hidden shadow-[0_0_20px_rgba(0,0,0,0.6)]">
+                <div className="px-3 py-2 border-b border-white/10" style={{ borderLeft: `3px solid ${hoveredPinEvent.hex_color || '#7C3AED'}` }}>
+                  <p className="text-white font-black text-xs truncate">{hoveredPinEvent.representative_emoji || '🎉'} {hoveredPinEvent.event_name}</p>
+                  <p className="text-white/50 text-[10px]">{hoveredPinEvent.event_date} · {hoveredPinEvent.city || 'NYC'}</p>
+                </div>
+                {hoveredPinEvent.event_description && (
+                  <div className="px-3 py-1.5">
+                    <p className="text-white/60 text-[10px] line-clamp-2">{hoveredPinEvent.event_description}</p>
+                  </div>
+                )}
+                <div className="px-3 py-1.5 border-t border-white/10">
+                  <p className="text-[#7C3AED] text-[10px] font-bold">Click pin to view details</p>
+                </div>
               </div>
             </div>
           )}
