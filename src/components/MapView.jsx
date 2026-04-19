@@ -2354,11 +2354,11 @@ export default function MapView({ events, headerCollapsed = false }) {
 
   // Central helper — clears stale memoized exprs and re-applies building/baseplate colors.
   // Called after any setData or toggle that may invalidate the current GPU expression.
-  function refreshBuildingColors() {
+  function refreshBuildingColors(overrideHm, overrideTsIdx) {
     const map = mapRef.current;
     if (!map || !map.getStyle()) return;
-    const isHm = heatmapRef.current;
-    const tsIdx = timespanIdxRef.current ?? 4;
+    const isHm = overrideHm !== undefined ? overrideHm : heatmapRef.current;
+    const tsIdx = overrideTsIdx !== undefined ? overrideTsIdx : (timespanIdxRef.current ?? 4);
     memoizedExprs.current = {};
     if (map.getLayer('real3d-buildings')) {
       map.setPaintProperty('real3d-buildings', 'fill-extrusion-color', buildingColorExprByState(isHm, tsIdx));
@@ -2946,7 +2946,7 @@ export default function MapView({ events, headerCollapsed = false }) {
       if (!buildingTiersBakedRef.current && buildingFGBRef.current && buildingZctaMapRef.current && precomputedTiersRef.current) {
         bakeAllTiersIntoBuildings().catch(() => {});
       } else {
-        refreshBuildingColors();
+        refreshBuildingColors(isHm);
       }
       updateRoadColors(map, isHm);
     }
@@ -2963,7 +2963,7 @@ export default function MapView({ events, headerCollapsed = false }) {
     if (!buildingTiersBakedRef.current && buildingFGBRef.current && buildingZctaMapRef.current && precomputedTiersRef.current) {
       bakeAllTiersIntoBuildings().catch(() => {}); // async bake; handles setData + refreshBuildingColors internally
     } else {
-      refreshBuildingColors();
+      refreshBuildingColors(heatmap, timespanIdx);
     }
     updateRoadColors(map, heatmap);
     if (map.getLayer('zcta-safezone-extrusion')) {
@@ -2980,7 +2980,7 @@ export default function MapView({ events, headerCollapsed = false }) {
     if (!buildingTiersBakedRef.current && buildingFGBRef.current && buildingZctaMapRef.current && precomputedTiersRef.current) {
       bakeAllTiersIntoBuildings().catch(() => {});
     } else {
-      refreshBuildingColors();
+      refreshBuildingColors(true, timespanIdx);
     }
     updateRoadColors(map, true);
   }, [timespanIdx, real3D, mapReady]);
