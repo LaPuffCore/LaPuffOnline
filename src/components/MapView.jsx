@@ -7,6 +7,8 @@ import MapIntro from './MapIntro';
 import CRTEffect from './CRTEffect';
 import { getZipColonists } from '../lib/pointsSystem';
 import { pingNYCLocation, getLastLocation } from '../lib/locationService';
+import { SAMPLE_MODE } from '../lib/sampleConfig';
+import { getSampleUsersForZip } from '../lib/sampleUsers';
 import { deserialize as fgbDeserialize } from 'flatgeobuf/lib/mjs/geojson.js';
 
 const GEOJSON_URL = './data/MODZCTA_2010_WGS1984.geo.json';
@@ -381,12 +383,14 @@ function normalizeFeatureGeometry(feature) {
 }
 
 // MapLibre line-width expression for 2D/Real3D ZCTA outlines.
-// z9→z9.5: original ramp 2→5.6px. z9.5+: gentle linear growth to 8px at z16.
+// z9→z9.5: original ramp 2→3.5px. z9.5→z11: ramp to 6.0px. z11→z16: gentle growth to 8px.
+// z9.5 value reduced from 5.6 (user: too big at 9.5-11). z11+ unchanged.
 // GPU-evaluated per-frame — no JS zoom listener needed.
 function zctaLineWidthExpr(mult = 1) {
   return ['interpolate', ['linear'], ['zoom'],
     9,   2.0 * mult,   // original z9 ramp start
-    9.5, 5.6 * mult,   // original z9.5 lock point
+    9.5, 3.5 * mult,   // reduced from 5.6 — less thick at far-mid zoom
+    11,  6.0 * mult,   // z11 anchor — preserves z11+ visual size
     16,  8.0 * mult,   // gentle growth target (stays visually consistent)
   ];
 }
@@ -1269,7 +1273,7 @@ function ZipHologramMobile({ feature, color, onClose }) {
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
-export default function MapView({ events }) {
+export default function MapView({ events, headerCollapsed = false }) {
   const [topoOn, setTopoOn] = useState(() => {
     try {
       const v = localStorage.getItem('lapuff_topo_on');
@@ -2752,10 +2756,9 @@ export default function MapView({ events }) {
       map.addLayer({
         id: 'real3d-roads-motorway', type: 'line',
         source: 'openmaptiles', 'source-layer': 'transportation',
-        minzoom: 9, maxzoom: 13,
-        filter: ['match', ['get', 'class'], ['motorway', 'trunk'], true, false],
+        minzoom: 9, maxzoom: 14,
         paint: {
-          'line-color': isHeatmap ? '#884400' : '#ff2200',
+          'line-color': isHeatmap ? '#7a2000' : '#c41000',
           'line-width': ['interpolate', ['linear'], ['zoom'], 9, 1.5, 13, 5],
           'line-blur': 1.5, 'line-opacity': 0.9,
         },
@@ -2764,8 +2767,7 @@ export default function MapView({ events }) {
       map.addLayer({
         id: 'real3d-roads-primary', type: 'line',
         source: 'openmaptiles', 'source-layer': 'transportation',
-        minzoom: 10, maxzoom: 13,
-        filter: ['all', ['match', ['get', 'class'], ['primary', 'secondary'], true, false], ['within', NYC_BBOX_GEOM]],
+        minzoom: 10, maxzoom: 14,
         paint: {
           'line-color': isHeatmap ? '#662200' : '#cc1800',
           'line-width': ['interpolate', ['linear'], ['zoom'], 10, 0.5, 13, 3],
@@ -2776,8 +2778,7 @@ export default function MapView({ events }) {
       map.addLayer({
         id: 'real3d-roads-tertiary', type: 'line',
         source: 'openmaptiles', 'source-layer': 'transportation',
-        minzoom: 11, maxzoom: 13,
-        filter: ['all', ['match', ['get', 'class'], ['tertiary', 'minor', 'residential'], true, false], ['within', NYC_BBOX_GEOM]],
+        minzoom: 11, maxzoom: 14,
         paint: {
           'line-color': '#771100',
           'line-width': ['interpolate', ['linear'], ['zoom'], 11, 0.3, 13, 1.5],
@@ -2788,11 +2789,11 @@ export default function MapView({ events }) {
       map.addLayer({
         id: 'real3d-landuse-baseplate', type: 'fill',
         source: 'openmaptiles', 'source-layer': 'landuse',
-        maxzoom: 13,
+        maxzoom: 14,
         filter: ['all', ['match', ['get', 'class'], ['residential', 'commercial', 'industrial', 'retail'], true, false], ['within', NYC_BBOX_GEOM]],
         paint: {
           'fill-color': baseplateColorExpr(isHeatmap, tsIdx),
-          'fill-opacity': ['interpolate', ['linear'], ['zoom'], 9, 0, 10, 0.45, 12, 0.45, 13, 0],
+          'fill-opacity': ['interpolate', ['linear'], ['zoom'], 9, 0, 10, 0.45, 13, 0.45, 14, 0],
         },
       });
 
@@ -2965,7 +2966,12 @@ export default function MapView({ events }) {
         ? { zipMap: cachedTierDataRef.current.zipMap }
         : buildZipEventMap(events, TIMESPAN_STEPS[timespanIdx].days);
       setSideEvents(zipMap[rawZip] || []);
-      setSideColonists(await getZipColonists(rawZip).catch(() => []));
+      let colonists = await getZipColonists(rawZip).catch(() => []);
+      if (SAMPLE_MODE) {
+        const samples = getSampleUsersForZip(rawZip);
+        colonists = [...colonists, ...samples].sort((a, b) => b.clout_points - a.clout_points);
+      }
+      setSideColonists(colonists);
     }
   }
 
@@ -3015,8 +3021,8 @@ export default function MapView({ events }) {
 
       {entered && (
         <>
-          {/* Controls */}
-          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-2">
+          {/* Controls — shift down when header collapsed to make room for expand button */}
+          <div className={`absolute left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-2 ${headerCollapsed ? 'top-14' : 'top-3'}`}>
             <div className="flex items-center gap-1 bg-black/80 backdrop-blur border border-white/20 rounded-2xl px-3 py-1.5">
               <span className="text-white text-xs font-black mr-1">📅</span>
               {TIMESPAN_STEPS.map((s, i) => (
@@ -3147,14 +3153,19 @@ export default function MapView({ events }) {
                     <div key={event.id} onClick={() => setSelectedEvent(event)}
                       className="flex items-start gap-3 p-3 border-b border-white/5 cursor-pointer hover:bg-white/5 transition-colors"
                       style={{ borderLeftColor: event.hex_color || '#7C3AED', borderLeftWidth: 3 }}>
-                      <div className="w-10 h-10 rounded-xl flex-shrink-0 overflow-hidden flex items-center justify-center text-xl"
+                      <div className="w-10 h-10 rounded-xl flex-shrink-0 overflow-hidden flex items-center justify-center text-xl relative"
                         style={{ background: (event.hex_color || '#7C3AED') + '33', border: `2px solid ${event.hex_color || '#7C3AED'}` }}>
-                        {event.photos?.[0]
-                          ? <img src={event.photos[0]} className="w-full h-full object-cover" alt="" onError={e => { e.target.style.display = 'none'; }} />
-                          : event.representative_emoji || '🎉'}
+                        {/* Emoji always visible as base layer — shown when image absent/broken */}
+                        <span className="absolute inset-0 flex items-center justify-center text-xl pointer-events-none">{event.representative_emoji || '🎉'}</span>
+                        {event.photos?.[0] && (
+                          <img src={event.photos[0]} className="w-full h-full object-cover relative z-10" alt=""
+                            onError={e => e.target.style.display = 'none'} />
+                        )}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-white font-black text-sm truncate">{event.representative_emoji} {event.event_name}</p>
+                        <p className="text-white font-black text-sm truncate">
+                          {event.photos?.[0] && (event.representative_emoji || '')} {event.event_name}
+                        </p>
                         <p className="text-white/40 text-xs">{event.event_date} · {event.price_category === 'free' ? 'FREE' : event.price_category || '?'}</p>
                         <div className="flex gap-1 mt-1 flex-wrap">
                           {generateAutoTags(event).slice(0, 2).map(t => (

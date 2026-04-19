@@ -21,6 +21,7 @@ export default function Home({ events = [], eventsLoading = false }) {
   const [user, setUser] = useState(null);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showHeader, setShowHeader] = useState(true);
+  const [headerCollapsed, setHeaderCollapsed] = useState(false);
   const [logoHovered, setLogoHovered] = useState(false);
   const lastScrollY = useRef(0);
   const downScrollAccum = useRef(0);
@@ -129,8 +130,8 @@ export default function Home({ events = [], eventsLoading = false }) {
 
   return (
     <div className="h-[100dvh] lp-page-bg flex flex-col overflow-hidden" style={{ fontFamily: "'Nunito', cursive, sans-serif" }}>
-      {/* Header */}
-      <header className={`lp-topbar bg-white border-b-4 border-black z-50 shadow-[0_4px_0px_black] flex-shrink-0 transition-transform duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform ${!showHeader ? '-translate-y-full absolute w-full' : 'translate-y-0 relative'}`}>
+      {/* Header — hidden when map is active and user collapsed it */}
+      <header className={`lp-topbar bg-white border-b-4 border-black z-50 shadow-[0_4px_0px_black] flex-shrink-0 transition-transform duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform ${(!showHeader || (isMap && headerCollapsed)) ? '-translate-y-full absolute w-full' : 'translate-y-0 relative'}`}>
         <div className="max-w-7xl mx-auto px-3 py-2 md:px-4 md:py-3">
           {/* Top Row: Logo, Nav, Menu */}
           <div className="flex items-center justify-between gap-2">
@@ -187,6 +188,18 @@ export default function Home({ events = [], eventsLoading = false }) {
 
             {/* Desktop Actions / Mobile Hamburger */}
             <div className="flex items-center gap-2">
+              {/* Map-only collapse button (desktop) */}
+              {isMap && (
+                <button onClick={() => setHeaderCollapsed(true)}
+                  className="hidden md:flex items-center gap-1 px-3 py-1.5 rounded-full text-[11px] font-black border-2 border-black bg-white hover:bg-gray-50 shadow-[2px_2px_0px_black] transition-all whitespace-nowrap"
+                  title="Collapse header to see more map">
+                  <svg width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="2 7 5.5 3.5 9 7"/>
+                    <polyline points="2 10 5.5 6.5 9 10"/>
+                  </svg>
+                  Collapse
+                </button>
+              )}
               <button onClick={() => setShowForm(true)}
                 className="hidden md:block text-white font-black px-5 py-2.5 rounded-full text-sm transition-all shadow-[3px_3px_0px_#333] hover:scale-105 whitespace-nowrap"
                 style={{ backgroundColor: accentColor }}>
@@ -225,7 +238,7 @@ export default function Home({ events = [], eventsLoading = false }) {
             </div>
           </div>
 
-          {/* Mobile Secondary Row: Auth + Submit */}
+          {/* Mobile Secondary Row: Auth + Submit + Map Collapse */}
           <div className="flex md:hidden items-center justify-center gap-3 mt-2 pb-1">
              {user ? (
                 <button onClick={() => setShowUserMenu(v => !v)}
@@ -245,6 +258,18 @@ export default function Home({ events = [], eventsLoading = false }) {
                 style={{ backgroundColor: accentColor }}>
                 + Submit Event
              </button>
+             {/* Map-only collapse button (mobile) */}
+             {isMap && (
+               <button onClick={() => setHeaderCollapsed(true)}
+                 className="flex items-center gap-1 px-3 py-1.5 rounded-full text-[11px] font-black border-2 border-black bg-white hover:bg-gray-50 shadow-[2px_2px_0px_black] transition-all"
+                 title="Collapse header">
+                 <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                   <polyline points="1.5 6.5 5 3 8.5 6.5"/>
+                   <polyline points="1.5 9.5 5 6 8.5 9.5"/>
+                 </svg>
+                 Collapse
+               </button>
+             )}
           </div>
         </div>
       </header>
@@ -252,8 +277,21 @@ export default function Home({ events = [], eventsLoading = false }) {
       {/* Content Area */}
       <div className="flex-1 relative overflow-hidden">
         {isMap ? (
-            <div className="h-full w-full">
-              <MapView events={events} />
+            <div className="h-full w-full relative">
+              {/* Expand button — shown when header is collapsed, floats above map controls */}
+              {headerCollapsed && (
+                <button
+                  onClick={() => setHeaderCollapsed(false)}
+                  className="absolute top-3 left-1/2 -translate-x-1/2 z-[60] flex items-center gap-1.5 px-4 py-2 rounded-2xl font-black text-sm border-2 bg-black/75 border-white/30 text-white hover:border-white/60 transition-all backdrop-blur-sm shadow-[0_2px_8px_rgba(0,0,0,0.5)]"
+                  title="Expand header">
+                  <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="2 4.5 6.5 9 11 4.5"/>
+                    <polyline points="2 1.5 6.5 6 11 1.5"/>
+                  </svg>
+                  Expand
+                </button>
+              )}
+              <MapView events={events} headerCollapsed={headerCollapsed} />
             </div>
         ) : (
           <main className="h-full overflow-y-auto" onScroll={handleScroll}>
