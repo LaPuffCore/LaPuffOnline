@@ -2766,11 +2766,11 @@ export default function MapView({ events, headerCollapsed = false }) {
       map.addLayer({
         id: 'real3d-roads-motorway', type: 'line',
         source: 'openmaptiles', 'source-layer': 'transportation',
-        minzoom: 9, maxzoom: 13,
+        minzoom: 9, maxzoom: 14,
         filter: ['match', ['get', 'class'], ['motorway', 'trunk'], true, false],
         paint: {
           'line-color': isHeatmap ? '#884400' : '#ff2200',
-          'line-width': ['interpolate', ['linear'], ['zoom'], 9, 1.5, 13, 5],
+          'line-width': ['interpolate', ['linear'], ['zoom'], 9, 1.5, 13, 5, 14, 3],
           'line-blur': 1.5, 'line-opacity': 0.9,
         },
       });
@@ -2778,11 +2778,11 @@ export default function MapView({ events, headerCollapsed = false }) {
       map.addLayer({
         id: 'real3d-roads-primary', type: 'line',
         source: 'openmaptiles', 'source-layer': 'transportation',
-        minzoom: 10, maxzoom: 13,
+        minzoom: 10, maxzoom: 14,
         filter: ['all', ['match', ['get', 'class'], ['primary', 'secondary'], true, false], ['within', NYC_BBOX_GEOM]],
         paint: {
           'line-color': isHeatmap ? '#662200' : '#cc1800',
-          'line-width': ['interpolate', ['linear'], ['zoom'], 10, 0.5, 13, 3],
+          'line-width': ['interpolate', ['linear'], ['zoom'], 10, 0.5, 13, 3, 14, 1.5],
           'line-blur': 0.8, 'line-opacity': 0.75,
         },
       });
@@ -2790,11 +2790,11 @@ export default function MapView({ events, headerCollapsed = false }) {
       map.addLayer({
         id: 'real3d-roads-tertiary', type: 'line',
         source: 'openmaptiles', 'source-layer': 'transportation',
-        minzoom: 11, maxzoom: 13,
+        minzoom: 11, maxzoom: 14,
         filter: ['all', ['match', ['get', 'class'], ['tertiary', 'minor', 'residential'], true, false], ['within', NYC_BBOX_GEOM]],
         paint: {
           'line-color': isHeatmap ? '#553300' : '#771100',
-          'line-width': ['interpolate', ['linear'], ['zoom'], 11, 0.3, 13, 1.5],
+          'line-width': ['interpolate', ['linear'], ['zoom'], 11, 0.3, 13, 1.5, 14, 0.5],
           'line-blur': 0.3, 'line-opacity': 0.65,
         },
       });
