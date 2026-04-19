@@ -1378,8 +1378,8 @@ export default function MapView({ events, headerCollapsed = false }) {
   const [showPins, setShowPins] = useState(false);
   const [hoveredPinEvent, setHoveredPinEvent] = useState(null);
   const [hoveredPinPos, setHoveredPinPos] = useState(null);
-  const pinMarkersRef = useRef([]);
-  const pinCameraListenerRef = useRef(null);
+  const pinEventsLookupRef = useRef(new Map());
+  const pinHandlersAttachedRef = useRef(false);
 
   // Auto-dismiss cache indicator 2 seconds after "done"
   useEffect(() => {
@@ -3092,23 +3092,26 @@ export default function MapView({ events, headerCollapsed = false }) {
     setLocLoading(false);
   }
 
-  // ── Event pin markers — timespan-filtered, 3D-elevated, geo-locked ──
+  // ── Event pin markers — native GeoJSON symbol layer for correct geo-positioning ──
+  // Uses MapLibre's built-in rendering so pins always stay at their exact lat/lng
+  // at any zoom, pitch, rotation. Viewport clipping is automatic.
   useEffect(() => {
     const map = mapRef.current;
-    // Clean up existing markers + camera listener
-    pinMarkersRef.current.forEach(m => m.remove());
-    pinMarkersRef.current = [];
-    if (pinCameraListenerRef.current) {
-      map?.off('move', pinCameraListenerRef.current);
-      pinCameraListenerRef.current = null;
-    }
-    if (!map || !mapReady || !showPins || !events?.length) return;
+    if (!map || !mapReady) return;
 
-    // Filter by timespan date range — include BOTH past and future within the window
-    // so sample/test events with hardcoded dates always appear
+    // Toggle visibility if layer exists
+    if (map.getLayer('event-pins-layer')) {
+      map.setLayoutProperty('event-pins-layer', 'visibility', showPins ? 'visible' : 'none');
+    }
+    if (!showPins || !events?.length) {
+      pinEventsLookupRef.current = new Map();
+      if (map.getSource('event-pins')) map.getSource('event-pins').setData({ type: 'FeatureCollection', features: [] });
+      return;
+    }
+
+    // Filter: future events only within timespan window
     const now = new Date(); now.setHours(0, 0, 0, 0);
     const days = TIMESPAN_STEPS[timespanIdx]?.days || 180;
-    const minDate = new Date(now.getTime() - days * 86400000);
     const maxDate = new Date(now.getTime() + days * 86400000);
 
     const pinEvents = events.filter(e => {
@@ -3116,118 +3119,144 @@ export default function MapView({ events, headerCollapsed = false }) {
       const lat = parseFloat(e.lat), lng = parseFloat(e.lng);
       if (isNaN(lat) || isNaN(lng)) return false;
       const ed = new Date(e.event_date + 'T00:00:00');
-      return ed >= minDate && ed <= maxDate;
+      return ed >= now && ed <= maxDate;
     });
 
-    if (!pinEvents.length) return;
+    // Build lookup map for click/hover handlers
+    const lookup = new Map();
+    pinEvents.forEach(evt => lookup.set(String(evt.id), evt));
+    pinEventsLookupRef.current = lookup;
 
-    // Build zip → tier map for 3D extrusion height lookup
-    const zipTierMap = {};
-    if (threeD && geoData?.features) {
-      const precomputed = precomputedTiersRef.current?.[timespanIdx];
-      if (precomputed) {
-        const { tiers } = precomputed;
-        geoData.features.forEach((f, i) => {
-          const zip = String(f.properties.MODZCTA || '');
-          if (zip && tiers[i] !== undefined) zipTierMap[zip] = tiers[i];
-        });
-      }
-    }
-
-    const PIN_3D_HEIGHTS = [30, 200, 700, 1600, 2800];
-    const PIN_FLAT_3D_H = 400;
-
-    // Calculate pixel offset for a pin — 3D elevation or 2D/Real3D hover
-    function calcOffset(evt) {
-      if (threeD) {
-        const pitchDeg = map.getPitch();
-        if (pitchDeg < 1) return [0, -8]; // Looking straight down — no height offset needed
-        const zip = (evt.location_data?.zipcode || '').trim().replace(/\D/g, '').padStart(5, '0').slice(0, 5);
-        const tier = zipTierMap[zip] ?? 0;
-        const heightM = heatmap ? (PIN_3D_HEIGHTS[tier] || 30) : PIN_FLAT_3D_H;
-        const zoom = map.getZoom();
-        const pitchRad = pitchDeg * Math.PI / 180;
-        const latRad = parseFloat(evt.lat) * Math.PI / 180;
-        const metersPerPx = 78271.484 * Math.cos(latRad) / Math.pow(2, zoom);
-        const pxUp = (heightM / metersPerPx) * Math.sin(pitchRad);
-        // Clamp: minimum 8px up, maximum 250px — prevents pins flying off-screen or going below map
-        const clamped = Math.max(8, Math.min(Math.round(pxUp), 250));
-        return [0, -clamped];
-      }
-      // 2D / Real3D — small hover above ground to clear clipping
-      return [0, -6];
-    }
-
-    const darken = (hex) => {
-      const r = Math.max(0, parseInt(hex.slice(1, 3), 16) - 40);
-      const g = Math.max(0, parseInt(hex.slice(3, 5), 16) - 40);
-      const b = Math.max(0, parseInt(hex.slice(5, 7), 16) - 40);
-      return `rgb(${r},${g},${b})`;
+    // Generate pin canvas images for unique color+emoji combos
+    const darkenHex = (hex, amount = 50) => {
+      try {
+        const r = Math.max(0, parseInt(hex.slice(1, 3), 16) - amount);
+        const g = Math.max(0, parseInt(hex.slice(3, 5), 16) - amount);
+        const b = Math.max(0, parseInt(hex.slice(5, 7), 16) - amount);
+        return `rgb(${r},${g},${b})`;
+      } catch { return '#000'; }
     };
 
     pinEvents.forEach(evt => {
-      const lat = parseFloat(evt.lat), lng = parseFloat(evt.lng);
-      const fillColor = evt.hex_color || '#7C3AED';
-      const outlineColor = darken(fillColor);
+      const color = evt.hex_color || '#7C3AED';
       const emoji = evt.representative_emoji || '🎉';
+      const key = `pin-${color}-${emoji}`;
+      if (map.hasImage(key)) return;
 
-      const el = document.createElement('div');
-      el.className = 'lp-event-pin';
-      el.style.cssText = 'cursor:pointer;width:32px;height:42px;position:relative;filter:drop-shadow(1px 2px 2px rgba(0,0,0,0.5));';
-      el.innerHTML = `
-        <svg width="32" height="42" viewBox="0 0 32 42" xmlns="http://www.w3.org/2000/svg">
-          <path d="M16 40 C16 40 2 24 2 14 C2 6.3 8.3 1 16 1 C23.7 1 30 6.3 30 14 C30 24 16 40 16 40Z"
-            fill="${fillColor}" stroke="${outlineColor}" stroke-width="2"/>
-          <circle cx="16" cy="14" r="8" fill="white" stroke="${outlineColor}" stroke-width="1.5"/>
-        </svg>
-        <span style="position:absolute;top:14px;left:50%;transform:translate(-50%,-50%);font-size:13px;line-height:1;pointer-events:none;text-align:center;">${emoji}</span>
-      `;
+      const W = 48, H = 64;
+      const canvas = document.createElement('canvas');
+      canvas.width = W * 2; canvas.height = H * 2;
+      const ctx = canvas.getContext('2d');
+      ctx.scale(2, 2);
 
-      el.addEventListener('mouseenter', (e) => {
-        setHoveredPinEvent(evt);
-        setHoveredPinPos({ x: e.clientX, y: e.clientY });
+      // Teardrop pin shape
+      const cx = W / 2, cy = 18, cr = 14;
+      ctx.beginPath();
+      ctx.moveTo(cx, H - 2);
+      ctx.bezierCurveTo(cx - 4, H - 10, cx - cr - 2, cy + cr + 2, cx - cr, cy);
+      ctx.arc(cx, cy, cr, Math.PI, 0, false);
+      ctx.bezierCurveTo(cx + cr + 2, cy + cr + 2, cx + 4, H - 10, cx, H - 2);
+      ctx.closePath();
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.strokeStyle = darkenHex(color);
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // White inner circle
+      ctx.beginPath();
+      ctx.arc(cx, cy, 9, 0, 2 * Math.PI);
+      ctx.fillStyle = '#ffffff';
+      ctx.fill();
+      ctx.strokeStyle = darkenHex(color, 30);
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      // Emoji centered in white circle
+      ctx.font = '13px "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(emoji, cx, cy + 0.5);
+
+      const imgData = ctx.getImageData(0, 0, W * 2, H * 2);
+      map.addImage(key, { width: W * 2, height: H * 2, data: imgData.data }, { pixelRatio: 2 });
+    });
+
+    // Build GeoJSON
+    const geojson = {
+      type: 'FeatureCollection',
+      features: pinEvents.map(evt => ({
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [parseFloat(evt.lng), parseFloat(evt.lat)] },
+        properties: {
+          _eventId: String(evt.id),
+          pinImage: `pin-${evt.hex_color || '#7C3AED'}-${evt.representative_emoji || '🎉'}`,
+        }
+      }))
+    };
+
+    // Create or update source + layer
+    if (map.getSource('event-pins')) {
+      map.getSource('event-pins').setData(geojson);
+    } else {
+      map.addSource('event-pins', { type: 'geojson', data: geojson });
+      map.addLayer({
+        id: 'event-pins-layer',
+        type: 'symbol',
+        source: 'event-pins',
+        layout: {
+          'icon-image': ['get', 'pinImage'],
+          'icon-size': ['interpolate', ['linear'], ['zoom'], 9, 0.35, 12, 0.5, 16, 0.65],
+          'icon-anchor': 'bottom',
+          'icon-allow-overlap': true,
+          'icon-ignore-placement': true,
+        },
+        paint: { 'icon-opacity': 1.0 },
       });
-      el.addEventListener('mousemove', (e) => {
-        setHoveredPinPos({ x: e.clientX, y: e.clientY });
+    }
+
+    // Ensure pins always render on top of all other layers
+    if (map.getLayer('event-pins-layer')) {
+      map.setLayoutProperty('event-pins-layer', 'visibility', 'visible');
+      try { map.moveLayer('event-pins-layer'); } catch {}
+    }
+
+    // Attach click/hover handlers once (persists for component lifetime)
+    if (!pinHandlersAttachedRef.current && map.getLayer('event-pins-layer')) {
+      pinHandlersAttachedRef.current = true;
+
+      map.on('click', 'event-pins-layer', (e) => {
+        if (!e.features?.length) return;
+        const id = e.features[0].properties._eventId;
+        const evt = pinEventsLookupRef.current.get(id);
+        if (evt) { setHoveredPinEvent(null); setSelectedEvent(evt); }
       });
-      el.addEventListener('mouseleave', () => {
+      map.on('mouseenter', 'event-pins-layer', (e) => {
+        map.getCanvas().style.cursor = 'pointer';
+        if (e.features?.length) {
+          const id = e.features[0].properties._eventId;
+          const evt = pinEventsLookupRef.current.get(id);
+          if (evt) {
+            setHoveredPinEvent(evt);
+            // Convert map point to screen coordinates for tooltip positioning
+            const rect = map.getContainer().getBoundingClientRect();
+            setHoveredPinPos({ x: rect.left + e.point.x, y: rect.top + e.point.y });
+          }
+        }
+      });
+      map.on('mousemove', 'event-pins-layer', (e) => {
+        if (e.point) {
+          const rect = map.getContainer().getBoundingClientRect();
+          setHoveredPinPos({ x: rect.left + e.point.x, y: rect.top + e.point.y });
+        }
+      });
+      map.on('mouseleave', 'event-pins-layer', () => {
+        map.getCanvas().style.cursor = '';
         setHoveredPinEvent(null);
         setHoveredPinPos(null);
       });
-      el.addEventListener('click', (e) => {
-        e.stopPropagation();
-        setHoveredPinEvent(null);
-        setSelectedEvent(evt);
-      });
-
-      const offset = calcOffset(evt);
-      const marker = new maplibregl.Marker({ element: el, anchor: 'bottom', offset })
-        .setLngLat([lng, lat])
-        .addTo(map);
-      marker._lpEvt = evt;
-      pinMarkersRef.current.push(marker);
-    });
-
-    // In 3D mode, dynamically update elevation offsets on camera move
-    if (threeD && pinMarkersRef.current.length > 0) {
-      const onCameraMove = () => {
-        pinMarkersRef.current.forEach(m => {
-          if (m._lpEvt) m.setOffset(calcOffset(m._lpEvt));
-        });
-      };
-      map.on('move', onCameraMove);
-      pinCameraListenerRef.current = onCameraMove;
     }
-
-    return () => {
-      pinMarkersRef.current.forEach(m => m.remove());
-      pinMarkersRef.current = [];
-      if (pinCameraListenerRef.current) {
-        map?.off('move', pinCameraListenerRef.current);
-        pinCameraListenerRef.current = null;
-      }
-    };
-  }, [showPins, events, mapReady, timespanIdx, threeD, heatmap]);
+  }, [showPins, events, mapReady, timespanIdx]);
 
   useEffect(() => {
     const h = e => { if (e.key === 'Escape') { setHoloFeature(null); setSideZip(null); setSideEvents([]); setSideColonists([]); } };

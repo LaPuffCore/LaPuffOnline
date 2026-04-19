@@ -2,6 +2,7 @@ import { useState } from 'react';
 
 export default function MapIntro({ onEnter }) {
   const [phase, setPhase] = useState('idle'); // idle | opening | fading
+  const [btnHover, setBtnHover] = useState(false);
 
   function handleEnter() {
     setPhase('opening');
@@ -29,16 +30,23 @@ export default function MapIntro({ onEnter }) {
           style={{ textShadow: '0 0 40px rgba(255,0,0,0.8)' }}>
           CULLING GAMES
         </h1>
-        <p className="text-red-300/60 font-bold text-sm mt-4 tracking-widest uppercase">New York City · Events Map</p>
+        <p className="text-red-300/60 font-bold text-sm mt-4 tracking-widest uppercase">The New York City Events Map ARG</p>
 
         {phase === 'idle' && (
           <button
             onClick={handleEnter}
-            className="pointer-events-auto mt-12 px-12 py-4 font-black text-xl tracking-widest uppercase border-2 border-red-600 text-red-400 hover:bg-red-900/40 hover:text-red-200 transition-all"
+            onMouseEnter={() => setBtnHover(true)}
+            onMouseLeave={() => setBtnHover(false)}
+            className="pointer-events-auto mt-12 px-12 py-4 font-black text-xl tracking-widest uppercase border-2 border-red-600 text-red-400"
             style={{
-              background: 'rgba(20,0,0,0.8)',
-              boxShadow: '0 0 20px rgba(200,0,0,0.4), inset 0 0 20px rgba(200,0,0,0.1)',
+              background: btnHover ? 'rgba(40,0,0,0.9)' : 'rgba(20,0,0,0.8)',
+              boxShadow: btnHover
+                ? '0 0 40px rgba(255,0,0,0.7), 0 0 80px rgba(255,0,0,0.3), inset 0 0 30px rgba(255,0,0,0.15)'
+                : '0 0 20px rgba(200,0,0,0.4), inset 0 0 20px rgba(200,0,0,0.1)',
               letterSpacing: '0.3em',
+              transform: btnHover ? 'scale(1.06)' : 'scale(1)',
+              color: btnHover ? '#fca5a5' : undefined,
+              transition: 'all 0.3s ease',
             }}
           >
             ▶ ENTER
