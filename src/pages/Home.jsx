@@ -191,8 +191,10 @@ export default function Home({ events = [], eventsLoading = false }) {
               {/* Map-only collapse button (desktop) */}
               {isMap && (
                 <button onClick={() => setHeaderCollapsed(true)}
-                  className="hidden md:flex items-center gap-1 px-3 py-1.5 rounded-full text-[11px] font-black border-2 border-black bg-white hover:bg-gray-50 shadow-[2px_2px_0px_black] transition-all whitespace-nowrap"
-                  title="Collapse header to see more map">
+                  className="hidden md:flex items-center gap-1 px-3 py-1.5 rounded-full text-[11px] font-black border-2 border-black bg-white shadow-[2px_2px_0px_black] transition-all whitespace-nowrap"
+                  title="Collapse header to see more map"
+                  onMouseEnter={e => { e.currentTarget.style.backgroundColor = accentColor; e.currentTarget.style.color = '#fff'; e.currentTarget.style.borderColor = accentColor; }}
+                  onMouseLeave={e => { e.currentTarget.style.backgroundColor = ''; e.currentTarget.style.color = ''; e.currentTarget.style.borderColor = ''; }}>
                   <svg width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                     <polyline points="2 7 5.5 3.5 9 7"/>
                     <polyline points="2 10 5.5 6.5 9 10"/>
@@ -261,8 +263,10 @@ export default function Home({ events = [], eventsLoading = false }) {
              {/* Map-only collapse button (mobile) */}
              {isMap && (
                <button onClick={() => setHeaderCollapsed(true)}
-                 className="flex items-center gap-1 px-3 py-1.5 rounded-full text-[11px] font-black border-2 border-black bg-white hover:bg-gray-50 shadow-[2px_2px_0px_black] transition-all"
-                 title="Collapse header">
+                 className="flex items-center gap-1 px-3 py-1.5 rounded-full text-[11px] font-black border-2 border-black bg-white shadow-[2px_2px_0px_black] transition-all"
+                 title="Collapse header"
+                 onMouseEnter={e => { e.currentTarget.style.backgroundColor = accentColor; e.currentTarget.style.color = '#fff'; e.currentTarget.style.borderColor = accentColor; }}
+                 onMouseLeave={e => { e.currentTarget.style.backgroundColor = ''; e.currentTarget.style.color = ''; e.currentTarget.style.borderColor = ''; }}>
                  <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                    <polyline points="1.5 6.5 5 3 8.5 6.5"/>
                    <polyline points="1.5 9.5 5 6 8.5 9.5"/>
@@ -282,8 +286,10 @@ export default function Home({ events = [], eventsLoading = false }) {
               {headerCollapsed && (
                 <button
                   onClick={() => setHeaderCollapsed(false)}
-                  className="absolute top-3 left-1/2 -translate-x-1/2 z-[60] flex items-center gap-1.5 px-4 py-2 rounded-2xl font-black text-sm border-2 bg-black/75 border-white/30 text-white hover:border-white/60 transition-all backdrop-blur-sm shadow-[0_2px_8px_rgba(0,0,0,0.5)]"
-                  title="Expand header">
+                  className="absolute top-3 left-1/2 -translate-x-1/2 z-[60] flex items-center gap-1.5 px-4 py-2 rounded-full font-black text-sm border-3 border-black bg-white shadow-[3px_3px_0px_black] transition-all"
+                  title="Expand header"
+                  onMouseEnter={e => { e.currentTarget.style.backgroundColor = accentColor; e.currentTarget.style.color = '#fff'; e.currentTarget.style.borderColor = accentColor; }}
+                  onMouseLeave={e => { e.currentTarget.style.backgroundColor = ''; e.currentTarget.style.color = ''; e.currentTarget.style.borderColor = ''; }}>
                   <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                     <polyline points="2 4.5 6.5 9 11 4.5"/>
                     <polyline points="2 1.5 6.5 6 11 1.5"/>

@@ -383,15 +383,15 @@ function normalizeFeatureGeometry(feature) {
 }
 
 // MapLibre line-width expression for 2D/Real3D ZCTA outlines.
-// z9→z9.5: original ramp 2→3.5px. z9.5→z11: ramp to 6.0px. z11→z16: gentle growth to 8px.
-// z9.5 value reduced from 5.6 (user: too big at 9.5-11). z11+ unchanged.
+// z9→z9.5: thin ramp. z9.5→z11: gradual growth. z11→z16: smooth scaling to maintain visual weight.
 // GPU-evaluated per-frame — no JS zoom listener needed.
 function zctaLineWidthExpr(mult = 1) {
   return ['interpolate', ['linear'], ['zoom'],
-    9,   2.0 * mult,   // original z9 ramp start
-    9.5, 3.5 * mult,   // reduced from 5.6 — less thick at far-mid zoom
-    11,  6.0 * mult,   // z11 anchor — preserves z11+ visual size
-    16,  8.0 * mult,   // gentle growth target (stays visually consistent)
+    9,   1.5 * mult,   // z9 start — thin far out
+    9.5, 2.0 * mult,   // z9.5 — subtle, not heavy
+    11,  3.5 * mult,   // z11 — moderate, transition to close zoom
+    12,  5.0 * mult,   // z12 — close zoom grows
+    16,  8.0 * mult,   // z16 — full visual weight at close
   ];
 }
 
@@ -2757,9 +2757,10 @@ export default function MapView({ events, headerCollapsed = false }) {
         id: 'real3d-roads-motorway', type: 'line',
         source: 'openmaptiles', 'source-layer': 'transportation',
         minzoom: 9, maxzoom: 14,
+        filter: ['in', ['get', 'class'], ['literal', ['motorway', 'trunk']]],
         paint: {
-          'line-color': isHeatmap ? '#7a2000' : '#c41000',
-          'line-width': ['interpolate', ['linear'], ['zoom'], 9, 1.5, 13, 5],
+          'line-color': isHeatmap ? '#6b3300' : '#991000',
+          'line-width': ['interpolate', ['linear'], ['zoom'], 9, 1.5, 13, 4, 13.5, 2],
           'line-blur': 1.5, 'line-opacity': 0.9,
         },
       });
@@ -2768,9 +2769,10 @@ export default function MapView({ events, headerCollapsed = false }) {
         id: 'real3d-roads-primary', type: 'line',
         source: 'openmaptiles', 'source-layer': 'transportation',
         minzoom: 10, maxzoom: 14,
+        filter: ['in', ['get', 'class'], ['literal', ['primary', 'secondary']]],
         paint: {
-          'line-color': isHeatmap ? '#662200' : '#cc1800',
-          'line-width': ['interpolate', ['linear'], ['zoom'], 10, 0.5, 13, 3],
+          'line-color': isHeatmap ? '#553300' : '#aa1400',
+          'line-width': ['interpolate', ['linear'], ['zoom'], 10, 0.5, 13, 2.5, 13.5, 1.2],
           'line-blur': 0.8, 'line-opacity': 0.75,
         },
       });
@@ -2779,9 +2781,10 @@ export default function MapView({ events, headerCollapsed = false }) {
         id: 'real3d-roads-tertiary', type: 'line',
         source: 'openmaptiles', 'source-layer': 'transportation',
         minzoom: 11, maxzoom: 14,
+        filter: ['in', ['get', 'class'], ['literal', ['tertiary', 'minor', 'service']]],
         paint: {
-          'line-color': '#771100',
-          'line-width': ['interpolate', ['linear'], ['zoom'], 11, 0.3, 13, 1.5],
+          'line-color': isHeatmap ? '#553300' : '#771100',
+          'line-width': ['interpolate', ['linear'], ['zoom'], 11, 0.3, 13, 1.2, 13.5, 0.6],
           'line-blur': 0.3, 'line-opacity': 0.65,
         },
       });
@@ -2789,11 +2792,11 @@ export default function MapView({ events, headerCollapsed = false }) {
       map.addLayer({
         id: 'real3d-landuse-baseplate', type: 'fill',
         source: 'openmaptiles', 'source-layer': 'landuse',
-        maxzoom: 14,
+        maxzoom: 13,
         filter: ['all', ['match', ['get', 'class'], ['residential', 'commercial', 'industrial', 'retail'], true, false], ['within', NYC_BBOX_GEOM]],
         paint: {
           'fill-color': baseplateColorExpr(isHeatmap, tsIdx),
-          'fill-opacity': ['interpolate', ['linear'], ['zoom'], 9, 0, 10, 0.45, 13, 0.45, 14, 0],
+          'fill-opacity': ['interpolate', ['linear'], ['zoom'], 9, 0, 10, 0.45, 12.5, 0.45, 13, 0],
         },
       });
 
@@ -2862,10 +2865,13 @@ export default function MapView({ events, headerCollapsed = false }) {
         refreshBuildingColors();
       }
       if (map.getLayer('real3d-roads-motorway')) {
-        map.setPaintProperty('real3d-roads-motorway', 'line-color', isHm ? '#884400' : '#ff2200');
+        map.setPaintProperty('real3d-roads-motorway', 'line-color', isHm ? '#6b3300' : '#991000');
       }
       if (map.getLayer('real3d-roads-primary')) {
-        map.setPaintProperty('real3d-roads-primary', 'line-color', isHm ? '#662200' : '#cc1800');
+        map.setPaintProperty('real3d-roads-primary', 'line-color', isHm ? '#553300' : '#aa1400');
+      }
+      if (map.getLayer('real3d-roads-tertiary')) {
+        map.setPaintProperty('real3d-roads-tertiary', 'line-color', isHm ? '#553300' : '#771100');
       }
     }
 
@@ -2884,10 +2890,13 @@ export default function MapView({ events, headerCollapsed = false }) {
       refreshBuildingColors();
     }
     if (map.getLayer('real3d-roads-motorway')) {
-      map.setPaintProperty('real3d-roads-motorway', 'line-color', heatmap ? '#884400' : '#ff2200');
+      map.setPaintProperty('real3d-roads-motorway', 'line-color', heatmap ? '#6b3300' : '#991000');
     }
     if (map.getLayer('real3d-roads-primary')) {
-      map.setPaintProperty('real3d-roads-primary', 'line-color', heatmap ? '#662200' : '#cc1800');
+      map.setPaintProperty('real3d-roads-primary', 'line-color', heatmap ? '#553300' : '#aa1400');
+    }
+    if (map.getLayer('real3d-roads-tertiary')) {
+      map.setPaintProperty('real3d-roads-tertiary', 'line-color', heatmap ? '#553300' : '#771100');
     }
     if (map.getLayer('zcta-safezone-extrusion')) {
       map.setPaintProperty('zcta-safezone-extrusion', 'fill-extrusion-opacity', 1.0);
