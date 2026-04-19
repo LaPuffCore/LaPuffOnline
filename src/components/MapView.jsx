@@ -1379,6 +1379,7 @@ export default function MapView({ events, headerCollapsed = false }) {
   const [hoveredPinEvent, setHoveredPinEvent] = useState(null);
   const [hoveredPinPos, setHoveredPinPos] = useState(null);
   const pinMarkersRef = useRef([]);
+  const pinCameraListenerRef = useRef(null);
 
   // Auto-dismiss cache indicator 2 seconds after "done"
   useEffect(() => {
@@ -3071,29 +3072,76 @@ export default function MapView({ events, headerCollapsed = false }) {
     setLocLoading(false);
   }
 
-  // ── Event pin markers — reads stored lat/lng from events (geocoded at submit time) ──
+  // ── Event pin markers — timespan-filtered, 3D-elevated, geo-locked ──
   useEffect(() => {
     const map = mapRef.current;
+    // Clean up existing markers + camera listener
     pinMarkersRef.current.forEach(m => m.remove());
     pinMarkersRef.current = [];
+    if (pinCameraListenerRef.current) {
+      map?.off('move', pinCameraListenerRef.current);
+      pinCameraListenerRef.current = null;
+    }
     if (!map || !mapReady || !showPins || !events?.length) return;
 
-    // Include user-submitted + sample events. Exclude auto events.
+    // Filter by timespan date range (matches heatmap logic)
+    const now = new Date(); now.setHours(0, 0, 0, 0);
+    const days = TIMESPAN_STEPS[timespanIdx]?.days || 180;
+    const maxDate = new Date(now.getTime() + days * 86400000);
+
     const pinEvents = events.filter(e => {
       if (e._auto) return false;
       const lat = parseFloat(e.lat), lng = parseFloat(e.lng);
-      return !isNaN(lat) && !isNaN(lng);
+      if (isNaN(lat) || isNaN(lng)) return false;
+      const ed = new Date(e.event_date + 'T00:00:00');
+      return ed >= now && ed <= maxDate;
     });
+
+    if (!pinEvents.length) return;
+
+    // Build zip → tier map for 3D extrusion height lookup
+    const zipTierMap = {};
+    if (threeD && geoData?.features) {
+      const precomputed = precomputedTiersRef.current?.[timespanIdx];
+      if (precomputed) {
+        const { tiers } = precomputed;
+        geoData.features.forEach((f, i) => {
+          const zip = String(f.properties.MODZCTA || '');
+          if (zip && tiers[i] !== undefined) zipTierMap[zip] = tiers[i];
+        });
+      }
+    }
+
+    const PIN_3D_HEIGHTS = [30, 200, 700, 1600, 2800];
+    const PIN_FLAT_3D_H = 400;
+
+    // Calculate pixel offset for a pin — 3D elevation or 2D/Real3D hover
+    function calcOffset(evt) {
+      if (threeD) {
+        const zip = (evt.location_data?.zipcode || '').trim().replace(/\D/g, '').padStart(5, '0').slice(0, 5);
+        const tier = zipTierMap[zip] ?? 0;
+        const heightM = heatmap ? (PIN_3D_HEIGHTS[tier] || 30) : PIN_FLAT_3D_H;
+        const zoom = map.getZoom();
+        const pitchRad = map.getPitch() * Math.PI / 180;
+        const latRad = parseFloat(evt.lat) * Math.PI / 180;
+        const metersPerPx = 78271.484 * Math.cos(latRad) / Math.pow(2, zoom);
+        const pxUp = (heightM / metersPerPx) * Math.sin(pitchRad);
+        return [0, -Math.round(pxUp) - 8];
+      }
+      // 2D / Real3D — small hover above ground to clear clipping
+      return [0, -6];
+    }
+
+    const darken = (hex) => {
+      const r = Math.max(0, parseInt(hex.slice(1, 3), 16) - 40);
+      const g = Math.max(0, parseInt(hex.slice(3, 5), 16) - 40);
+      const b = Math.max(0, parseInt(hex.slice(5, 7), 16) - 40);
+      return `rgb(${r},${g},${b})`;
+    };
 
     pinEvents.forEach(evt => {
       const lat = parseFloat(evt.lat), lng = parseFloat(evt.lng);
       const fillColor = evt.hex_color || '#7C3AED';
-      const darken = (hex) => {
-        const r = Math.max(0, parseInt(hex.slice(1,3), 16) - 40);
-        const g = Math.max(0, parseInt(hex.slice(3,5), 16) - 40);
-        const b = Math.max(0, parseInt(hex.slice(5,7), 16) - 40);
-        return `rgb(${r},${g},${b})`;
-      };
       const outlineColor = darken(fillColor);
       const emoji = evt.representative_emoji || '🎉';
 
@@ -3126,17 +3174,34 @@ export default function MapView({ events, headerCollapsed = false }) {
         setSelectedEvent(evt);
       });
 
-      const marker = new maplibregl.Marker({ element: el, anchor: 'bottom' })
+      const offset = calcOffset(evt);
+      const marker = new maplibregl.Marker({ element: el, anchor: 'bottom', offset })
         .setLngLat([lng, lat])
         .addTo(map);
+      marker._lpEvt = evt;
       pinMarkersRef.current.push(marker);
     });
+
+    // In 3D mode, dynamically update elevation offsets on camera move
+    if (threeD && pinMarkersRef.current.length > 0) {
+      const onCameraMove = () => {
+        pinMarkersRef.current.forEach(m => {
+          if (m._lpEvt) m.setOffset(calcOffset(m._lpEvt));
+        });
+      };
+      map.on('move', onCameraMove);
+      pinCameraListenerRef.current = onCameraMove;
+    }
 
     return () => {
       pinMarkersRef.current.forEach(m => m.remove());
       pinMarkersRef.current = [];
+      if (pinCameraListenerRef.current) {
+        map?.off('move', pinCameraListenerRef.current);
+        pinCameraListenerRef.current = null;
+      }
     };
-  }, [showPins, events, mapReady]);
+  }, [showPins, events, mapReady, timespanIdx, threeD, heatmap]);
 
   useEffect(() => {
     const h = e => { if (e.key === 'Escape') { setHoloFeature(null); setSideZip(null); setSideEvents([]); setSideColonists([]); } };
