@@ -2962,6 +2962,24 @@ export default function MapView({ events, headerCollapsed = false }) {
     // Always refresh building colors immediately so the toggle is visually instant
     refreshBuildingColors(heatmap, timespanIdx);
     updateRoadColors(map, heatmap);
+
+    // When heatmap turns OFF in Real3D, force-reset the ZCTA ground layer and extrusion layers
+    // to standard non-heatmap state. Effect A handles this too, but we belt-and-suspenders here
+    // to cover any timing gaps between the two effects.
+    if (!heatmap) {
+      if (map.getLayer('zcta-fill')) {
+        map.setPaintProperty('zcta-fill', 'fill-color', '#1a0505');
+        map.setPaintProperty('zcta-fill', 'fill-opacity', satellite ? 0.65 : 0.75);
+      }
+      if (map.getLayer('zcta-extrude')) {
+        map.setPaintProperty('zcta-extrude', 'fill-extrusion-color', '#1a0505');
+        map.setPaintProperty('zcta-extrude', 'fill-extrusion-height', 0);
+        map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', 0);
+      }
+      if (map.getLayer('zcta-floor')) map.setPaintProperty('zcta-floor', 'fill-extrusion-opacity', 0);
+      if (map.getLayer('zcta-cap')) map.setPaintProperty('zcta-cap', 'fill-extrusion-opacity', 0);
+    }
+
     // Background bake if needed (will re-refresh when done — cosmetic, not blocking)
     if (!buildingTiersBakedRef.current && buildingFGBRef.current && buildingZctaMapRef.current && precomputedTiersRef.current) {
       bakeAllTiersIntoBuildings().catch(() => {});
@@ -2969,6 +2987,8 @@ export default function MapView({ events, headerCollapsed = false }) {
     if (map.getLayer('zcta-safezone-extrusion')) {
       map.setPaintProperty('zcta-safezone-extrusion', 'fill-extrusion-opacity', 1.0);
     }
+    // Force MapLibre to re-render immediately so stale heatmap colors don't linger
+    map.triggerRepaint();
   }, [heatmap, real3D, mapReady]);
 
   // Timespan change in Real3D — swap which _tier_X column the paint reads (GPU-only, instant)
@@ -3084,9 +3104,11 @@ export default function MapView({ events, headerCollapsed = false }) {
     }
     if (!map || !mapReady || !showPins || !events?.length) return;
 
-    // Filter by timespan date range (matches heatmap logic)
+    // Filter by timespan date range — include BOTH past and future within the window
+    // so sample/test events with hardcoded dates always appear
     const now = new Date(); now.setHours(0, 0, 0, 0);
     const days = TIMESPAN_STEPS[timespanIdx]?.days || 180;
+    const minDate = new Date(now.getTime() - days * 86400000);
     const maxDate = new Date(now.getTime() + days * 86400000);
 
     const pinEvents = events.filter(e => {
@@ -3094,7 +3116,7 @@ export default function MapView({ events, headerCollapsed = false }) {
       const lat = parseFloat(e.lat), lng = parseFloat(e.lng);
       if (isNaN(lat) || isNaN(lng)) return false;
       const ed = new Date(e.event_date + 'T00:00:00');
-      return ed >= now && ed <= maxDate;
+      return ed >= minDate && ed <= maxDate;
     });
 
     if (!pinEvents.length) return;
@@ -3118,15 +3140,19 @@ export default function MapView({ events, headerCollapsed = false }) {
     // Calculate pixel offset for a pin — 3D elevation or 2D/Real3D hover
     function calcOffset(evt) {
       if (threeD) {
+        const pitchDeg = map.getPitch();
+        if (pitchDeg < 1) return [0, -8]; // Looking straight down — no height offset needed
         const zip = (evt.location_data?.zipcode || '').trim().replace(/\D/g, '').padStart(5, '0').slice(0, 5);
         const tier = zipTierMap[zip] ?? 0;
         const heightM = heatmap ? (PIN_3D_HEIGHTS[tier] || 30) : PIN_FLAT_3D_H;
         const zoom = map.getZoom();
-        const pitchRad = map.getPitch() * Math.PI / 180;
+        const pitchRad = pitchDeg * Math.PI / 180;
         const latRad = parseFloat(evt.lat) * Math.PI / 180;
         const metersPerPx = 78271.484 * Math.cos(latRad) / Math.pow(2, zoom);
         const pxUp = (heightM / metersPerPx) * Math.sin(pitchRad);
-        return [0, -Math.round(pxUp) - 8];
+        // Clamp: minimum 8px up, maximum 250px — prevents pins flying off-screen or going below map
+        const clamped = Math.max(8, Math.min(Math.round(pxUp), 250));
+        return [0, -clamped];
       }
       // 2D / Real3D — small hover above ground to clear clipping
       return [0, -6];
