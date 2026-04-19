@@ -2265,7 +2265,7 @@ export default function MapView({ events, headerCollapsed = false }) {
       }
       // Real3D: confirm building/baseplate colors when crossing into render zoom ranges.
       // This guards against stale paint expressions after zoom-driven layer transitions.
-      if (isR3D && heatmapRef.current) {
+      if (isR3D) {
         const zoom = map.getZoom();
         const crossedBaseplates = (prevZoom < 13 && zoom >= 13) || (prevZoom >= 13 && zoom < 13);
         const crossedBuildings  = (prevZoom < 14 && zoom >= 14) || (prevZoom >= 14 && zoom < 14);
@@ -2942,47 +2942,47 @@ export default function MapView({ events, headerCollapsed = false }) {
     } else {
       // Normal path — layers already exist (pre-created at map init). Just flip visibility.
       setReal3DLayersVisible(map, true);
-      // Ensure correct colors — bake if tiers are ready but not yet baked
+      // Always refresh colors immediately so the toggle is instant
+      refreshBuildingColors(isHm);
+      updateRoadColors(map, isHm);
+      // Background bake if needed (will re-refresh when done)
       if (!buildingTiersBakedRef.current && buildingFGBRef.current && buildingZctaMapRef.current && precomputedTiersRef.current) {
         bakeAllTiersIntoBuildings().catch(() => {});
-      } else {
-        refreshBuildingColors(isHm);
       }
-      updateRoadColors(map, isHm);
     }
 
     map.setLight({ anchor: 'map' });
     map.easeTo({ pitch: 55, bearing: -17, duration: 700 });
   }, [real3D, mapReady]);
 
-  // Heatmap toggle in Real3D — just swap paint expressions (GPU-only, instant)
+  // Heatmap toggle in Real3D — swap paint expressions immediately (GPU-only, instant)
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady || !real3D) return;
-    // Safety: if tiers not yet baked but all prerequisites exist, bake now
-    if (!buildingTiersBakedRef.current && buildingFGBRef.current && buildingZctaMapRef.current && precomputedTiersRef.current) {
-      bakeAllTiersIntoBuildings().catch(() => {}); // async bake; handles setData + refreshBuildingColors internally
-    } else {
-      refreshBuildingColors(heatmap, timespanIdx);
-    }
+    // Always refresh building colors immediately so the toggle is visually instant
+    refreshBuildingColors(heatmap, timespanIdx);
     updateRoadColors(map, heatmap);
+    // Background bake if needed (will re-refresh when done — cosmetic, not blocking)
+    if (!buildingTiersBakedRef.current && buildingFGBRef.current && buildingZctaMapRef.current && precomputedTiersRef.current) {
+      bakeAllTiersIntoBuildings().catch(() => {});
+    }
     if (map.getLayer('zcta-safezone-extrusion')) {
       map.setPaintProperty('zcta-safezone-extrusion', 'fill-extrusion-opacity', 1.0);
     }
   }, [heatmap, real3D, mapReady]);
 
-  // Timespan change in Real3D — just swap which _tier_X column the paint reads (GPU-only, instant)
+  // Timespan change in Real3D — swap which _tier_X column the paint reads (GPU-only, instant)
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady || !real3D) return;
     if (!heatmapRef.current) return;
-    // Safety: if tiers not yet baked but all prerequisites exist, bake now
+    // Always refresh immediately so the slider feels instant
+    refreshBuildingColors(true, timespanIdx);
+    updateRoadColors(map, true);
+    // Background bake if needed
     if (!buildingTiersBakedRef.current && buildingFGBRef.current && buildingZctaMapRef.current && precomputedTiersRef.current) {
       bakeAllTiersIntoBuildings().catch(() => {});
-    } else {
-      refreshBuildingColors(true, timespanIdx);
     }
-    updateRoadColors(map, true);
   }, [timespanIdx, real3D, mapReady]);
 
   const handleThreeDToggle = () => {
@@ -3154,7 +3154,7 @@ export default function MapView({ events, headerCollapsed = false }) {
             fill="${fillColor}" stroke="${outlineColor}" stroke-width="2"/>
           <circle cx="16" cy="14" r="8" fill="white" stroke="${outlineColor}" stroke-width="1.5"/>
         </svg>
-        <span style="position:absolute;top:5px;left:50%;transform:translateX(-50%);font-size:12px;line-height:1;pointer-events:none;">${emoji}</span>
+        <span style="position:absolute;top:14px;left:50%;transform:translate(-50%,-50%);font-size:13px;line-height:1;pointer-events:none;text-align:center;">${emoji}</span>
       `;
 
       el.addEventListener('mouseenter', (e) => {
