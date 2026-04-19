@@ -304,6 +304,10 @@ borough-outline (fill-extrusion, unrestricted, topmost)
 
 ### MapView — UI Micro-Fixes
 - **Zoom controls overlap**: The native MapLibre zoom-out (minus) button overlaps the custom Recentering button. Fix: add `marginBottom: '80px'` to the MapLibre NavigationControl container on load, or reposition the custom recentering button so the native minus button is always clickable.
+- **Controls positioning**: `top-[112px] md:top-[84px]` when header expanded, `top-[68px]` when collapsed. Smooth `transition-[top] duration-300`.
+- **Pin button**: Separate element next to time toggles box with `gap-2` spacing, pill-shaped `px-2 py-1 rounded-xl`.
+- **Side panel**: Desktop `top-[72px]` when header visible, `top-0` when collapsed. Smooth transition.
+- **Stacking context**: Map container at `zIndex: 3`, CRT overlay at `zIndex: 20` (sibling). MapLibre markers are inside map container — they render below CRT visually but are visible through CRT transparency. `pointer-events: none` on CRT ensures click-through.
 
 ### MapView — Caching & Reliability
 - **Cacheable (compute once)**: ZCTA GeoJSON, borough GeoJSON, ZCTA skeleton, borough skeleton, zip→borough mapping, adjacency matrix. All already cached in state or refs.
@@ -447,6 +451,18 @@ borough-outline (fill-extrusion, unrestricted, topmost)
 - Timezone: auto-detected from browser, converted via `localToUTC(date, time, offset)`.
 - Submitted events await approval (`is_approved = false`).
 - Links: flexible array, trimmed on submit.
+- **Geocoding at submit**: `AddressSearch.jsx` uses Nominatim — `lat`/`lng` from search results are passed to `EventSubmitForm.jsx` and included in the Supabase INSERT payload. Events table has `lat FLOAT8` and `lng FLOAT8` columns with `idx_events_lat_lng` index.
+- `toSampleEventRow` in `supabase.js` includes `lat`, `lng`, `borough` fields for sample sync.
+- All 40 sample events in `sampleEvents.js` have hardcoded lat/lng coordinates.
+
+### Event Pin Markers (MapView)
+- Pin toggle button: `showPins` state, 📍 pill button next to time toggles (separate element, not inside time toggle box).
+- Pin effect: `[showPins, events, mapReady]` deps. Filters `!e._auto` and requires valid `parseFloat(lat/lng)`.
+- Pin DOM: MapLibre `Marker` with custom SVG element (pin shape + emoji), `anchor: 'bottom'`.
+- Pin colors: `hex_color` fill, darkened stroke, white inner circle.
+- Hover: tooltip with event name/date. Click: opens EventDetailPopup.
+- **Critical data flow**: DB rows synced before `lat`/`lng` columns existed will have null coords. `AppWithEvents` enriches DB events from SAMPLE_EVENTS by matching `event_name__event_date` keys to backfill missing lat/lng. This enrichment only runs in SAMPLE_MODE when base events differ from SAMPLE_EVENTS array reference.
+- MapView reads `e.lat`/`e.lng` directly — zero geocoding API calls at runtime.
 
 ### Auto-Tags System
 - `generateAutoTags(event)` → max 7 tags.
