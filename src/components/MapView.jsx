@@ -3071,6 +3071,9 @@ export default function MapView({ events, headerCollapsed = false }) {
     setLocLoading(false);
   }
 
+  // ── Geocode cache: address string → [lng, lat]. Persists across pin toggles. ──
+  const geocodeCacheRef = useRef({});
+
   // ── Event pin markers ──
   useEffect(() => {
     const map = mapRef.current;
@@ -3079,88 +3082,115 @@ export default function MapView({ events, headerCollapsed = false }) {
     pinMarkersRef.current = [];
     if (!map || !mapReady || !showPins || !events?.length) return;
 
-    // Build zip → centroid lookup from ZCTA GeoJSON for events missing lat/lng
-    const zipCentroidMap = {};
-    const geo = geoDataRef.current;
-    if (geo?.features) {
-      geo.features.forEach(f => {
-        const zip = f.properties?.MODZCTA || f.properties?.modzcta;
-        if (!zip || isSpecialZip(zip)) return;
-        const coords = f.geometry?.coordinates;
-        if (!coords?.length) return;
-        // Compute centroid from first ring of first polygon
-        const ring = f.geometry.type === 'MultiPolygon' ? coords[0][0] : (f.geometry.type === 'Polygon' ? coords[0] : null);
-        if (!ring?.length) return;
-        let cx = 0, cy = 0;
-        for (const pt of ring) { cx += pt[0]; cy += pt[1]; }
-        zipCentroidMap[zip] = [cx / ring.length, cy / ring.length];
+    let cancelled = false;
+
+    // Include user-submitted + sample events. Exclude auto events.
+    const pinEvents = events.filter(e => !e._auto);
+
+    // Geocode via MapTiler (batched, cached, throttled)
+    async function geocodeAddress(address) {
+      if (!address) return null;
+      const cached = geocodeCacheRef.current[address];
+      if (cached) return cached;
+      try {
+        const q = encodeURIComponent(address);
+        const url = `https://api.maptiler.com/geocoding/${q}.json?key=${MAPTILER_KEY}&bbox=-74.3,40.4,-73.6,41.0&limit=1`;
+        const res = await fetch(url);
+        if (!res.ok) return null;
+        const data = await res.json();
+        const coords = data?.features?.[0]?.center; // [lng, lat]
+        if (coords?.length === 2) {
+          geocodeCacheRef.current[address] = coords;
+          return coords;
+        }
+      } catch { /* silent */ }
+      return null;
+    }
+
+    async function resolveAndPlace() {
+      // Split into events with coords vs needing geocoding
+      const withCoords = [];
+      const needGeocode = [];
+      for (const e of pinEvents) {
+        const lat = parseFloat(e.lat), lng = parseFloat(e.lng);
+        if (!isNaN(lat) && !isNaN(lng)) {
+          withCoords.push({ ...e, _pinLat: lat, _pinLng: lng });
+        } else {
+          const addr = e.location_data?.address || e.address || e.location;
+          if (addr) needGeocode.push({ evt: e, addr });
+        }
+      }
+
+      // Place events that already have coords immediately
+      if (!cancelled) placeMarkers(withCoords);
+
+      // Geocode remaining in small batches (5 at a time, 100ms between)
+      const BATCH = 5;
+      for (let i = 0; i < needGeocode.length && !cancelled; i += BATCH) {
+        const batch = needGeocode.slice(i, i + BATCH);
+        const results = await Promise.all(batch.map(async ({ evt, addr }) => {
+          const coords = await geocodeAddress(addr);
+          if (!coords) return null;
+          return { ...evt, _pinLat: coords[1], _pinLng: coords[0] };
+        }));
+        if (!cancelled) placeMarkers(results.filter(Boolean));
+        if (i + BATCH < needGeocode.length) await new Promise(r => setTimeout(r, 100));
+      }
+    }
+
+    function placeMarkers(resolved) {
+      resolved.forEach(evt => {
+        const lat = evt._pinLat, lng = evt._pinLng;
+        const fillColor = evt.hex_color || '#7C3AED';
+        const darken = (hex) => {
+          const r = Math.max(0, parseInt(hex.slice(1,3), 16) - 40);
+          const g = Math.max(0, parseInt(hex.slice(3,5), 16) - 40);
+          const b = Math.max(0, parseInt(hex.slice(5,7), 16) - 40);
+          return `rgb(${r},${g},${b})`;
+        };
+        const outlineColor = darken(fillColor);
+        const emoji = evt.representative_emoji || '🎉';
+
+        const el = document.createElement('div');
+        el.className = 'lp-event-pin';
+        el.style.cssText = 'cursor:pointer;width:32px;height:42px;position:relative;filter:drop-shadow(1px 2px 2px rgba(0,0,0,0.5));';
+        el.innerHTML = `
+          <svg width="32" height="42" viewBox="0 0 32 42" xmlns="http://www.w3.org/2000/svg">
+            <path d="M16 40 C16 40 2 24 2 14 C2 6.3 8.3 1 16 1 C23.7 1 30 6.3 30 14 C30 24 16 40 16 40Z"
+              fill="${fillColor}" stroke="${outlineColor}" stroke-width="2"/>
+            <circle cx="16" cy="14" r="8" fill="white" stroke="${outlineColor}" stroke-width="1.5"/>
+          </svg>
+          <span style="position:absolute;top:5px;left:50%;transform:translateX(-50%);font-size:12px;line-height:1;pointer-events:none;">${emoji}</span>
+        `;
+
+        el.addEventListener('mouseenter', (e) => {
+          setHoveredPinEvent(evt);
+          setHoveredPinPos({ x: e.clientX, y: e.clientY });
+        });
+        el.addEventListener('mousemove', (e) => {
+          setHoveredPinPos({ x: e.clientX, y: e.clientY });
+        });
+        el.addEventListener('mouseleave', () => {
+          setHoveredPinEvent(null);
+          setHoveredPinPos(null);
+        });
+        el.addEventListener('click', (e) => {
+          e.stopPropagation();
+          setHoveredPinEvent(null);
+          setSelectedEvent(evt);
+        });
+
+        const marker = new maplibregl.Marker({ element: el, anchor: 'bottom' })
+          .setLngLat([lng, lat])
+          .addTo(map);
+        pinMarkersRef.current.push(marker);
       });
     }
 
-    // Resolve lat/lng for each event — use direct coords or zip centroid fallback
-    const resolvedEvents = events.map(e => {
-      let lat = parseFloat(e.lat), lng = parseFloat(e.lng);
-      if (!isNaN(lat) && !isNaN(lng)) return { ...e, _pinLat: lat, _pinLng: lng };
-      const zip = e.zip_code || e.zipcode;
-      if (zip && zipCentroidMap[zip]) {
-        const [cLng, cLat] = zipCentroidMap[zip];
-        // Add slight jitter so pins in same zip don't stack exactly
-        const jitter = () => (Math.random() - 0.5) * 0.003;
-        return { ...e, _pinLat: cLat + jitter(), _pinLng: cLng + jitter() };
-      }
-      return null;
-    }).filter(Boolean);
-
-    resolvedEvents.forEach(evt => {
-      const lat = evt._pinLat, lng = evt._pinLng;
-      const fillColor = evt.hex_color || '#7C3AED';
-      // Darken fill color for outline
-      const darken = (hex) => {
-        const r = Math.max(0, parseInt(hex.slice(1,3), 16) - 40);
-        const g = Math.max(0, parseInt(hex.slice(3,5), 16) - 40);
-        const b = Math.max(0, parseInt(hex.slice(5,7), 16) - 40);
-        return `rgb(${r},${g},${b})`;
-      };
-      const outlineColor = darken(fillColor);
-      const emoji = evt.representative_emoji || '🎉';
-
-      // Create pin SVG element
-      const el = document.createElement('div');
-      el.className = 'lp-event-pin';
-      el.style.cssText = 'cursor:pointer;width:32px;height:42px;position:relative;filter:drop-shadow(1px 2px 2px rgba(0,0,0,0.5));';
-      el.innerHTML = `
-        <svg width="32" height="42" viewBox="0 0 32 42" xmlns="http://www.w3.org/2000/svg">
-          <path d="M16 40 C16 40 2 24 2 14 C2 6.3 8.3 1 16 1 C23.7 1 30 6.3 30 14 C30 24 16 40 16 40Z"
-            fill="${fillColor}" stroke="${outlineColor}" stroke-width="2"/>
-          <circle cx="16" cy="14" r="8" fill="white" stroke="${outlineColor}" stroke-width="1.5"/>
-        </svg>
-        <span style="position:absolute;top:5px;left:50%;transform:translateX(-50%);font-size:12px;line-height:1;pointer-events:none;">${emoji}</span>
-      `;
-
-      el.addEventListener('mouseenter', (e) => {
-        setHoveredPinEvent(evt);
-        setHoveredPinPos({ x: e.clientX, y: e.clientY });
-      });
-      el.addEventListener('mousemove', (e) => {
-        setHoveredPinPos({ x: e.clientX, y: e.clientY });
-      });
-      el.addEventListener('mouseleave', () => {
-        setHoveredPinEvent(null);
-        setHoveredPinPos(null);
-      });
-      el.addEventListener('click', (e) => {
-        e.stopPropagation();
-        setHoveredPinEvent(null);
-        setSelectedEvent(evt);
-      });
-
-      const marker = new maplibregl.Marker({ element: el, anchor: 'bottom' })
-        .setLngLat([lng, lat])
-        .addTo(map);
-      pinMarkersRef.current.push(marker);
-    });
+    resolveAndPlace();
 
     return () => {
+      cancelled = true;
       pinMarkersRef.current.forEach(m => m.remove());
       pinMarkersRef.current = [];
     };
