@@ -2354,11 +2354,13 @@ export default function MapView({ events, headerCollapsed = false }) {
 
   // Central helper — clears stale memoized exprs and re-applies building/baseplate colors.
   // Called after any setData or toggle that may invalidate the current GPU expression.
-  function refreshBuildingColors(overrideHm, overrideTsIdx) {
+  // Central helper — clears stale memoized exprs and re-applies building/baseplate colors.
+  // Called after any setData or toggle that may invalidate the current GPU expression.
+  function refreshBuildingColors() {
     const map = mapRef.current;
     if (!map || !map.getStyle()) return;
-    const isHm = overrideHm !== undefined ? overrideHm : heatmapRef.current;
-    const tsIdx = overrideTsIdx !== undefined ? overrideTsIdx : (timespanIdxRef.current ?? 4);
+    const isHm = heatmapRef.current;
+    const tsIdx = timespanIdxRef.current ?? 4;
     memoizedExprs.current = {};
     if (map.getLayer('real3d-buildings')) {
       map.setPaintProperty('real3d-buildings', 'fill-extrusion-color', buildingColorExprByState(isHm, tsIdx));
@@ -2942,67 +2944,47 @@ export default function MapView({ events, headerCollapsed = false }) {
     } else {
       // Normal path — layers already exist (pre-created at map init). Just flip visibility.
       setReal3DLayersVisible(map, true);
-      // Always refresh colors immediately so the toggle is instant
-      refreshBuildingColors(isHm);
-      updateRoadColors(map, isHm);
-      // Background bake if needed (will re-refresh when done)
+      // Ensure correct colors — bake if tiers are ready but not yet baked
       if (!buildingTiersBakedRef.current && buildingFGBRef.current && buildingZctaMapRef.current && precomputedTiersRef.current) {
-        bakeAllTiersIntoBuildings().catch(() => {});
+        bakeAllTiersIntoBuildings();
+      } else {
+        refreshBuildingColors();
       }
+      updateRoadColors(map, isHm);
     }
 
     map.setLight({ anchor: 'map' });
     map.easeTo({ pitch: 55, bearing: -17, duration: 700 });
   }, [real3D, mapReady]);
 
-  // Heatmap toggle in Real3D — swap paint expressions immediately (GPU-only, instant)
+  // Heatmap toggle in Real3D — just swap paint expressions (GPU-only, instant)
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady || !real3D) return;
-    // Always refresh building colors immediately so the toggle is visually instant
-    refreshBuildingColors(heatmap, timespanIdx);
-    updateRoadColors(map, heatmap);
-
-    // When heatmap turns OFF in Real3D, force-reset the ZCTA ground layer and extrusion layers
-    // to standard non-heatmap state. Effect A handles this too, but we belt-and-suspenders here
-    // to cover any timing gaps between the two effects.
-    if (!heatmap) {
-      if (map.getLayer('zcta-fill')) {
-        map.setPaintProperty('zcta-fill', 'fill-color', '#1a0505');
-        map.setPaintProperty('zcta-fill', 'fill-opacity', satellite ? 0.65 : 0.75);
-      }
-      if (map.getLayer('zcta-extrude')) {
-        map.setPaintProperty('zcta-extrude', 'fill-extrusion-color', '#1a0505');
-        map.setPaintProperty('zcta-extrude', 'fill-extrusion-height', 0);
-        map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', 0);
-      }
-      if (map.getLayer('zcta-floor')) map.setPaintProperty('zcta-floor', 'fill-extrusion-opacity', 0);
-      if (map.getLayer('zcta-cap')) map.setPaintProperty('zcta-cap', 'fill-extrusion-opacity', 0);
-    }
-
-    // Background bake if needed (will re-refresh when done — cosmetic, not blocking)
+    // Safety: if tiers not yet baked but all prerequisites exist, bake now
     if (!buildingTiersBakedRef.current && buildingFGBRef.current && buildingZctaMapRef.current && precomputedTiersRef.current) {
-      bakeAllTiersIntoBuildings().catch(() => {});
+      bakeAllTiersIntoBuildings(); // bake handles setData + refreshBuildingColors internally
+    } else {
+      refreshBuildingColors();
     }
+    updateRoadColors(map, heatmap);
     if (map.getLayer('zcta-safezone-extrusion')) {
       map.setPaintProperty('zcta-safezone-extrusion', 'fill-extrusion-opacity', 1.0);
     }
-    // Force MapLibre to re-render immediately so stale heatmap colors don't linger
-    map.triggerRepaint();
   }, [heatmap, real3D, mapReady]);
 
-  // Timespan change in Real3D — swap which _tier_X column the paint reads (GPU-only, instant)
+  // Timespan change in Real3D — just swap which _tier_X column the paint reads (GPU-only, instant)
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady || !real3D) return;
     if (!heatmapRef.current) return;
-    // Always refresh immediately so the slider feels instant
-    refreshBuildingColors(true, timespanIdx);
-    updateRoadColors(map, true);
-    // Background bake if needed
+    // Safety: if tiers not yet baked but all prerequisites exist, bake now
     if (!buildingTiersBakedRef.current && buildingFGBRef.current && buildingZctaMapRef.current && precomputedTiersRef.current) {
-      bakeAllTiersIntoBuildings().catch(() => {});
+      bakeAllTiersIntoBuildings();
+    } else {
+      refreshBuildingColors();
     }
+    updateRoadColors(map, heatmapRef.current);
   }, [timespanIdx, real3D, mapReady]);
 
   const handleThreeDToggle = () => {
@@ -3293,7 +3275,7 @@ export default function MapView({ events, headerCollapsed = false }) {
       {entered && (
         <>
           {/* Controls — below header when expanded, below expand button when collapsed */}
-          <div className={`absolute left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-2 transition-[top] duration-300 ${headerCollapsed ? 'top-[68px]' : 'top-[112px] md:top-[84px]'}`}>
+          <div className={`absolute left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-2 transition-[top] duration-300 ${headerCollapsed ? 'top-[68px]' : 'top-[120px] md:top-[84px]'}`}>
             <div className="flex items-center gap-2">
               <div className="flex items-center gap-1 bg-black/80 backdrop-blur border border-white/20 rounded-2xl px-3 py-1.5">
                 <span className="text-white text-xs font-black mr-1">📅</span>
@@ -3310,35 +3292,36 @@ export default function MapView({ events, headerCollapsed = false }) {
                 📍
               </button>
             </div>
+            {/* Row 2: Topo + Heatmap + Satellite (+ 3D/Real3D on desktop) */}
             <div className="flex gap-2 flex-wrap justify-center">
-              <div className="flex flex-col items-center gap-2">
-                <div className="relative flex flex-col items-center gap-2">
-                  <button onClick={() => { setHeatmap(v => { if (!v) setTopoOn(false); return !v; }); }}
-                    className={`px-4 py-2 rounded-2xl font-black text-sm border-2 transition-all ${heatmap ? 'bg-gradient-to-r from-cyan-500 via-yellow-400 to-red-500 border-yellow-300 text-white' : 'bg-black/70 border-white/30 text-white hover:border-orange-400'}`}>
-                    🌡️ Heatmap
-                  </button>
-                  {heatmap && !isMobile && (
-                    <button onClick={() => setTopoOn(v => !v)}
-                      className={`w-10 h-10 rounded-2xl border-3 p-0 flex items-center justify-center transition-all ${topoOn ? 'ring-2 ring-yellow-300 border-yellow-300' : 'border-white/50 hover:border-yellow-300'}`}
-                      title="Topo Heatmap Toggle"
-                      style={{ position: 'absolute', top: 'calc(100% + 8px)', left: '50%', transform: 'translateX(-50%)', backgroundColor: '#000' }}>
-                      <div style={{ width: 36, height: 36, borderRadius: 8, backgroundImage: `url('${PUBLIC_BASE}data/topo-thumb.png')`, backgroundSize: 'cover', backgroundPosition: 'center', opacity: topoOn ? 1 : 0.8 }} />
-                    </button>
-                  )}
-                  {heatmap && isMobile && (
-                    <button onClick={() => setTopoOn(v => !v)}
-                      className={`absolute left-[-44px] top-0 w-9 h-9 rounded-2xl border-3 p-0 flex items-center justify-center transition-all ${topoOn ? 'ring-2 ring-yellow-300 border-yellow-300' : 'border-white/50 hover:border-yellow-300'}`}
-                      title="Topo Heatmap Toggle (mobile)"
-                      style={{ transform: 'translateX(-4px)', backgroundColor: '#000' }}>
-                      <div style={{ width: 30, height: 30, borderRadius: 8, backgroundImage: `url('${PUBLIC_BASE}data/topo-thumb.png')`, backgroundSize: 'cover', backgroundPosition: 'center', opacity: topoOn ? 1 : 0.8 }} />
-                    </button>
-                  )}
-                </div>
-              </div>
+              {heatmap && (
+                <button onClick={() => setTopoOn(v => !v)}
+                  className={`w-10 h-10 rounded-2xl border-3 p-0 flex items-center justify-center transition-all ${topoOn ? 'ring-2 ring-yellow-300 border-yellow-300' : 'border-white/50 hover:border-yellow-300'}`}
+                  title="Topo Heatmap Toggle"
+                  style={{ backgroundColor: '#000' }}>
+                  <div className={`rounded-lg bg-cover bg-center ${isMobile ? 'w-[30px] h-[30px]' : 'w-[36px] h-[36px]'}`} style={{ backgroundImage: `url('${PUBLIC_BASE}data/topo-thumb.png')`, opacity: topoOn ? 1 : 0.8 }} />
+                </button>
+              )}
+              <button onClick={() => { setHeatmap(v => { if (!v) setTopoOn(false); return !v; }); }}
+                className={`px-4 py-2 rounded-2xl font-black text-sm border-2 transition-all ${heatmap ? 'bg-gradient-to-r from-cyan-500 via-yellow-400 to-red-500 border-yellow-300 text-white' : 'bg-black/70 border-white/30 text-white hover:border-orange-400'}`}>
+                🌡️ Heatmap
+              </button>
               <button onClick={() => setSatellite(v => !v)}
                 className={`px-4 py-2 rounded-2xl font-black text-sm border-2 transition-all ${satellite ? 'bg-[#7C3AED] border-[#7C3AED] text-white' : 'bg-black/70 border-white/30 text-white hover:border-violet-400'}`}>
                 🛰️ Satellite
               </button>
+              {/* Desktop: 3D + Real3D in same row */}
+              <button onClick={handleThreeDToggle}
+                className={`hidden md:block px-4 py-2 rounded-2xl font-black text-sm border-2 transition-all ${threeD ? 'bg-emerald-600 border-emerald-400 text-white' : 'bg-black/70 border-white/30 text-white hover:border-emerald-400'}`}>
+                🏙️ 3D
+              </button>
+              <button onClick={handleReal3DToggle}
+                className={`hidden md:block px-4 py-2 rounded-2xl font-black text-sm border-2 transition-all ${real3D ? 'bg-amber-600 border-amber-400 text-white' : 'bg-black/70 border-white/30 text-white hover:border-amber-400'}`}>
+                🏛️ Real3D
+              </button>
+            </div>
+            {/* Row 3 (mobile only): 3D + Real3D */}
+            <div className="flex gap-2 justify-center md:hidden">
               <button onClick={handleThreeDToggle}
                 className={`px-4 py-2 rounded-2xl font-black text-sm border-2 transition-all ${threeD ? 'bg-emerald-600 border-emerald-400 text-white' : 'bg-black/70 border-white/30 text-white hover:border-emerald-400'}`}>
                 🏙️ 3D
