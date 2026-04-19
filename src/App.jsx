@@ -69,7 +69,27 @@ function AppWithEvents() {
         const baseEvents = dbEvents && dbEvents.length > 0
           ? dbEvents
           : SAMPLE_MODE ? SAMPLE_EVENTS : [];
-        const merged = [...baseEvents, ...(autoEvents || [])];
+
+        // Enrich DB events with lat/lng from sample data if missing (DB rows
+        // inserted before the lat/lng columns were added won't have coords)
+        let enrichedBase = baseEvents;
+        if (SAMPLE_MODE && baseEvents.length > 0 && baseEvents !== SAMPLE_EVENTS) {
+          const sampleByKey = {};
+          SAMPLE_EVENTS.forEach(s => {
+            sampleByKey[`${s.event_name}__${s.event_date}`] = s;
+          });
+          enrichedBase = baseEvents.map(e => {
+            if (e.lat && e.lng) return e;
+            const key = `${e.event_name}__${e.event_date}`;
+            const sample = sampleByKey[key];
+            if (sample && sample.lat && sample.lng) {
+              return { ...e, lat: sample.lat, lng: sample.lng, borough: e.borough || sample.borough };
+            }
+            return e;
+          });
+        }
+
+        const merged = [...enrichedBase, ...(autoEvents || [])];
 
         if (merged.length > 0) {
           setEvents(merged);

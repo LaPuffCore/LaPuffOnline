@@ -25,6 +25,9 @@ function toSampleEventRow(event) {
     hex_color: event.hex_color || '#7C3AED',
     is_approved: true,
     zip_code: SAMPLE_ZIP_CODE,
+    lat: event.lat || null,
+    lng: event.lng || null,
+    borough: event.borough || null,
   };
 }
 

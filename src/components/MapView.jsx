@@ -3173,7 +3173,7 @@ export default function MapView({ events, headerCollapsed = false }) {
       {entered && (
         <>
           {/* Controls — below header when expanded, below expand button when collapsed */}
-          <div className={`absolute left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-2 transition-[top] duration-300 ${headerCollapsed ? 'top-[68px]' : 'top-[104px] md:top-[72px]'}`}>
+          <div className={`absolute left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-2 transition-[top] duration-300 ${headerCollapsed ? 'top-[68px]' : 'top-[112px] md:top-[84px]'}`}>
             <div className="flex items-center gap-2">
               <div className="flex items-center gap-1 bg-black/80 backdrop-blur border border-white/20 rounded-2xl px-3 py-1.5">
                 <span className="text-white text-xs font-black mr-1">📅</span>
