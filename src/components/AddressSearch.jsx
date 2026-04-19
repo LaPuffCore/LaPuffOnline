@@ -37,7 +37,7 @@ export default function AddressSearch({ value, onChange, placeholder = 'Search N
     const address = item.display_name;
     setQuery(address);
     setResults([]);
-    onChange({ city, address, zipcode });
+    onChange({ city, address, zipcode, lat: parseFloat(item.lat), lng: parseFloat(item.lon) });
   }
 
   return (

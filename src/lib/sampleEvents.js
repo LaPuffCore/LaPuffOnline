@@ -25,6 +25,8 @@ const ALL_SAMPLE_EVENTS = [
     _sample: true,
     _sample: true,
     borough: 'Bronx',
+    lat: 40.8623,
+    lng: -73.8812,
   },
   {
     id: 'sample-2',
@@ -46,6 +48,8 @@ const ALL_SAMPLE_EVENTS = [
     is_approved: true,
     _sample: true,
     borough: 'Manhattan',
+    lat: 40.7794,
+    lng: -73.9632,
   },
   {
     id: 'sample-3',
@@ -66,6 +70,8 @@ const ALL_SAMPLE_EVENTS = [
     is_approved: true,
     _sample: true,
     borough: 'Manhattan',
+    lat: 40.7539,
+    lng: -74.0005,
   },
   {
     id: 'sample-4',
@@ -83,6 +89,8 @@ const ALL_SAMPLE_EVENTS = [
     is_approved: true,
     _sample: true,
     borough: 'Manhattan',
+    lat: 40.7580,
+    lng: -73.9775,
   },
   {
     id: 'sample-5',
@@ -103,6 +111,8 @@ const ALL_SAMPLE_EVENTS = [
     is_approved: true,
     _sample: true,
     borough: 'Manhattan',
+    lat: 40.7806,
+    lng: -73.9813,
   },
   {
     id: 'sample-6',
@@ -122,6 +132,8 @@ const ALL_SAMPLE_EVENTS = [
     is_approved: true,
     _sample: true,
     borough: 'Manhattan',
+    lat: 40.7725,
+    lng: -73.9835,
   },
   {
     id: 'sample-7',
@@ -139,6 +151,8 @@ const ALL_SAMPLE_EVENTS = [
     is_approved: true,
     _sample: true,
     borough: 'Brooklyn',
+    lat: 40.6933,
+    lng: -73.9874,
   },
   {
     id: 'sample-8',
@@ -156,6 +170,8 @@ const ALL_SAMPLE_EVENTS = [
     is_approved: true,
     _sample: true,
     borough: 'Manhattan',
+    lat: 40.7621,
+    lng: -73.9684,
   },
   {
     id: 'sample-9',
@@ -173,6 +189,8 @@ const ALL_SAMPLE_EVENTS = [
     is_approved: true,
     _sample: true,
     borough: 'Manhattan',
+    lat: 40.7601,
+    lng: -73.9798,
   },
   {
     id: 'sample-10',
@@ -190,6 +208,8 @@ const ALL_SAMPLE_EVENTS = [
     is_approved: true,
     _sample: true,
     borough: 'Manhattan',
+    lat: 40.7286,
+    lng: -73.9868,
   },
   {
     id: 'sample-11',
@@ -207,6 +227,8 @@ const ALL_SAMPLE_EVENTS = [
     is_approved: true,
     _sample: true,
     borough: 'Brooklyn',
+    lat: 40.6795,
+    lng: -73.9795,
   },
   {
     id: 'sample-12',
@@ -224,6 +246,8 @@ const ALL_SAMPLE_EVENTS = [
     is_approved: true,
     _sample: true,
     borough: 'Brooklyn',
+    lat: 40.7179,
+    lng: -73.9614,
   },
   {
     id: 'sample-13',
@@ -241,6 +265,8 @@ const ALL_SAMPLE_EVENTS = [
     is_approved: true,
     _sample: true,
     borough: 'Manhattan',
+    lat: 40.6892,
+    lng: -74.0168,
   },
   {
     id: 'sample-14',
@@ -258,6 +284,8 @@ const ALL_SAMPLE_EVENTS = [
     is_approved: true,
     _sample: true,
     borough: 'Queens',
+    lat: 40.7466,
+    lng: -73.8449,
   },
   {
     id: 'sample-15',
@@ -275,6 +303,8 @@ const ALL_SAMPLE_EVENTS = [
     is_approved: true,
     _sample: true,
     borough: 'Bronx',
+    lat: 40.8611,
+    lng: -73.8975,
   },
   {
     id: 'sample-16',
@@ -292,6 +322,8 @@ const ALL_SAMPLE_EVENTS = [
     is_approved: true,
     _sample: true,
     borough: 'Staten Island',
+    lat: 40.6433,
+    lng: -74.0771,
   },
   {
     id: 'sample-17',
@@ -309,6 +341,8 @@ const ALL_SAMPLE_EVENTS = [
     is_approved: true,
     _sample: true,
     borough: 'Manhattan',
+    lat: 40.6945,
+    lng: -73.9857,
   },
   {
     id: 'sample-18',
@@ -326,6 +360,8 @@ const ALL_SAMPLE_EVENTS = [
     is_approved: true,
     _sample: true,
     borough: 'Brooklyn',
+    lat: 40.6712,
+    lng: -73.9639,
   },
   {
     id: 'sample-19',
@@ -343,6 +379,8 @@ const ALL_SAMPLE_EVENTS = [
     is_approved: true,
     _sample: true,
     borough: 'Manhattan',
+    lat: 40.7845,
+    lng: -73.9575,
   },
   {
     id: 'sample-20',
@@ -366,6 +404,8 @@ const ALL_SAMPLE_EVENTS = [
     is_approved: true,
     _sample: true,
     borough: 'Brooklyn',
+    lat: 40.8108,
+    lng: -73.8195,
   },
   {
     id: 'sample-21',
@@ -383,6 +423,8 @@ const ALL_SAMPLE_EVENTS = [
     is_approved: true,
     _sample: true,
     borough: 'Queens',
+    lat: 40.8175,
+    lng: -73.9215,
   },
   {
     id: 'sample-22',
@@ -400,6 +442,8 @@ const ALL_SAMPLE_EVENTS = [
     is_approved: true,
     _sample: true,
     borough: 'Bronx',
+    lat: 40.7425,
+    lng: -73.9468,
   },
   {
     id: 'sample-23',
@@ -417,6 +461,8 @@ const ALL_SAMPLE_EVENTS = [
     is_approved: true,
     _sample: true,
     borough: 'Queens',
+    lat: 40.6978,
+    lng: -73.7911,
   },
   {
     id: 'sample-24',
@@ -434,6 +480,8 @@ const ALL_SAMPLE_EVENTS = [
     is_approved: true,
     _sample: true,
     borough: 'Queens',
+    lat: 40.6432,
+    lng: -74.0949,
   },
   {
     id: 'sample-25',
@@ -451,6 +499,8 @@ const ALL_SAMPLE_EVENTS = [
     is_approved: true,
     _sample: true,
     borough: 'Manhattan',
+    lat: 40.6399,
+    lng: -74.0929,
   },
   {
     id: 'sample-26',
@@ -468,6 +518,8 @@ const ALL_SAMPLE_EVENTS = [
     is_approved: true,
     _sample: true,
     borough: 'Manhattan',
+    lat: 40.7187,
+    lng: -73.9843,
   },
   {
     id: 'sample-27',
@@ -485,6 +537,8 @@ const ALL_SAMPLE_EVENTS = [
     is_approved: true,
     _sample: true,
     borough: 'Manhattan',
+    lat: 40.6987,
+    lng: -73.9790,
   },
   {
     id: 'sample-28',
@@ -502,6 +556,8 @@ const ALL_SAMPLE_EVENTS = [
     is_approved: true,
     _sample: true,
     borough: 'Brooklyn',
+    lat: 40.7558,
+    lng: -73.9052,
   },
   {
     id: 'sample-29',
@@ -519,6 +575,8 @@ const ALL_SAMPLE_EVENTS = [
     is_approved: true,
     _sample: true,
     borough: 'Brooklyn',
+    lat: 40.7020,
+    lng: -73.8012,
   },
   {
     id: 'sample-30',
@@ -536,6 +594,8 @@ const ALL_SAMPLE_EVENTS = [
     is_approved: true,
     _sample: true,
     borough: 'Staten Island',
+    lat: 40.6152,
+    lng: -74.1560,
   },
   {
     id: 'sample-31',
@@ -553,6 +613,8 @@ const ALL_SAMPLE_EVENTS = [
     is_approved: true,
     _sample: true,
     borough: 'Manhattan',
+    lat: 40.7225,
+    lng: -73.9888,
   },
   {
     id: 'sample-32',
@@ -570,6 +632,8 @@ const ALL_SAMPLE_EVENTS = [
     is_approved: true,
     _sample: true,
     borough: 'Manhattan',
+    lat: 40.6543,
+    lng: -74.0037,
   },
   {
     id: 'sample-33',
@@ -587,6 +651,8 @@ const ALL_SAMPLE_EVENTS = [
     is_approved: true,
     _sample: true,
     borough: 'Queens',
+    lat: 40.7427,
+    lng: -73.9233,
   },
   {
     id: 'sample-34',
@@ -604,6 +670,8 @@ const ALL_SAMPLE_EVENTS = [
     is_approved: true,
     _sample: true,
     borough: 'Bronx',
+    lat: 40.8296,
+    lng: -73.9262,
   },
   {
     id: 'sample-35',
@@ -621,6 +689,8 @@ const ALL_SAMPLE_EVENTS = [
     is_approved: true,
     _sample: true,
     borough: 'Manhattan',
+    lat: 40.6596,
+    lng: -73.8963,
   },
   {
     id: 'sample-36',
@@ -638,6 +708,8 @@ const ALL_SAMPLE_EVENTS = [
     is_approved: true,
     _sample: true,
     borough: 'Brooklyn',
+    lat: 40.6403,
+    lng: -74.0771,
   },
   {
     id: 'sample-37',
@@ -655,6 +727,8 @@ const ALL_SAMPLE_EVENTS = [
     is_approved: true,
     _sample: true,
     borough: 'Manhattan',
+    lat: 40.7785,
+    lng: -73.9725,
   },
   {
     id: 'sample-38',
@@ -672,6 +746,8 @@ const ALL_SAMPLE_EVENTS = [
     is_approved: true,
     _sample: true,
     borough: 'Queens',
+    lat: 40.5749,
+    lng: -73.9786,
   },
   {
     id: 'sample-39',
@@ -689,6 +765,8 @@ const ALL_SAMPLE_EVENTS = [
     is_approved: true,
     _sample: true,
     borough: 'Manhattan',
+    lat: 40.8043,
+    lng: -73.9530,
   },
   {
     id: 'sample-40',
@@ -706,6 +784,8 @@ const ALL_SAMPLE_EVENTS = [
     is_approved: true,
     _sample: true,
     borough: 'Manhattan',
+    lat: 40.8565,
+    lng: -73.7960,
   },
 ];
 

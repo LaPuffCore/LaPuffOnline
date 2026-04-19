@@ -70,6 +70,8 @@ export default function EventSubmitForm({ onClose }) {
       description: form.description,
       photos: photoUrls.length ? photoUrls : null,
       representative_emoji: form.emoji, hex_color: form.color, is_approved: false,
+      lat: form.location_data.lat || null,
+      lng: form.location_data.lng || null,
     };
     try {
       await submitEvent(payload);
