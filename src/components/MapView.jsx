@@ -1805,7 +1805,7 @@ export default function MapView({ events, headerCollapsed = false }) {
         precomputedTiersRef.current = result;
         // Bake tiers into buildings if FGB data + ZCTA index are ready
         if (buildingFGBRef.current && buildingZctaMapRef.current) {
-          await bakeAllTiersIntoBuildings();
+          bakeAllTiersIntoBuildings();
         }
       }
     })();
@@ -2354,68 +2354,48 @@ export default function MapView({ events, headerCollapsed = false }) {
 
   // Central helper — clears stale memoized exprs and re-applies building/baseplate colors.
   // Called after any setData or toggle that may invalidate the current GPU expression.
-  // Central helper — clears stale memoized exprs and re-applies building/baseplate colors.
-  // Called after any setData or toggle that may invalidate the current GPU expression.
   function refreshBuildingColors() {
     const map = mapRef.current;
     if (!map || !map.getStyle()) return;
     const isHm = heatmapRef.current;
     const tsIdx = timespanIdxRef.current ?? 4;
     memoizedExprs.current = {};
-    // Update each layer independently — one failure should not block others
     if (map.getLayer('real3d-buildings')) {
-      try { map.setPaintProperty('real3d-buildings', 'fill-extrusion-color', buildingColorExprByState(isHm, tsIdx)); }
-      catch (e) { console.error('refreshBuildingColors real3d-buildings failed:', e); }
+      map.setPaintProperty('real3d-buildings', 'fill-extrusion-color', buildingColorExprByState(isHm, tsIdx));
     }
     if (map.getLayer('real3d-buildings-baseplate')) {
-      try { map.setPaintProperty('real3d-buildings-baseplate', 'fill-extrusion-color', baseplateColorExpr(isHm, tsIdx)); }
-      catch (e) { console.error('refreshBuildingColors baseplate failed:', e); }
+      map.setPaintProperty('real3d-buildings-baseplate', 'fill-extrusion-color', baseplateColorExpr(isHm, tsIdx));
     }
     if (map.getLayer('real3d-landuse-baseplate')) {
-      try { map.setPaintProperty('real3d-landuse-baseplate', 'fill-color', baseplateColorExpr(isHm, tsIdx)); }
-      catch (e) { console.error('refreshBuildingColors landuse failed:', e); }
+      map.setPaintProperty('real3d-landuse-baseplate', 'fill-color', baseplateColorExpr(isHm, tsIdx));
     }
   }
 
-  // Central helper — updates road layer colors based on heatmap state + borough tiers.
-  // When heatmap ON + borough data available: per-borough tier-colored roads.
-  // When heatmap OFF: static red-toned colors.
-  function updateRoadColors(map, isHeatmap) {
-    try {
-      if (!map?.getStyle()) return;
-      let motorwayColor, primaryColor, tertiaryColor;
-      if (isHeatmap) {
-        const boroGeo = boroughGeoDataRef.current;
-        const tsIdx = timespanIdxRef.current ?? 4;
-        const precomputed = precomputedTiersRef.current;
-        const tiers = precomputed?.[tsIdx]?.tiers ?? tiersRef.current;
-        if (tiers && boroGeo?.features?.length && zipBoroughMapRef.current) {
-          const boroTiers = computeBoroughAvgTiers(tiers, zipBoroughMapRef.current, boroGeo.features.length);
-          const expr = roadBoroughColorExpr(boroGeo, boroTiers);
-          motorwayColor = expr;
-          primaryColor = expr;
-          tertiaryColor = expr;
-        } else {
-          motorwayColor = '#6b3300';
-          primaryColor = '#553300';
-          tertiaryColor = '#553300';
-        }
-      } else {
-        motorwayColor = '#991000';
-        primaryColor = '#aa1400';
-        tertiaryColor = '#771100';
-      }
-      if (map.getLayer('real3d-roads-motorway')) {
-        map.setPaintProperty('real3d-roads-motorway', 'line-color', motorwayColor);
-      }
-      if (map.getLayer('real3d-roads-primary')) {
-        map.setPaintProperty('real3d-roads-primary', 'line-color', primaryColor);
-      }
-      if (map.getLayer('real3d-roads-tertiary')) {
-        map.setPaintProperty('real3d-roads-tertiary', 'line-color', tertiaryColor);
-      }
-    } catch (e) {
-      console.error('updateRoadColors failed:', e);
+  // Helper — compute road color for a given heatmap state.
+  // Returns per-borough arc expression when heatmap ON + data available, else static color.
+  function getRoadColor(isHeatmap, staticColor, hmFallback) {
+    if (!isHeatmap) return staticColor;
+    const boroGeo = boroughGeoDataRef.current;
+    const tsIdx = timespanIdxRef.current ?? 4;
+    const precomputed = precomputedTiersRef.current;
+    const tiers = precomputed?.[tsIdx]?.tiers ?? tiersRef.current;
+    if (tiers && boroGeo?.features?.length && zipBoroughMapRef.current) {
+      const boroTiers = computeBoroughAvgTiers(tiers, zipBoroughMapRef.current, boroGeo.features.length);
+      return roadBoroughColorExpr(boroGeo, boroTiers);
+    }
+    return hmFallback;
+  }
+
+  // Apply road colors to all 3 road layers
+  function applyRoadColors(map, isHeatmap) {
+    if (map.getLayer('real3d-roads-motorway')) {
+      map.setPaintProperty('real3d-roads-motorway', 'line-color', getRoadColor(isHeatmap, '#991000', '#6b3300'));
+    }
+    if (map.getLayer('real3d-roads-primary')) {
+      map.setPaintProperty('real3d-roads-primary', 'line-color', getRoadColor(isHeatmap, '#aa1400', '#553300'));
+    }
+    if (map.getLayer('real3d-roads-tertiary')) {
+      map.setPaintProperty('real3d-roads-tertiary', 'line-color', getRoadColor(isHeatmap, '#771100', '#553300'));
     }
   }
 
@@ -2621,7 +2601,7 @@ export default function MapView({ events, headerCollapsed = false }) {
       if (map && map.getSource('fgb-buildings') && map.getStyle()) {
         // bakeAllTiersIntoBuildings calls setData internally (+ refreshes paint expressions).
         // Only call setData directly when baking is skipped (precomputed tiers not ready yet).
-        const baked = precomputedTiersRef.current ? await bakeAllTiersIntoBuildings() : false;
+        const baked = precomputedTiersRef.current ? bakeAllTiersIntoBuildings() : false;
         if (!baked) map.getSource('fgb-buildings').setData(geojson);
       }
     } catch (err) {
@@ -2709,39 +2689,27 @@ export default function MapView({ events, headerCollapsed = false }) {
   // After this, GPU reads ['get', '_tier_X'] directly — no feature-state or setData needed on timespan change.
   // Only called when BOTH pre-computed tiers AND building ZCTA index are ready.
   // Mutates features in place, then one final setData pushes the baked GeoJSON.
-  async function bakeAllTiersIntoBuildings() {
+  function bakeAllTiersIntoBuildings() {
     const geojson = buildingFGBRef.current;
     const idxMap = buildingZctaMapRef.current;
     const precomputed = precomputedTiersRef.current;
     if (!geojson?.features?.length || !idxMap || !precomputed) return false;
 
     const features = geojson.features;
-    const BAKE_CHUNK = 20000;
-    for (let start = 0; start < features.length; start += BAKE_CHUNK) {
-      const end = Math.min(start + BAKE_CHUNK, features.length);
-      for (let i = start; i < end; i++) {
-        const zIdx = idxMap[i];
-        const props = features[i].properties;
-        for (let t = 0; t < TIMESPAN_STEPS.length; t++) {
-          const tiers = precomputed[t]?.tiers;
-          props[`_tier_${t}`] = (zIdx >= 0 && tiers && tiers.length > zIdx) ? (tiers[zIdx] ?? 0) : 0;
-        }
+    for (let i = 0; i < features.length; i++) {
+      const zIdx = idxMap[i];
+      const props = features[i].properties;
+      for (let t = 0; t < TIMESPAN_STEPS.length; t++) {
+        const tiers = precomputed[t]?.tiers;
+        props[`_tier_${t}`] = (zIdx >= 0 && tiers && tiers.length > zIdx) ? (tiers[zIdx] ?? 0) : 0;
       }
-      if (end < features.length) await new Promise(r => setTimeout(r, 0));
     }
     buildingTiersBakedRef.current = true;
-
-    // Clear stale memoized expressions — they were built before baking when _tier_X were all 0.
-    // Ensures subsequent paint calls regenerate correct expressions against real tier data.
     memoizedExprs.current = {};
 
-    // Push baked data to map if source exists, then refresh paint expressions.
-    // This guarantees correct colors even if the paint was set before baking completed.
     const map = mapRef.current;
     if (map?.getSource('fgb-buildings') && map.getStyle()) {
       map.getSource('fgb-buildings').setData(geojson);
-      // refreshBuildingColors clears memoized cache and re-applies paint for all building layers.
-      // Called unconditionally — setPaintProperty guards exist inside refreshBuildingColors.
       refreshBuildingColors();
     }
     return true;
@@ -2798,7 +2766,7 @@ export default function MapView({ events, headerCollapsed = false }) {
         // If data is loaded but tiers not yet baked, bake now (covers race condition
         // where FGB cache finished before precomputed tiers, skipping bake at cache time)
         if (!buildingTiersBakedRef.current && buildingZctaMapRef.current && precomputedTiersRef.current) {
-          bakeAllTiersIntoBuildings().catch(() => {}); // async bake; handles setData + refreshBuildingColors internally
+          bakeAllTiersIntoBuildings();
         } else {
           map.getSource('fgb-buildings').setData(buildingFGBRef.current);
           refreshBuildingColors();
@@ -2838,10 +2806,10 @@ export default function MapView({ events, headerCollapsed = false }) {
       map.addLayer({
         id: 'real3d-roads-motorway', type: 'line',
         source: 'openmaptiles', 'source-layer': 'transportation',
-        minzoom: 9,
+        minzoom: 9, maxzoom: 14,
         filter: ['in', ['get', 'class'], ['literal', ['motorway', 'trunk']]],
         paint: {
-          'line-color': '#991000',
+          'line-color': isHeatmap ? '#6b3300' : '#991000',
           'line-width': ['interpolate', ['linear'], ['zoom'], 9, 1.5, 13, 4, 13.5, 2],
           'line-blur': 1.5, 'line-opacity': 0.9,
         },
@@ -2850,10 +2818,10 @@ export default function MapView({ events, headerCollapsed = false }) {
       map.addLayer({
         id: 'real3d-roads-primary', type: 'line',
         source: 'openmaptiles', 'source-layer': 'transportation',
-        minzoom: 10,
+        minzoom: 10, maxzoom: 14,
         filter: ['in', ['get', 'class'], ['literal', ['primary', 'secondary']]],
         paint: {
-          'line-color': '#aa1400',
+          'line-color': isHeatmap ? '#553300' : '#aa1400',
           'line-width': ['interpolate', ['linear'], ['zoom'], 10, 0.5, 13, 2.5, 13.5, 1.2],
           'line-blur': 0.8, 'line-opacity': 0.75,
         },
@@ -2862,17 +2830,17 @@ export default function MapView({ events, headerCollapsed = false }) {
       map.addLayer({
         id: 'real3d-roads-tertiary', type: 'line',
         source: 'openmaptiles', 'source-layer': 'transportation',
-        minzoom: 11,
+        minzoom: 11, maxzoom: 14,
         filter: ['in', ['get', 'class'], ['literal', ['tertiary', 'minor', 'service']]],
         paint: {
-          'line-color': '#771100',
+          'line-color': isHeatmap ? '#553300' : '#771100',
           'line-width': ['interpolate', ['linear'], ['zoom'], 11, 0.3, 13, 1.2, 13.5, 0.6],
           'line-blur': 0.3, 'line-opacity': 0.65,
         },
       });
 
       // Apply per-borough heatmap road colors if applicable
-      updateRoadColors(map, isHeatmap);
+      applyRoadColors(map, isHeatmap);
 
       map.addLayer({
         id: 'real3d-landuse-baseplate', type: 'fill',
@@ -2933,11 +2901,9 @@ export default function MapView({ events, headerCollapsed = false }) {
     if (!map || !mapReady) return;
 
     if (!real3D) {
-      // Hide all Real3D layers (don't destroy)
       if (real3dLayersCreatedRef.current) {
         setReal3DLayersVisible(map, false);
       }
-      // Stencil cleanup (legacy)
       if (map.getLayer('real3d-nyc-stencil')) map.removeLayer('real3d-nyc-stencil');
       if (map.getSource('real3d-stencil-source')) map.removeSource('real3d-stencil-source');
       if (!threeD) map.easeTo({ pitch: 0, bearing: 0, duration: 700 });
@@ -2950,30 +2916,28 @@ export default function MapView({ events, headerCollapsed = false }) {
       initReal3DLayers(map, isHm, timespanIdxRef.current ?? 4);
     } else {
       setReal3DLayersVisible(map, true);
-      // ALWAYS refresh colors immediately for instant visual feedback
-      refreshBuildingColors();
       if (!buildingTiersBakedRef.current && buildingFGBRef.current && buildingZctaMapRef.current && precomputedTiersRef.current) {
-        bakeAllTiersIntoBuildings().catch(() => {});
+        bakeAllTiersIntoBuildings();
+      } else {
+        refreshBuildingColors();
       }
-      updateRoadColors(map, isHm);
+      applyRoadColors(map, isHm);
     }
 
     map.setLight({ anchor: 'map' });
     map.easeTo({ pitch: 55, bearing: -17, duration: 700 });
   }, [real3D, mapReady]);
 
-  // Heatmap toggle in Real3D — swap paint expressions immediately (GPU-only, instant).
-  // ALWAYS refreshes building colors first for instant feedback, then bakes in background if needed.
+  // Heatmap toggle in Real3D — swap paint expressions (GPU-only, instant)
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady || !real3D) return;
-    // Immediate paint refresh — ensures heatmap ON/OFF colors apply instantly
-    refreshBuildingColors();
-    // Background bake if tiers not yet baked (async, won't block the toggle)
     if (!buildingTiersBakedRef.current && buildingFGBRef.current && buildingZctaMapRef.current && precomputedTiersRef.current) {
-      bakeAllTiersIntoBuildings().catch(() => {});
+      bakeAllTiersIntoBuildings();
+    } else {
+      refreshBuildingColors();
     }
-    updateRoadColors(map, heatmap);
+    applyRoadColors(map, heatmap);
     if (map.getLayer('zcta-safezone-extrusion')) {
       map.setPaintProperty('zcta-safezone-extrusion', 'fill-extrusion-opacity', 1.0);
     }
@@ -2984,12 +2948,12 @@ export default function MapView({ events, headerCollapsed = false }) {
     const map = mapRef.current;
     if (!map || !mapReady || !real3D) return;
     if (!heatmapRef.current) return;
-    // Immediate paint refresh
-    refreshBuildingColors();
     if (!buildingTiersBakedRef.current && buildingFGBRef.current && buildingZctaMapRef.current && precomputedTiersRef.current) {
-      bakeAllTiersIntoBuildings().catch(() => {});
+      bakeAllTiersIntoBuildings();
+    } else {
+      refreshBuildingColors();
     }
-    updateRoadColors(map, heatmapRef.current);
+    applyRoadColors(map, heatmapRef.current);
   }, [timespanIdx, real3D, mapReady]);
 
   const handleThreeDToggle = () => {
@@ -3080,16 +3044,16 @@ export default function MapView({ events, headerCollapsed = false }) {
   }
 
   // ── Event pin markers — native GeoJSON symbol layer for correct geo-positioning ──
-  // Uses MapLibre's built-in rendering so pins always stay at their exact lat/lng
-  // at any zoom, pitch, rotation. Viewport clipping is automatic.
+  // Two layers from same source: dots at far zoom (z<12), full pins at close zoom (z>=12).
+  // MapLibre handles viewport clipping, pitch/rotation, zoom scaling automatically.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
 
-    // Toggle visibility if layer exists
-    if (map.getLayer('event-pins-layer')) {
-      map.setLayoutProperty('event-pins-layer', 'visibility', showPins ? 'visible' : 'none');
-    }
+    // Toggle visibility if layers exist
+    ['event-pins-dots', 'event-pins-layer'].forEach(id => {
+      if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', showPins ? 'visible' : 'none');
+    });
     if (!showPins || !events?.length) {
       pinEventsLookupRef.current = new Map();
       if (map.getSource('event-pins')) map.getSource('event-pins').setData({ type: 'FeatureCollection', features: [] });
@@ -3114,7 +3078,7 @@ export default function MapView({ events, headerCollapsed = false }) {
     pinEvents.forEach(evt => lookup.set(String(evt.id), evt));
     pinEventsLookupRef.current = lookup;
 
-    // Generate pin canvas images for unique color+emoji combos
+    // Darken helper
     const darkenHex = (hex, amount = 50) => {
       try {
         const r = Math.max(0, parseInt(hex.slice(1, 3), 16) - amount);
@@ -3127,49 +3091,78 @@ export default function MapView({ events, headerCollapsed = false }) {
     pinEvents.forEach(evt => {
       const color = evt.hex_color || '#7C3AED';
       const emoji = evt.representative_emoji || '🎉';
-      const key = `pin-${color}-${emoji}`;
-      if (map.hasImage(key)) return;
 
-      const W = 48, H = 64;
-      const canvas = document.createElement('canvas');
-      canvas.width = W * 2; canvas.height = H * 2;
-      const ctx = canvas.getContext('2d');
-      ctx.scale(2, 2);
+      // DOT image — small solid circle for far zoom (z<12)
+      const dotKey = `dot-${color}`;
+      if (!map.hasImage(dotKey)) {
+        const S = 32;
+        const dc = document.createElement('canvas');
+        dc.width = S * 2; dc.height = S * 2;
+        const dctx = dc.getContext('2d');
+        dctx.scale(2, 2);
+        dctx.beginPath();
+        dctx.arc(S / 2, S / 2, 12, 0, 2 * Math.PI);
+        dctx.fillStyle = color;
+        dctx.fill();
+        dctx.strokeStyle = darkenHex(color, 70);
+        dctx.lineWidth = 3;
+        dctx.stroke();
+        const dotData = dctx.getImageData(0, 0, S * 2, S * 2);
+        map.addImage(dotKey, { width: S * 2, height: S * 2, data: dotData.data }, { pixelRatio: 2 });
+      }
 
-      // Teardrop pin shape
-      const cx = W / 2, cy = 18, cr = 14;
-      ctx.beginPath();
-      ctx.moveTo(cx, H - 2);
-      ctx.bezierCurveTo(cx - 4, H - 10, cx - cr - 2, cy + cr + 2, cx - cr, cy);
-      ctx.arc(cx, cy, cr, Math.PI, 0, false);
-      ctx.bezierCurveTo(cx + cr + 2, cy + cr + 2, cx + 4, H - 10, cx, H - 2);
-      ctx.closePath();
-      ctx.fillStyle = color;
-      ctx.fill();
-      ctx.strokeStyle = darkenHex(color);
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
+      // FULL PIN image — circle + triangle pointer for close zoom (z>=12)
+      const pinKey = `pin-${color}-${emoji}`;
+      if (!map.hasImage(pinKey)) {
+        const W = 80, H = 110;
+        const canvas = document.createElement('canvas');
+        canvas.width = W * 2; canvas.height = H * 2;
+        const ctx = canvas.getContext('2d');
+        ctx.scale(2, 2);
 
-      // White inner circle
-      ctx.beginPath();
-      ctx.arc(cx, cy, 9, 0, 2 * Math.PI);
-      ctx.fillStyle = '#ffffff';
-      ctx.fill();
-      ctx.strokeStyle = darkenHex(color, 30);
-      ctx.lineWidth = 1;
-      ctx.stroke();
+        const cx = W / 2, circleR = 30, circleY = 34;
+        const tipY = H - 2;
 
-      // Emoji centered in white circle
-      ctx.font = '13px "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(emoji, cx, cy + 0.5);
+        // Triangle pointer from circle bottom to tip
+        ctx.beginPath();
+        ctx.moveTo(cx - 14, circleY + circleR - 6);
+        ctx.lineTo(cx, tipY);
+        ctx.lineTo(cx + 14, circleY + circleR - 6);
+        ctx.closePath();
+        ctx.fillStyle = color;
+        ctx.fill();
 
-      const imgData = ctx.getImageData(0, 0, W * 2, H * 2);
-      map.addImage(key, { width: W * 2, height: H * 2, data: imgData.data }, { pixelRatio: 2 });
+        // Main circle body
+        ctx.beginPath();
+        ctx.arc(cx, circleY, circleR, 0, 2 * Math.PI);
+        ctx.fillStyle = color;
+        ctx.fill();
+        ctx.strokeStyle = darkenHex(color, 70);
+        ctx.lineWidth = 3;
+        ctx.stroke();
+
+        // White inner circle (large, fills most of the pin head)
+        const innerR = 22;
+        ctx.beginPath();
+        ctx.arc(cx, circleY, innerR, 0, 2 * Math.PI);
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+        ctx.strokeStyle = darkenHex(color, 30);
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        // Emoji centered in the white circle
+        ctx.font = '24px "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(emoji, cx, circleY + 1);
+
+        const imgData = ctx.getImageData(0, 0, W * 2, H * 2);
+        map.addImage(pinKey, { width: W * 2, height: H * 2, data: imgData.data }, { pixelRatio: 2 });
+      }
     });
 
-    // Build GeoJSON
+    // Build GeoJSON with both image keys
     const geojson = {
       type: 'FeatureCollection',
       features: pinEvents.map(evt => ({
@@ -3178,69 +3171,100 @@ export default function MapView({ events, headerCollapsed = false }) {
         properties: {
           _eventId: String(evt.id),
           pinImage: `pin-${evt.hex_color || '#7C3AED'}-${evt.representative_emoji || '🎉'}`,
+          dotImage: `dot-${evt.hex_color || '#7C3AED'}`,
         }
       }))
     };
 
-    // Create or update source + layer
+    // Create or update source + layers
     if (map.getSource('event-pins')) {
       map.getSource('event-pins').setData(geojson);
     } else {
       map.addSource('event-pins', { type: 'geojson', data: geojson });
+
+      // Dot layer — far zoom (below z12)
       map.addLayer({
-        id: 'event-pins-layer',
+        id: 'event-pins-dots',
         type: 'symbol',
         source: 'event-pins',
+        maxzoom: 12,
         layout: {
-          'icon-image': ['get', 'pinImage'],
-          'icon-size': ['interpolate', ['linear'], ['zoom'], 9, 0.35, 12, 0.5, 16, 0.65],
-          'icon-anchor': 'bottom',
+          'icon-image': ['get', 'dotImage'],
+          'icon-size': ['interpolate', ['linear'], ['zoom'], 9, 0.4, 11.5, 0.6],
+          'icon-anchor': 'center',
           'icon-allow-overlap': true,
           'icon-ignore-placement': true,
         },
         paint: { 'icon-opacity': 1.0 },
       });
+
+      // Full pin layer — close zoom (z11+ with ramp, full at z12+)
+      map.addLayer({
+        id: 'event-pins-layer',
+        type: 'symbol',
+        source: 'event-pins',
+        minzoom: 11,
+        layout: {
+          'icon-image': ['get', 'pinImage'],
+          'icon-size': ['interpolate', ['linear'], ['zoom'], 11, 0, 12, 0.55, 14, 0.75, 16, 0.9],
+          'icon-anchor': 'bottom',
+          'icon-allow-overlap': true,
+          'icon-ignore-placement': true,
+        },
+        paint: {
+          'icon-opacity': ['interpolate', ['linear'], ['zoom'], 11, 0, 12, 1.0],
+        },
+      });
     }
 
     // Ensure pins always render on top of all other layers
-    if (map.getLayer('event-pins-layer')) {
-      map.setLayoutProperty('event-pins-layer', 'visibility', 'visible');
-      try { map.moveLayer('event-pins-layer'); } catch {}
-    }
+    ['event-pins-dots', 'event-pins-layer'].forEach(id => {
+      if (map.getLayer(id)) {
+        map.setLayoutProperty(id, 'visibility', 'visible');
+        try { map.moveLayer(id); } catch {}
+      }
+    });
 
     // Attach click/hover handlers once (persists for component lifetime)
     if (!pinHandlersAttachedRef.current && map.getLayer('event-pins-layer')) {
       pinHandlersAttachedRef.current = true;
 
-      map.on('click', 'event-pins-layer', (e) => {
+      const handleClick = (e) => {
         if (!e.features?.length) return;
         const id = e.features[0].properties._eventId;
         const evt = pinEventsLookupRef.current.get(id);
         if (evt) { setHoveredPinEvent(null); setSelectedEvent(evt); }
-      });
-      map.on('mouseenter', 'event-pins-layer', (e) => {
+      };
+      const handleEnter = (e) => {
         map.getCanvas().style.cursor = 'pointer';
         if (e.features?.length) {
           const id = e.features[0].properties._eventId;
           const evt = pinEventsLookupRef.current.get(id);
           if (evt) {
             setHoveredPinEvent(evt);
-            // Convert map point to screen coordinates for tooltip positioning
             const rect = map.getContainer().getBoundingClientRect();
             setHoveredPinPos({ x: rect.left + e.point.x, y: rect.top + e.point.y });
           }
         }
-      });
-      map.on('mousemove', 'event-pins-layer', (e) => {
+      };
+      const handleMove = (e) => {
         if (e.point) {
           const rect = map.getContainer().getBoundingClientRect();
           setHoveredPinPos({ x: rect.left + e.point.x, y: rect.top + e.point.y });
         }
-      });
-      map.on('mouseleave', 'event-pins-layer', () => {
+      };
+      const handleLeave = () => {
         map.getCanvas().style.cursor = '';
         setHoveredPinEvent(null);
         setHoveredPinPos(null);
+      };
+
+      // Attach to both layers
+      ['event-pins-dots', 'event-pins-layer'].forEach(id => {
+        map.on('click', id, handleClick);
+        map.on('mouseenter', id, handleEnter);
+        map.on('mousemove', id, handleMove);
+        map.on('mouseleave', id, handleLeave);
       });
     }
   }, [showPins, events, mapReady, timespanIdx]);
@@ -3513,8 +3537,8 @@ export default function MapView({ events, headerCollapsed = false }) {
           )}
 
           {sideZip && isMobile && (
-            <div className="absolute inset-x-0 bottom-0 z-50 flex flex-col overflow-hidden"
-              style={{ height: '50%', background: 'rgba(3,0,10,0.88)', backdropFilter: 'blur(12px)', borderTop: '1px solid rgba(180,0,0,0.3)' }}>
+            <div className={`absolute inset-x-0 bottom-0 z-50 flex flex-col overflow-hidden transition-[top] duration-300 ${headerCollapsed ? 'top-[56px]' : 'top-[72px]'}`}
+              style={{ background: 'rgba(3,0,10,0.88)', backdropFilter: 'blur(12px)', borderTop: '1px solid rgba(180,0,0,0.3)' }}>
               <div className="flex items-center justify-between px-4 py-2 border-b border-white/10 flex-shrink-0">
                 <div>
                   <p className="text-red-400 font-black text-sm">{sideLabel}</p>
