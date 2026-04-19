@@ -3367,9 +3367,9 @@ export default function MapView({ events, headerCollapsed = false }) {
             </div>
           )}
 
-          {/* ── DESKTOP side panel ── */}
+          {/* ── DESKTOP side panel — sits below header when not collapsed ── */}
           {sideZip && !isMobile && (
-            <div className="absolute right-0 top-0 bottom-0 z-50 flex flex-col overflow-hidden"
+            <div className={`absolute right-0 bottom-0 z-50 flex flex-col overflow-hidden transition-[top] duration-300 ${headerCollapsed ? 'top-0' : 'top-[72px]'}`}
               style={{ width: 400, background: 'rgba(3,0,10,0.82)', backdropFilter: 'blur(16px)', borderLeft: '1px solid rgba(180,0,0,0.3)' }}>
               <div className="flex items-center justify-between px-5 py-3 border-b border-white/10 bg-black/30 flex-shrink-0">
                 <div>
