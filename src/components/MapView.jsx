@@ -90,6 +90,19 @@ function midTierColor(tier) {
   return HEAT_MID_COLORS.cold;
 }
 
+// Build a MapLibre expression that colors road features by the borough they're in.
+// Each borough's road color = darkTierColor of that borough's avg tier.
+// Roads outside all 5 boroughs get cold dark blue fallback.
+function roadBoroughColorExpr(boroughGeoData, boroughAvgTiers) {
+  const features = boroughGeoData?.features;
+  if (!features?.length || !boroughAvgTiers?.length) return '#001f29';
+  const cases = [];
+  for (let i = 0; i < features.length; i++) {
+    cases.push(['within', features[i].geometry], darkTierColor(boroughAvgTiers[i] ?? 0));
+  }
+  return ['case', ...cases, '#001f29'];
+}
+
 function isSpecialZip(zip) {
   return !zip || zip === '' || zip === '99999' || parseInt(zip) > 11697 || (typeof zip === 'string' && zip.startsWith('SAFEZONE'));
 }
@@ -1497,6 +1510,15 @@ export default function MapView({ events, headerCollapsed = false }) {
       }
     });
     mapRef.current = map;
+    // WebGL context loss recovery — prevent crash on mobile GPU pressure
+    map.getCanvas().addEventListener('webglcontextlost', (e) => {
+      e.preventDefault();
+      console.warn('WebGL context lost — will attempt recovery');
+    });
+    map.getCanvas().addEventListener('webglcontextrestored', () => {
+      console.log('WebGL context restored');
+      setStyleVersion(v => v + 1); // trigger style re-application
+    });
     map.on('load', () => {
       map.getCanvas().style.backgroundColor = 'transparent';
       setMapReady(true);
@@ -1782,7 +1804,7 @@ export default function MapView({ events, headerCollapsed = false }) {
         precomputedTiersRef.current = result;
         // Bake tiers into buildings if FGB data + ZCTA index are ready
         if (buildingFGBRef.current && buildingZctaMapRef.current) {
-          bakeAllTiersIntoBuildings();
+          await bakeAllTiersIntoBuildings();
         }
       }
     })();
@@ -2348,6 +2370,44 @@ export default function MapView({ events, headerCollapsed = false }) {
     }
   }
 
+  // Central helper — updates road layer colors based on heatmap state + borough tiers.
+  // When heatmap ON + borough data available: per-borough tier-colored roads.
+  // When heatmap OFF: static red-toned colors.
+  function updateRoadColors(map, isHeatmap) {
+    if (!map?.getStyle()) return;
+    let motorwayColor, primaryColor, tertiaryColor;
+    if (isHeatmap) {
+      const boroGeo = boroughGeoDataRef.current;
+      const tsIdx = timespanIdxRef.current ?? 4;
+      const precomputed = precomputedTiersRef.current;
+      const tiers = precomputed?.[tsIdx]?.tiers ?? tiersRef.current;
+      const boroTiers = computeBoroughAvgTiers(tiers, zipBoroughMapRef.current, boroGeo?.features?.length || 5);
+      if (boroGeo?.features?.length) {
+        const expr = roadBoroughColorExpr(boroGeo, boroTiers);
+        motorwayColor = expr;
+        primaryColor = expr;
+        tertiaryColor = expr;
+      } else {
+        motorwayColor = '#6b3300';
+        primaryColor = '#553300';
+        tertiaryColor = '#553300';
+      }
+    } else {
+      motorwayColor = '#991000';
+      primaryColor = '#aa1400';
+      tertiaryColor = '#771100';
+    }
+    if (map.getLayer('real3d-roads-motorway')) {
+      map.setPaintProperty('real3d-roads-motorway', 'line-color', motorwayColor);
+    }
+    if (map.getLayer('real3d-roads-primary')) {
+      map.setPaintProperty('real3d-roads-primary', 'line-color', primaryColor);
+    }
+    if (map.getLayer('real3d-roads-tertiary')) {
+      map.setPaintProperty('real3d-roads-tertiary', 'line-color', tertiaryColor);
+    }
+  }
+
   // Update 2D ZCTA line widths based on current zoom — called on every zoom event and on
   // heatmap effect for initial state. Gentle linear increase at z10+ so lines don't
   // appear to shrink relative to the growing zip polygons, without becoming too thick.
@@ -2550,7 +2610,7 @@ export default function MapView({ events, headerCollapsed = false }) {
       if (map && map.getSource('fgb-buildings') && map.getStyle()) {
         // bakeAllTiersIntoBuildings calls setData internally (+ refreshes paint expressions).
         // Only call setData directly when baking is skipped (precomputed tiers not ready yet).
-        const baked = precomputedTiersRef.current ? bakeAllTiersIntoBuildings() : false;
+        const baked = precomputedTiersRef.current ? await bakeAllTiersIntoBuildings() : false;
         if (!baked) map.getSource('fgb-buildings').setData(geojson);
       }
     } catch (err) {
@@ -2638,20 +2698,25 @@ export default function MapView({ events, headerCollapsed = false }) {
   // After this, GPU reads ['get', '_tier_X'] directly — no feature-state or setData needed on timespan change.
   // Only called when BOTH pre-computed tiers AND building ZCTA index are ready.
   // Mutates features in place, then one final setData pushes the baked GeoJSON.
-  function bakeAllTiersIntoBuildings() {
+  async function bakeAllTiersIntoBuildings() {
     const geojson = buildingFGBRef.current;
     const idxMap = buildingZctaMapRef.current;
     const precomputed = precomputedTiersRef.current;
     if (!geojson?.features?.length || !idxMap || !precomputed) return false;
 
     const features = geojson.features;
-    for (let i = 0; i < features.length; i++) {
-      const zIdx = idxMap[i];
-      const props = features[i].properties;
-      for (let t = 0; t < TIMESPAN_STEPS.length; t++) {
-        const tiers = precomputed[t]?.tiers;
-        props[`_tier_${t}`] = (zIdx >= 0 && tiers && tiers.length > zIdx) ? (tiers[zIdx] ?? 0) : 0;
+    const BAKE_CHUNK = 20000;
+    for (let start = 0; start < features.length; start += BAKE_CHUNK) {
+      const end = Math.min(start + BAKE_CHUNK, features.length);
+      for (let i = start; i < end; i++) {
+        const zIdx = idxMap[i];
+        const props = features[i].properties;
+        for (let t = 0; t < TIMESPAN_STEPS.length; t++) {
+          const tiers = precomputed[t]?.tiers;
+          props[`_tier_${t}`] = (zIdx >= 0 && tiers && tiers.length > zIdx) ? (tiers[zIdx] ?? 0) : 0;
+        }
       }
+      if (end < features.length) await new Promise(r => setTimeout(r, 0));
     }
     buildingTiersBakedRef.current = true;
 
@@ -2722,7 +2787,7 @@ export default function MapView({ events, headerCollapsed = false }) {
         // If data is loaded but tiers not yet baked, bake now (covers race condition
         // where FGB cache finished before precomputed tiers, skipping bake at cache time)
         if (!buildingTiersBakedRef.current && buildingZctaMapRef.current && precomputedTiersRef.current) {
-          bakeAllTiersIntoBuildings(); // bake handles setData + refreshBuildingColors internally
+          bakeAllTiersIntoBuildings().catch(() => {}); // async bake; handles setData + refreshBuildingColors internally
         } else {
           map.getSource('fgb-buildings').setData(buildingFGBRef.current);
           refreshBuildingColors();
@@ -2765,7 +2830,7 @@ export default function MapView({ events, headerCollapsed = false }) {
         minzoom: 9,
         filter: ['in', ['get', 'class'], ['literal', ['motorway', 'trunk']]],
         paint: {
-          'line-color': isHeatmap ? '#6b3300' : '#991000',
+          'line-color': '#991000',
           'line-width': ['interpolate', ['linear'], ['zoom'], 9, 1.5, 13, 4, 13.5, 2],
           'line-blur': 1.5, 'line-opacity': 0.9,
         },
@@ -2777,7 +2842,7 @@ export default function MapView({ events, headerCollapsed = false }) {
         minzoom: 10,
         filter: ['in', ['get', 'class'], ['literal', ['primary', 'secondary']]],
         paint: {
-          'line-color': isHeatmap ? '#553300' : '#aa1400',
+          'line-color': '#aa1400',
           'line-width': ['interpolate', ['linear'], ['zoom'], 10, 0.5, 13, 2.5, 13.5, 1.2],
           'line-blur': 0.8, 'line-opacity': 0.75,
         },
@@ -2789,11 +2854,14 @@ export default function MapView({ events, headerCollapsed = false }) {
         minzoom: 11,
         filter: ['in', ['get', 'class'], ['literal', ['tertiary', 'minor', 'service']]],
         paint: {
-          'line-color': isHeatmap ? '#553300' : '#771100',
+          'line-color': '#771100',
           'line-width': ['interpolate', ['linear'], ['zoom'], 11, 0.3, 13, 1.2, 13.5, 0.6],
           'line-blur': 0.3, 'line-opacity': 0.65,
         },
       });
+
+      // Apply per-borough heatmap road colors if applicable
+      updateRoadColors(map, isHeatmap);
 
       map.addLayer({
         id: 'real3d-landuse-baseplate', type: 'fill',
@@ -2810,11 +2878,19 @@ export default function MapView({ events, headerCollapsed = false }) {
 
       // Viewport listener for instant render when cache isn't ready.
       // Skip fetch when Real3D layers are hidden — no visible output to fill.
+      // Mobile gets higher debounce to reduce GPU pressure during rapid pinch-zoom.
       let vpTimer = null;
+      let zoomSettleTimer = null;
+      const isMob = window.innerWidth < 768;
+      const VP_DEBOUNCE = isMob ? 350 : 200;
       const onViewportChange = () => {
         if (!real3DRef.current) return; // Real3D not active, skip unnecessary fetch
         if (vpTimer) clearTimeout(vpTimer);
-        vpTimer = setTimeout(() => fetchViewportBuildings(mapRef.current), 200);
+        if (zoomSettleTimer) clearTimeout(zoomSettleTimer);
+        // Cancel in-flight fetches during rapid zoom changes
+        zoomSettleTimer = setTimeout(() => {
+          vpTimer = setTimeout(() => fetchViewportBuildings(mapRef.current), VP_DEBOUNCE);
+        }, isMob ? 100 : 0);
       };
       map.on('moveend', onViewportChange);
       map.on('zoomend', onViewportChange);
@@ -2822,6 +2898,7 @@ export default function MapView({ events, headerCollapsed = false }) {
         map.off('moveend', onViewportChange);
         map.off('zoomend', onViewportChange);
         if (vpTimer) clearTimeout(vpTimer);
+        if (zoomSettleTimer) clearTimeout(zoomSettleTimer);
       };
 
       if (map.getLayer('real3d-roads-motorway')) map.moveLayer('real3d-roads-motorway');
@@ -2866,19 +2943,11 @@ export default function MapView({ events, headerCollapsed = false }) {
       setReal3DLayersVisible(map, true);
       // Ensure correct colors — bake if tiers are ready but not yet baked
       if (!buildingTiersBakedRef.current && buildingFGBRef.current && buildingZctaMapRef.current && precomputedTiersRef.current) {
-        bakeAllTiersIntoBuildings();
+        bakeAllTiersIntoBuildings().catch(() => {});
       } else {
         refreshBuildingColors();
       }
-      if (map.getLayer('real3d-roads-motorway')) {
-        map.setPaintProperty('real3d-roads-motorway', 'line-color', isHm ? '#6b3300' : '#991000');
-      }
-      if (map.getLayer('real3d-roads-primary')) {
-        map.setPaintProperty('real3d-roads-primary', 'line-color', isHm ? '#553300' : '#aa1400');
-      }
-      if (map.getLayer('real3d-roads-tertiary')) {
-        map.setPaintProperty('real3d-roads-tertiary', 'line-color', isHm ? '#553300' : '#771100');
-      }
+      updateRoadColors(map, isHm);
     }
 
     map.setLight({ anchor: 'map' });
@@ -2891,19 +2960,11 @@ export default function MapView({ events, headerCollapsed = false }) {
     if (!map || !mapReady || !real3D) return;
     // Safety: if tiers not yet baked but all prerequisites exist, bake now
     if (!buildingTiersBakedRef.current && buildingFGBRef.current && buildingZctaMapRef.current && precomputedTiersRef.current) {
-      bakeAllTiersIntoBuildings(); // bake handles setData + refreshBuildingColors internally
+      bakeAllTiersIntoBuildings().catch(() => {}); // async bake; handles setData + refreshBuildingColors internally
     } else {
       refreshBuildingColors();
     }
-    if (map.getLayer('real3d-roads-motorway')) {
-      map.setPaintProperty('real3d-roads-motorway', 'line-color', heatmap ? '#6b3300' : '#991000');
-    }
-    if (map.getLayer('real3d-roads-primary')) {
-      map.setPaintProperty('real3d-roads-primary', 'line-color', heatmap ? '#553300' : '#aa1400');
-    }
-    if (map.getLayer('real3d-roads-tertiary')) {
-      map.setPaintProperty('real3d-roads-tertiary', 'line-color', heatmap ? '#553300' : '#771100');
-    }
+    updateRoadColors(map, heatmap);
     if (map.getLayer('zcta-safezone-extrusion')) {
       map.setPaintProperty('zcta-safezone-extrusion', 'fill-extrusion-opacity', 1.0);
     }
@@ -2916,10 +2977,11 @@ export default function MapView({ events, headerCollapsed = false }) {
     if (!heatmapRef.current) return;
     // Safety: if tiers not yet baked but all prerequisites exist, bake now
     if (!buildingTiersBakedRef.current && buildingFGBRef.current && buildingZctaMapRef.current && precomputedTiersRef.current) {
-      bakeAllTiersIntoBuildings();
+      bakeAllTiersIntoBuildings().catch(() => {});
     } else {
       refreshBuildingColors();
     }
+    updateRoadColors(map, true);
   }, [timespanIdx, real3D, mapReady]);
 
   const handleThreeDToggle = () => {
