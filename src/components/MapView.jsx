@@ -2362,14 +2362,18 @@ export default function MapView({ events, headerCollapsed = false }) {
     const isHm = heatmapRef.current;
     const tsIdx = timespanIdxRef.current ?? 4;
     memoizedExprs.current = {};
+    // Update each layer independently — one failure should not block others
     if (map.getLayer('real3d-buildings')) {
-      map.setPaintProperty('real3d-buildings', 'fill-extrusion-color', buildingColorExprByState(isHm, tsIdx));
+      try { map.setPaintProperty('real3d-buildings', 'fill-extrusion-color', buildingColorExprByState(isHm, tsIdx)); }
+      catch (e) { console.error('refreshBuildingColors real3d-buildings failed:', e); }
     }
     if (map.getLayer('real3d-buildings-baseplate')) {
-      map.setPaintProperty('real3d-buildings-baseplate', 'fill-extrusion-color', baseplateColorExpr(isHm, tsIdx));
+      try { map.setPaintProperty('real3d-buildings-baseplate', 'fill-extrusion-color', baseplateColorExpr(isHm, tsIdx)); }
+      catch (e) { console.error('refreshBuildingColors baseplate failed:', e); }
     }
     if (map.getLayer('real3d-landuse-baseplate')) {
-      map.setPaintProperty('real3d-landuse-baseplate', 'fill-color', baseplateColorExpr(isHm, tsIdx));
+      try { map.setPaintProperty('real3d-landuse-baseplate', 'fill-color', baseplateColorExpr(isHm, tsIdx)); }
+      catch (e) { console.error('refreshBuildingColors landuse failed:', e); }
     }
   }
 
@@ -2377,37 +2381,41 @@ export default function MapView({ events, headerCollapsed = false }) {
   // When heatmap ON + borough data available: per-borough tier-colored roads.
   // When heatmap OFF: static red-toned colors.
   function updateRoadColors(map, isHeatmap) {
-    if (!map?.getStyle()) return;
-    let motorwayColor, primaryColor, tertiaryColor;
-    if (isHeatmap) {
-      const boroGeo = boroughGeoDataRef.current;
-      const tsIdx = timespanIdxRef.current ?? 4;
-      const precomputed = precomputedTiersRef.current;
-      const tiers = precomputed?.[tsIdx]?.tiers ?? tiersRef.current;
-      const boroTiers = computeBoroughAvgTiers(tiers, zipBoroughMapRef.current, boroGeo?.features?.length || 5);
-      if (boroGeo?.features?.length) {
-        const expr = roadBoroughColorExpr(boroGeo, boroTiers);
-        motorwayColor = expr;
-        primaryColor = expr;
-        tertiaryColor = expr;
+    try {
+      if (!map?.getStyle()) return;
+      let motorwayColor, primaryColor, tertiaryColor;
+      if (isHeatmap) {
+        const boroGeo = boroughGeoDataRef.current;
+        const tsIdx = timespanIdxRef.current ?? 4;
+        const precomputed = precomputedTiersRef.current;
+        const tiers = precomputed?.[tsIdx]?.tiers ?? tiersRef.current;
+        if (tiers && boroGeo?.features?.length && zipBoroughMapRef.current) {
+          const boroTiers = computeBoroughAvgTiers(tiers, zipBoroughMapRef.current, boroGeo.features.length);
+          const expr = roadBoroughColorExpr(boroGeo, boroTiers);
+          motorwayColor = expr;
+          primaryColor = expr;
+          tertiaryColor = expr;
+        } else {
+          motorwayColor = '#6b3300';
+          primaryColor = '#553300';
+          tertiaryColor = '#553300';
+        }
       } else {
-        motorwayColor = '#6b3300';
-        primaryColor = '#553300';
-        tertiaryColor = '#553300';
+        motorwayColor = '#991000';
+        primaryColor = '#aa1400';
+        tertiaryColor = '#771100';
       }
-    } else {
-      motorwayColor = '#991000';
-      primaryColor = '#aa1400';
-      tertiaryColor = '#771100';
-    }
-    if (map.getLayer('real3d-roads-motorway')) {
-      map.setPaintProperty('real3d-roads-motorway', 'line-color', motorwayColor);
-    }
-    if (map.getLayer('real3d-roads-primary')) {
-      map.setPaintProperty('real3d-roads-primary', 'line-color', primaryColor);
-    }
-    if (map.getLayer('real3d-roads-tertiary')) {
-      map.setPaintProperty('real3d-roads-tertiary', 'line-color', tertiaryColor);
+      if (map.getLayer('real3d-roads-motorway')) {
+        map.setPaintProperty('real3d-roads-motorway', 'line-color', motorwayColor);
+      }
+      if (map.getLayer('real3d-roads-primary')) {
+        map.setPaintProperty('real3d-roads-primary', 'line-color', primaryColor);
+      }
+      if (map.getLayer('real3d-roads-tertiary')) {
+        map.setPaintProperty('real3d-roads-tertiary', 'line-color', tertiaryColor);
+      }
+    } catch (e) {
+      console.error('updateRoadColors failed:', e);
     }
   }
 
@@ -2939,16 +2947,13 @@ export default function MapView({ events, headerCollapsed = false }) {
     const isHm = heatmapRef.current;
 
     if (!real3dLayersCreatedRef.current) {
-      // Fallback — layers weren't pre-created (geoData was nil at map load). Create now.
       initReal3DLayers(map, isHm, timespanIdxRef.current ?? 4);
     } else {
-      // Normal path — layers already exist (pre-created at map init). Just flip visibility.
       setReal3DLayersVisible(map, true);
-      // Ensure correct colors — bake if tiers are ready but not yet baked
+      // ALWAYS refresh colors immediately for instant visual feedback
+      refreshBuildingColors();
       if (!buildingTiersBakedRef.current && buildingFGBRef.current && buildingZctaMapRef.current && precomputedTiersRef.current) {
-        bakeAllTiersIntoBuildings();
-      } else {
-        refreshBuildingColors();
+        bakeAllTiersIntoBuildings().catch(() => {});
       }
       updateRoadColors(map, isHm);
     }
@@ -2957,15 +2962,16 @@ export default function MapView({ events, headerCollapsed = false }) {
     map.easeTo({ pitch: 55, bearing: -17, duration: 700 });
   }, [real3D, mapReady]);
 
-  // Heatmap toggle in Real3D — just swap paint expressions (GPU-only, instant)
+  // Heatmap toggle in Real3D — swap paint expressions immediately (GPU-only, instant).
+  // ALWAYS refreshes building colors first for instant feedback, then bakes in background if needed.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady || !real3D) return;
-    // Safety: if tiers not yet baked but all prerequisites exist, bake now
+    // Immediate paint refresh — ensures heatmap ON/OFF colors apply instantly
+    refreshBuildingColors();
+    // Background bake if tiers not yet baked (async, won't block the toggle)
     if (!buildingTiersBakedRef.current && buildingFGBRef.current && buildingZctaMapRef.current && precomputedTiersRef.current) {
-      bakeAllTiersIntoBuildings(); // bake handles setData + refreshBuildingColors internally
-    } else {
-      refreshBuildingColors();
+      bakeAllTiersIntoBuildings().catch(() => {});
     }
     updateRoadColors(map, heatmap);
     if (map.getLayer('zcta-safezone-extrusion')) {
@@ -2973,16 +2979,15 @@ export default function MapView({ events, headerCollapsed = false }) {
     }
   }, [heatmap, real3D, mapReady]);
 
-  // Timespan change in Real3D — just swap which _tier_X column the paint reads (GPU-only, instant)
+  // Timespan change in Real3D — swap which _tier_X column the paint reads (GPU-only, instant)
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady || !real3D) return;
     if (!heatmapRef.current) return;
-    // Safety: if tiers not yet baked but all prerequisites exist, bake now
+    // Immediate paint refresh
+    refreshBuildingColors();
     if (!buildingTiersBakedRef.current && buildingFGBRef.current && buildingZctaMapRef.current && precomputedTiersRef.current) {
-      bakeAllTiersIntoBuildings();
-    } else {
-      refreshBuildingColors();
+      bakeAllTiersIntoBuildings().catch(() => {});
     }
     updateRoadColors(map, heatmapRef.current);
   }, [timespanIdx, real3D, mapReady]);
