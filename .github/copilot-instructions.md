@@ -383,19 +383,22 @@ borough-outline (fill-extrusion, unrestricted, topmost)
 
 ### MapView — Baked Tier Architecture (commit 690b888+, replaces feature-state approach)
 - **Building tier colors via baked properties**: Each building has `_tier_0.._tier_4` in its GeoJSON properties. Paint expressions use `['get', '_tier_X']` where X = active timespan index. GPU evaluates directly from properties — no feature-state, no CPU loop.
-- **`bakeAllTiersIntoBuildings()`**: Iterates all 381K buildings once, writing all 5 tier values from `precomputedTiersRef` using `buildingZctaMapRef`. Called when both pre-computed tiers AND ZCTA index are ready. After baking: clears `memoizedExprs.current`, calls `setData`, then calls `refreshBuildingColors()`.
+- **`bakeAllTiersIntoBuildings(asyncMode)`**: Iterates all 381K buildings, writing all 5 tier values from `precomputedTiersRef` using `buildingZctaMapRef`. `asyncMode=false` (default): synchronous, used on desktop. `asyncMode=true`: yields every 10K features via setTimeout(0), used on mobile to prevent main thread freeze. Returns `true` (sync) or `Promise<true>` (async).
 - **`refreshBuildingColors()`**: Central helper — clears `memoizedExprs.current = {}` and calls `setPaintProperty` for `real3d-buildings`, `real3d-buildings-baseplate`, and `real3d-landuse-baseplate` using current `heatmapRef.current + timespanIdxRef.current`. Called from: bake completion, heatmap effect, timespan effect, Real3D toggle (subsequent activation), addBuildingLayers setTimeout, fetchViewportBuildings (after setData), zoom listener (z13/z14 boundary crossing).
-- **Baking safety nets (commit c163dac)**: Every point where building data enters the map or paint is refreshed checks `!buildingTiersBakedRef.current && buildingFGBRef.current && buildingZctaMapRef.current && precomputedTiersRef.current` — if all prerequisites exist but baking hasn't run, it triggers `bakeAllTiersIntoBuildings()` immediately. This covers timing gaps where FGB cache and precomputed tiers complete in either order.
-- **`buildFGBCache` setData logic**: If `bakeAllTiersIntoBuildings()` ran (returns true), skip the second `setData` call — bake already called it + refreshed paint. Only call `setData` directly when baking is skipped (precomputed tiers not yet ready).
-- **`fetchViewportBuildings`**: Now bakes all 5 `_tier_X` columns from `precomputedTiersRef` for each viewport feature (not just `_tier` for current timespan). Calls `refreshBuildingColors()` after setData if Real3D is active. Guard: `if (buildingFGBRef.current) return` prevents overwriting baked full-cache data.
+- **Baking safety nets**: Every point where building data enters the map or paint is refreshed checks `!buildingTiersBakedRef.current && buildingFGBRef.current && buildingZctaMapRef.current && precomputedTiersRef.current` — if all prerequisites exist but baking hasn't run, it triggers baking (async on mobile, sync on desktop).
+- **`buildFGBCache` setData logic**: On desktop, sync bake. On mobile, async bake with yielding. Only calls `setData` directly when baking is skipped (precomputed tiers not yet ready).
+- **`fetchViewportBuildings`**: Bakes all 5 `_tier_X` columns from `precomputedTiersRef` for each viewport feature. Guard: `if (buildingFGBRef.current) return` prevents overwriting baked full-cache data.
 - **Timespan change = `refreshBuildingColors()` only**: Switches `['get', '_tier_X']` column. GPU recompiles shader — near-instant.
 - **Heatmap toggle = `refreshBuildingColors()` only**: Switches between red palette (reads `_s7`) and tier palette (reads `_tier_X`).
-- **Pre-computed tiers**: `precomputedTiersRef.current[timespanIdx]` = `{ tiers, zipMap, maxCount }` for all 5 timespans. Computed in background on `[events, geoData, adjacency]` change. Time slider reads pre-computed (near-instant).
-- **Deferred building load**: `addBuildingLayers` adds empty source + layers (instant), then `setTimeout(0)` pushes data from cache or viewport fetch. Tries baking if prerequisites ready — avoids blue flash from unbaked data.
-- **Zoom thresholds**: Baseplates z13-14 (opacity fade z13-13.5), buildings z14+. Building base 2m above ground.
-- **Layer visibility toggle**: `initReal3DLayers()` creates all 9 Real3D layers + sources once. `setReal3DLayersVisible()` toggles visibility. No layer/source destroy/recreate on toggle.
-- **`fetchViewportBuildings` zoom guard**: `< 13` — no viewport fetch needed below z13 since baseplates don't appear until z13. Full cache guard prevents viewport data from ever overwriting baked data.
-- **Zoom boundary color refresh**: `onZoom` listener detects crossing z13 (baseplates appear) or z14 (buildings appear) thresholds in Real3D+heatmap mode and calls `refreshBuildingColors()` — guards against stale expressions after zoom-driven layer transitions.
+
+### MapView — Mobile Real3D Optimization (commit 028fab2+)
+- **Problem**: 381K buildings (FGB) + sync baking (1.9M property writes) + ~310MB memory caused mobile crashes (OOM, watchdog timeout, GPU stalls).
+- **Solution**: Mobile-only deferred loading with loading gate popup.
+- **Deferred on mobile init**: `initReal3DLayers` and `buildFGBCache` are SKIPPED on map load when `window.innerWidth < 768`. Desktop behavior unchanged (eager pre-creation + cache build).
+- **Loading gate**: When mobile user toggles Real3D ON, `real3dLoading` state shows fullscreen overlay with spinner + progress text. Steps: prepare layers → camera transition → load FGB → async bake → apply colors → dismiss popup.
+- **Async baking on mobile**: `bakeAllTiersIntoBuildings(true)` yields every 10K features. Prevents main thread freeze. All safety-net bake calls in effects/handlers check `window.innerWidth < 768` to use async mode.
+- **Desktop path**: Completely unchanged — sync baking, eager init, no popup.
+- **Benefits**: MapIntro loads faster (no GPU/memory overhead from pre-created Real3D layers), Real3D works without crashing (yielded baking + deferred FGB), user sees loading progress instead of frozen screen.
 
 ### MapView — Safezone Architecture (commit 351b0cc+)
 - **Safezone split**: The original `99999` MultiPolygon (20 sub-polygons) is split at GeoJSON load time into individual `SAFEZONE_N` features, each a single Polygon with `_special: true`, `_safezoneNum: N`.
