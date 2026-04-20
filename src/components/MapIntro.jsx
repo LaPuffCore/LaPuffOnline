@@ -18,7 +18,7 @@ export default function MapIntro({ onEnter }) {
     <div className="absolute inset-0 z-40 overflow-hidden pointer-events-auto">
       {/* Title — ABOVE the doors, fades out after doors open */}
       <div
-        className="absolute inset-0 flex flex-col items-center justify-center z-20 pointer-events-none"
+        className="absolute inset-0 flex flex-col items-center justify-center z-20 pointer-events-none px-4 text-center"
         style={{ transition: 'opacity 0.8s ease-out', opacity: titleFading ? 0 : 1 }}
       >
         <p className="text-red-500 font-black text-xs tracking-[0.4em] uppercase mb-3 opacity-60">Welcome to</p>

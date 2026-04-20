@@ -1371,6 +1371,7 @@ export default function MapView({ events, headerCollapsed = false }) {
   const [hoveredPinPos, setHoveredPinPos] = useState(null);
   const pinEventsLookupRef = useRef(new Map());
   const pinHandlersAttachedRef = useRef(false);
+  const hoveredPinEventRef = useRef(null);
 
   // Auto-dismiss cache indicator 2 seconds after "done"
   useEffect(() => {
@@ -1386,6 +1387,7 @@ export default function MapView({ events, headerCollapsed = false }) {
   timespanIdxRef.current = timespanIdx;
   geoDataRef.current   = geoData;
   boroughGeoDataRef.current = boroughGeoData;
+  hoveredPinEventRef.current = hoveredPinEvent;
 
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768);
@@ -1725,6 +1727,8 @@ export default function MapView({ events, headerCollapsed = false }) {
 
     const handleZctaClick = e => {
       if (!e.features.length) return;
+      // If a pin is currently hovered, don't open zip panel — pin click takes priority
+      if (hoveredPinEventRef.current) return;
       const f = e.features[0];
       const zip = String(f.properties.MODZCTA || '');
       const isSafezone = !!f.properties._special;
@@ -3340,6 +3344,23 @@ export default function MapView({ events, headerCollapsed = false }) {
     }
   }, [showPins, events, mapReady, timespanIdx]);
 
+  // 3D pin elevation — shift pins upward in 3D ZCTA mode to sit above extrusion blocks
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+    ['event-pins-dots', 'event-pins-layer'].forEach(id => {
+      if (!map.getLayer(id)) return;
+      // Only 3D ZCTA mode (not 2D or Real3D) — shift pins up visually
+      if (threeD) {
+        // In 3D+heatmap, taller extrusions need more offset. In 3D non-heatmap, fixed 400m height.
+        const offset = heatmap ? -55 : -40;
+        map.setPaintProperty(id, 'icon-translate', [0, offset]);
+      } else {
+        map.setPaintProperty(id, 'icon-translate', [0, 0]);
+      }
+    });
+  }, [threeD, heatmap, mapReady]);
+
   useEffect(() => {
     const h = e => { if (e.key === 'Escape') { setHoloFeature(null); setSideZip(null); setSideEvents([]); setSideColonists([]); } };
     window.addEventListener('keydown', h);
@@ -3394,18 +3415,20 @@ export default function MapView({ events, headerCollapsed = false }) {
             </div>
             {/* Row 2: Topo + Heatmap + Satellite (+ 3D/Real3D on desktop) */}
             <div className="flex gap-2 flex-wrap justify-center">
-              {heatmap && (
-                <button onClick={() => setTopoOn(v => !v)}
-                  className={`w-10 h-10 rounded-2xl border-3 p-0 flex items-center justify-center transition-all ${topoOn ? 'ring-2 ring-yellow-300 border-yellow-300' : 'border-white/50 hover:border-yellow-300'}`}
-                  title="Topo Heatmap Toggle"
-                  style={{ backgroundColor: '#000' }}>
-                  <div className={`rounded-lg bg-cover bg-center ${isMobile ? 'w-[30px] h-[30px]' : 'w-[36px] h-[36px]'}`} style={{ backgroundImage: `url('${PUBLIC_BASE}data/topo-thumb.png')`, opacity: topoOn ? 1 : 0.8 }} />
-                </button>
-              )}
+              <div className="relative">
+                {heatmap && (
+                  <button onClick={() => setTopoOn(v => !v)}
+                    className={`absolute right-full mr-2 w-10 h-10 rounded-2xl border-3 p-0 flex items-center justify-center transition-all ${topoOn ? 'ring-2 ring-yellow-300 border-yellow-300' : 'border-white/50 hover:border-yellow-300'}`}
+                    title="Topo Heatmap Toggle"
+                    style={{ backgroundColor: '#000' }}>
+                    <div className={`rounded-lg bg-cover bg-center ${isMobile ? 'w-[30px] h-[30px]' : 'w-[36px] h-[36px]'}`} style={{ backgroundImage: `url('${PUBLIC_BASE}data/topo-thumb.png')`, opacity: topoOn ? 1 : 0.8 }} />
+                  </button>
+                )}
               <button onClick={() => { setHeatmap(v => { if (!v) setTopoOn(false); return !v; }); }}
                 className={`px-4 py-2 rounded-2xl font-black text-sm border-2 transition-all ${heatmap ? 'bg-gradient-to-r from-cyan-500 via-yellow-400 to-red-500 border-yellow-300 text-white' : 'bg-black/70 border-white/30 text-white hover:border-orange-400'}`}>
                 🌡️ Heatmap
               </button>
+              </div>
               <button onClick={() => setSatellite(v => !v)}
                 className={`px-4 py-2 rounded-2xl font-black text-sm border-2 transition-all ${satellite ? 'bg-[#7C3AED] border-[#7C3AED] text-white' : 'bg-black/70 border-white/30 text-white hover:border-violet-400'}`}>
                 🛰️ Satellite
@@ -3458,10 +3481,10 @@ export default function MapView({ events, headerCollapsed = false }) {
             </div>
           )}
 
-          {/* Hover tooltip */}
+          {/* Hover tooltip — positioned below cursor so pin tooltip can stack above */}
           {hoveredZip && tooltipPos && (
             <div className="absolute z-30 pointer-events-none"
-              style={{ left: Math.min(tooltipPos.x + 12, window.innerWidth - 220), top: Math.max(tooltipPos.y - 10, 70), width: 210 }}>
+              style={{ left: Math.min(tooltipPos.x + 12, window.innerWidth - 220), top: tooltipPos.y + 20, width: 210 }}>
               <div className="bg-gray-950/95 border border-red-900/60 rounded-2xl overflow-hidden shadow-[0_0_15px_rgba(255,20,0,0.3)]">
                 <div className="px-3 py-2 border-b border-white/10">
                   <p className="text-red-400 font-black text-xs">{zipLabel}</p>
@@ -3491,10 +3514,10 @@ export default function MapView({ events, headerCollapsed = false }) {
             </div>
           )}
 
-          {/* ── Pin hover popup ── */}
+          {/* ── Pin hover popup — above cursor, stacks above zip tooltip ── */}
           {hoveredPinEvent && hoveredPinPos && (
             <div className="fixed z-[100001] pointer-events-none"
-              style={{ left: Math.min(hoveredPinPos.x + 14, window.innerWidth - 260), top: Math.max(hoveredPinPos.y - 60, 10), width: 240 }}>
+              style={{ left: Math.min(hoveredPinPos.x + 14, window.innerWidth - 260), top: Math.max(hoveredPinPos.y - 90, 10), width: 240 }}>
               <div className="bg-gray-950/95 border border-white/20 rounded-2xl overflow-hidden shadow-[0_0_20px_rgba(0,0,0,0.6)]">
                 <div className="px-3 py-2 border-b border-white/10" style={{ borderLeft: `3px solid ${hoveredPinEvent.hex_color || '#7C3AED'}` }}>
                   <p className="text-white font-black text-xs truncate">{hoveredPinEvent.representative_emoji || '🎉'} {hoveredPinEvent.event_name}</p>
