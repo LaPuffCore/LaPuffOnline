@@ -1362,6 +1362,9 @@ export default function MapView({ events, headerCollapsed = false }) {
   // Cache status for FGB loading indicator: 'idle' | 'building' | 'paused' | 'done'
   const [fgbCacheStatus, setFgbCacheStatus] = useState('idle');
   const [fgbCacheProgress, setFgbCacheProgress] = useState(0); // 0-100
+  // Mobile Real3D loading gate — shows popup while building data loads
+  const [real3dLoading, setReal3dLoading] = useState(false);
+  const [real3dLoadProgress, setReal3dLoadProgress] = useState('');
   // Event pin markers toggle
   const [showPins, setShowPins] = useState(false);
   const [hoveredPinEvent, setHoveredPinEvent] = useState(null);
@@ -1757,21 +1760,21 @@ export default function MapView({ events, headerCollapsed = false }) {
   }, [mapReady, geoData]);
 
   // Pre-create Real3D layers at map init so first toggle is instant (just a visibility flip).
-  // Runs right after addLayers (same deps, defined after it — React fires in order).
-  // All layers are immediately hidden. Zero GPU cost for hidden layers.
+  // On mobile: skip this — layers created on-demand when Real3D is activated to save GPU memory.
   useEffect(() => {
+    if (window.innerWidth < 768) return; // mobile: defer to Real3D toggle
     const map = mapRef.current;
     if (!map || !mapReady || !geoData) return;
-    if (real3dLayersCreatedRef.current) return; // already created (shouldn't happen, safety guard)
+    if (real3dLayersCreatedRef.current) return;
     initReal3DLayers(map, heatmapRef.current, timespanIdxRef.current ?? 4);
-    // Hide immediately — user hasn't toggled Real3D on yet
     setReal3DLayersVisible(map, false);
   }, [mapReady, geoData]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Start background FGB cache building once map + ZCTA data are ready.
-  // Runs once per session — Cache API persists data across sessions.
+  // On mobile: defer until Real3D is first activated to avoid main thread pressure during map intro.
   useEffect(() => {
     if (!mapReady || !geoData) return;
+    if (window.innerWidth < 768) return; // mobile: defer to Real3D toggle
     buildFGBCache();
   }, [mapReady, geoData]);
 
@@ -2559,10 +2562,17 @@ export default function MapView({ events, headerCollapsed = false }) {
       // Push to map if Real3D active + bake all timespan tiers if pre-computed
       const map = mapRef.current;
       if (map && map.getSource('fgb-buildings') && map.getStyle()) {
-        // bakeAllTiersIntoBuildings calls setData internally (+ refreshes paint expressions).
-        // Only call setData directly when baking is skipped (precomputed tiers not ready yet).
-        const baked = precomputedTiersRef.current ? bakeAllTiersIntoBuildings() : false;
-        if (!baked) map.getSource('fgb-buildings').setData(geojson);
+        const isMob = window.innerWidth < 768;
+        if (precomputedTiersRef.current) {
+          if (isMob) {
+            await bakeAllTiersIntoBuildings(true); // async with yielding on mobile
+          } else {
+            const baked = bakeAllTiersIntoBuildings(); // sync on desktop
+            if (!baked) map.getSource('fgb-buildings').setData(geojson);
+          }
+        } else {
+          map.getSource('fgb-buildings').setData(geojson);
+        }
       }
     } catch (err) {
       console.error('FGB cache build failed:', err);
@@ -2649,30 +2659,53 @@ export default function MapView({ events, headerCollapsed = false }) {
   // After this, GPU reads ['get', '_tier_X'] directly — no feature-state or setData needed on timespan change.
   // Only called when BOTH pre-computed tiers AND building ZCTA index are ready.
   // Mutates features in place, then one final setData pushes the baked GeoJSON.
-  function bakeAllTiersIntoBuildings() {
+  // On mobile: yields every 10K features to avoid main thread freeze.
+  function bakeAllTiersIntoBuildings(asyncMode = false) {
     const geojson = buildingFGBRef.current;
     const idxMap = buildingZctaMapRef.current;
     const precomputed = precomputedTiersRef.current;
-    if (!geojson?.features?.length || !idxMap || !precomputed) return false;
+    if (!geojson?.features?.length || !idxMap || !precomputed) return asyncMode ? Promise.resolve(false) : false;
 
     const features = geojson.features;
-    for (let i = 0; i < features.length; i++) {
-      const zIdx = idxMap[i];
-      const props = features[i].properties;
-      for (let t = 0; t < TIMESPAN_STEPS.length; t++) {
-        const tiers = precomputed[t]?.tiers;
-        props[`_tier_${t}`] = (zIdx >= 0 && tiers && tiers.length > zIdx) ? (tiers[zIdx] ?? 0) : 0;
+    const BAKE_CHUNK = 10000;
+
+    function bakeRange(start, end) {
+      for (let i = start; i < end; i++) {
+        const zIdx = idxMap[i];
+        const props = features[i].properties;
+        for (let t = 0; t < TIMESPAN_STEPS.length; t++) {
+          const tiers = precomputed[t]?.tiers;
+          props[`_tier_${t}`] = (zIdx >= 0 && tiers && tiers.length > zIdx) ? (tiers[zIdx] ?? 0) : 0;
+        }
       }
     }
-    buildingTiersBakedRef.current = true;
-    memoizedExprs.current = {};
 
-    const map = mapRef.current;
-    if (map?.getSource('fgb-buildings') && map.getStyle()) {
-      map.getSource('fgb-buildings').setData(geojson);
-      refreshBuildingColors();
+    function finalize() {
+      buildingTiersBakedRef.current = true;
+      memoizedExprs.current = {};
+      const map = mapRef.current;
+      if (map?.getSource('fgb-buildings') && map.getStyle()) {
+        map.getSource('fgb-buildings').setData(geojson);
+        refreshBuildingColors();
+      }
     }
-    return true;
+
+    if (!asyncMode) {
+      // Desktop: synchronous (fast on desktop, ~50-100ms)
+      bakeRange(0, features.length);
+      finalize();
+      return true;
+    }
+
+    // Mobile: async with yielding every BAKE_CHUNK features
+    return (async () => {
+      for (let start = 0; start < features.length; start += BAKE_CHUNK) {
+        bakeRange(start, Math.min(start + BAKE_CHUNK, features.length));
+        await new Promise(r => setTimeout(r, 0));
+      }
+      finalize();
+      return true;
+    })();
   }
 
   // Create fgb-buildings source + building layers. Source starts empty.
@@ -2723,16 +2756,19 @@ export default function MapView({ events, headerCollapsed = false }) {
     setTimeout(() => {
       if (!map.getSource('fgb-buildings')) return;
       if (buildingFGBRef.current) {
-        // If data is loaded but tiers not yet baked, bake now (covers race condition
-        // where FGB cache finished before precomputed tiers, skipping bake at cache time)
         if (!buildingTiersBakedRef.current && buildingZctaMapRef.current && precomputedTiersRef.current) {
-          bakeAllTiersIntoBuildings();
+          const isMob = window.innerWidth < 768;
+          if (isMob) {
+            bakeAllTiersIntoBuildings(true);
+          } else {
+            bakeAllTiersIntoBuildings();
+          }
         } else {
           map.getSource('fgb-buildings').setData(buildingFGBRef.current);
           refreshBuildingColors();
         }
       } else {
-        fetchViewportBuildings(map); // fetchViewportBuildings handles its own color refresh
+        fetchViewportBuildings(map);
       }
     }, 0);
   }
@@ -2852,7 +2888,8 @@ export default function MapView({ events, headerCollapsed = false }) {
     });
   }
 
-  // Real3D toggle effect — create once, then toggle visibility
+  // Real3D toggle effect — create once, then toggle visibility.
+  // On mobile: shows loading popup, defers FGB cache build, uses async baking.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
@@ -2868,30 +2905,79 @@ export default function MapView({ events, headerCollapsed = false }) {
     }
 
     const isHm = heatmapRef.current;
+    const isMob = window.innerWidth < 768;
 
-    if (!real3dLayersCreatedRef.current) {
-      initReal3DLayers(map, isHm, timespanIdxRef.current ?? 4);
-    } else {
-      setReal3DLayersVisible(map, true);
-      // Ensure correct colors — bake if tiers are ready but not yet baked
-      if (!buildingTiersBakedRef.current && buildingFGBRef.current && buildingZctaMapRef.current && precomputedTiersRef.current) {
-        bakeAllTiersIntoBuildings();
+    // Desktop: immediate (sync) path — unchanged
+    if (!isMob) {
+      if (!real3dLayersCreatedRef.current) {
+        initReal3DLayers(map, isHm, timespanIdxRef.current ?? 4);
       } else {
-        refreshBuildingColors();
+        setReal3DLayersVisible(map, true);
+        if (!buildingTiersBakedRef.current && buildingFGBRef.current && buildingZctaMapRef.current && precomputedTiersRef.current) {
+          bakeAllTiersIntoBuildings();
+        } else {
+          refreshBuildingColors();
+        }
+        if (map.getLayer('real3d-roads-motorway')) map.setPaintProperty('real3d-roads-motorway', 'line-color', isHm ? '#884400' : '#ff2200');
+        if (map.getLayer('real3d-roads-primary')) map.setPaintProperty('real3d-roads-primary', 'line-color', isHm ? '#662200' : '#cc1800');
+        if (map.getLayer('real3d-roads-tertiary')) map.setPaintProperty('real3d-roads-tertiary', 'line-color', isHm ? '#553300' : '#771100');
       }
-      if (map.getLayer('real3d-roads-motorway')) {
-        map.setPaintProperty('real3d-roads-motorway', 'line-color', isHm ? '#884400' : '#ff2200');
-      }
-      if (map.getLayer('real3d-roads-primary')) {
-        map.setPaintProperty('real3d-roads-primary', 'line-color', isHm ? '#662200' : '#cc1800');
-      }
-      if (map.getLayer('real3d-roads-tertiary')) {
-        map.setPaintProperty('real3d-roads-tertiary', 'line-color', isHm ? '#553300' : '#771100');
-      }
+      map.setLight({ anchor: 'map' });
+      map.easeTo({ pitch: 55, bearing: -17, duration: 700 });
+      return;
     }
 
-    map.setLight({ anchor: 'map' });
-    map.easeTo({ pitch: 55, bearing: -17, duration: 700 });
+    // Mobile: gated async path — show loading popup, defer heavy work
+    let cancelled = false;
+    (async () => {
+      setReal3dLoading(true);
+      setReal3dLoadProgress('Preparing Real3D layers…');
+      await new Promise(r => setTimeout(r, 50)); // let UI render the popup
+
+      // Step 1: Create layers if needed (lightweight — just WebGL setup)
+      if (!real3dLayersCreatedRef.current) {
+        initReal3DLayers(map, isHm, timespanIdxRef.current ?? 4);
+      } else {
+        setReal3DLayersVisible(map, true);
+      }
+      if (cancelled) return;
+
+      // Step 2: Start camera transition early so user sees something
+      map.setLight({ anchor: 'map' });
+      map.easeTo({ pitch: 55, bearing: -17, duration: 700 });
+      await new Promise(r => setTimeout(r, 100));
+      if (cancelled) return;
+
+      // Step 3: Load FGB data if not already cached
+      if (!buildingFGBRef.current) {
+        setReal3dLoadProgress('Loading building data…');
+        await buildFGBCache();
+        if (cancelled) return;
+      }
+
+      // Step 4: Bake tiers (async with yielding on mobile)
+      if (!buildingTiersBakedRef.current && buildingFGBRef.current && buildingZctaMapRef.current && precomputedTiersRef.current) {
+        setReal3dLoadProgress('Baking building colors…');
+        await bakeAllTiersIntoBuildings(true); // async mode
+        if (cancelled) return;
+      } else if (buildingFGBRef.current) {
+        // Data loaded but precomputed tiers not ready — push unbaked data
+        if (map.getSource('fgb-buildings') && map.getStyle()) {
+          map.getSource('fgb-buildings').setData(buildingFGBRef.current);
+        }
+        refreshBuildingColors();
+      }
+
+      // Step 5: Apply road colors
+      if (map.getLayer('real3d-roads-motorway')) map.setPaintProperty('real3d-roads-motorway', 'line-color', isHm ? '#884400' : '#ff2200');
+      if (map.getLayer('real3d-roads-primary')) map.setPaintProperty('real3d-roads-primary', 'line-color', isHm ? '#662200' : '#cc1800');
+      if (map.getLayer('real3d-roads-tertiary')) map.setPaintProperty('real3d-roads-tertiary', 'line-color', isHm ? '#553300' : '#771100');
+
+      setReal3dLoading(false);
+      setReal3dLoadProgress('');
+    })();
+
+    return () => { cancelled = true; };
   }, [real3D, mapReady]);
 
   // Heatmap toggle in Real3D — swap paint expressions (GPU-only, instant)
@@ -2900,7 +2986,12 @@ export default function MapView({ events, headerCollapsed = false }) {
     if (!map || !mapReady || !real3D) return;
     // Safety: if tiers not yet baked but all prerequisites exist, bake now
     if (!buildingTiersBakedRef.current && buildingFGBRef.current && buildingZctaMapRef.current && precomputedTiersRef.current) {
-      bakeAllTiersIntoBuildings(); // bake handles setData + refreshBuildingColors internally
+      const isMob = window.innerWidth < 768;
+      if (isMob) {
+        bakeAllTiersIntoBuildings(true).then(() => refreshBuildingColors());
+      } else {
+        bakeAllTiersIntoBuildings();
+      }
     } else {
       refreshBuildingColors();
     }
@@ -2925,7 +3016,12 @@ export default function MapView({ events, headerCollapsed = false }) {
     if (!heatmapRef.current) return;
     // Safety: if tiers not yet baked but all prerequisites exist, bake now
     if (!buildingTiersBakedRef.current && buildingFGBRef.current && buildingZctaMapRef.current && precomputedTiersRef.current) {
-      bakeAllTiersIntoBuildings();
+      const isMob = window.innerWidth < 768;
+      if (isMob) {
+        bakeAllTiersIntoBuildings(true).then(() => refreshBuildingColors());
+      } else {
+        bakeAllTiersIntoBuildings();
+      }
     } else {
       refreshBuildingColors();
     }
@@ -3591,6 +3687,25 @@ export default function MapView({ events, headerCollapsed = false }) {
       )}
 
       {selectedEvent && <EventDetailPopup event={selectedEvent} onClose={() => setSelectedEvent(null)} />}
+
+      {/* Mobile Real3D loading gate — fullscreen overlay while building data loads */}
+      {real3dLoading && (
+        <div className="fixed inset-0 z-[100001] flex items-center justify-center bg-black/80 backdrop-blur-sm">
+          <div className="flex flex-col items-center gap-4 px-8 py-6 rounded-3xl border-2 border-white/20 bg-black/90 shadow-2xl max-w-[280px]">
+            <div className="relative w-12 h-12">
+              <div className="absolute inset-0 rounded-full border-4 border-white/10" />
+              <div className="absolute inset-0 rounded-full border-4 border-t-[#7C3AED] border-r-transparent border-b-transparent border-l-transparent animate-spin" />
+            </div>
+            <div className="text-center">
+              <p className="text-white font-black text-sm tracking-wide mb-1">Loading Real3D</p>
+              <p className="text-white/50 text-xs font-semibold">{real3dLoadProgress || 'Caching and baking…'}</p>
+            </div>
+            <div className="w-full h-1 rounded-full bg-white/10 overflow-hidden">
+              <div className="h-full rounded-full bg-[#7C3AED] animate-pulse" style={{ width: '60%' }} />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* FGB cache status indicator — bottom-left corner with progress bar */}
       {fgbCacheStatus !== 'idle' && (
