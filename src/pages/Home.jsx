@@ -30,9 +30,12 @@ export default function Home({ events = [], eventsLoading = false }) {
   const [isMusicOn,     setIsMusicOn]     = useState(false);
   const [currentMode,   setCurrentMode]   = useState(null); // 'clout' | null
   const [showMusicMenu, setShowMusicMenu] = useState(false);
+  const [musicVolume,   setMusicVolume]   = useState(80);
   const scIframeRef      = useRef(null);
   const scWidgetRef      = useRef(null);
   const scReadyRef       = useRef(false);
+  const pendingPlayRef   = useRef(false);  // play queued before widget READY
+  const musicVolumeRef   = useRef(80);    // stable ref for closure access
   const mapAutoPlayedRef = useRef(false);
   const musicDesktopRef  = useRef(null);
   const musicMobileRef   = useRef(null);
@@ -145,7 +148,14 @@ export default function Home({ events = [], eventsLoading = false }) {
       if (!scIframeRef.current || !window.SC) return;
       const widget = window.SC.Widget(scIframeRef.current);
       scWidgetRef.current = widget;
-      widget.bind(window.SC.Widget.Events.READY, () => { scReadyRef.current = true; });
+      widget.bind(window.SC.Widget.Events.READY, () => {
+        scReadyRef.current = true;
+        widget.setVolume(musicVolumeRef.current);
+        if (pendingPlayRef.current) {
+          pendingPlayRef.current = false;
+          widget.play();
+        }
+      });
     }
     if (window.SC) { initWidget(); return; }
     const script = document.createElement('script');
@@ -170,13 +180,45 @@ export default function Home({ events = [], eventsLoading = false }) {
   function triggerCloutCullingGames() {
     setCurrentMode('clout');
     setIsMusicOn(true);
-    if (scWidgetRef.current && scReadyRef.current) scWidgetRef.current.play();
+    if (scWidgetRef.current && scReadyRef.current) {
+      scWidgetRef.current.play();
+    } else {
+      pendingPlayRef.current = true; // will fire when READY event arrives
+    }
   }
 
   function stopMusic() {
     setIsMusicOn(false);
     setCurrentMode(null);
+    pendingPlayRef.current = false;
     if (scWidgetRef.current) scWidgetRef.current.pause();
+  }
+
+  function handleVolumeChange(val) {
+    setMusicVolume(val);
+    musicVolumeRef.current = val;
+    if (scWidgetRef.current && scReadyRef.current) scWidgetRef.current.setVolume(val);
+  }
+
+  function handlePrevTrack() {
+    if (scWidgetRef.current && scReadyRef.current) scWidgetRef.current.prev();
+  }
+
+  function handleNextTrack() {
+    if (scWidgetRef.current && scReadyRef.current) scWidgetRef.current.next();
+  }
+
+  function handleTogglePlayPause() {
+    if (isMusicOn) {
+      setIsMusicOn(false);
+      if (scWidgetRef.current) scWidgetRef.current.pause();
+    } else if (currentMode === 'clout') {
+      setIsMusicOn(true);
+      if (scWidgetRef.current && scReadyRef.current) scWidgetRef.current.play();
+      else pendingPlayRef.current = true;
+    } else {
+      triggerCloutCullingGames();
+    }
   }
 
   function handleMapClick() {
@@ -262,12 +304,12 @@ export default function Home({ events = [], eventsLoading = false }) {
                 </button>
                 {showMusicMenu && (
                   <div className="absolute left-0 top-full mt-2 z-[200] w-52 bg-white border-3 border-black rounded-2xl shadow-[5px_5px_0px_black] overflow-hidden">
-                    <div className="px-3 py-2 border-b-2 border-gray-100">
+                    <div className="px-3 py-1.5 border-b-2 border-gray-100">
                       <p className="font-black text-[10px] text-gray-400 uppercase tracking-widest">Radio</p>
                     </div>
                     <button
                       onClick={() => { triggerCloutCullingGames(); setShowMusicMenu(false); }}
-                      className="w-full px-3 py-2.5 text-left text-xs font-black hover:bg-gray-50 flex items-center gap-2 border-b border-gray-100 transition-colors"
+                      className="w-full px-3 py-2 text-left text-xs font-black hover:bg-gray-50 flex items-center gap-2 border-b border-gray-100 transition-colors"
                       style={currentMode === 'clout' ? { color: accentColor } : {}}>
                       <span>🎮</span>
                       <span className="flex-1">Clout Culling Games</span>
@@ -275,12 +317,28 @@ export default function Home({ events = [], eventsLoading = false }) {
                     </button>
                     <button
                       onClick={() => { stopMusic(); setShowMusicMenu(false); }}
-                      className="w-full px-3 py-2.5 text-left text-xs font-black hover:bg-gray-50 flex items-center gap-2 transition-colors"
+                      className="w-full px-3 py-2 text-left text-xs font-black hover:bg-gray-50 flex items-center gap-2 transition-colors"
                       style={!isMusicOn ? { color: accentColor } : { color: '#9ca3af' }}>
                       <span>⏹</span>
                       <span className="flex-1">Off</span>
                       {!isMusicOn && <span className="text-[8px]">✓</span>}
                     </button>
+                    {/* Playback controls */}
+                    <div className="px-3 py-2 border-t-2 border-gray-100 flex items-center justify-center gap-5">
+                      <button onClick={handlePrevTrack} title="Previous" className="text-gray-400 hover:text-gray-900 transition-colors text-sm leading-none">⏮</button>
+                      <button onClick={handleTogglePlayPause} title={isMusicOn ? 'Pause' : 'Play'} className="text-sm leading-none transition-colors" style={{ color: isMusicOn ? accentColor : '#374151' }}>
+                        {isMusicOn ? '⏸' : '▶'}
+                      </button>
+                      <button onClick={handleNextTrack} title="Next" className="text-gray-400 hover:text-gray-900 transition-colors text-sm leading-none">⏭</button>
+                    </div>
+                    {/* Volume slider */}
+                    <div className="px-3 pb-2.5 flex items-center gap-2">
+                      <span className="text-[11px] text-gray-400 flex-shrink-0">🔊</span>
+                      <input type="range" min="0" max="100" value={musicVolume}
+                        onChange={e => handleVolumeChange(Number(e.target.value))}
+                        className="flex-1 h-1 cursor-pointer"
+                        style={{ accentColor }} />
+                    </div>
                   </div>
                 )}
               </div>
@@ -355,13 +413,13 @@ export default function Home({ events = [], eventsLoading = false }) {
                  </svg>
                </button>
                {showMusicMenu && (
-                 <div className="absolute left-0 top-full mt-2 z-[200] w-48 max-w-[calc(100vw-2rem)] bg-white border-3 border-black rounded-2xl shadow-[5px_5px_0px_black] overflow-hidden">
-                   <div className="px-3 py-2 border-b-2 border-gray-100">
+                 <div className="absolute left-0 top-full mt-2 z-[200] w-52 max-w-[calc(100vw-2rem)] bg-white border-3 border-black rounded-2xl shadow-[5px_5px_0px_black] overflow-hidden">
+                   <div className="px-3 py-1.5 border-b-2 border-gray-100">
                      <p className="font-black text-[10px] text-gray-400 uppercase tracking-widest">Radio</p>
                    </div>
                    <button
                      onClick={() => { triggerCloutCullingGames(); setShowMusicMenu(false); }}
-                     className="w-full px-3 py-2.5 text-left text-xs font-black hover:bg-gray-50 flex items-center gap-2 border-b border-gray-100 transition-colors"
+                     className="w-full px-3 py-2 text-left text-xs font-black hover:bg-gray-50 flex items-center gap-2 border-b border-gray-100 transition-colors"
                      style={currentMode === 'clout' ? { color: accentColor } : {}}>
                      <span>🎮</span>
                      <span className="flex-1">Clout Culling Games</span>
@@ -369,12 +427,28 @@ export default function Home({ events = [], eventsLoading = false }) {
                    </button>
                    <button
                      onClick={() => { stopMusic(); setShowMusicMenu(false); }}
-                     className="w-full px-3 py-2.5 text-left text-xs font-black hover:bg-gray-50 flex items-center gap-2 transition-colors"
+                     className="w-full px-3 py-2 text-left text-xs font-black hover:bg-gray-50 flex items-center gap-2 transition-colors"
                      style={!isMusicOn ? { color: accentColor } : { color: '#9ca3af' }}>
                      <span>⏹</span>
                      <span className="flex-1">Off</span>
                      {!isMusicOn && <span className="text-[8px]">✓</span>}
                    </button>
+                   {/* Playback controls */}
+                   <div className="px-3 py-2 border-t-2 border-gray-100 flex items-center justify-center gap-5">
+                     <button onClick={handlePrevTrack} title="Previous" className="text-gray-400 hover:text-gray-900 transition-colors text-sm leading-none">⏮</button>
+                     <button onClick={handleTogglePlayPause} title={isMusicOn ? 'Pause' : 'Play'} className="text-sm leading-none transition-colors" style={{ color: isMusicOn ? accentColor : '#374151' }}>
+                       {isMusicOn ? '⏸' : '▶'}
+                     </button>
+                     <button onClick={handleNextTrack} title="Next" className="text-gray-400 hover:text-gray-900 transition-colors text-sm leading-none">⏭</button>
+                   </div>
+                   {/* Volume slider */}
+                   <div className="px-3 pb-2.5 flex items-center gap-2">
+                     <span className="text-[11px] text-gray-400 flex-shrink-0">🔊</span>
+                     <input type="range" min="0" max="100" value={musicVolume}
+                       onChange={e => handleVolumeChange(Number(e.target.value))}
+                       className="flex-1 h-1 cursor-pointer"
+                       style={{ accentColor }} />
+                   </div>
                  </div>
                )}
              </div>
@@ -392,7 +466,7 @@ export default function Home({ events = [], eventsLoading = false }) {
                 </button>
              )}
              <button onClick={() => setShowForm(true)}
-                className="text-white font-black px-3 py-1.5 rounded-full text-[11px] shadow-[2px_2px_0px_#333]"
+                className="text-white font-black px-2.5 py-1.5 rounded-full text-[10px] shadow-[2px_2px_0px_#333] whitespace-nowrap flex-shrink-0"
                 style={{ backgroundColor: accentColor }}>
                 + Submit Event
              </button>
@@ -472,7 +546,7 @@ export default function Home({ events = [], eventsLoading = false }) {
         width="0"
         height="0"
         allow="autoplay"
-        src="https://w.soundcloud.com/player/?url=https%3A//soundcloud.com/justin-lapuff/sets/clout-culling-games&auto_play=false&hide_related=true&show_comments=false&show_user=false&show_reposts=false&show_teaser=false"
+        src="https://w.soundcloud.com/player/?url=https%3A//soundcloud.com/justin-lapuff/sets/clout-culling-games&auto_play=false&hide_related=true&show_comments=false&show_user=false&show_reposts=false&show_teaser=false&visual=false"
         style={{ visibility: 'hidden', position: 'absolute', pointerEvents: 'none', top: 0, left: 0 }}
         title="SC Ghost Player"
       />
