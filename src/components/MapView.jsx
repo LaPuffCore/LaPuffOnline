@@ -2708,7 +2708,11 @@ export default function MapView({ events, headerCollapsed = false }) {
       for await (const feature of fgbDeserialize(BUILDING_FGB_URL, rect)) {
         if (!feature?.geometry?.coordinates) continue;
 
-        const props = normalizeFGBProps(feature.properties, features.length);
+        // Compute stable spatial hash from geometry anchor — ensures deterministic _s5/_s7 shade clusters
+        // regardless of feature load order. Prevents color flicker when panning (mobile viewport-only path).
+        const anchor = feature.geometry.coordinates?.[0]?.[0] ?? [0, 0];
+        const spatialSeed = Math.abs(Math.round(anchor[0] * 1e5) ^ Math.round(anchor[1] * 1e5));
+        const props = normalizeFGBProps(feature.properties, spatialSeed);
 
         // Inline PiP — bake all 5 tier columns using precomputed tiers (no full ZCTA index needed).
         const precomputed = precomputedTiersRef.current;
@@ -3578,11 +3582,21 @@ export default function MapView({ events, headerCollapsed = false }) {
           </button>
 
           {notInNYC && (
-            <div className="absolute top-24 left-1/2 -translate-x-1/2 z-40 bg-yellow-950/95 border border-yellow-600 rounded-2xl px-5 py-3 flex items-center gap-3 shadow-lg">
-              <span className="text-yellow-400 text-xl">⚠️</span>
-              <div>
-                <p className="text-yellow-200 font-black text-sm">You are not in NYC</p>
-                <p className="text-yellow-400/70 text-xs mt-0.5">Orbiter mode — view only.</p>
+            <div
+              className="fixed inset-0 z-[200000] flex items-center justify-center pointer-events-none"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="pointer-events-auto bg-yellow-950/95 border border-yellow-600 rounded-2xl px-5 py-3 flex items-center gap-3 shadow-lg">
+                <span className="text-yellow-400 text-xl">⚠️</span>
+                <div>
+                  <p className="text-yellow-200 font-black text-sm">You are not in NYC</p>
+                  <p className="text-yellow-400/70 text-xs mt-0.5">Orbiter mode — view only.</p>
+                </div>
+                {/* Mobile-only X close button — rendered above all UI layers including topbar */}
+                <button
+                  className="md:hidden ml-2 w-6 h-6 flex items-center justify-center rounded-full bg-yellow-900/80 hover:bg-yellow-800 text-yellow-200 text-xs font-black flex-shrink-0"
+                  onClick={e => { e.stopPropagation(); e.preventDefault(); setNotInNYC(false); }}
+                >✕</button>
               </div>
             </div>
           )}
