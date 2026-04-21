@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom';
 import { useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
@@ -132,8 +133,9 @@ function buildZipEventMap(events, days) {
   const maxDate = new Date(now.getTime() + days * 86400000);
   const zipMap = {};
   events.forEach(e => {
-    // Auto-scraped events do NOT affect heatmap — only user-submitted events count
-    if (e._auto || e._sample) return;
+    // Auto-scraped events do NOT affect heatmap — only user-submitted events count.
+    // Sample events ARE included (they simulate user events during development).
+    if (e._auto) return;
     const ed = new Date(e.event_date + 'T00:00:00');
     if (ed < now || ed > maxDate) return;
     const zip = (e.location_data?.zipcode || '').trim().replace(/\D/g, '').padStart(5, '0').slice(0, 5);
@@ -388,12 +390,12 @@ function normalizeFeatureGeometry(feature) {
 // GPU-evaluated per-frame — no JS zoom listener needed.
 function zctaLineWidthExpr(mult = 1) {
   return ['interpolate', ['linear'], ['zoom'],
-    9,   1.5 * mult,   // z9 start — thin far out
-    9.5, 1.7 * mult,   // z9.5 — subtle, not heavy
-    10,  1.8 * mult,   // z10 — slightly thicker
-    11,  2.3 * mult,   // z11 — moderate
-    12,  3.2 * mult,   // z12 — close zoom growth
-    16,  8.0 * mult,   // z16 — full visual weight at close
+    9,   0.8 * mult,   // z9 start — thin far out
+    9.5, 1.0 * mult,   // z9.5 — subtle
+    10,  1.2 * mult,   // z10 — slightly thicker
+    11,  1.6 * mult,   // z11 — moderate
+    12,  2.2 * mult,   // z12 — close zoom growth
+    16,  6.0 * mult,   // z16 — full visual weight at close
   ];
 }
 
@@ -1689,7 +1691,7 @@ export default function MapView({ events, headerCollapsed = false }) {
     map.addLayer({
       id: 'zcta-safe-line', type: 'line', source: 'zcta',
       filter: ['==', ['get', '_special'], true],
-      paint: { 'line-color': '#000000', 'line-width': zctaLineWidthExpr(1.5), 'line-opacity': (is3D || isReal3D) ? 0 : 1 },
+      paint: { 'line-color': '#000000', 'line-width': zctaLineWidthExpr(0.8), 'line-offset': 1, 'line-opacity': (is3D || isReal3D) ? 0 : 1 },
     });
 
     // Ground boundary glows (non-special) — hidden in 3D mode
@@ -1990,7 +1992,7 @@ export default function MapView({ events, headerCollapsed = false }) {
       if (threeD) {
         map.setPaintProperty('zcta-safe-line', 'line-opacity', 0);
         // Safezone extrusion is the sole white renderer — ensure it stays visible in all 3D/Real3D modes
-        if (map.getLayer('zcta-safezone-extrusion')) map.setPaintProperty('zcta-safezone-extrusion', 'fill-extrusion-opacity', satellite ? 0.8 : 1.0);
+        if (map.getLayer('zcta-safezone-extrusion')) map.setPaintProperty('zcta-safezone-extrusion', 'fill-extrusion-opacity', satellite ? 0.22 : 1.0);
 
         const extrudeColorExpr = ['step', ['get', '_tier'], HEAT_COLORS.cold, 1, HEAT_COLORS.cool, 2, HEAT_COLORS.warm, 3, HEAT_COLORS.orange, 4, HEAT_COLORS.hot];
         // FIX SATELLITE: 3D+heatmap extrusion stays solid (1.0) even when satellite is on
@@ -2017,7 +2019,7 @@ export default function MapView({ events, headerCollapsed = false }) {
       } else {
         // 2D heatmap — safe-line visible only when NOT in Real3D (where safezone-extrusion handles it)
         map.setPaintProperty('zcta-safe-line', 'line-opacity', real3D ? 0 : 1);
-        if (map.getLayer('zcta-safezone-extrusion')) map.setPaintProperty('zcta-safezone-extrusion', 'fill-extrusion-opacity', satellite ? 0.8 : 1.0);
+        if (map.getLayer('zcta-safezone-extrusion')) map.setPaintProperty('zcta-safezone-extrusion', 'fill-extrusion-opacity', satellite ? 0.22 : 1.0);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-color', '#1a0505');
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-height', 0);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', 0);
@@ -2049,7 +2051,7 @@ export default function MapView({ events, headerCollapsed = false }) {
       if (threeD) {
         map.setPaintProperty('zcta-safe-line', 'line-opacity', 0);
         // Safezone extrusion is the sole white renderer — ensure it stays visible in all 3D/Real3D modes
-        if (map.getLayer('zcta-safezone-extrusion')) map.setPaintProperty('zcta-safezone-extrusion', 'fill-extrusion-opacity', satellite ? 0.8 : 1.0);
+        if (map.getLayer('zcta-safezone-extrusion')) map.setPaintProperty('zcta-safezone-extrusion', 'fill-extrusion-opacity', satellite ? 0.22 : 1.0);
         // FIX SATELLITE: 3D no-heatmap extrusion is semi-transparent when satellite is on
         const flatColorExpr = '#220202';
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-color', withHoverColor(flatColorExpr));
@@ -2075,7 +2077,7 @@ export default function MapView({ events, headerCollapsed = false }) {
       } else {
         // 2D non-heatmap — safe-line visible only when NOT in Real3D
         map.setPaintProperty('zcta-safe-line', 'line-opacity', real3D ? 0 : 1);
-        if (map.getLayer('zcta-safezone-extrusion')) map.setPaintProperty('zcta-safezone-extrusion', 'fill-extrusion-opacity', satellite ? 0.8 : 1.0);
+        if (map.getLayer('zcta-safezone-extrusion')) map.setPaintProperty('zcta-safezone-extrusion', 'fill-extrusion-opacity', satellite ? 0.22 : 1.0);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-color', '#1a0505');
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-height', 0);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', 0);
@@ -2099,7 +2101,7 @@ export default function MapView({ events, headerCollapsed = false }) {
     // Re-apply locked outline widths for 2D / Real3D (defensive: enforce after any style swap)
     if (!threeD) {
       try {
-        if (map.getLayer('zcta-safe-line')) map.setPaintProperty('zcta-safe-line', 'line-width', zctaLineWidthExpr(1.5));
+        if (map.getLayer('zcta-safe-line')) map.setPaintProperty('zcta-safe-line', 'line-width', zctaLineWidthExpr(0.8));
         if (map.getLayer('zcta-line-glow2')) map.setPaintProperty('zcta-line-glow2', 'line-width', zctaLineWidthExpr(1.6));
         if (map.getLayer('zcta-line-glow')) map.setPaintProperty('zcta-line-glow', 'line-width', zctaLineWidthExpr(1.25));
         if (map.getLayer('zcta-line')) map.setPaintProperty('zcta-line', 'line-width', zctaLineWidthExpr(1));
@@ -3127,7 +3129,7 @@ export default function MapView({ events, headerCollapsed = false }) {
       map.setPaintProperty('real3d-roads-tertiary', 'line-color', heatmap ? '#553300' : '#771100');
     }
     if (map.getLayer('zcta-safezone-extrusion')) {
-      map.setPaintProperty('zcta-safezone-extrusion', 'fill-extrusion-opacity', satellite ? 0.8 : 1.0);
+      map.setPaintProperty('zcta-safezone-extrusion', 'fill-extrusion-opacity', satellite ? 0.22 : 1.0);
     }
   }, [heatmap, real3D, mapReady]);
 
@@ -3584,9 +3586,9 @@ export default function MapView({ events, headerCollapsed = false }) {
             }
           </button>
 
-          {notInNYC && (
+          {notInNYC && createPortal(
             <div
-              className="fixed inset-0 z-[200000] flex items-center justify-center pointer-events-none"
+              className="fixed inset-0 z-[9999999] flex items-center justify-center pointer-events-none"
               onClick={e => e.stopPropagation()}
             >
               <div className="pointer-events-auto bg-yellow-950/95 border border-yellow-600 rounded-2xl px-5 py-3 flex items-center gap-3 shadow-lg">
@@ -3595,13 +3597,14 @@ export default function MapView({ events, headerCollapsed = false }) {
                   <p className="text-yellow-200 font-black text-sm">You are not in NYC</p>
                   <p className="text-yellow-400/70 text-xs mt-0.5">Orbiter mode — view only.</p>
                 </div>
-                {/* Mobile-only X close button — rendered above all UI layers including topbar */}
+                {/* X close button — always on top via portal to document.body */}
                 <button
-                  className="md:hidden ml-2 w-6 h-6 flex items-center justify-center rounded-full bg-yellow-900/80 hover:bg-yellow-800 text-yellow-200 text-xs font-black flex-shrink-0"
+                  className="ml-2 w-6 h-6 flex items-center justify-center rounded-full bg-yellow-900/80 hover:bg-yellow-800 text-yellow-200 text-xs font-black flex-shrink-0"
                   onClick={e => { e.stopPropagation(); e.preventDefault(); setNotInNYC(false); }}
                 >✕</button>
               </div>
-            </div>
+            </div>,
+            document.body
           )}
 
           {/* Hover tooltip — positioned below cursor so pin tooltip can stack above */}

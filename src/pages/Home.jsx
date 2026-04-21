@@ -31,6 +31,7 @@ export default function Home({ events = [], eventsLoading = false }) {
   const [currentMode,   setCurrentMode]   = useState(null); // 'clout' | null
   const [showMusicMenu, setShowMusicMenu] = useState(false);
   const [musicVolume,   setMusicVolume]   = useState(80);
+  const [hasVisitedMap, setHasVisitedMap] = useState(false); // gate music button visibility
   const scIframeRef      = useRef(null);
   const scWidgetRef      = useRef(null);
   const scReadyRef       = useRef(false);
@@ -224,9 +225,12 @@ export default function Home({ events = [], eventsLoading = false }) {
   function handleMapClick() {
     setView('map');
     setShowLeaderboard(false);
-    if (!mapAutoPlayedRef.current) {
-      mapAutoPlayedRef.current = true;
-      // Call immediately — staying in the same click event tick satisfies browser autoplay policy
+    setHasVisitedMap(true);
+    // Auto-play only first time ever — check localStorage
+    const alreadyPlayed = localStorage.getItem('lapuff_music_firstplayed');
+    if (!alreadyPlayed) {
+      localStorage.setItem('lapuff_music_firstplayed', '1');
+      // Call immediately — same click-event tick satisfies browser autoplay policy
       triggerCloutCullingGames();
     }
   }
@@ -290,8 +294,8 @@ export default function Home({ events = [], eventsLoading = false }) {
                 </button>
               </div>
 
-              {/* Desktop Music Button — square, just right of nav toggles */}
-              <div className="relative hidden md:block" ref={musicDesktopRef}>
+              {/* Desktop Music Button — only shown after user enters map */}
+              {hasVisitedMap && <div className="relative hidden md:block" ref={musicDesktopRef}>
                 <button
                   onClick={() => setShowMusicMenu(v => !v)}
                   className="w-9 h-9 md:w-10 md:h-10 flex items-center justify-center rounded-xl border-2 md:border-3 border-black bg-white shadow-[2px_2px_0px_black] md:shadow-[3px_3px_0px_black] transition-all hover:scale-105"
@@ -303,7 +307,7 @@ export default function Home({ events = [], eventsLoading = false }) {
                   </svg>
                 </button>
                 {showMusicMenu && (
-                  <div className="absolute left-0 top-full mt-2 z-[200] w-52 bg-white border-3 border-black rounded-2xl shadow-[5px_5px_0px_black] overflow-hidden">
+                  <div className="absolute left-0 top-full mt-2 z-[60] w-52 bg-white border-3 border-black rounded-2xl shadow-[5px_5px_0px_black] overflow-hidden">
                     <div className="px-3 py-1.5 border-b-2 border-gray-100">
                       <p className="font-black text-[10px] text-gray-400 uppercase tracking-widest">Radio</p>
                     </div>
@@ -341,7 +345,7 @@ export default function Home({ events = [], eventsLoading = false }) {
                     </div>
                   </div>
                 )}
-              </div>
+              </div>}
             </div>
 
             {/* Desktop Actions / Mobile Hamburger */}
@@ -401,8 +405,8 @@ export default function Home({ events = [], eventsLoading = false }) {
           {/* Mobile Secondary Row: Music + Auth + Submit + Map Collapse */}
           <div className="flex md:hidden items-center justify-center gap-3 mt-2 pb-1">
 
-             {/* Mobile Music Button */}
-             <div className="relative" ref={musicMobileRef}>
+             {/* Mobile Music Button — only shown after user enters map */}
+             {hasVisitedMap && <div className="relative" ref={musicMobileRef}>
                <button
                  onClick={() => setShowMusicMenu(v => !v)}
                  className="w-9 h-9 flex items-center justify-center rounded-xl border-2 border-black bg-white shadow-[2px_2px_0px_black] transition-all flex-shrink-0"
@@ -413,7 +417,7 @@ export default function Home({ events = [], eventsLoading = false }) {
                  </svg>
                </button>
                {showMusicMenu && (
-                 <div className="absolute left-0 top-full mt-2 z-[200] w-52 max-w-[calc(100vw-2rem)] bg-white border-3 border-black rounded-2xl shadow-[5px_5px_0px_black] overflow-hidden">
+                 <div className="absolute left-0 top-full mt-2 z-[60] w-52 max-w-[calc(100vw-2rem)] bg-white border-3 border-black rounded-2xl shadow-[5px_5px_0px_black] overflow-hidden">
                    <div className="px-3 py-1.5 border-b-2 border-gray-100">
                      <p className="font-black text-[10px] text-gray-400 uppercase tracking-widest">Radio</p>
                    </div>
@@ -451,7 +455,7 @@ export default function Home({ events = [], eventsLoading = false }) {
                    </div>
                  </div>
                )}
-             </div>
+             </div>}
              {user ? (
                 <button onClick={() => setShowUserMenu(v => !v)}
                 className="w-[112px] bg-white rounded-full px-3 py-1.5 font-black text-[11px] shadow-[2px_2px_0px_#333] truncate text-center border-2 lp-accent-border lp-accent-color-text">
