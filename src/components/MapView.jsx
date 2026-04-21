@@ -13,9 +13,9 @@ import { deserialize as fgbDeserialize } from 'flatgeobuf/lib/mjs/geojson.js';
 
 const GEOJSON_URL = './data/MODZCTA_2010_WGS1984.geo.json';
 const BOROUGH_GEOJSON_URL = './data/borough.geo.json';
-const BUILDING_FGB_URL = './data/building_indexed.fgb';
-const FGB_CACHE_NAME = 'lapuff-fgb-v2';
-const FGB_CACHE_KEY  = 'building_indexed.fgb';
+const BUILDING_FGB_URL = './data/final_building.fgb';
+const FGB_CACHE_NAME = 'lapuff-fgb-v3';
+const FGB_CACHE_KEY  = 'final_building.fgb';
 const MAPTILER_KEY = 'VjoJJ0mSCXFo9kFGYGxJ';
 
 const TIMESPAN_STEPS = [
