@@ -26,6 +26,9 @@ const ALL_SAMPLE_EVENTS = [
     borough: 'Bronx',
     lat: 40.867108,
     lng: -73.877867,
+    afters_address: "500 E Fordham Rd, Bronx, NY 10458",
+    afters_lat: 40.861934,
+    afters_lng: -73.88812,
   },
   {
     id: 'sample-2',
@@ -46,6 +49,9 @@ const ALL_SAMPLE_EVENTS = [
     borough: 'Manhattan',
     lat: 40.779440,
     lng: -73.963382,
+    afters_address: "133 E 65th St, New York, NY 10065",
+    afters_lat: 40.76543,
+    afters_lng: -73.96482,
   },
   {
     id: 'sample-3',
@@ -66,6 +72,9 @@ const ALL_SAMPLE_EVENTS = [
     borough: 'Manhattan',
     lat: 40.753983,
     lng: -74.000603,
+    afters_address: "848 Washington St, New York, NY 10014",
+    afters_lat: 40.74053,
+    afters_lng: -74.00912,
   },
   {
     id: 'sample-4',
@@ -86,6 +95,9 @@ const ALL_SAMPLE_EVENTS = [
     borough: 'Manhattan',
     lat: 40.780490,
     lng: -73.981131,
+    afters_address: "340 Amsterdam Ave, New York, NY 10024",
+    afters_lat: 40.7789,
+    afters_lng: -73.98159,
   },
   {
     id: 'sample-5',
@@ -106,6 +118,9 @@ const ALL_SAMPLE_EVENTS = [
     borough: 'Manhattan',
     lat: 40.750513,
     lng: -73.993516,
+    afters_address: "133 W 33rd St, New York, NY 10001",
+    afters_lat: 40.74938,
+    afters_lng: -73.99291,
   },
 
   // ── FUTURE EVENTS (25) — future-dated for active map density and heatmap testing ──
@@ -128,6 +143,9 @@ const ALL_SAMPLE_EVENTS = [
     borough: 'Manhattan',
     lat: 40.735863,
     lng: -73.990987,
+    afters_address: "48 W 17th St, New York, NY 10011",
+    afters_lat: 40.73973,
+    afters_lng: -73.99482,
   },
   {
     id: 'sample-7',
@@ -148,6 +166,9 @@ const ALL_SAMPLE_EVENTS = [
     borough: 'Manhattan',
     lat: 40.748085,
     lng: -74.004795,
+    afters_address: "425 W 15th St, New York, NY 10011",
+    afters_lat: 40.74288,
+    afters_lng: -74.0085,
   },
   {
     id: 'sample-8',
@@ -168,6 +189,9 @@ const ALL_SAMPLE_EVENTS = [
     borough: 'Manhattan',
     lat: 40.761524,
     lng: -73.977669,
+    afters_address: "315 W 44th St, New York, NY 10036",
+    afters_lat: 40.75976,
+    afters_lng: -73.99043,
   },
   {
     id: 'sample-9',
@@ -188,6 +212,9 @@ const ALL_SAMPLE_EVENTS = [
     borough: 'Manhattan',
     lat: 40.758747,
     lng: -73.978674,
+    afters_address: "15 Vanderbilt Ave, New York, NY 10017",
+    afters_lat: 40.75264,
+    afters_lng: -73.97725,
   },
   {
     id: 'sample-10',
@@ -208,6 +235,9 @@ const ALL_SAMPLE_EVENTS = [
     borough: 'Manhattan',
     lat: 40.758896,
     lng: -73.985130,
+    afters_address: "70 Little W 12th St, New York, NY 10014",
+    afters_lat: 40.74099,
+    afters_lng: -74.00854,
   },
   {
     id: 'sample-11',
@@ -228,6 +258,9 @@ const ALL_SAMPLE_EVENTS = [
     borough: 'Manhattan',
     lat: 40.772490,
     lng: -73.983177,
+    afters_address: "2315 Broadway, New York, NY 10024",
+    afters_lat: 40.78072,
+    afters_lng: -73.98138,
   },
   {
     id: 'sample-12',
@@ -248,6 +281,9 @@ const ALL_SAMPLE_EVENTS = [
     borough: 'Manhattan',
     lat: 40.742490,
     lng: -74.004200,
+    afters_address: "406 W 17th St, New York, NY 10011",
+    afters_lat: 40.74159,
+    afters_lng: -74.00285,
   },
   {
     id: 'sample-13',
@@ -268,6 +304,9 @@ const ALL_SAMPLE_EVENTS = [
     borough: 'Manhattan',
     lat: 40.730823,
     lng: -73.997332,
+    afters_address: "149 Bleecker St, New York, NY 10012",
+    afters_lat: 40.72714,
+    afters_lng: -73.99997,
   },
   {
     id: 'sample-14',
@@ -288,6 +327,9 @@ const ALL_SAMPLE_EVENTS = [
     borough: 'Brooklyn',
     lat: 40.671401,
     lng: -73.963665,
+    afters_address: "618 St Johns Pl, Brooklyn, NY 11216",
+    afters_lat: 40.6712,
+    afters_lng: -73.96018,
   },
   {
     id: 'sample-15',
@@ -308,6 +350,9 @@ const ALL_SAMPLE_EVENTS = [
     borough: 'Brooklyn',
     lat: 40.660695,
     lng: -73.969010,
+    afters_address: "297 9th St, Brooklyn, NY 11215",
+    afters_lat: 40.66288,
+    afters_lng: -73.99044,
   },
   {
     id: 'sample-16',
@@ -328,6 +373,9 @@ const ALL_SAMPLE_EVENTS = [
     borough: 'Brooklyn',
     lat: 40.703431,
     lng: -73.989570,
+    afters_address: "60 Furman St, Brooklyn, NY 11201",
+    afters_lat: 40.69629,
+    afters_lng: -73.99854,
   },
   {
     id: 'sample-17',
@@ -348,6 +396,9 @@ const ALL_SAMPLE_EVENTS = [
     borough: 'Brooklyn',
     lat: 40.682618,
     lng: -73.975538,
+    afters_address: "589 Vanderbilt Ave, Brooklyn, NY 11238",
+    afters_lat: 40.67995,
+    afters_lng: -73.96976,
   },
   {
     id: 'sample-18',
@@ -368,6 +419,9 @@ const ALL_SAMPLE_EVENTS = [
     borough: 'Brooklyn',
     lat: 40.713052,
     lng: -73.957358,
+    afters_address: "90 Wythe Ave, Brooklyn, NY 11249",
+    afters_lat: 40.72023,
+    afters_lng: -73.95731,
   },
   {
     id: 'sample-19',
@@ -388,6 +442,9 @@ const ALL_SAMPLE_EVENTS = [
     borough: 'Queens',
     lat: 40.757890,
     lng: -73.831830,
+    afters_address: "38-12 Prince St, Flushing, NY 11354",
+    afters_lat: 40.7591,
+    afters_lng: -73.82976,
   },
   {
     id: 'sample-20',
@@ -408,6 +465,9 @@ const ALL_SAMPLE_EVENTS = [
     borough: 'Queens',
     lat: 40.780369,
     lng: -73.926895,
+    afters_address: "29-19 24th Ave, Astoria, NY 11102",
+    afters_lat: 40.77564,
+    afters_lng: -73.93153,
   },
   {
     id: 'sample-21',
@@ -428,6 +488,9 @@ const ALL_SAMPLE_EVENTS = [
     borough: 'Queens',
     lat: 40.745116,
     lng: -73.946716,
+    afters_address: "27-24 Jackson Ave, Long Island City, NY 11101",
+    afters_lat: 40.74477,
+    afters_lng: -73.94449,
   },
   {
     id: 'sample-22',
@@ -448,6 +511,9 @@ const ALL_SAMPLE_EVENTS = [
     borough: 'Queens',
     lat: 40.746544,
     lng: -73.891735,
+    afters_address: "40-19 Gleane St, Flushing, NY 11373",
+    afters_lat: 40.74495,
+    afters_lng: -73.88459,
   },
   {
     id: 'sample-23',
@@ -468,6 +534,9 @@ const ALL_SAMPLE_EVENTS = [
     borough: 'Bronx',
     lat: 40.829640,
     lng: -73.926278,
+    afters_address: "836 River Ave, Bronx, NY 10452",
+    afters_lat: 40.82853,
+    afters_lng: -73.92704,
   },
   {
     id: 'sample-24',
@@ -488,6 +557,9 @@ const ALL_SAMPLE_EVENTS = [
     borough: 'Bronx',
     lat: 40.850369,
     lng: -73.876856,
+    afters_address: "2344 Arthur Ave, Bronx, NY 10458",
+    afters_lat: 40.85467,
+    afters_lng: -73.88304,
   },
   {
     id: 'sample-25',
@@ -508,6 +580,9 @@ const ALL_SAMPLE_EVENTS = [
     borough: 'Bronx',
     lat: 40.837260,
     lng: -73.906390,
+    afters_address: "890 Melrose Ave, Bronx, NY 10456",
+    afters_lat: 40.8361,
+    afters_lng: -73.91432,
   },
   {
     id: 'sample-26',
@@ -528,6 +603,9 @@ const ALL_SAMPLE_EVENTS = [
     borough: 'Staten Island',
     lat: 40.643880,
     lng: -74.073030,
+    afters_address: "120 Bay St, Staten Island, NY 10301",
+    afters_lat: 40.64123,
+    afters_lng: -74.07643,
   },
   {
     id: 'sample-27',
@@ -548,6 +626,9 @@ const ALL_SAMPLE_EVENTS = [
     borough: 'Staten Island',
     lat: 40.637470,
     lng: -74.102190,
+    afters_address: "1 Edgewater St, Staten Island, NY 10305",
+    afters_lat: 40.63482,
+    afters_lng: -74.0734,
   },
   {
     id: 'sample-28',
@@ -568,6 +649,9 @@ const ALL_SAMPLE_EVENTS = [
     borough: 'Manhattan',
     lat: 40.753570,
     lng: -74.001603,
+    afters_address: "71 W 35th St, New York, NY 10001",
+    afters_lat: 40.75043,
+    afters_lng: -73.99134,
   },
   {
     id: 'sample-29',
@@ -588,6 +672,9 @@ const ALL_SAMPLE_EVENTS = [
     borough: 'Manhattan',
     lat: 40.773786,
     lng: -73.972184,
+    afters_address: "1590 2nd Ave, New York, NY 10028",
+    afters_lat: 40.77264,
+    afters_lng: -73.95368,
   },
   {
     id: 'sample-30',
@@ -608,6 +695,9 @@ const ALL_SAMPLE_EVENTS = [
     borough: 'Brooklyn',
     lat: 40.658830,
     lng: -74.014460,
+    afters_address: "480 Union St, Brooklyn, NY 11231",
+    afters_lat: 40.6701,
+    afters_lng: -73.99683,
   },
 ];
 

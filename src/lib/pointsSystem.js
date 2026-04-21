@@ -6,6 +6,7 @@ const SUPABASE_KEY = 'sb_publishable_tLCmZUz3bgISgxs4KVq28g_x36Xo6Cp';
 
 export const POINTS = {
   EVENT_ATTEND_CHECKIN: 300,    // Highest — real-life attendance verified by GPS
+  AFTERS_ATTEND_CHECKIN: 200,   // Afters location check-in — post-event social
   SELF_CHECKIN: 150,            
   ATTENDEE_TO_ORGANIZER: 80,    
   REFERRAL_SUCCESS: 50,         
@@ -21,12 +22,27 @@ export const POINTS = {
  * The 'award_clout' function in SQL ensures only the auth.uid() can trigger their own growth,
  * or the Growth Loop trigger (SQL side) handles the Referral recipient.
  */
-export async function awardPoints(session, amount, reason) {
-  // 1. Fundamental Logic: Only signed-in users can trigger point events
+/**
+ * SECURE POINT AWARDING
+ * @param {object} session - auth session with access_token
+ * @param {number} amount - points to award
+ * @param {string} reason - audit reason string
+ * @param {string|null} eventId - optional event UUID for dedup
+ * @param {string|null} checkinType - 'main' | 'afters' | null
+ */
+export async function awardPoints(session, amount, reason, eventId = null, checkinType = null) {
   if (!session?.access_token) {
     console.warn("Points ignored: No active session or unvalidated user.");
     return false;
   }
+
+  const body = {
+    p_user_id: session.user.id,
+    p_amount: amount,
+    p_reason: reason,
+    ...(eventId && { p_event_id: eventId }),
+    ...(checkinType && { p_checkin_type: checkinType }),
+  };
 
   const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/award_clout`, {
     method: 'POST',
@@ -35,15 +51,12 @@ export async function awardPoints(session, amount, reason) {
       'Authorization': `Bearer ${session.access_token}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ 
-      points_to_add: amount, 
-      audit_reason: reason 
-    }),
+    body: JSON.stringify(body),
   });
 
   if (!res.ok) {
-    const err = await res.json();
-    console.error("Clout Grant Failed:", err.message);
+    const err = await res.json().catch(() => ({}));
+    console.error("Clout Grant Failed:", err.message || res.status);
     return false;
   }
   return true;

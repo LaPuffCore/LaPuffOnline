@@ -6,6 +6,7 @@ import { getUserTZOffset, utcToLocal } from '../lib/timezones';
 import { generateAutoTags } from '../lib/autoTags';
 import { TAG_COLORS } from '../lib/tagColors';
 import { getTileAccentColor, useSiteTheme } from '../lib/theme';
+import { isEventLive, isAftersWindow } from '../lib/eventUtils';
 
 function getDaysInMonth(year, month) { return new Date(year, month + 1, 0).getDate(); }
 function getFirstDay(year, month) { return new Date(year, month, 1).getDay(); }
@@ -51,10 +52,8 @@ function MiniMap({ lat, lng, address, city, borderColor }) {
   );
 }
 
-function DayEventDetails({ event }) {
+function DayEventDetails({ event, borderColor }) {
   const { resolvedTheme } = useSiteTheme();
-  // Inherit tileAccentOverride + theme exactly like EventTile/EventDetailPopup
-  const borderColor = getTileAccentColor(event.hex_color, resolvedTheme);
   const tags = generateAutoTags(event);
   const displayTime = event.event_time_utc ? utcToLocal(event.event_time_utc, getUserTZOffset()) : '';
   const displayDate = event.event_date
@@ -64,19 +63,25 @@ function DayEventDetails({ event }) {
   return (
     <div className="border-[2.5px] border-t-0 rounded-b-[1.6rem] bg-gray-50 px-3 pb-3 pt-7 md:px-4 md:pb-4 md:pt-8 shadow-[inset_0_1px_0_rgba(0,0,0,0.05)]" style={{ borderColor }}>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4 mb-4">
-        <div className="bg-white border-2 rounded-xl p-3 transition-all duration-150 hover:scale-[1.01]"
+        {/* Time + Date box */}
+        <button
+          className="bg-white border-2 rounded-xl p-3 text-left transition-all duration-150 hover:scale-[1.01] cursor-pointer"
           style={{ borderColor }}
-          onMouseEnter={ev => { ev.currentTarget.style.backgroundColor = borderColor; ev.currentTarget.style.color = '#fff'; }}
+          onMouseEnter={ev => { ev.currentTarget.style.backgroundColor = '#000'; ev.currentTarget.style.color = '#fff'; }}
           onMouseLeave={ev => { ev.currentTarget.style.backgroundColor = ''; ev.currentTarget.style.color = ''; }}>
           <p className="text-[10px] font-black uppercase tracking-widest text-gray-500 mb-2">Time + Date</p>
           <p className="text-sm font-black">📅 {displayDate}</p>
           {displayTime && <p className="text-sm font-black mt-1">🕐 {displayTime}</p>}
-          <p className="text-xs font-bold text-gray-600 mt-2">
+          <p className="text-xs font-bold text-gray-500 mt-2">
             {event.location_data?.rsvp_link ? '🔒 RSVP REQUIRED' : `📍 ${event.location_data?.city || 'NYC'}`}
           </p>
-        </div>
+        </button>
 
-        <div className="h-[120px] md:h-[130px]">
+        {/* Map */}
+        <div className="h-[120px] md:h-[130px] rounded-xl overflow-hidden border-2 transition-all duration-150 hover:scale-[1.01] cursor-pointer group"
+          style={{ borderColor }}
+          onMouseEnter={ev => { ev.currentTarget.style.borderColor = '#000'; }}
+          onMouseLeave={ev => { ev.currentTarget.style.borderColor = borderColor; }}>
           <MiniMap
             lat={event.location_data?.lat}
             lng={event.location_data?.lng}
@@ -96,14 +101,23 @@ function DayEventDetails({ event }) {
         </div>
       )}
 
-      <div className="flex flex-wrap gap-1.5 md:gap-2 mb-4">
-        {tags.map((tag) => (
-          <span key={tag} className={`text-[9px] font-black px-2 py-1 rounded-lg border-2 border-black ${TAG_COLORS[tag] || 'bg-white'} uppercase`}>
-            #{tag}
-          </span>
-        ))}
-      </div>
+      {/* Tags */}
+      {tags.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 md:gap-2 mb-4">
+          {tags.map((tag) => (
+            <span
+              key={tag}
+              className={`text-[9px] font-black px-2 py-1 rounded-lg border-2 border-black cursor-pointer transition-all duration-100 hover:scale-[1.06] select-none ${TAG_COLORS[tag] || 'bg-white'} uppercase`}
+              onMouseEnter={ev => { ev.currentTarget.style.backgroundColor = '#000'; ev.currentTarget.style.color = '#fff'; ev.currentTarget.style.borderColor = '#000'; }}
+              onMouseLeave={ev => { ev.currentTarget.style.backgroundColor = ''; ev.currentTarget.style.color = ''; ev.currentTarget.style.borderColor = ''; }}
+            >
+              #{tag}
+            </span>
+          ))}
+        </div>
+      )}
 
+      {/* Links */}
       {event.relevant_links?.length > 0 && (
         <div className="space-y-2">
           <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">Links</p>
@@ -115,8 +129,8 @@ function DayEventDetails({ event }) {
               rel="noopener noreferrer"
               className="block bg-white border-2 rounded-xl px-3 py-2.5 text-[11px] md:text-xs font-black truncate transition-all duration-150 hover:scale-[1.02]"
               style={{ borderColor }}
-              onMouseEnter={ev => { ev.currentTarget.style.backgroundColor = borderColor; ev.currentTarget.style.color = '#fff'; }}
-              onMouseLeave={ev => { ev.currentTarget.style.backgroundColor = ''; ev.currentTarget.style.color = ''; }}
+              onMouseEnter={ev => { ev.currentTarget.style.backgroundColor = '#000'; ev.currentTarget.style.color = '#fff'; ev.currentTarget.style.borderColor = '#000'; }}
+              onMouseLeave={ev => { ev.currentTarget.style.backgroundColor = ''; ev.currentTarget.style.color = ''; ev.currentTarget.style.borderColor = borderColor; }}
             >
               {link.replace(/^https?:\/\/(www\.)?/, '')}
             </a>
@@ -257,7 +271,7 @@ export default function CalendarPage({ events = [] }) {
                           ev.stopPropagation();
                           if (isMobile) { drillToWeek(date); } else { setSelectedEvent(e); }
                         }}
-                        className={isMobile ? 'flex h-5 w-full items-center rounded-lg px-1' : 'w-full text-left text-[9px] md:text-[10px] rounded-lg px-1.5 py-1 font-bold cursor-pointer hover:opacity-85 leading-tight overflow-hidden line-clamp-2 [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]'}
+                        className={isMobile ? 'flex h-5 w-full items-center rounded-lg px-1' : 'w-full text-left text-[9px] md:text-[10px] rounded-lg px-1.5 py-1 font-bold cursor-pointer hover:opacity-85 leading-tight overflow-hidden whitespace-nowrap'}
                         style={{ backgroundColor: `${tileColor}33`, color: tileColor }}
                       >
                         {isMobile ? (
@@ -268,7 +282,7 @@ export default function CalendarPage({ events = [] }) {
                         ) : (
                           <>
                             <span className="mr-1">{e.representative_emoji || '🎉'}</span>
-                            {e.event_name}
+                            {(e.event_name?.length > 37 ? e.event_name.slice(0, 37) + '...' : e.event_name)}
                           </>
                         )}
                       </button>
@@ -347,7 +361,15 @@ export default function CalendarPage({ events = [] }) {
                         <div className="flex items-start gap-2">
                           <span className="text-2xl md:text-3xl leading-none">{e.representative_emoji || '🎉'}</span>
                           <div className="min-w-0 flex-1">
-                            <p className="text-[11px] md:text-xs font-black leading-tight line-clamp-2">{e.event_name}</p>
+                            <div className="flex items-center gap-1 mb-0.5">
+                              <p className="text-[11px] md:text-xs font-black leading-tight line-clamp-2 flex-1">{e.event_name}</p>
+                              {isEventLive(e) && (
+                                <span className="flex-shrink-0 text-[8px] font-black bg-green-500 text-white px-1.5 py-0.5 rounded-full animate-pulse">LIVE</span>
+                              )}
+                              {isAftersWindow(e) && (
+                                <span className="flex-shrink-0 text-[8px] font-black bg-purple-600 text-white px-1.5 py-0.5 rounded-full animate-pulse">AFTERS</span>
+                              )}
+                            </div>
                             {time && <p className="text-[10px] md:text-[11px] font-bold text-gray-600 mt-1">🕐 {time}</p>}
                             <p className="text-[10px] md:text-[11px] font-bold text-gray-600 truncate">📍 {loc}</p>
                           </div>
@@ -398,10 +420,12 @@ export default function CalendarPage({ events = [] }) {
               <div
                 key={e.id}
                 className="relative overflow-visible transition-transform pb-1"
+                style={{ zIndex: expanded ? 50 : 'auto' }}
               >
                 <div
-                  className="relative z-10 bg-white border-3 rounded-3xl shadow-[4px_4px_0px_black] transition-all duration-150 hover:scale-[1.02] hover:z-20"
-                  style={{ borderColor: getTileAccentColor(e.hex_color, resolvedTheme) }}
+                  className="relative bg-white border-3 rounded-3xl shadow-[4px_4px_0px_black] transition-all duration-150 hover:scale-[1.02] cursor-pointer select-none"
+                  style={{ borderColor, zIndex: expanded ? 50 : 10 }}
+                  onClick={() => setExpandedEvents((prev) => ({ ...prev, [e.id]: !prev[e.id] }))}
                 >
                   <div className="p-4 flex items-center gap-3 md:gap-4">
                     <div className="w-14 h-14 md:w-16 md:h-16 rounded-2xl overflow-hidden flex-shrink-0 flex items-center justify-center">
@@ -414,27 +438,34 @@ export default function CalendarPage({ events = [] }) {
                     </div>
 
                     <div className="min-w-0 flex-1">
-                      <h3 className="font-black text-sm md:text-base leading-tight line-clamp-2"
-                        style={{ color: getTileAccentColor(e.hex_color, resolvedTheme) }}>{e.event_name}</h3>
+                      <div className="flex items-center gap-2 mb-0.5">
+                        <h3 className="font-black text-sm md:text-base leading-tight line-clamp-2 flex-1"
+                          style={{ color: getTileAccentColor(e.hex_color, resolvedTheme) }}>{e.event_name}</h3>
+                        {isEventLive(e) && (
+                          <span className="flex-shrink-0 text-[9px] font-black bg-green-500 text-white px-2 py-0.5 rounded-full animate-pulse">LIVE</span>
+                        )}
+                        {isAftersWindow(e) && (
+                          <span className="flex-shrink-0 text-[9px] font-black bg-purple-600 text-white px-2 py-0.5 rounded-full animate-pulse">AFTERS</span>
+                        )}
+                      </div>
                       <p className="text-[11px] md:text-sm text-gray-500 font-bold">
                         {displayDate}{displayTime ? ` · ${displayTime}` : ''}
                       </p>
                     </div>
 
-                    <button
-                      onClick={() => setExpandedEvents((prev) => ({ ...prev, [e.id]: !prev[e.id] }))}
-                      className="w-9 h-9 border-2 rounded-xl flex items-center justify-center text-base font-black shadow-[2px_2px_0px_black] transition-colors"
+                    <div
+                      className="w-9 h-9 border-2 rounded-xl flex items-center justify-center text-base font-black shadow-[2px_2px_0px_black] transition-colors flex-shrink-0"
                       style={{ borderColor: getTileAccentColor(e.hex_color, resolvedTheme), color: getTileAccentColor(e.hex_color, resolvedTheme) }}
                       aria-label="Toggle details"
                     >
                       {expanded ? '⌃' : '⌄'}
-                    </button>
+                    </div>
                   </div>
                 </div>
 
                 {expanded && (
-                  <div className="relative z-0 -mt-4 pt-6 px-2 md:px-3">
-                    <DayEventDetails event={e} />
+                  <div className="relative -mt-4 pt-6 px-2 md:px-3" style={{ zIndex: 49 }}>
+                    <DayEventDetails event={e} borderColor={borderColor} />
                   </div>
                 )}
               </div>

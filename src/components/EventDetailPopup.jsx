@@ -10,7 +10,7 @@ import { awardPoints, POINTS, isEligibleForPoints } from '../lib/pointsSystem';
 import { getValidSession } from '../lib/supabaseAuth';
 import { getTileAccentColor, useSiteTheme } from '../lib/theme';
 import { pingLocation, isWithin750ft, markCheckedIn, isCheckedIn, isAutoPingEnabled, setAutoPingEnabled } from '../lib/locationService';
-import { isCheckInWindowOpen } from '../lib/eventUtils';
+import { isCheckInWindowOpen, isAftersWindow, isEventLive } from '../lib/eventUtils';
 
 function MiniMap({ lat, lng, address, city, borderColor, textColor }) {
   const [loaded, setLoaded] = useState(false);
@@ -197,38 +197,39 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
     });
   };
 
-  const handleManualCheckIn = async () => {
+    const handleManualCheckIn = async (checkinType = 'main') => {
     setCheckInLoading(true);
     setCheckInResult(null);
     try {
-      const now = Date.now();
-      const start = event.event_time_utc ? new Date(event.event_time_utc).getTime() : null;
-      if (!start || now < start) {
-        setCheckInResult({ type: 'error', msg: '⏳ Event not yet started' });
-        return;
-      }
       if (!isCheckInWindowOpen(event)) {
-        setCheckInResult({ type: 'error', msg: '🕐 This event has already ended' });
+        setCheckInResult({ type: 'error', msg: '🕐 This event check-in window is not open' });
         return;
       }
-      const eLat = event.location_data?.lat ?? event.lat;
-      const eLng = event.location_data?.lng ?? event.lng;
+      const isAfters = checkinType === 'afters';
+      const eLat = isAfters ? event.afters_lat : (event.location_data?.lat ?? event.lat);
+      const eLng = isAfters ? event.afters_lng : (event.location_data?.lng ?? event.lng);
       if (!eLat || !eLng) {
-        setCheckInResult({ type: 'error', msg: '📍 No location set for this event' });
+        setCheckInResult({ type: 'error', msg: '📍 No location set for this check-in' });
+        return;
+      }
+      if (isCheckedIn(event.id, checkinType)) {
+        setCheckInResult({ type: 'info', msg: isAfters ? '✅ Already checked into afters!' : '✅ Already checked in!' });
         return;
       }
       const loc = await pingLocation();
       if (!isWithin750ft(loc.lat, loc.lng, eLat, eLng)) {
-        setCheckInResult({ type: 'error', msg: '📡 You are not in range of the event' });
+        setCheckInResult({ type: 'error', msg: '📡 You are not in range' });
         return;
       }
-      markCheckedIn(event.id);
+      markCheckedIn(event.id, checkinType);
       const session = await getValidSession();
       if (isEligibleForPoints(session)) {
-        awardPoints(session, POINTS.EVENT_ATTEND_CHECKIN, `Event check-in: ${event.event_name}`);
+        const pts = isAfters ? POINTS.AFTERS_ATTEND_CHECKIN : POINTS.EVENT_ATTEND_CHECKIN;
+        const reason = isAfters ? `Afters Attendance: ${event.event_name}` : `Event check-in: ${event.event_name}`;
+        awardPoints(session, pts, reason, event.id, checkinType);
       }
-      setCheckInResult({ type: 'success', msg: '✅ You have checked in!' });
-    } catch (err) {
+      setCheckInResult({ type: 'success', msg: isAfters ? '🎉 Afters check-in confirmed!' : '✅ You have checked in!' });
+    } catch {
       setCheckInResult({ type: 'error', msg: '📍 Could not get your location — please allow location access' });
     } finally {
       setCheckInLoading(false);
@@ -304,7 +305,25 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
               </div>
             )}
 
-            {/* WEB ONLY (sm+): Image navigation arrows */}
+            {/* LIVE / AFTERS / Attendance overlays */}
+            {isEventLive(event) && !event._auto && (
+              <div className="absolute top-2 left-2 z-20 flex items-center gap-1 bg-green-500 text-white text-[9px] font-black px-2 py-0.5 rounded-full shadow animate-pulse select-none">
+                <span className="w-1.5 h-1.5 bg-white rounded-full inline-block"/>
+                LIVE
+              </div>
+            )}
+            {isAftersWindow(event) && !event._auto && (
+              <div className="absolute top-2 left-2 z-20 flex items-center gap-1 bg-purple-600 text-white text-[9px] font-black px-2 py-0.5 rounded-full shadow animate-pulse select-none">
+                <span className="w-1.5 h-1.5 bg-white rounded-full inline-block"/>
+                AFTERS
+              </div>
+            )}
+            {(isEventLive(event) || isAftersWindow(event)) && event.attendance_count > 0 && (
+              <div className="absolute bottom-2 right-2 z-20 flex items-center gap-1 bg-black/70 text-white text-[9px] font-black px-2 py-0.5 rounded-full shadow select-none">
+                <span>👥</span>
+                <span>{event.attendance_count}</span>
+              </div>
+            )}
             {showImage && photos.length > 1 && (
               <div className="absolute inset-0 hidden sm:flex justify-between items-center px-2 pointer-events-none z-20">
                 {canImgPrev ? (
@@ -447,13 +466,24 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
                 {showCheckInMenu && (
                   <div className="absolute bottom-full mb-2 left-0 right-0 bg-white border-3 border-black rounded-2xl shadow-[5px_5px_0px_black] overflow-hidden z-10">
                     <button
-                      onClick={() => { handleManualCheckIn(); setShowCheckInMenu(false); }}
-                      disabled={checkInLoading || isCheckedIn(event.id)}
+                      onClick={() => { handleManualCheckIn('main'); setShowCheckInMenu(false); }}
+                      disabled={checkInLoading || isCheckedIn(event.id, 'main')}
                       className="w-full px-4 py-3 text-left text-xs font-black flex items-center gap-2 border-b-2 border-gray-100 hover:bg-gray-50 transition-colors disabled:opacity-50"
                     >
                       <span>📍</span>
-                      <span>{isCheckedIn(event.id) ? 'Already Checked In ✓' : checkInLoading ? 'Getting location…' : 'Manual Check In'}</span>
+                      <span>{isCheckedIn(event.id, 'main') ? 'Already Checked In ✓' : checkInLoading ? 'Getting location…' : 'Manual Check In'}</span>
                     </button>
+                    {event.afters_lat && isAftersWindow(event) && (
+                      <button
+                        onClick={() => { handleManualCheckIn('afters'); setShowCheckInMenu(false); }}
+                        disabled={checkInLoading || isCheckedIn(event.id, 'afters')}
+                        className="w-full px-4 py-3 text-left text-xs font-black flex items-center gap-2 border-b-2 border-gray-100 hover:bg-purple-50 transition-colors disabled:opacity-50"
+                      >
+                        <span>🎉</span>
+                        <span className="flex-1">{isCheckedIn(event.id, 'afters') ? 'Afters Checked In ✓' : 'Afters Check In'}</span>
+                        <span className="text-[9px] bg-purple-600 text-white px-1.5 py-0.5 rounded-full">+200 pts</span>
+                      </button>
+                    )}
                     <button
                       onClick={handleToggleAutoPing}
                       className="w-full px-4 py-3 text-left text-xs font-black flex flex-col gap-0.5 hover:bg-gray-50 transition-colors"
@@ -476,10 +506,10 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
                 <button
                   onClick={() => setShowCheckInMenu(v => !v)}
                   className="w-full flex items-center justify-between p-3 sm:p-4 bg-gray-50 border-[2.5px] border-black rounded-xl transition-all group shadow-[4px_4px_0px_black] hover:bg-black hover:text-white active:translate-x-0.5 active:translate-y-0.5 active:shadow-none"
-                  style={isCheckedIn(event.id) ? { borderColor: '#22c55e', backgroundColor: '#f0fdf4' } : {}}
+                  style={isCheckedIn(event.id, 'main') ? { borderColor: '#22c55e', backgroundColor: '#f0fdf4' } : {}}
                 >
                   <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-tighter">
-                    {isCheckedIn(event.id) ? '✅ CHECKED IN' : '📍 LOCATION CHECK IN'}
+                    {isCheckedIn(event.id, 'main') ? '✅ CHECKED IN' : '📍 LOCATION CHECK IN'}
                   </span>
                   <span className="text-lg sm:text-xl transition-transform">{showCheckInMenu ? '↓' : '↑'}</span>
                 </button>

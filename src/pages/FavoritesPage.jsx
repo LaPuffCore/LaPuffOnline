@@ -13,6 +13,7 @@ import {
 } from '../lib/favorites';
 import { getUserTZOffset, utcToLocal } from '../lib/timezones';
 import { getTileAccentColor, useSiteTheme } from '../lib/theme';
+import { isEventLive, isAftersWindow } from '../lib/eventUtils';
 
 function formatDayTitle(dateKey) {
   if (!dateKey) return 'Undated';
@@ -113,6 +114,18 @@ function FavoriteCard({ event, tzOffset, onOpen, onUnfavorite }) {
         )}
 
         <div className="absolute top-2 right-2 flex items-center gap-1.5">
+          {isEventLive(event) && (
+            <div className="flex items-center gap-1 bg-green-500 text-white text-[9px] font-black px-2 py-0.5 rounded-full animate-pulse shadow select-none">
+              <span className="w-1.5 h-1.5 bg-white rounded-full inline-block"/>
+              LIVE
+            </div>
+          )}
+          {isAftersWindow(event) && (
+            <div className="flex items-center gap-1 bg-purple-600 text-white text-[9px] font-black px-2 py-0.5 rounded-full animate-pulse shadow select-none">
+              <span className="w-1.5 h-1.5 bg-white rounded-full inline-block"/>
+              AFTERS
+            </div>
+          )}
           <div className="flex items-center gap-1 bg-black/85 text-white rounded-full px-2 py-1 border border-white/10">
             <TrendIcon trend={trend} size="sm" />
             {favCount > 0 && <span className="text-[11px] font-black">{favCount}</span>}

@@ -117,6 +117,8 @@ export function stopWatching() {}
 // ─── CHECK-IN RADIUS ─────────────────────────────────────────────────────────
 // 750 feet ≈ 228.6 meters
 const CHECKIN_RADIUS_M = 229;
+// Grace period before event start (30 min)
+const CHECKIN_GRACE_MS = 30 * 60 * 1000;
 
 export function isWithin750ft(userLat, userLng, eventLat, eventLng) {
   return haversine(userLat, userLng, eventLat, eventLng) <= CHECKIN_RADIUS_M;
@@ -130,14 +132,17 @@ export function getCheckedInEvents() {
   catch { return new Set(); }
 }
 
-export function markCheckedIn(eventId) {
+export function markCheckedIn(eventId, type = 'main') {
   const set = getCheckedInEvents();
-  set.add(String(eventId));
+  set.add(`${String(eventId)}:${type}`);
+  // Legacy compat: also store bare id for main check-ins
+  if (type === 'main') set.add(String(eventId));
   localStorage.setItem(CHECKED_IN_KEY, JSON.stringify([...set]));
 }
 
-export function isCheckedIn(eventId) {
-  return getCheckedInEvents().has(String(eventId));
+export function isCheckedIn(eventId, type = 'main') {
+  const set = getCheckedInEvents();
+  return set.has(`${String(eventId)}:${type}`) || (type === 'main' && set.has(String(eventId)));
 }
 
 // ─── AUTO-PING SYSTEM ─────────────────────────────────────────────────────────
@@ -199,9 +204,9 @@ export async function runAutoPingScan(events, session, onCheckIn) {
       if (!hasInterval) continue;
 
       // Auto check-in!
-      markCheckedIn(event.id);
+      markCheckedIn(event.id, 'main');
       if (isEligibleForPoints(session)) {
-        awardPoints(session, POINTS.EVENT_ATTEND_CHECKIN, `Auto check-in: ${event.event_name}`);
+        awardPoints(session, POINTS.EVENT_ATTEND_CHECKIN, `Auto check-in: ${event.event_name}`, event.id, 'main');
       }
       onCheckIn?.(event);
     }

@@ -43,7 +43,7 @@ export async function getApprovedEvents(options = {}) {
   try {
     const sampleFilter = sampleOnly ? `&zip_code=eq.${SAMPLE_ZIP_CODE}` : '';
     const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/events?is_approved=eq.true${sampleFilter}&select=*&order=event_date.asc`,
+      `${SUPABASE_URL}/rest/v1/events_with_counts?is_approved=eq.true${sampleFilter}&select=*&order=event_date.asc`,
       { headers: baseHeaders }
     );
     if (!res.ok) return [];

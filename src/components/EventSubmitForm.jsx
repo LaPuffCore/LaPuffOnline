@@ -8,6 +8,47 @@ import AddressSearch from './AddressSearch';
 import { useSiteTheme } from '../lib/theme';
 
 const PRICE_OPTIONS = ['free', '$', '$$', '$$$'];
+const MAX_PHOTO_BYTES = 1024 * 1024; // 1MB
+
+/** Compress a File to ≤ maxBytes using canvas, returns a new File */
+async function compressImage(file, maxBytes = MAX_PHOTO_BYTES) {
+  if (file.size <= maxBytes) return file;
+  return new Promise((resolve) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const canvas = document.createElement('canvas');
+      let { width, height } = img;
+      // Scale down if very large
+      const MAX_DIM = 1920;
+      if (width > MAX_DIM || height > MAX_DIM) {
+        const ratio = Math.min(MAX_DIM / width, MAX_DIM / height);
+        width = Math.round(width * ratio);
+        height = Math.round(height * ratio);
+      }
+      canvas.width = width;
+      canvas.height = height;
+      canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+
+      let quality = 0.85;
+      const tryCompress = () => {
+        canvas.toBlob((blob) => {
+          if (!blob) { resolve(file); return; }
+          if (blob.size <= maxBytes || quality < 0.1) {
+            resolve(new File([blob], file.name.replace(/\.[^.]+$/, '.jpg'), { type: 'image/jpeg' }));
+          } else {
+            quality -= 0.1;
+            tryCompress();
+          }
+        }, 'image/jpeg', quality);
+      };
+      tryCompress();
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
+    img.src = url;
+  });
+}
 
 export default function EventSubmitForm({ onClose }) {
   const { resolvedTheme } = useSiteTheme();
@@ -20,6 +61,7 @@ export default function EventSubmitForm({ onClose }) {
     location_data: { city: 'New York', address: '', zipcode: '', rsvp_link: '' },
     event_date: '', event_time: '', event_end_time: '', timezone: userTz,
     relevant_links: [''], description: '', emoji: '🎉', color: '#7C3AED',
+    afters_address: '', afters_lat: null, afters_lng: null,
   });
   const [photoFiles, setPhotoFiles] = useState([]);
   const [photos, setPhotos] = useState([]);
@@ -42,6 +84,7 @@ export default function EventSubmitForm({ onClose }) {
     if (containsProfanity(form.event_name)) e.event_name = 'Error profanity filter';
     if (!form.event_date) e.event_date = 'Required';
     if (!form.event_time) e.event_time = 'Required';
+    if (!form.event_end_time) e.event_end_time = 'Required';
     if (!form.description.trim()) e.description = 'Required';
     if (containsProfanity(form.description)) e.description = 'Error profanity filter';
     if (containsProfanity(form.name)) e.name = 'Error profanity filter';
@@ -75,6 +118,9 @@ export default function EventSubmitForm({ onClose }) {
       representative_emoji: form.emoji, hex_color: form.color, is_approved: false,
       lat: form.location_data.lat || null,
       lng: form.location_data.lng || null,
+      afters_address: form.afters_address || null,
+      afters_lat: form.afters_lat || null,
+      afters_lng: form.afters_lng || null,
     };
     try {
       await submitEvent(payload);
@@ -84,10 +130,11 @@ export default function EventSubmitForm({ onClose }) {
     setSubmitting(false);
   }
 
-  function handlePhotoAdd(e) {
-    const files = Array.from(e.target.files || []).filter(f => f.size <= 1024 * 1024).slice(0, 5 - photoFiles.length);
-    setPhotoFiles(prev => [...prev, ...files]);
-    setPhotos(prev => [...prev, ...files.map(f => URL.createObjectURL(f))]);
+  async function handlePhotoAdd(e) {
+    const rawFiles = Array.from(e.target.files || []).slice(0, 5 - photoFiles.length);
+    const compressed = await Promise.all(rawFiles.map(f => compressImage(f)));
+    setPhotoFiles(prev => [...prev, ...compressed]);
+    setPhotos(prev => [...prev, ...compressed.map(f => URL.createObjectURL(f))]);
   }
 
   if (success) {
@@ -195,7 +242,7 @@ export default function EventSubmitForm({ onClose }) {
 
                 {/* Photos */}
                 <div>
-                  <label className="block text-xs font-black uppercase mb-1">Photos ({photoFiles.length}/5, Max 1MB Each)</label>
+                  <label className="block text-xs font-black uppercase mb-1">Photos ({photoFiles.length}/5, auto-compressed)</label>
                   <div className="flex flex-wrap gap-2">
                     {photos.map((p, i) => (
                       <div key={i} className="relative w-16 h-16">
@@ -256,6 +303,22 @@ export default function EventSubmitForm({ onClose }) {
                     placeholder="Tell people what this event is about!" rows={4}
                     className={`w-full border-3 ${errors.description ? 'border-red-500' : 'border-black'} rounded-2xl px-3 py-2.5 text-sm font-medium resize-none focus:outline-none focus:bg-violet-50 shadow-[3px_3px_0px_black]`} />
                   {errors.description && <p className="text-red-500 text-xs mt-1">⚠ {errors.description}</p>}
+                </div>
+
+                {/* Afters Address (optional) */}
+                <div>
+                  <label className="block text-xs font-black uppercase mb-1">
+                    Afters Address <span className="text-gray-400 font-normal normal-case">(optional — where the party continues)</span>
+                  </label>
+                  <AddressSearch
+                    value={{ address: form.afters_address }}
+                    onChange={({ address, lat, lng }) => {
+                      setField('afters_address', address);
+                      setField('afters_lat', lat || null);
+                      setField('afters_lng', lng || null);
+                    }}
+                    placeholder="Search for an after-party spot..."
+                  />
                 </div>
 
                 {/* Links */}

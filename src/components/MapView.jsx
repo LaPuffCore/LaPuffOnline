@@ -8,6 +8,7 @@ import MapIntro from './MapIntro';
 import CRTEffect from './CRTEffect';
 import { getZipColonists } from '../lib/pointsSystem';
 import { pingNYCLocation, getLastLocation } from '../lib/locationService';
+import { isEventHappeningNow, isAftersWindow, isEventLive } from '../lib/eventUtils';
 import { SAMPLE_MODE } from '../lib/sampleConfig';
 import { getSampleUsersForZip } from '../lib/sampleUsers';
 import { deserialize as fgbDeserialize } from 'flatgeobuf/lib/mjs/geojson.js';
@@ -1151,6 +1152,69 @@ function PaginatedSection({ items, renderItem, emptyMsg, headerLabel, headerColo
   );
 }
 
+// ── AftersCheckInModal ────────────────────────────────────────────────────────
+function AftersCheckInModal({ event, onClose }) {
+  const [status, setStatus] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const attendanceCount = event.attendance_count || 0;
+
+  async function handleCheckIn() {
+    setLoading(true);
+    setStatus(null);
+    try {
+      const { pingLocation, isWithin750ft, markCheckedIn, isCheckedIn } = await import('../lib/locationService.js');
+      const { awardPoints, POINTS, isEligibleForPoints } = await import('../lib/pointsSystem.js');
+      const { getValidSession } = await import('../lib/supabaseAuth.js');
+      const { isCheckInWindowOpen } = await import('../lib/eventUtils.js');
+      if (isCheckedIn(event.id, 'afters')) { setStatus({ ok: true, msg: '✅ Already checked into afters!' }); return; }
+      if (!isCheckInWindowOpen(event)) { setStatus({ ok: false, msg: '🕐 Afters window not open' }); return; }
+      const aLat = parseFloat(event.afters_lat), aLng = parseFloat(event.afters_lng);
+      if (isNaN(aLat) || isNaN(aLng)) { setStatus({ ok: false, msg: '📍 No afters location set' }); return; }
+      const loc = await pingLocation();
+      if (!isWithin750ft(loc.lat, loc.lng, aLat, aLng)) { setStatus({ ok: false, msg: '📡 You are not in range of the afters' }); return; }
+      markCheckedIn(event.id, 'afters');
+      const session = await getValidSession();
+      if (isEligibleForPoints(session)) awardPoints(session, POINTS.AFTERS_ATTEND_CHECKIN, `Afters Attendance: ${event.event_name}`, event.id, 'afters');
+      setStatus({ ok: true, msg: '🎉 Afters check-in confirmed! +200 pts' });
+    } catch { setStatus({ ok: false, msg: '📍 Could not get location — enable location access' }); }
+    finally { setLoading(false); }
+  }
+
+  return (
+    <div className="bg-white border-4 border-[#7c3aed] rounded-3xl shadow-[8px_8px_0px_black] max-w-sm w-full p-6"
+      onClick={e => e.stopPropagation()}>
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <span className="text-3xl">🎉</span>
+          <div>
+            <p className="text-[9px] font-black uppercase text-purple-600 tracking-widest">Afters Check-In</p>
+            <h3 className="font-black text-sm leading-tight line-clamp-2">{event.event_name}</h3>
+          </div>
+        </div>
+        <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full border-2 border-black font-black hover:bg-black hover:text-white transition-colors">✕</button>
+      </div>
+      {event.afters_address && (
+        <p className="text-xs font-bold text-gray-600 mb-3">📍 {event.afters_address}</p>
+      )}
+      {attendanceCount > 0 && (
+        <p className="text-[11px] font-black text-purple-700 mb-3">👥 {attendanceCount} {attendanceCount === 1 ? 'person has' : 'people have'} checked in</p>
+      )}
+      {status && (
+        <div className={`mb-3 px-3 py-2 rounded-xl border-2 text-xs font-black ${status.ok ? 'bg-green-50 border-green-400 text-green-700' : 'bg-red-50 border-red-300 text-red-700'}`}>
+          {status.msg}
+        </div>
+      )}
+      <button
+        onClick={handleCheckIn}
+        disabled={loading || status?.ok}
+        className="w-full py-3 bg-[#7c3aed] text-white font-black rounded-2xl border-3 border-black shadow-[4px_4px_0px_black] hover:bg-[#6d28d9] disabled:opacity-50 transition-all active:shadow-none active:translate-x-1 active:translate-y-1"
+      >
+        {loading ? 'Getting location…' : status?.ok ? '✅ Checked In' : '📍 Check Into Afters (+200 pts)'}
+      </button>
+    </div>
+  );
+}
+
 // ── ZipHologram desktop ───────────────────────────────────────────────────────
 function ZipHologram({ feature, color, onClose }) {
   const canvasRef = useRef(null);
@@ -1391,6 +1455,12 @@ export default function MapView({ events, headerCollapsed = false }) {
   const pinEventsLookupRef = useRef(new Map());
   const pinHandlersAttachedRef = useRef(false);
   const hoveredPinEventRef = useRef(null);
+  // Pill badge markers (live/afters above each pin)
+  const pillMarkersRef = useRef([]);
+  // Afters pin markers
+  const aftersMarkersRef = useRef([]);
+  // Selected afters event for check-in popup
+  const [aftersCheckInEvent, setAftersCheckInEvent] = useState(null);
 
   // Auto-dismiss cache indicator 2 seconds after "done"
   useEffect(() => {
@@ -3250,23 +3320,36 @@ export default function MapView({ events, headerCollapsed = false }) {
     ['event-pins-dots', 'event-pins-layer'].forEach(id => {
       if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', showPins ? 'visible' : 'none');
     });
+
+    // Clear pill and afters markers
+    pillMarkersRef.current.forEach(m => m.remove());
+    pillMarkersRef.current = [];
+    aftersMarkersRef.current.forEach(m => m.remove());
+    aftersMarkersRef.current = [];
+    // Clear route line
+    if (map.getSource('afters-route')) map.getSource('afters-route').setData({ type: 'FeatureCollection', features: [] });
+
     if (!showPins || !events?.length) {
       pinEventsLookupRef.current = new Map();
       if (map.getSource('event-pins')) map.getSource('event-pins').setData({ type: 'FeatureCollection', features: [] });
       return;
     }
 
-    // Filter: future events only within timespan window
-    const now = new Date(); now.setHours(0, 0, 0, 0);
+    // Filter: show events in timespan window OR currently live/afters (persist duration+1hr)
+    const nowTs = Date.now();
+    const nowDay = new Date(); nowDay.setHours(0, 0, 0, 0);
     const days = TIMESPAN_STEPS[timespanIdx]?.days || 180;
-    const maxDate = new Date(now.getTime() + days * 86400000);
+    const maxDate = new Date(nowDay.getTime() + days * 86400000);
 
     const pinEvents = events.filter(e => {
       if (e._auto) return false;
       const lat = parseFloat(e.lat), lng = parseFloat(e.lng);
       if (isNaN(lat) || isNaN(lng)) return false;
+      // Always show if happening now or in afters window (persist live events)
+      if (isEventHappeningNow(e)) return true;
+      // Also show future events within timespan
       const ed = new Date(e.event_date + 'T00:00:00');
-      return ed >= now && ed <= maxDate;
+      return ed >= nowDay && ed <= maxDate;
     });
 
     // Build lookup map for click/hover handlers
@@ -3472,9 +3555,124 @@ export default function MapView({ events, headerCollapsed = false }) {
         map.on('mouseleave', id, handleLeave);
       });
     }
-  }, [showPins, events, mapReady, timespanIdx]);
 
-  // 3D pin elevation removed — pins use precise coordinates in all modes
+    // ── PILL BADGES + AFTERS PINS ─────────────────────────────────────────────
+    pinEvents.forEach(evt => {
+      const evtLive = isEventLive(evt);
+      const evtAfters = isAftersWindow(evt);
+
+      // LIVE / AFTERS pill badge above the main pin
+      if (evtLive || evtAfters) {
+        const lat = parseFloat(evt.lat), lng = parseFloat(evt.lng);
+        if (!isNaN(lat) && !isNaN(lng)) {
+          const el = document.createElement('div');
+          el.style.cssText = 'pointer-events:none;display:flex;align-items:center;gap:3px;padding:2px 7px;border-radius:999px;font-size:9px;font-weight:900;color:#fff;box-shadow:1px 1px 4px rgba(0,0,0,0.5);animation:pulse 2s infinite;white-space:nowrap;margin-bottom:2px;';
+          el.style.backgroundColor = evtAfters ? '#7c3aed' : '#16a34a';
+          const dot = document.createElement('span');
+          dot.style.cssText = 'width:5px;height:5px;border-radius:50%;background:#fff;display:inline-block;flex-shrink:0;';
+          el.appendChild(dot);
+          el.appendChild(document.createTextNode(evtAfters ? 'AFTERS' : 'LIVE'));
+          const marker = new maplibregl.Marker({ element: el, anchor: 'bottom', offset: [0, -112] })
+            .setLngLat([lng, lat])
+            .addTo(map);
+          pillMarkersRef.current.push(marker);
+        }
+      }
+
+      // AFTERS PIN — spawn when in afters window and afters coords exist
+      if (evtAfters && evt.afters_lat && evt.afters_lng) {
+        const aLat = parseFloat(evt.afters_lat), aLng = parseFloat(evt.afters_lng);
+        if (!isNaN(aLat) && !isNaN(aLng)) {
+          // Build afters pin DOM element (purple pin with 🎉)
+          const canvas = document.createElement('canvas');
+          const W = 60, H = 82;
+          canvas.width = W * 2; canvas.height = H * 2;
+          const ctx = canvas.getContext('2d');
+          ctx.scale(2, 2);
+          const cx = W / 2, circleR = 22, circleY = 25, tipY = H - 2;
+          ctx.beginPath();
+          ctx.moveTo(cx - 10, circleY + circleR - 4);
+          ctx.lineTo(cx, tipY);
+          ctx.lineTo(cx + 10, circleY + circleR - 4);
+          ctx.closePath();
+          ctx.fillStyle = '#7c3aed';
+          ctx.fill();
+          ctx.beginPath();
+          ctx.arc(cx, circleY, circleR, 0, 2 * Math.PI);
+          ctx.fillStyle = '#7c3aed';
+          ctx.fill();
+          ctx.strokeStyle = '#4c1d95';
+          ctx.lineWidth = 2.5;
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(cx, circleY, 16, 0, 2 * Math.PI);
+          ctx.fillStyle = '#fff';
+          ctx.fill();
+          ctx.font = '18px "Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('🎉', cx, circleY + 1);
+          const pinEl = document.createElement('canvas');
+          pinEl.width = W * 2; pinEl.height = H * 2;
+          pinEl.style.width = `${W}px`; pinEl.style.height = `${H}px`;
+          pinEl.style.cursor = 'pointer';
+          pinEl.getContext('2d').drawImage(canvas, 0, 0);
+
+          const aftersMarker = new maplibregl.Marker({ element: pinEl, anchor: 'bottom' })
+            .setLngLat([aLng, aLat])
+            .addTo(map);
+
+          // Afters pin click → open check-in popup
+          pinEl.addEventListener('click', (e) => {
+            e.stopPropagation();
+            setAftersCheckInEvent(evt);
+          });
+
+          aftersMarkersRef.current.push(aftersMarker);
+
+          // Draw route line between main pin and afters pin using OSRM
+          const mainLat = parseFloat(evt.lat), mainLng = parseFloat(evt.lng);
+          if (!isNaN(mainLat) && !isNaN(mainLng)) {
+            const routeUrl = `https://router.project-osrm.org/route/v1/walking/${mainLng},${mainLat};${aLng},${aLat}?overview=full&geometries=geojson`;
+            fetch(routeUrl)
+              .then(r => r.json())
+              .then(data => {
+                const routeCoords = data?.routes?.[0]?.geometry;
+                if (!routeCoords) return;
+                const geojson = { type: 'FeatureCollection', features: [{ type: 'Feature', geometry: routeCoords, properties: {} }] };
+                if (map.getSource('afters-route')) {
+                  map.getSource('afters-route').setData(geojson);
+                } else {
+                  map.addSource('afters-route', { type: 'geojson', data: geojson });
+                  map.addLayer({
+                    id: 'afters-route-line',
+                    type: 'line',
+                    source: 'afters-route',
+                    layout: { 'line-join': 'round', 'line-cap': 'round' },
+                    paint: {
+                      'line-color': '#7c3aed',
+                      'line-width': 3,
+                      'line-dasharray': [3, 4],
+                      'line-opacity': 0.8,
+                    },
+                  });
+                }
+              })
+              .catch(() => {
+                // Fallback: straight dotted line
+                const geojson = { type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'LineString', coordinates: [[mainLng, mainLat], [aLng, aLat]] }, properties: {} }] };
+                if (map.getSource('afters-route')) map.getSource('afters-route').setData(geojson);
+                else {
+                  map.addSource('afters-route', { type: 'geojson', data: geojson });
+                  map.addLayer({ id: 'afters-route-line', type: 'line', source: 'afters-route', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#7c3aed', 'line-width': 3, 'line-dasharray': [3, 4], 'line-opacity': 0.8 } });
+                }
+              });
+          }
+        }
+      }
+    });
+
+  }, [showPins, events, mapReady, timespanIdx]);
 
   useEffect(() => {
     const h = e => { if (e.key === 'Escape') { setHoloFeature(null); setSideZip(null); setSideEvents([]); setSideColonists([]); } };
@@ -3867,6 +4065,14 @@ export default function MapView({ events, headerCollapsed = false }) {
       )}
 
       {selectedEvent && <EventDetailPopup event={selectedEvent} onClose={() => setSelectedEvent(null)} />}
+
+      {/* Afters check-in popup — lightweight modal for afters pin tap */}
+      {aftersCheckInEvent && (
+        <div className="fixed inset-0 z-[100002] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+          onClick={() => setAftersCheckInEvent(null)}>
+          <AftersCheckInModal event={aftersCheckInEvent} onClose={() => setAftersCheckInEvent(null)} />
+        </div>
+      )}
 
       {/* Mobile Real3D loading gate — fullscreen overlay while building data loads */}
       {real3dLoading && (
