@@ -1121,24 +1121,28 @@ function buildHeatUnderlayPoints(geoData, tiers) {
 }
 
 // ── Paginated list section ─────────────────────────────────────────────
-function PaginatedSection({ items, renderItem, emptyMsg, headerLabel, headerColor = 'text-white/30' }) {
+function PaginatedSection({ items, renderItem, emptyMsg, headerLabel, headerColor = 'text-white/30', pageSize = PAGE_SIZE }) {
   const [page, setPage] = useState(0);
-  const totalPages = Math.ceil(items.length / PAGE_SIZE);
-  const visible = items.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
+  const totalPages = Math.ceil(items.length / pageSize);
+  const visible = items.slice(page * pageSize, page * pageSize + pageSize);
   return (
     <div className="flex flex-col min-h-0">
       <p className={`px-4 py-2 text-xs font-black uppercase tracking-widest sticky top-0 bg-gray-950/90 flex-shrink-0 ${headerColor}`}>{headerLabel}</p>
       {items.length === 0
         ? <p className="px-4 py-6 text-white/20 text-sm text-center">{emptyMsg}</p>
-        : visible.map((item, i) => renderItem(item, page * PAGE_SIZE + i))
+        : visible.map((item, i) => renderItem(item, page * pageSize + i))
       }
       {totalPages > 1 && (
-        <div className="flex items-center justify-between px-4 py-1.5 border-t border-white/10 flex-shrink-0">
-          <span className="text-white/20 text-[10px] font-black">{page + 1} / {totalPages}</span>
-          <div className="flex gap-2">
-            {page > 0 && <button onClick={() => setPage(p => p - 1)} className="text-white/40 hover:text-white text-xs font-black px-2 py-0.5 rounded hover:bg-white/10">▲</button>}
-            {page < totalPages - 1 && <button onClick={() => setPage(p => p + 1)} className="text-white/40 hover:text-white text-xs font-black px-2 py-0.5 rounded hover:bg-white/10">▼</button>}
-          </div>
+        <div className="flex items-center justify-center gap-2 px-4 py-1.5 border-t border-white/10 flex-shrink-0">
+          {page > 0
+            ? <button onClick={() => setPage(p => p - 1)} className="text-white/50 hover:text-white text-xs font-black px-1.5 py-0.5 rounded hover:bg-white/10 transition-colors">{'<'}</button>
+            : <span className="w-5" />
+          }
+          <span className="text-white/30 text-[10px] font-black">{page + 1} / {totalPages}</span>
+          {page < totalPages - 1
+            ? <button onClick={() => setPage(p => p + 1)} className="text-white/50 hover:text-white text-xs font-black px-1.5 py-0.5 rounded hover:bg-white/10 transition-colors">{'>'}</button>
+            : <span className="w-5" />
+          }
         </div>
       )}
     </div>
@@ -1808,13 +1812,13 @@ export default function MapView({ events, headerCollapsed = false }) {
     setReal3DLayersVisible(map, false);
   }, [mapReady, geoData]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Gear 2 — MapView Active: start desktop FGB cache after map is ready and user has had time to use 2D/3D/heatmap/satellite.
-  // Delay 4 seconds so initial map render, ZCTA data load, and event rendering all settle first.
+  // Gear 2 — MapView Active: start desktop FGB cache after map is ready.
+  // Brief 500ms settle so the initial 2D map frame renders and ZCTA tiles paint before the heavy parse starts.
   // Mobile: defer entirely to Real3D toggle (Gear 3) — raw bytes already staged by Gear 1.
   useEffect(() => {
     if (!mapReady || !geoData) return;
     if (window.innerWidth < 768) return; // mobile: Gear 3 handles cache on Real3D activation
-    const t = setTimeout(() => buildFGBCache(), 4000);
+    const t = setTimeout(() => buildFGBCache(), 500);
     return () => clearTimeout(t);
   }, [mapReady, geoData]);
 
@@ -2670,13 +2674,16 @@ export default function MapView({ events, headerCollapsed = false }) {
   async function fetchViewportBuildings(map) {
     if (!map || !map.getStyle() || !map.getSource('fgb-buildings')) return;
 
-    // GPU flush: clear buildings from GPU when zoomed out past the render threshold.
+    const isMob = window.innerWidth < 768;
+
+    // Zoom guard: nothing to render below z13 (baseplates start z13, buildings z14).
+    // Mobile: clear source to free memory — viewport-only path, data is re-fetched on zoom-in.
+    // Desktop: just return — full cache stays in source; layer minzoom handles visual hiding.
     if (map.getZoom() < 13) {
-      map.getSource('fgb-buildings').setData({ type: 'FeatureCollection', features: [] });
+      if (isMob) map.getSource('fgb-buildings').setData({ type: 'FeatureCollection', features: [] });
       return;
     }
 
-    const isMob = window.innerWidth < 768;
     if (!isMob && buildingFGBRef.current) return; // desktop: full cache ready, skip viewport fetch
 
     const bounds = map.getBounds();
@@ -2907,7 +2914,7 @@ export default function MapView({ events, headerCollapsed = false }) {
         filter: ['match', ['get', 'class'], ['motorway', 'trunk'], true, false],
         paint: {
           'line-color': isHeatmap ? '#884400' : '#ff2200',
-          'line-width': ['interpolate', ['linear'], ['zoom'], 9, 1.5, 13, 5, 14, 3],
+          'line-width': ['interpolate', ['linear'], ['zoom'], 9, 1.5, 13, 5, 16, 10],
           'line-blur': 1.5, 'line-opacity': 0.9,
         },
       });
@@ -2919,7 +2926,7 @@ export default function MapView({ events, headerCollapsed = false }) {
         filter: ['all', ['match', ['get', 'class'], ['primary', 'secondary'], true, false], ['within', NYC_BBOX_GEOM]],
         paint: {
           'line-color': isHeatmap ? '#662200' : '#cc1800',
-          'line-width': ['interpolate', ['linear'], ['zoom'], 10, 0.5, 13, 3, 14, 1.5],
+          'line-width': ['interpolate', ['linear'], ['zoom'], 10, 0.5, 13, 3, 16, 6],
           'line-blur': 0.8, 'line-opacity': 0.75,
         },
       });
@@ -2931,7 +2938,7 @@ export default function MapView({ events, headerCollapsed = false }) {
         filter: ['all', ['match', ['get', 'class'], ['tertiary', 'minor', 'residential'], true, false], ['within', NYC_BBOX_GEOM]],
         paint: {
           'line-color': isHeatmap ? '#553300' : '#771100',
-          'line-width': ['interpolate', ['linear'], ['zoom'], 11, 0.3, 13, 1.5, 14, 0.5],
+          'line-width': ['interpolate', ['linear'], ['zoom'], 11, 0.3, 13, 1.5, 16, 3.5],
           'line-blur': 0.3, 'line-opacity': 0.65,
         },
       });
@@ -3513,20 +3520,32 @@ export default function MapView({ events, headerCollapsed = false }) {
               </button>
             </div>
             {/* Row 2: Heatmap + Satellite + 3D + Real3D — single row on mobile, all 4 */}
-            <div className="flex gap-1.5 md:gap-2 justify-center items-center">
-              <div className="relative">
+            <div className="flex gap-1.5 md:gap-2 justify-center items-start">
+              {/* Heatmap button + topo button stacked (topo only on mobile, below heatmap) */}
+              <div className="flex flex-col items-center gap-1">
+                <div className="relative">
+                  {heatmap && (
+                    <button onClick={() => setTopoOn(v => !v)}
+                      className={`hidden md:flex absolute right-full mr-2 w-10 h-10 rounded-2xl border-3 p-0 items-center justify-center transition-all ${topoOn ? 'border-yellow-300 ring-2 ring-yellow-300' : 'border-white hover:border-yellow-300'}`}
+                      title="Topo Heatmap Toggle"
+                      style={{ backgroundColor: '#000' }}>
+                      <div className="w-[36px] h-[36px] rounded-lg bg-cover bg-center" style={{ backgroundImage: `url('${PUBLIC_BASE}data/topo-thumb.png')` }} />
+                    </button>
+                  )}
+                  <button onClick={() => { setHeatmap(v => { if (!v) setTopoOn(false); return !v; }); }}
+                    className={`px-2 py-1.5 md:px-4 md:py-2 rounded-2xl font-black text-[11px] md:text-sm border-2 transition-all ${heatmap ? 'bg-gradient-to-r from-cyan-500 via-yellow-400 to-red-500 border-yellow-300 text-white' : 'bg-black/70 border-white/30 text-white md:hover:border-orange-400'}`}>
+                    🌡️ Heatmap
+                  </button>
+                </div>
+                {/* Mobile topo — centered directly below heatmap button */}
                 {heatmap && (
                   <button onClick={() => setTopoOn(v => !v)}
-                    className={`hidden md:flex absolute right-full mr-2 w-10 h-10 rounded-2xl border-3 p-0 items-center justify-center transition-all ${topoOn ? 'ring-2 ring-yellow-300 border-yellow-300' : 'border-white/50 md:hover:border-yellow-300'}`}
+                    className={`md:hidden w-9 h-9 rounded-xl border-2 p-0 flex items-center justify-center transition-all ${topoOn ? 'border-yellow-300 ring-2 ring-yellow-300' : 'border-white hover:border-yellow-300'}`}
                     title="Topo Heatmap Toggle"
                     style={{ backgroundColor: '#000' }}>
-                    <div className="w-[36px] h-[36px] rounded-lg bg-cover bg-center" style={{ backgroundImage: `url('${PUBLIC_BASE}data/topo-thumb.png')`, opacity: topoOn ? 1 : 0.8 }} />
+                    <div className="w-[26px] h-[26px] rounded-md bg-cover bg-center" style={{ backgroundImage: `url('${PUBLIC_BASE}data/topo-thumb.png')` }} />
                   </button>
                 )}
-                <button onClick={() => { setHeatmap(v => { if (!v) setTopoOn(false); return !v; }); }}
-                  className={`px-2 py-1.5 md:px-4 md:py-2 rounded-2xl font-black text-[11px] md:text-sm border-2 transition-all ${heatmap ? 'bg-gradient-to-r from-cyan-500 via-yellow-400 to-red-500 border-yellow-300 text-white' : 'bg-black/70 border-white/30 text-white md:hover:border-orange-400'}`}>
-                  🌡️ Heatmap
-                </button>
               </div>
               <button onClick={() => setSatellite(v => !v)}
                 className={`px-2 py-1.5 md:px-4 md:py-2 rounded-2xl font-black text-[11px] md:text-sm border-2 transition-all ${satellite ? 'bg-[#7C3AED] border-[#7C3AED] text-white' : 'bg-black/70 border-white/30 text-white md:hover:border-violet-400'}`}>
@@ -3541,17 +3560,6 @@ export default function MapView({ events, headerCollapsed = false }) {
                 🏛️ Real3D
               </button>
             </div>
-            {/* Row 3 (mobile only): Topo button centered below heatmap */}
-            {heatmap && (
-              <div className="flex justify-center md:hidden">
-                <button onClick={() => setTopoOn(v => !v)}
-                  className={`w-9 h-9 rounded-xl border-2 p-0 flex items-center justify-center transition-all ${topoOn ? 'ring-2 ring-yellow-300 border-yellow-300' : 'border-white/50'}`}
-                  title="Topo Heatmap Toggle"
-                  style={{ backgroundColor: '#000' }}>
-                  <div className="w-[26px] h-[26px] rounded-md bg-cover bg-center" style={{ backgroundImage: `url('${PUBLIC_BASE}data/topo-thumb.png')`, opacity: topoOn ? 1 : 0.8 }} />
-                </button>
-              </div>
-            )}
             {connectionNotice && (
               <div className="max-w-[92vw] rounded-xl border border-red-400 bg-red-950/90 px-3 py-2 text-center">
                 <p className="text-red-200 text-xs font-black">{connectionNotice}</p>
@@ -3652,6 +3660,7 @@ export default function MapView({ events, headerCollapsed = false }) {
                   emptyMsg="No upcoming events"
                   headerLabel="Events"
                   headerColor="text-white/30"
+                  pageSize={4}
                   renderItem={(event) => (
                     <div key={event.id} onClick={() => setSelectedEvent(event)}
                       className="flex items-start gap-3 p-3 border-b border-white/5 cursor-pointer hover:bg-white/5 transition-colors"
@@ -3688,6 +3697,7 @@ export default function MapView({ events, headerCollapsed = false }) {
                     emptyMsg="No colonists yet"
                     headerLabel="Colony Leaderboard"
                     headerColor="text-green-400/50"
+                    pageSize={7}
                     renderItem={(c, i) => {
                       const medal = MEDALS[i] || null, isTop = i < 3;
                       return (
@@ -3732,7 +3742,7 @@ export default function MapView({ events, headerCollapsed = false }) {
             <div
               className="absolute inset-x-0 bottom-0 z-50 flex flex-col overflow-hidden transition-[top] duration-300"
               style={{
-                top: headerCollapsed ? '56px' : '260px',
+                top: headerCollapsed ? '56px' : '62px',
                 background: 'rgba(3,0,10,0.55)',
                 backdropFilter: 'blur(14px)',
                 borderTop: '1px solid rgba(180,0,0,0.3)',
@@ -3774,6 +3784,7 @@ export default function MapView({ events, headerCollapsed = false }) {
                       emptyMsg="None"
                       headerLabel="Events"
                       headerColor="text-white/30"
+                      pageSize={headerCollapsed ? 5 : 3}
                       renderItem={(event) => (
                         <div key={event.id} onClick={() => setSelectedEvent(event)}
                           className="flex items-center gap-2 px-2 py-2 border-b border-white/5 cursor-pointer active:bg-white/5"
@@ -3794,6 +3805,7 @@ export default function MapView({ events, headerCollapsed = false }) {
                         emptyMsg="None yet"
                         headerLabel="Colonists"
                         headerColor="text-green-400/50"
+                        pageSize={headerCollapsed ? 7 : 4}
                         renderItem={(c, i) => {
                           const medal = MEDALS[i] || null, isTop = i < 3;
                           return (
