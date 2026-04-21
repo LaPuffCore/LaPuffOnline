@@ -2746,7 +2746,7 @@ export default function MapView({ events, headerCollapsed = false }) {
         paint: {
           'fill-extrusion-color': buildingColorExprByState(isHeatmap, tsIdx),
           'fill-extrusion-height': ['coalesce', ['get', 'height_roof'], 8],
-          'fill-extrusion-base': ['coalesce', ['get', 'ground_elevation'], 0],
+          'fill-extrusion-base': 0,
           'fill-extrusion-opacity': 1.0,
           'fill-extrusion-vertical-gradient': false,
         },
