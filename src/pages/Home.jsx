@@ -25,7 +25,18 @@ export default function Home({ events = [], eventsLoading = false }) {
   const [logoHovered, setLogoHovered] = useState(false);
   const lastScrollY = useRef(0);
   const downScrollAccum = useRef(0);
-  
+
+  // ── Ghost Music Player state ──────────────────────────────────────────────
+  const [isMusicOn,     setIsMusicOn]     = useState(false);
+  const [currentMode,   setCurrentMode]   = useState(null); // 'clout' | null
+  const [showMusicMenu, setShowMusicMenu] = useState(false);
+  const scIframeRef      = useRef(null);
+  const scWidgetRef      = useRef(null);
+  const scReadyRef       = useRef(false);
+  const mapAutoPlayedRef = useRef(false);
+  const musicDesktopRef  = useRef(null);
+  const musicMobileRef   = useRef(null);
+
   const location = useLocation();
   const isMap = view === 'map';
   const displayName = user?.username || user?.user_metadata?.username || user?.email?.split('@')[0] || 'Account';
@@ -128,6 +139,56 @@ export default function Home({ events = [], eventsLoading = false }) {
     setTileViewKey((prev) => prev + 1);
   }
 
+  // ── SoundCloud Widget API bootstrap ──────────────────────────────────────
+  useEffect(() => {
+    function initWidget() {
+      if (!scIframeRef.current || !window.SC) return;
+      const widget = window.SC.Widget(scIframeRef.current);
+      scWidgetRef.current = widget;
+      widget.bind(window.SC.Widget.Events.READY, () => { scReadyRef.current = true; });
+    }
+    if (window.SC) { initWidget(); return; }
+    const script = document.createElement('script');
+    script.src = 'https://w.soundcloud.com/player/api.js';
+    script.async = true;
+    script.onload = initWidget;
+    document.head.appendChild(script);
+  }, []);
+
+  // Close music menu on outside click
+  useEffect(() => {
+    if (!showMusicMenu) return;
+    const handler = (e) => {
+      const inD = musicDesktopRef.current?.contains(e.target);
+      const inM = musicMobileRef.current?.contains(e.target);
+      if (!inD && !inM) setShowMusicMenu(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showMusicMenu]);
+
+  function triggerCloutCullingGames() {
+    setCurrentMode('clout');
+    setIsMusicOn(true);
+    if (scWidgetRef.current && scReadyRef.current) scWidgetRef.current.play();
+  }
+
+  function stopMusic() {
+    setIsMusicOn(false);
+    setCurrentMode(null);
+    if (scWidgetRef.current) scWidgetRef.current.pause();
+  }
+
+  function handleMapClick() {
+    setView('map');
+    setShowLeaderboard(false);
+    if (!mapAutoPlayedRef.current) {
+      mapAutoPlayedRef.current = true;
+      // setTimeout satisfies browser autoplay policy — the preceding click IS the user gesture
+      setTimeout(triggerCloutCullingGames, 300);
+    }
+  }
+
   return (
     <div className="h-[100dvh] lp-page-bg flex flex-col overflow-hidden" style={{ fontFamily: "'Nunito', cursive, sans-serif" }}>
       {/* Header — hidden when map is active and user collapsed it */}
@@ -170,7 +231,7 @@ export default function Home({ events = [], eventsLoading = false }) {
                 onMouseLeave={e => { if (!(view === 'tiles' && !showLeaderboard)) e.currentTarget.style.backgroundColor = ''; }}>
                 🎴 Tiles
               </button>
-              <button onClick={() => { setView('map'); setShowLeaderboard(false); }}
+              <button onClick={handleMapClick}
                 className="px-2.5 py-1.5 md:px-4 md:py-2 rounded-lg md:rounded-xl text-xs md:text-sm font-black transition-all"
                 style={view === 'map' && !showLeaderboard ? { backgroundColor: accentColor, color: '#fff', boxShadow: '1px 1px 0px #333' } : {}}
                 onMouseEnter={e => { if (!(view === 'map' && !showLeaderboard)) e.currentTarget.style.backgroundColor = accentColor + '30'; }}
@@ -237,11 +298,83 @@ export default function Home({ events = [], eventsLoading = false }) {
                 )}
               </div>
               <HamburgerMenu events={events} user={user} onAuthClick={() => setShowAuth(true)} />
+
+              {/* ── Desktop Music Button (ghost player) ── */}
+              <div className="relative hidden md:block" ref={musicDesktopRef}>
+                <button
+                  onClick={() => setShowMusicMenu(v => !v)}
+                  className="w-10 h-10 flex items-center justify-center rounded-full border-3 border-black bg-white shadow-[2px_2px_0px_black] transition-all hover:scale-105"
+                  title="Radio"
+                  style={isMusicOn ? { borderColor: accentColor, boxShadow: `2px 2px 0px ${accentColor}` } : {}}>
+                  <span className="text-base" style={isMusicOn ? { filter: `drop-shadow(0 0 4px ${accentColor})` } : {}}>
+                    {isMusicOn ? '🎶' : '🎵'}
+                  </span>
+                </button>
+                {showMusicMenu && (
+                  <div className="absolute right-0 top-full mt-2 z-[200] w-52 bg-white border-3 border-black rounded-2xl shadow-[5px_5px_0px_black] overflow-hidden">
+                    <div className="px-3 py-2 border-b-2 border-gray-100">
+                      <p className="font-black text-[10px] text-gray-400 uppercase tracking-widest">🎵 Radio</p>
+                    </div>
+                    <button
+                      onClick={() => { triggerCloutCullingGames(); setShowMusicMenu(false); }}
+                      className="w-full px-3 py-2.5 text-left text-xs font-black hover:bg-gray-50 flex items-center gap-2 border-b border-gray-100 transition-colors"
+                      style={currentMode === 'clout' ? { color: accentColor } : {}}>
+                      <span>🎮</span>
+                      <span className="flex-1">Clout Culling Games</span>
+                      {currentMode === 'clout' && isMusicOn && <span className="text-[8px] animate-pulse" style={{ color: accentColor }}>▶</span>}
+                    </button>
+                    <button
+                      onClick={() => { stopMusic(); setShowMusicMenu(false); }}
+                      className="w-full px-3 py-2.5 text-left text-xs font-black hover:bg-gray-50 flex items-center gap-2 transition-colors"
+                      style={!isMusicOn ? { color: accentColor } : { color: '#9ca3af' }}>
+                      <span>⏹</span>
+                      <span className="flex-1">Off</span>
+                      {!isMusicOn && <span className="text-[8px]">✓</span>}
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
-          {/* Mobile Secondary Row: Auth + Submit + Map Collapse */}
+          {/* Mobile Secondary Row: Music + Auth + Submit + Map Collapse */}
           <div className="flex md:hidden items-center justify-center gap-3 mt-2 pb-1">
+
+             {/* Mobile Music Button */}
+             <div className="relative" ref={musicMobileRef}>
+               <button
+                 onClick={() => setShowMusicMenu(v => !v)}
+                 className="w-9 h-9 flex items-center justify-center rounded-full border-2 border-black bg-white shadow-[2px_2px_0px_black] transition-all flex-shrink-0"
+                 title="Radio"
+                 style={isMusicOn ? { borderColor: accentColor, boxShadow: `2px 2px 0px ${accentColor}` } : {}}>
+                 <span className="text-sm" style={isMusicOn ? { filter: `drop-shadow(0 0 4px ${accentColor})` } : {}}>
+                   {isMusicOn ? '🎶' : '🎵'}
+                 </span>
+               </button>
+               {showMusicMenu && (
+                 <div className="absolute left-0 bottom-full mb-2 z-[200] w-48 max-w-[calc(100vw-2rem)] bg-white border-3 border-black rounded-2xl shadow-[5px_5px_0px_black] overflow-hidden">
+                   <div className="px-3 py-2 border-b-2 border-gray-100">
+                     <p className="font-black text-[10px] text-gray-400 uppercase tracking-widest">🎵 Radio</p>
+                   </div>
+                   <button
+                     onClick={() => { triggerCloutCullingGames(); setShowMusicMenu(false); }}
+                     className="w-full px-3 py-2.5 text-left text-xs font-black hover:bg-gray-50 flex items-center gap-2 border-b border-gray-100 transition-colors"
+                     style={currentMode === 'clout' ? { color: accentColor } : {}}>
+                     <span>🎮</span>
+                     <span className="flex-1">Clout Culling Games</span>
+                     {currentMode === 'clout' && isMusicOn && <span className="text-[8px] animate-pulse" style={{ color: accentColor }}>▶</span>}
+                   </button>
+                   <button
+                     onClick={() => { stopMusic(); setShowMusicMenu(false); }}
+                     className="w-full px-3 py-2.5 text-left text-xs font-black hover:bg-gray-50 flex items-center gap-2 transition-colors"
+                     style={!isMusicOn ? { color: accentColor } : { color: '#9ca3af' }}>
+                     <span>⏹</span>
+                     <span className="flex-1">Off</span>
+                     {!isMusicOn && <span className="text-[8px]">✓</span>}
+                   </button>
+                 </div>
+               )}
+             </div>
              {user ? (
                 <button onClick={() => setShowUserMenu(v => !v)}
                 className="w-[112px] bg-white rounded-full px-3 py-1.5 font-black text-[11px] shadow-[2px_2px_0px_#333] truncate text-center border-2 lp-accent-border lp-accent-color-text">
@@ -328,6 +461,18 @@ export default function Home({ events = [], eventsLoading = false }) {
       {/* Modals */}
       {showForm && <EventSubmitForm onClose={() => setShowForm(false)} />}
       {showAuth && <AuthModal onClose={() => setShowAuth(false)} onSuccess={handleAuthSuccess} />}
+
+      {/* ── Ghost SoundCloud Player iframe (completely hidden, controls via SC Widget API) ── */}
+      <iframe
+        ref={scIframeRef}
+        id="sc-ghost-player"
+        width="0"
+        height="0"
+        allow="autoplay"
+        src="https://w.soundcloud.com/player/?url=https%3A//soundcloud.com/justin-lapuff/sets/clout-culling-games&auto_play=false&hide_related=true&show_comments=false&show_user=false&show_reposts=false&show_teaser=false"
+        style={{ visibility: 'hidden', position: 'absolute', pointerEvents: 'none', top: 0, left: 0 }}
+        title="SC Ghost Player"
+      />
     </div>
   );
 }
