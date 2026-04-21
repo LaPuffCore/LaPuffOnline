@@ -268,7 +268,57 @@ export default function Home({ events = [], eventsLoading = false }) {
               <ParticipantDot />
             </button>
 
-            {/* View Toggles + Desktop Music — grouped together in center */}
+            {/* Desktop Music Button — hugs right of orbiter/logo, only after visiting map */}
+            {hasVisitedMap && <div className="relative hidden md:block ml-1" ref={musicDesktopRef}>
+              <button
+                onClick={() => setShowMusicMenu(v => !v)}
+                className="w-9 h-9 md:w-10 md:h-10 flex items-center justify-center rounded-xl border-2 md:border-3 border-black bg-white shadow-[2px_2px_0px_black] md:shadow-[3px_3px_0px_black] transition-all hover:scale-105"
+                title="Radio"
+                style={isMusicOn ? { borderColor: accentColor, boxShadow: `3px 3px 0px ${accentColor}`, color: accentColor } : {}}>
+                <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16" style={isMusicOn ? { filter: `drop-shadow(0 0 3px ${accentColor})` } : {}}>
+                  <path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6z"/>
+                </svg>
+              </button>
+              {showMusicMenu && (
+                <div className="absolute left-0 top-full mt-2 z-[60] w-52 bg-white border-3 border-black rounded-2xl shadow-[5px_5px_0px_black] overflow-hidden">
+                  <div className="px-3 py-1.5 border-b-2 border-gray-100">
+                    <p className="font-black text-[10px] text-gray-400 uppercase tracking-widest">Radio</p>
+                  </div>
+                  <button
+                    onClick={() => { triggerCloutCullingGames(); setShowMusicMenu(false); }}
+                    className="w-full px-3 py-2 text-left text-xs font-black hover:bg-gray-50 flex items-center gap-2 border-b border-gray-100 transition-colors"
+                    style={currentMode === 'clout' ? { color: accentColor } : {}}>
+                    <span>🎮</span>
+                    <span className="flex-1">Clout Culling Games</span>
+                    {currentMode === 'clout' && isMusicOn && <span className="text-[8px] animate-pulse" style={{ color: accentColor }}>▶</span>}
+                  </button>
+                  <button
+                    onClick={() => { stopMusic(); setShowMusicMenu(false); }}
+                    className="w-full px-3 py-2 text-left text-xs font-black hover:bg-gray-50 flex items-center gap-2 transition-colors"
+                    style={!isMusicOn ? { color: accentColor } : { color: '#9ca3af' }}>
+                    <span>⏹</span>
+                    <span className="flex-1">Off</span>
+                    {!isMusicOn && <span className="text-[8px]">✓</span>}
+                  </button>
+                  <div className="px-3 py-2 border-t-2 border-gray-100 flex items-center justify-center gap-5">
+                    <button onClick={handlePrevTrack} title="Previous" className="text-gray-400 hover:text-gray-900 transition-colors text-sm leading-none">⏮</button>
+                    <button onClick={handleTogglePlayPause} title={isMusicOn ? 'Pause' : 'Play'} className="text-sm leading-none transition-colors" style={{ color: isMusicOn ? accentColor : '#374151' }}>
+                      {isMusicOn ? '⏸' : '▶'}
+                    </button>
+                    <button onClick={handleNextTrack} title="Next" className="text-gray-400 hover:text-gray-900 transition-colors text-sm leading-none">⏭</button>
+                  </div>
+                  <div className="px-3 pb-2.5 flex items-center gap-2">
+                    <span className="text-[11px] text-gray-400 flex-shrink-0">🔊</span>
+                    <input type="range" min="0" max="100" value={musicVolume}
+                      onChange={e => handleVolumeChange(Number(e.target.value))}
+                      className="flex-1 h-1 cursor-pointer"
+                      style={{ accentColor }} />
+                  </div>
+                </div>
+              )}
+            </div>}
+
+            {/* View Toggles — center */}
             <div className="flex items-center gap-2 scale-90 md:scale-100">
               <div className="bg-gray-100 border-2 md:border-3 border-black rounded-xl md:rounded-2xl p-0.5 md:p-1 flex shadow-[2px_2px_0px_black] md:shadow-[3px_3px_0px_black]">
                 <button onClick={() => { setView('tiles'); setShowLeaderboard(false); setShowHeader(true); }}
@@ -293,59 +343,6 @@ export default function Home({ events = [], eventsLoading = false }) {
                   🏆 Top
                 </button>
               </div>
-
-              {/* Desktop Music Button — only shown after user enters map */}
-              {hasVisitedMap && <div className="relative hidden md:block" ref={musicDesktopRef}>
-                <button
-                  onClick={() => setShowMusicMenu(v => !v)}
-                  className="w-9 h-9 md:w-10 md:h-10 flex items-center justify-center rounded-xl border-2 md:border-3 border-black bg-white shadow-[2px_2px_0px_black] md:shadow-[3px_3px_0px_black] transition-all hover:scale-105"
-                  title="Radio"
-                  style={isMusicOn ? { borderColor: accentColor, boxShadow: `3px 3px 0px ${accentColor}`, color: accentColor } : {}}>
-                  {/* Single music note SVG */}
-                  <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16" style={isMusicOn ? { filter: `drop-shadow(0 0 3px ${accentColor})` } : {}}>
-                    <path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6z"/>
-                  </svg>
-                </button>
-                {showMusicMenu && (
-                  <div className="absolute left-0 top-full mt-2 z-[60] w-52 bg-white border-3 border-black rounded-2xl shadow-[5px_5px_0px_black] overflow-hidden">
-                    <div className="px-3 py-1.5 border-b-2 border-gray-100">
-                      <p className="font-black text-[10px] text-gray-400 uppercase tracking-widest">Radio</p>
-                    </div>
-                    <button
-                      onClick={() => { triggerCloutCullingGames(); setShowMusicMenu(false); }}
-                      className="w-full px-3 py-2 text-left text-xs font-black hover:bg-gray-50 flex items-center gap-2 border-b border-gray-100 transition-colors"
-                      style={currentMode === 'clout' ? { color: accentColor } : {}}>
-                      <span>🎮</span>
-                      <span className="flex-1">Clout Culling Games</span>
-                      {currentMode === 'clout' && isMusicOn && <span className="text-[8px] animate-pulse" style={{ color: accentColor }}>▶</span>}
-                    </button>
-                    <button
-                      onClick={() => { stopMusic(); setShowMusicMenu(false); }}
-                      className="w-full px-3 py-2 text-left text-xs font-black hover:bg-gray-50 flex items-center gap-2 transition-colors"
-                      style={!isMusicOn ? { color: accentColor } : { color: '#9ca3af' }}>
-                      <span>⏹</span>
-                      <span className="flex-1">Off</span>
-                      {!isMusicOn && <span className="text-[8px]">✓</span>}
-                    </button>
-                    {/* Playback controls */}
-                    <div className="px-3 py-2 border-t-2 border-gray-100 flex items-center justify-center gap-5">
-                      <button onClick={handlePrevTrack} title="Previous" className="text-gray-400 hover:text-gray-900 transition-colors text-sm leading-none">⏮</button>
-                      <button onClick={handleTogglePlayPause} title={isMusicOn ? 'Pause' : 'Play'} className="text-sm leading-none transition-colors" style={{ color: isMusicOn ? accentColor : '#374151' }}>
-                        {isMusicOn ? '⏸' : '▶'}
-                      </button>
-                      <button onClick={handleNextTrack} title="Next" className="text-gray-400 hover:text-gray-900 transition-colors text-sm leading-none">⏭</button>
-                    </div>
-                    {/* Volume slider */}
-                    <div className="px-3 pb-2.5 flex items-center gap-2">
-                      <span className="text-[11px] text-gray-400 flex-shrink-0">🔊</span>
-                      <input type="range" min="0" max="100" value={musicVolume}
-                        onChange={e => handleVolumeChange(Number(e.target.value))}
-                        className="flex-1 h-1 cursor-pointer"
-                        style={{ accentColor }} />
-                    </div>
-                  </div>
-                )}
-              </div>}
             </div>
 
             {/* Desktop Actions / Mobile Hamburger */}

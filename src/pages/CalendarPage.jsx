@@ -64,7 +64,10 @@ function DayEventDetails({ event }) {
   return (
     <div className="border-[2.5px] border-t-0 rounded-b-[1.6rem] bg-gray-50 px-3 pb-3 pt-7 md:px-4 md:pb-4 md:pt-8 shadow-[inset_0_1px_0_rgba(0,0,0,0.05)]" style={{ borderColor }}>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4 mb-4">
-        <div className="bg-white border-2 rounded-xl p-3" style={{ borderColor }}>
+        <div className="bg-white border-2 rounded-xl p-3 transition-all duration-150 hover:scale-[1.01]"
+          style={{ borderColor }}
+          onMouseEnter={ev => { ev.currentTarget.style.backgroundColor = borderColor + '18'; }}
+          onMouseLeave={ev => { ev.currentTarget.style.backgroundColor = ''; }}>
           <p className="text-[10px] font-black uppercase tracking-widest text-gray-500 mb-2">Time + Date</p>
           <p className="text-sm font-black">📅 {displayDate}</p>
           {displayTime && <p className="text-sm font-black mt-1">🕐 {displayTime}</p>}
@@ -230,7 +233,7 @@ export default function CalendarPage({ events = [] }) {
                 key={date.toDateString()}
                 onClick={() => drillToWeek(date)}
                 className={`rounded-2xl border-2 cursor-pointer transition-all min-h-0 overflow-hidden p-1 md:p-2 hover:border-[#7C3AED] hover:shadow-md ${isToday ? 'border-[#7C3AED] bg-violet-50' : 'border-gray-200 bg-white'} ${evs.length > 0 ? 'ring-1 ring-[#7C3AED]/20' : ''}`}
-                style={{ minHeight: isMobile ? '70px' : '80px' }}
+                style={{ minHeight: isMobile ? '72px' : '100px' }}
               >
                 <div className="flex h-full min-h-0 flex-col">
                   <div className="mb-1 flex items-start justify-between">
@@ -254,7 +257,7 @@ export default function CalendarPage({ events = [] }) {
                           ev.stopPropagation();
                           if (isMobile) { drillToWeek(date); } else { setSelectedEvent(e); }
                         }}
-                        className={isMobile ? 'flex h-5 w-full items-center rounded-lg px-1' : 'w-full text-left text-[9px] md:text-[10px] rounded-lg px-1.5 py-1 font-bold cursor-pointer hover:opacity-85 leading-tight line-clamp-2'}
+                        className={isMobile ? 'flex h-5 w-full items-center rounded-lg px-1' : 'w-full text-left text-[9px] md:text-[10px] rounded-lg px-1.5 py-1 font-bold cursor-pointer hover:opacity-85 leading-tight overflow-hidden line-clamp-2 [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]'}
                         style={{ backgroundColor: `${tileColor}33`, color: tileColor }}
                       >
                         {isMobile ? (
@@ -381,7 +384,7 @@ export default function CalendarPage({ events = [] }) {
   function DayView() {
     const evs = eventsForDate(curDate);
     return (
-      <div className="space-y-4 h-full overflow-y-auto pr-1 pt-1">
+      <div className="space-y-4 h-full overflow-y-auto overflow-x-visible pr-1 pt-1">
         {evs.length === 0 ? (
           <div className="text-center py-10 text-gray-400 font-medium">No favorites on this day</div>
         ) : (
@@ -397,7 +400,7 @@ export default function CalendarPage({ events = [] }) {
                 className="relative overflow-visible transition-transform pb-1"
               >
                 <div
-                  className="relative z-10 bg-white border-3 rounded-3xl shadow-[4px_4px_0px_black] transition-all duration-150 hover:scale-[1.01]"
+                  className="relative z-10 bg-white border-3 rounded-3xl shadow-[4px_4px_0px_black] transition-all duration-150 hover:scale-[1.02] hover:z-20"
                   style={{ borderColor: getTileAccentColor(e.hex_color, resolvedTheme) }}
                 >
                   <div className="p-4 flex items-center gap-3 md:gap-4">
