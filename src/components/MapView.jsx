@@ -1216,7 +1216,7 @@ function ZipHologram({ feature, color, onClose }) {
 }
 
 // ── ZipHologramMobile — constrained to top 50% of MapView container ─────
-function ZipHologramMobile({ feature, color, onClose }) {
+function ZipHologramMobile({ feature, color, onClose, embedded = false }) {
   const canvasRef = useRef(null);
   const animRef   = useRef(null);
   const timeRef   = useRef(0);
@@ -1262,6 +1262,15 @@ function ZipHologramMobile({ feature, color, onClose }) {
   }, [feature, color]);
 
   const zipLabel = feature?.properties?.MODZCTA;
+  if (embedded) {
+    // Embedded inside the unified mobile panel — no absolute positioning, no header row (parent controls it).
+    return (
+      <div className="flex flex-col w-full flex-1 min-h-0">
+        <canvas ref={canvasRef} width={400} height={220} style={{ width: '100%', flex: 1, minHeight: 0, borderTop: `1px solid ${color}44`, background: '#000000bb' }} />
+        <div className="text-center py-1 text-[10px] font-black tracking-widest opacity-40 uppercase flex-shrink-0" style={{ color }}>◈ Hologram ◈</div>
+      </div>
+    );
+  }
   return (
     <div className="absolute inset-x-0 top-0 z-40 flex flex-col" style={{ height: '50%', background: 'rgba(0,0,0,0.78)', backdropFilter: 'blur(4px)' }}>
       <div className="flex items-center justify-between px-3 py-2 flex-shrink-0">
@@ -2217,18 +2226,20 @@ export default function MapView({ events, headerCollapsed = false }) {
 
   // Outline ring width regeneration on zoom AND pitch — covers 3D and Real3D modes.
   // ZCTA outline only rebuilds in 3D (layer only exists in 3D). Borough outline rebuilds in both.
-  // Fires synchronously on zoom tick — skeleton cache is fast enough that RAF debounce just adds visible lag.
+  // 30ms RAF debounce batches rapid zoom ticks without adding visible lag.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
     let prevZoom = map.getZoom();
-    const onZoom = () => {
+    let rafId = null;
+    let mobileVpTimer = null;
+    const isMob = window.innerWidth < 768;
+
+    const doOutlineRebuild = () => {
       const is3D  = threeDRef.current;
       const isR3D = real3DRef.current;
-      // 2D/Real3D: line-width is a MapLibre expression (GPU-evaluated per-frame) — no JS update needed.
-      if (!is3D && !isR3D) { prevZoom = map.getZoom(); return; }
-      if (!is3D && isR3D)  { prevZoom = map.getZoom(); }
-      // ZCTA outline — 3D only (layer does not exist in Real3D)
+      if (!is3D && !isR3D) return;
+      // ZCTA outline — 3D only
       if (is3D && map.getSource('zcta-outline')) {
         if (zctaSkeletonRef.current && withHeatRef.current) {
           const overrides = withHeatRef.current.features.map(f => f.properties);
@@ -2239,37 +2250,62 @@ export default function MapView({ events, headerCollapsed = false }) {
           map.getSource('zcta-outline').setData(createZctaOutlineGeoJSON(withHeatRef.current, getZoomAwareOutlineWidth(map, undefined, true)));
         }
       }
-      // Borough outline — 3D and Real3D. Uses pre-computed filter index for safezone fix.
+      // Borough outline — 3D and Real3D
       if ((is3D || isR3D) && map.getSource('borough-source')) {
         const filterSet = boroughQuadFilterRef.current;
         if (boroughSkeletonRef.current && boroughWithColorRef.current) {
           const overrides = boroughWithColorRef.current.features.map(f => f.properties);
           let quads = generateBoroughQuadsFromSkeleton(boroughSkeletonRef.current, getZoomAwareOutlineWidth(map, 18, true), overrides);
-          if (filterSet && filterSet.size > 0) {
-            quads = { ...quads, features: quads.features.filter((_, i) => !filterSet.has(i)) };
-          }
+          if (filterSet && filterSet.size > 0) quads = { ...quads, features: quads.features.filter((_, i) => !filterSet.has(i)) };
           map.getSource('borough-source').setData(quads);
         } else if (boroughWithColorRef.current) {
           let quads = createOutlineGeoJSON(boroughWithColorRef.current, getZoomAwareOutlineWidth(map, 18, true));
-          if (filterSet && filterSet.size > 0) {
-            quads = { ...quads, features: quads.features.filter((_, i) => !filterSet.has(i)) };
-          }
+          if (filterSet && filterSet.size > 0) quads = { ...quads, features: quads.features.filter((_, i) => !filterSet.has(i)) };
           map.getSource('borough-source').setData(quads);
         }
       }
-      // Real3D: confirm building/baseplate colors when crossing into render zoom ranges.
-      // This guards against stale paint expressions after zoom-driven layer transitions.
-      if (isR3D && heatmapRef.current) {
-        const zoom = map.getZoom();
+    };
+
+    const onZoom = () => {
+      const is3D  = threeDRef.current;
+      const isR3D = real3DRef.current;
+      const zoom  = map.getZoom();
+
+      // Mobile Real3D: trigger viewport fetch when crossing z13/z14 thresholds.
+      // Debounced at 100ms — much faster than the zoomend+350ms path.
+      if (isMob && isR3D) {
+        const crossedBaseplates = (prevZoom < 13 && zoom >= 13);
+        const crossedBuildings  = (prevZoom < 14 && zoom >= 14);
+        if (crossedBaseplates || crossedBuildings) {
+          if (mobileVpTimer) clearTimeout(mobileVpTimer);
+          mobileVpTimer = setTimeout(() => fetchViewportBuildings(mapRef.current), 100);
+        }
+      }
+
+      // Desktop Real3D: refresh paint expressions on zoom threshold crossing.
+      if (!isMob && isR3D && heatmapRef.current) {
         const crossedBaseplates = (prevZoom < 13 && zoom >= 13) || (prevZoom >= 13 && zoom < 13);
         const crossedBuildings  = (prevZoom < 14 && zoom >= 14) || (prevZoom >= 14 && zoom < 14);
         if (crossedBaseplates || crossedBuildings) refreshBuildingColors();
       }
-      prevZoom = map.getZoom();
+
+      prevZoom = zoom;
+      if (!is3D && !isR3D) return;
+
+      // Desktop only: small RAF debounce so setData doesn't fire 60x/sec during smooth scroll zoom.
+      if (!isMob) {
+        if (rafId) cancelAnimationFrame(rafId);
+        rafId = requestAnimationFrame(doOutlineRebuild);
+      }
     };
     map.on('zoom', onZoom);
     map.on('pitch', onZoom);
-    return () => { map.off('zoom', onZoom); map.off('pitch', onZoom); };
+    return () => {
+      map.off('zoom', onZoom);
+      map.off('pitch', onZoom);
+      if (rafId) cancelAnimationFrame(rafId);
+      if (mobileVpTimer) clearTimeout(mobileVpTimer);
+    };
   }, [mapReady]);
 
   // SATELLITE: Single raster layer on main map — same approach for ALL modes (2D, 3D, Real3D).
@@ -3520,7 +3556,7 @@ export default function MapView({ events, headerCollapsed = false }) {
           {/* ── DESKTOP side panel — sits below header when not collapsed ── */}
           {sideZip && !isMobile && (
             <div className={`absolute right-0 bottom-0 z-50 flex flex-col overflow-hidden transition-[top] duration-300 ${headerCollapsed ? 'top-0' : 'top-[72px]'}`}
-              style={{ width: 400, background: 'rgba(3,0,10,0.82)', backdropFilter: 'blur(16px)', borderLeft: '1px solid rgba(180,0,0,0.3)' }}>
+              style={{ width: 400, background: 'rgba(3,0,10,0.52)', backdropFilter: 'blur(16px)', borderLeft: '1px solid rgba(180,0,0,0.3)' }}>
               <div className="flex items-center justify-between px-5 py-3 border-b border-white/10 bg-black/30 flex-shrink-0">
                 <div>
                   <p className="text-red-400 font-black">{sideLabel}</p>
@@ -3608,77 +3644,104 @@ export default function MapView({ events, headerCollapsed = false }) {
           )}
 
           {/* ── MOBILE: hologram top 50%, side panel bottom 50% ── */}
-          {holoFeature && isMobile && (
+          {holoFeature && isMobile && !sideZip && (
             <ZipHologramMobile feature={holoFeature} color={holoColor} onClose={() => setHoloFeature(null)} />
           )}
 
-          {sideZip && isMobile && (
-            <div className={`absolute inset-x-0 bottom-0 z-50 flex flex-col overflow-hidden transition-[top] duration-300 ${headerCollapsed ? 'top-[56px]' : 'top-[72px]'}`}
-              style={{ background: 'rgba(3,0,10,0.88)', backdropFilter: 'blur(12px)', borderTop: '1px solid rgba(180,0,0,0.3)' }}>
-              <div className="flex items-center justify-between px-4 py-2 border-b border-white/10 flex-shrink-0">
-                <div>
-                  <p className="text-red-400 font-black text-sm">{sideLabel}</p>
-                  <p className="text-white/40 text-xs">{isSafezoneModzcta(sideZip) ? `🛡️ ${getSafezoneLabel(sideZip)} · ${sideEvents.length} events` : `${sideEvents.length} events · ${sideColonists.length} colonists`}</p>
+          {(sideZip || holoFeature) && isMobile && (
+            <div
+              className="absolute inset-x-0 bottom-0 z-50 flex flex-col overflow-hidden transition-[top] duration-300"
+              style={{
+                top: headerCollapsed ? '56px' : '72px',
+                background: 'rgba(3,0,10,0.55)',
+                backdropFilter: 'blur(14px)',
+                borderTop: '1px solid rgba(180,0,0,0.3)',
+              }}
+            >
+              {/* TOP 50% — zip hologram + label row */}
+              <div className="flex flex-col overflow-hidden border-b border-white/10" style={{ flex: 1 }}>
+                <div className="flex items-center justify-between px-3 py-2 flex-shrink-0">
+                  <div>
+                    <div style={{ color: holoColor || '#cc2200', textShadow: `0 0 12px ${holoColor || '#cc2200'}` }}
+                      className="font-black text-sm tracking-widest uppercase">
+                      ZIP {sideLabel || holoFeature?.properties?.MODZCTA} — ISOLATED
+                    </div>
+                    {sideZip && (
+                      <p className="text-white/40 text-xs">
+                        {isSafezoneModzcta(sideZip)
+                          ? `🛡️ ${getSafezoneLabel(sideZip)} · ${sideEvents.length} events`
+                          : `${sideEvents.length} events · ${sideColonists.length} colonists`}
+                      </p>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => { setSideZip(null); setSideEvents([]); setSideColonists([]); setHoloFeature(null); }}
+                    className="w-8 h-8 rounded-full border font-black text-xs flex items-center justify-center hover:bg-white/20 flex-shrink-0"
+                    style={{ borderColor: holoColor || '#cc2200', color: holoColor || '#cc2200' }}
+                  >✕</button>
                 </div>
-                <button onClick={() => { setSideZip(null); setSideEvents([]); setSideColonists([]); setHoloFeature(null); }}
-                  className="text-white/40 text-lg w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10">✕</button>
+                {holoFeature && (
+                  <ZipHologramMobile feature={holoFeature} color={holoColor} embedded onClose={null} />
+                )}
               </div>
 
-              <div className="flex flex-1 overflow-hidden min-h-0">
-                <div className="flex-1 flex flex-col overflow-hidden border-r border-white/10 min-h-0">
-                  <PaginatedSection
-                    items={sideEvents}
-                    emptyMsg="None"
-                    headerLabel="Events"
-                    headerColor="text-white/30"
-                    renderItem={(event) => (
-                      <div key={event.id} onClick={() => setSelectedEvent(event)}
-                        className="flex items-center gap-2 px-2 py-2 border-b border-white/5 cursor-pointer active:bg-white/5"
-                        style={{ borderLeftColor: event.hex_color || '#7C3AED', borderLeftWidth: 2 }}>
-                        <div className="text-base flex-shrink-0">{event.representative_emoji || '🎉'}</div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-white font-black text-xs truncate leading-tight">{event.event_name}</p>
-                          <p className="text-white/40 text-[10px]">{event.event_date}</p>
-                        </div>
-                      </div>
-                    )}
-                  />
-                </div>
-                {!isSafezoneModzcta(sideZip) && (
-                  <div className="flex-1 flex flex-col overflow-hidden min-h-0">
+              {/* BOTTOM 50% — events + colonists columns */}
+              {sideZip && (
+                <div className="flex overflow-hidden min-h-0" style={{ flex: 1 }}>
+                  <div className="flex-1 flex flex-col overflow-hidden border-r border-white/10 min-h-0">
                     <PaginatedSection
-                      items={sideColonists}
-                      emptyMsg="None yet"
-                      headerLabel="Colony"
-                      headerColor="text-green-400/50"
-                      renderItem={(c, i) => {
-                        const medal = MEDALS[i] || null, isTop = i < 3;
-                        return (
-                          <div key={c.username || i}
-                            className="flex items-center gap-2 px-2 py-2 border-b border-white/5"
-                            style={{ background: isTop ? `rgba(${i === 0 ? '255,200,0' : i === 1 ? '180,180,180' : '200,120,60'},0.06)` : 'transparent' }}>
-                            <div className="w-5 text-center flex-shrink-0">
-                              {medal ? <span className="text-sm">{medal}</span> : <span className="text-[10px] font-black text-white/20">#{i + 1}</span>}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <p className={`font-black text-xs truncate ${isTop ? 'text-white' : 'text-white/60'}`}>{c.username}</p>
-                            </div>
-                            <p className={`font-black text-xs flex-shrink-0 ${isTop ? 'text-yellow-400' : 'text-yellow-400/50'}`}>{c.clout_points || 0}</p>
+                      items={sideEvents}
+                      emptyMsg="None"
+                      headerLabel="Events"
+                      headerColor="text-white/30"
+                      renderItem={(event) => (
+                        <div key={event.id} onClick={() => setSelectedEvent(event)}
+                          className="flex items-center gap-2 px-2 py-2 border-b border-white/5 cursor-pointer active:bg-white/5"
+                          style={{ borderLeftColor: event.hex_color || '#7C3AED', borderLeftWidth: 2 }}>
+                          <div className="text-base flex-shrink-0">{event.representative_emoji || '🎉'}</div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-white font-black text-xs truncate leading-tight">{event.event_name}</p>
+                            <p className="text-white/40 text-[10px]">{event.event_date}</p>
                           </div>
-                        );
-                      }}
+                        </div>
+                      )}
                     />
                   </div>
-                )}
-                {isSafezoneModzcta(sideZip) && (
-                  <div className="flex-1 flex items-center justify-center p-4">
-                    <div className="text-center">
-                      <p className="text-2xl mb-2">🛡️</p>
-                      <p className="text-emerald-400 font-black text-xs">No colonists in safezones</p>
+                  {!isSafezoneModzcta(sideZip) ? (
+                    <div className="flex-1 flex flex-col overflow-hidden min-h-0">
+                      <PaginatedSection
+                        items={sideColonists}
+                        emptyMsg="None yet"
+                        headerLabel="Colony"
+                        headerColor="text-green-400/50"
+                        renderItem={(c, i) => {
+                          const medal = MEDALS[i] || null, isTop = i < 3;
+                          return (
+                            <div key={c.username || i}
+                              className="flex items-center gap-2 px-2 py-2 border-b border-white/5"
+                              style={{ background: isTop ? `rgba(${i === 0 ? '255,200,0' : i === 1 ? '180,180,180' : '200,120,60'},0.06)` : 'transparent' }}>
+                              <div className="w-5 text-center flex-shrink-0">
+                                {medal ? <span className="text-sm">{medal}</span> : <span className="text-[10px] font-black text-white/20">#{i + 1}</span>}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className={`font-black text-xs truncate ${isTop ? 'text-white' : 'text-white/60'}`}>{c.username}</p>
+                              </div>
+                              <p className={`font-black text-xs flex-shrink-0 ${isTop ? 'text-yellow-400' : 'text-yellow-400/50'}`}>{c.clout_points || 0}</p>
+                            </div>
+                          );
+                        }}
+                      />
                     </div>
-                  </div>
-                )}
-              </div>
+                  ) : (
+                    <div className="flex-1 flex items-center justify-center p-4">
+                      <div className="text-center">
+                        <p className="text-2xl mb-2">🛡️</p>
+                        <p className="text-emerald-400 font-black text-xs">No colonists in safezones</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
