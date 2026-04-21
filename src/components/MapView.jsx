@@ -14,7 +14,7 @@ import { deserialize as fgbDeserialize } from 'flatgeobuf/lib/mjs/geojson.js';
 const GEOJSON_URL = './data/MODZCTA_2010_WGS1984.geo.json';
 const BOROUGH_GEOJSON_URL = './data/borough.geo.json';
 const BUILDING_FGB_URL = './data/final_building.fgb';
-const FGB_CACHE_NAME = 'lapuff-fgb-v3';
+const FGB_CACHE_NAME = 'lapuff-fgb-v4'; // v4: rebuilt with Hilbert R-tree spatial index
 const FGB_CACHE_KEY  = 'final_building.fgb';
 const MAPTILER_KEY = 'VjoJJ0mSCXFo9kFGYGxJ';
 
@@ -2839,7 +2839,7 @@ export default function MapView({ events, headerCollapsed = false }) {
       map.addLayer({
         id: 'real3d-roads-motorway', type: 'line',
         source: 'openmaptiles', 'source-layer': 'transportation',
-        minzoom: 9, maxzoom: 14,
+        minzoom: 9, maxzoom: 17,
         filter: ['match', ['get', 'class'], ['motorway', 'trunk'], true, false],
         paint: {
           'line-color': isHeatmap ? '#884400' : '#ff2200',
@@ -2851,7 +2851,7 @@ export default function MapView({ events, headerCollapsed = false }) {
       map.addLayer({
         id: 'real3d-roads-primary', type: 'line',
         source: 'openmaptiles', 'source-layer': 'transportation',
-        minzoom: 10, maxzoom: 14,
+        minzoom: 10, maxzoom: 17,
         filter: ['all', ['match', ['get', 'class'], ['primary', 'secondary'], true, false], ['within', NYC_BBOX_GEOM]],
         paint: {
           'line-color': isHeatmap ? '#662200' : '#cc1800',
@@ -2863,7 +2863,7 @@ export default function MapView({ events, headerCollapsed = false }) {
       map.addLayer({
         id: 'real3d-roads-tertiary', type: 'line',
         source: 'openmaptiles', 'source-layer': 'transportation',
-        minzoom: 11, maxzoom: 14,
+        minzoom: 11, maxzoom: 17,
         filter: ['all', ['match', ['get', 'class'], ['tertiary', 'minor', 'residential'], true, false], ['within', NYC_BBOX_GEOM]],
         paint: {
           'line-color': isHeatmap ? '#553300' : '#771100',
@@ -3339,6 +3339,7 @@ export default function MapView({ events, headerCollapsed = false }) {
 
       const handleClick = (e) => {
         if (!e.features?.length) return;
+        e.stopPropagation(); // prevent ZCTA click from also firing on mobile pin tap
         const id = e.features[0].properties._eventId;
         const evt = pinEventsLookupRef.current.get(id);
         if (evt) { setHoveredPinEvent(null); setSelectedEvent(evt); }
@@ -3436,39 +3437,39 @@ export default function MapView({ events, headerCollapsed = false }) {
               <div className="relative">
                 {heatmap && (
                   <button onClick={() => setTopoOn(v => !v)}
-                    className={`absolute right-full mr-2 w-10 h-10 rounded-2xl border-3 p-0 flex items-center justify-center transition-all ${topoOn ? 'ring-2 ring-yellow-300 border-yellow-300' : 'border-white/50 hover:border-yellow-300'}`}
+                    className={`absolute right-full mr-2 w-10 h-10 rounded-2xl border-3 p-0 flex items-center justify-center transition-all ${topoOn ? 'ring-2 ring-yellow-300 border-yellow-300' : 'border-white/50 md:hover:border-yellow-300'}`}
                     title="Topo Heatmap Toggle"
                     style={{ backgroundColor: '#000' }}>
                     <div className={`rounded-lg bg-cover bg-center ${isMobile ? 'w-[30px] h-[30px]' : 'w-[36px] h-[36px]'}`} style={{ backgroundImage: `url('${PUBLIC_BASE}data/topo-thumb.png')`, opacity: topoOn ? 1 : 0.8 }} />
                   </button>
                 )}
               <button onClick={() => { setHeatmap(v => { if (!v) setTopoOn(false); return !v; }); }}
-                className={`px-4 py-2 rounded-2xl font-black text-sm border-2 transition-all ${heatmap ? 'bg-gradient-to-r from-cyan-500 via-yellow-400 to-red-500 border-yellow-300 text-white' : 'bg-black/70 border-white/30 text-white hover:border-orange-400'}`}>
+                className={`px-4 py-2 rounded-2xl font-black text-sm border-2 transition-all ${heatmap ? 'bg-gradient-to-r from-cyan-500 via-yellow-400 to-red-500 border-yellow-300 text-white' : 'bg-black/70 border-white/30 text-white md:hover:border-orange-400'}`}>
                 🌡️ Heatmap
               </button>
               </div>
               <button onClick={() => setSatellite(v => !v)}
-                className={`px-4 py-2 rounded-2xl font-black text-sm border-2 transition-all ${satellite ? 'bg-[#7C3AED] border-[#7C3AED] text-white' : 'bg-black/70 border-white/30 text-white hover:border-violet-400'}`}>
+                className={`px-4 py-2 rounded-2xl font-black text-sm border-2 transition-all ${satellite ? 'bg-[#7C3AED] border-[#7C3AED] text-white' : 'bg-black/70 border-white/30 text-white md:hover:border-violet-400'}`}>
                 🛰️ Satellite
               </button>
               {/* Desktop: 3D + Real3D in same row */}
               <button onClick={handleThreeDToggle}
-                className={`hidden md:block px-4 py-2 rounded-2xl font-black text-sm border-2 transition-all ${threeD ? 'bg-emerald-600 border-emerald-400 text-white' : 'bg-black/70 border-white/30 text-white hover:border-emerald-400'}`}>
+                className={`hidden md:block px-4 py-2 rounded-2xl font-black text-sm border-2 transition-all ${threeD ? 'bg-emerald-600 border-emerald-400 text-white' : 'bg-black/70 border-white/30 text-white md:hover:border-emerald-400'}`}>
                 🏙️ 3D
               </button>
               <button onClick={handleReal3DToggle}
-                className={`hidden md:block px-4 py-2 rounded-2xl font-black text-sm border-2 transition-all ${real3D ? 'bg-amber-600 border-amber-400 text-white' : 'bg-black/70 border-white/30 text-white hover:border-amber-400'}`}>
+                className={`hidden md:block px-4 py-2 rounded-2xl font-black text-sm border-2 transition-all ${real3D ? 'bg-amber-600 border-amber-400 text-white' : 'bg-black/70 border-white/30 text-white md:hover:border-amber-400'}`}>
                 🏛️ Real3D
               </button>
             </div>
             {/* Row 3 (mobile only): 3D + Real3D */}
             <div className="flex gap-2 justify-center md:hidden">
               <button onClick={handleThreeDToggle}
-                className={`px-4 py-2 rounded-2xl font-black text-sm border-2 transition-all ${threeD ? 'bg-emerald-600 border-emerald-400 text-white' : 'bg-black/70 border-white/30 text-white hover:border-emerald-400'}`}>
+                className={`px-4 py-2 rounded-2xl font-black text-sm border-2 transition-all ${threeD ? 'bg-emerald-600 border-emerald-400 text-white' : 'bg-black/70 border-white/30 text-white md:hover:border-emerald-400'}`}>
                 🏙️ 3D
               </button>
               <button onClick={handleReal3DToggle}
-                className={`px-4 py-2 rounded-2xl font-black text-sm border-2 transition-all ${real3D ? 'bg-amber-600 border-amber-400 text-white' : 'bg-black/70 border-white/30 text-white hover:border-amber-400'}`}>
+                className={`px-4 py-2 rounded-2xl font-black text-sm border-2 transition-all ${real3D ? 'bg-amber-600 border-amber-400 text-white' : 'bg-black/70 border-white/30 text-white md:hover:border-amber-400'}`}>
                 🏛️ Real3D
               </button>
             </div>
@@ -3652,7 +3653,7 @@ export default function MapView({ events, headerCollapsed = false }) {
             <div
               className="absolute inset-x-0 bottom-0 z-50 flex flex-col overflow-hidden transition-[top] duration-300"
               style={{
-                top: headerCollapsed ? '56px' : '72px',
+                top: headerCollapsed ? '56px' : '244px',
                 background: 'rgba(3,0,10,0.55)',
                 backdropFilter: 'blur(14px)',
                 borderTop: '1px solid rgba(180,0,0,0.3)',
@@ -3712,7 +3713,7 @@ export default function MapView({ events, headerCollapsed = false }) {
                       <PaginatedSection
                         items={sideColonists}
                         emptyMsg="None yet"
-                        headerLabel="Colony"
+                        headerLabel="Colonists"
                         headerColor="text-green-400/50"
                         renderItem={(c, i) => {
                           const medal = MEDALS[i] || null, isTop = i < 3;
