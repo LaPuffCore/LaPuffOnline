@@ -155,6 +155,7 @@ export default function Home({ events = [], eventsLoading = false }) {
         if (pendingPlayRef.current) {
           pendingPlayRef.current = false;
           widget.play();
+          widget.setShuffle(true);
         }
       });
     }
@@ -183,6 +184,7 @@ export default function Home({ events = [], eventsLoading = false }) {
     setIsMusicOn(true);
     if (scWidgetRef.current && scReadyRef.current) {
       scWidgetRef.current.play();
+      scWidgetRef.current.setShuffle(true);
     } else {
       pendingPlayRef.current = true; // will fire when READY event arrives
     }
@@ -242,6 +244,8 @@ export default function Home({ events = [], eventsLoading = false }) {
         <div className="max-w-7xl mx-auto px-3 py-2 md:px-4 md:py-3">
           {/* Top Row: Logo, Nav, Menu */}
           <div className="flex items-center justify-between gap-2">
+            {/* Logo + Music Button — grouped so music button stays right of the orbiter button */}
+            <div className="flex items-center gap-2">
             {/* Logo - Scaled down for mobile */}
             <button
               onClick={handleLogoHomeReset}
@@ -269,7 +273,7 @@ export default function Home({ events = [], eventsLoading = false }) {
             </button>
 
             {/* Desktop Music Button — hugs right of orbiter/logo, only after visiting map */}
-            {hasVisitedMap && <div className="relative hidden md:block ml-1" ref={musicDesktopRef}>
+            {hasVisitedMap && <div className="relative hidden md:block" ref={musicDesktopRef}>
               <button
                 onClick={() => setShowMusicMenu(v => !v)}
                 className="w-9 h-9 md:w-10 md:h-10 flex items-center justify-center rounded-xl border-2 md:border-3 border-black bg-white shadow-[2px_2px_0px_black] md:shadow-[3px_3px_0px_black] transition-all hover:scale-105"
@@ -317,6 +321,7 @@ export default function Home({ events = [], eventsLoading = false }) {
                 </div>
               )}
             </div>}
+            </div>{/* end logo+music group */}
 
             {/* View Toggles — center */}
             <div className="flex items-center gap-2 scale-90 md:scale-100">

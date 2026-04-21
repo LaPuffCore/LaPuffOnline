@@ -66,8 +66,8 @@ function DayEventDetails({ event }) {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4 mb-4">
         <div className="bg-white border-2 rounded-xl p-3 transition-all duration-150 hover:scale-[1.01]"
           style={{ borderColor }}
-          onMouseEnter={ev => { ev.currentTarget.style.backgroundColor = borderColor + '18'; }}
-          onMouseLeave={ev => { ev.currentTarget.style.backgroundColor = ''; }}>
+          onMouseEnter={ev => { ev.currentTarget.style.backgroundColor = borderColor; ev.currentTarget.style.color = '#fff'; }}
+          onMouseLeave={ev => { ev.currentTarget.style.backgroundColor = ''; ev.currentTarget.style.color = ''; }}>
           <p className="text-[10px] font-black uppercase tracking-widest text-gray-500 mb-2">Time + Date</p>
           <p className="text-sm font-black">📅 {displayDate}</p>
           {displayTime && <p className="text-sm font-black mt-1">🕐 {displayTime}</p>}

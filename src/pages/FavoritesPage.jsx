@@ -92,8 +92,8 @@ function FavoriteCard({ event, tzOffset, onOpen, onUnfavorite }) {
   return (
     <article
       onClick={() => onOpen(event)}
-      className="group w-full md:w-72 bg-white border-3 rounded-3xl cursor-pointer transition-transform duration-200 hover:scale-[1.02] hover:-translate-y-0.5 shadow-[5px_5px_0px_black] overflow-visible"
-      style={{ borderColor }}
+      className="group w-full md:w-72 bg-white rounded-3xl cursor-pointer transition-transform duration-200 hover:scale-[1.02] hover:-translate-y-0.5 overflow-visible"
+      style={{ border: `3px solid ${borderColor}`, boxShadow: `5px 5px 0px ${resolvedTheme?.tileShadowColor || '#000000'}` }}
     >
       <div className="h-40 md:h-44 relative overflow-hidden bg-gray-100 border-b-2 border-black rounded-t-[1.2rem]">
         {showImage ? (
