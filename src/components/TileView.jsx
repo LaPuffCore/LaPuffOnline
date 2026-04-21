@@ -278,7 +278,7 @@ export default function TileView({ events, eventsLoading = false }) {
       });
     }
 
-    if (sourceMode === 'user') list = list.filter(e => !e._auto);  // samples = user events during dev
+    if (sourceMode === 'user') list = list.filter(e => !e._sample && !e._auto);
     else if (sourceMode === 'auto') list = list.filter(e => e._sample || e._auto);
 
     if (borough !== 'All') list = list.filter(e => (e.borough || e.location_data?.city || '').toLowerCase() === borough.toLowerCase());
