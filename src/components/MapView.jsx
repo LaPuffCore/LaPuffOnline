@@ -3415,7 +3415,7 @@ export default function MapView({ events, headerCollapsed = false }) {
       {entered && (
         <>
           {/* Controls — below header when expanded, below expand button when collapsed */}
-          <div className={`absolute left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-2 transition-[top] duration-300 ${headerCollapsed ? 'top-[68px]' : 'top-[120px] md:top-[84px]'}`}>
+          <div className={`absolute left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-2 transition-[top] duration-300 ${headerCollapsed ? 'top-[68px]' : 'top-[134px] md:top-[84px]'}`}>
             <div className="flex items-center gap-2">
               <div className="flex items-center gap-1 bg-black/80 backdrop-blur border border-white/20 rounded-2xl px-3 py-1.5">
                 <span className="text-white text-xs font-black mr-1">📅</span>
@@ -3432,47 +3432,46 @@ export default function MapView({ events, headerCollapsed = false }) {
                 📍
               </button>
             </div>
-            {/* Row 2: Topo + Heatmap + Satellite (+ 3D/Real3D on desktop) */}
-            <div className="flex gap-2 flex-wrap justify-center">
+            {/* Row 2: Heatmap + Satellite + 3D + Real3D — single row on mobile, all 4 */}
+            <div className="flex gap-1.5 md:gap-2 justify-center items-center">
               <div className="relative">
                 {heatmap && (
                   <button onClick={() => setTopoOn(v => !v)}
-                    className={`absolute right-full mr-2 w-10 h-10 rounded-2xl border-3 p-0 flex items-center justify-center transition-all ${topoOn ? 'ring-2 ring-yellow-300 border-yellow-300' : 'border-white/50 md:hover:border-yellow-300'}`}
+                    className={`hidden md:flex absolute right-full mr-2 w-10 h-10 rounded-2xl border-3 p-0 items-center justify-center transition-all ${topoOn ? 'ring-2 ring-yellow-300 border-yellow-300' : 'border-white/50 md:hover:border-yellow-300'}`}
                     title="Topo Heatmap Toggle"
                     style={{ backgroundColor: '#000' }}>
-                    <div className={`rounded-lg bg-cover bg-center ${isMobile ? 'w-[30px] h-[30px]' : 'w-[36px] h-[36px]'}`} style={{ backgroundImage: `url('${PUBLIC_BASE}data/topo-thumb.png')`, opacity: topoOn ? 1 : 0.8 }} />
+                    <div className="w-[36px] h-[36px] rounded-lg bg-cover bg-center" style={{ backgroundImage: `url('${PUBLIC_BASE}data/topo-thumb.png')`, opacity: topoOn ? 1 : 0.8 }} />
                   </button>
                 )}
-              <button onClick={() => { setHeatmap(v => { if (!v) setTopoOn(false); return !v; }); }}
-                className={`px-4 py-2 rounded-2xl font-black text-sm border-2 transition-all ${heatmap ? 'bg-gradient-to-r from-cyan-500 via-yellow-400 to-red-500 border-yellow-300 text-white' : 'bg-black/70 border-white/30 text-white md:hover:border-orange-400'}`}>
-                🌡️ Heatmap
-              </button>
+                <button onClick={() => { setHeatmap(v => { if (!v) setTopoOn(false); return !v; }); }}
+                  className={`px-2 py-1.5 md:px-4 md:py-2 rounded-2xl font-black text-[11px] md:text-sm border-2 transition-all ${heatmap ? 'bg-gradient-to-r from-cyan-500 via-yellow-400 to-red-500 border-yellow-300 text-white' : 'bg-black/70 border-white/30 text-white md:hover:border-orange-400'}`}>
+                  🌡️ Heatmap
+                </button>
               </div>
               <button onClick={() => setSatellite(v => !v)}
-                className={`px-4 py-2 rounded-2xl font-black text-sm border-2 transition-all ${satellite ? 'bg-[#7C3AED] border-[#7C3AED] text-white' : 'bg-black/70 border-white/30 text-white md:hover:border-violet-400'}`}>
+                className={`px-2 py-1.5 md:px-4 md:py-2 rounded-2xl font-black text-[11px] md:text-sm border-2 transition-all ${satellite ? 'bg-[#7C3AED] border-[#7C3AED] text-white' : 'bg-black/70 border-white/30 text-white md:hover:border-violet-400'}`}>
                 🛰️ Satellite
               </button>
-              {/* Desktop: 3D + Real3D in same row */}
               <button onClick={handleThreeDToggle}
-                className={`hidden md:block px-4 py-2 rounded-2xl font-black text-sm border-2 transition-all ${threeD ? 'bg-emerald-600 border-emerald-400 text-white' : 'bg-black/70 border-white/30 text-white md:hover:border-emerald-400'}`}>
+                className={`px-2 py-1.5 md:px-4 md:py-2 rounded-2xl font-black text-[11px] md:text-sm border-2 transition-all ${threeD ? 'bg-emerald-600 border-emerald-400 text-white' : 'bg-black/70 border-white/30 text-white md:hover:border-emerald-400'}`}>
                 🏙️ 3D
               </button>
               <button onClick={handleReal3DToggle}
-                className={`hidden md:block px-4 py-2 rounded-2xl font-black text-sm border-2 transition-all ${real3D ? 'bg-amber-600 border-amber-400 text-white' : 'bg-black/70 border-white/30 text-white md:hover:border-amber-400'}`}>
+                className={`px-2 py-1.5 md:px-4 md:py-2 rounded-2xl font-black text-[11px] md:text-sm border-2 transition-all ${real3D ? 'bg-amber-600 border-amber-400 text-white' : 'bg-black/70 border-white/30 text-white md:hover:border-amber-400'}`}>
                 🏛️ Real3D
               </button>
             </div>
-            {/* Row 3 (mobile only): 3D + Real3D */}
-            <div className="flex gap-2 justify-center md:hidden">
-              <button onClick={handleThreeDToggle}
-                className={`px-4 py-2 rounded-2xl font-black text-sm border-2 transition-all ${threeD ? 'bg-emerald-600 border-emerald-400 text-white' : 'bg-black/70 border-white/30 text-white md:hover:border-emerald-400'}`}>
-                🏙️ 3D
-              </button>
-              <button onClick={handleReal3DToggle}
-                className={`px-4 py-2 rounded-2xl font-black text-sm border-2 transition-all ${real3D ? 'bg-amber-600 border-amber-400 text-white' : 'bg-black/70 border-white/30 text-white md:hover:border-amber-400'}`}>
-                🏛️ Real3D
-              </button>
-            </div>
+            {/* Row 3 (mobile only): Topo button centered below heatmap */}
+            {heatmap && (
+              <div className="flex justify-center md:hidden">
+                <button onClick={() => setTopoOn(v => !v)}
+                  className={`w-9 h-9 rounded-xl border-2 p-0 flex items-center justify-center transition-all ${topoOn ? 'ring-2 ring-yellow-300 border-yellow-300' : 'border-white/50'}`}
+                  title="Topo Heatmap Toggle"
+                  style={{ backgroundColor: '#000' }}>
+                  <div className="w-[26px] h-[26px] rounded-md bg-cover bg-center" style={{ backgroundImage: `url('${PUBLIC_BASE}data/topo-thumb.png')`, opacity: topoOn ? 1 : 0.8 }} />
+                </button>
+              </div>
+            )}
             {connectionNotice && (
               <div className="max-w-[92vw] rounded-xl border border-red-400 bg-red-950/90 px-3 py-2 text-center">
                 <p className="text-red-200 text-xs font-black">{connectionNotice}</p>
@@ -3653,7 +3652,7 @@ export default function MapView({ events, headerCollapsed = false }) {
             <div
               className="absolute inset-x-0 bottom-0 z-50 flex flex-col overflow-hidden transition-[top] duration-300"
               style={{
-                top: headerCollapsed ? '56px' : '244px',
+                top: headerCollapsed ? '56px' : '260px',
                 background: 'rgba(3,0,10,0.55)',
                 backdropFilter: 'blur(14px)',
                 borderTop: '1px solid rgba(180,0,0,0.3)',
