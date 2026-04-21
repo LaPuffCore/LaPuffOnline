@@ -62,9 +62,9 @@ function DayEventDetails({ event }) {
     : 'Date TBD';
 
   return (
-    <div className="border-[2.5px] border-t-0 border-black rounded-b-[1.6rem] bg-gray-50 px-3 pb-3 pt-6 md:px-4 md:pb-4 md:pt-7 shadow-[inset_0_1px_0_rgba(0,0,0,0.05)]">
+    <div className="border-[2.5px] border-t-0 rounded-b-[1.6rem] bg-gray-50 px-3 pb-3 pt-7 md:px-4 md:pb-4 md:pt-8 shadow-[inset_0_1px_0_rgba(0,0,0,0.05)]" style={{ borderColor }}>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4 mb-4">
-        <div className="bg-white border-2 border-black rounded-xl p-3">
+        <div className="bg-white border-2 rounded-xl p-3 transition-colors" style={{ borderColor }}>
           <p className="text-[10px] font-black uppercase tracking-widest text-gray-500 mb-2">Time + Date</p>
           <p className="text-sm font-black">📅 {displayDate}</p>
           {displayTime && <p className="text-sm font-black mt-1">🕐 {displayTime}</p>}
@@ -87,7 +87,7 @@ function DayEventDetails({ event }) {
       {event.description && (
         <div className="mb-4">
           <p className="text-[10px] font-black uppercase tracking-widest text-gray-500 mb-1.5">Description</p>
-          <div className="bg-white border-2 border-black rounded-xl p-3 text-xs md:text-sm font-bold leading-relaxed">
+          <div className="bg-white border-2 rounded-xl p-3 text-xs md:text-sm font-bold leading-relaxed" style={{ borderColor }}>
             {event.description}
           </div>
         </div>
@@ -110,7 +110,10 @@ function DayEventDetails({ event }) {
               href={link}
               target="_blank"
               rel="noopener noreferrer"
-              className="block bg-white border-2 border-black rounded-xl px-3 py-2.5 text-[11px] md:text-xs font-black truncate hover:bg-black hover:text-white transition-colors"
+              className="block bg-white border-2 rounded-xl px-3 py-2.5 text-[11px] md:text-xs font-black truncate transition-all duration-150 hover:scale-[1.02]"
+              style={{ borderColor }}
+              onMouseEnter={e => { e.currentTarget.style.backgroundColor = borderColor; e.currentTarget.style.color = '#fff'; }}
+              onMouseLeave={e => { e.currentTarget.style.backgroundColor = ''; e.currentTarget.style.color = ''; }}
             >
               {link.replace(/^https?:\/\/(www\.)?/, '')}
             </a>
@@ -227,7 +230,7 @@ export default function CalendarPage({ events = [] }) {
                 key={date.toDateString()}
                 onClick={() => drillToWeek(date)}
                 className={`rounded-2xl border-2 cursor-pointer transition-all min-h-0 overflow-hidden p-1 md:p-2 hover:border-[#7C3AED] hover:shadow-md ${isToday ? 'border-[#7C3AED] bg-violet-50' : 'border-gray-200 bg-white'} ${evs.length > 0 ? 'ring-1 ring-[#7C3AED]/20' : ''}`}
-                style={{ minHeight: isMobile ? '62px' : undefined }}
+                style={{ minHeight: isMobile ? '70px' : '80px' }}
               >
                 <div className="flex h-full min-h-0 flex-col">
                   <div className="mb-1 flex items-start justify-between">
@@ -333,8 +336,10 @@ export default function CalendarPage({ events = [] }) {
                       <button
                         key={e.id}
                         onClick={() => setSelectedEvent(e)}
-                        className="min-w-[190px] md:min-w-[235px] max-w-[190px] md:max-w-[235px] text-left rounded-xl border-2 bg-gray-50 p-2.5 md:p-3 shadow-[2px_2px_0px_black] hover:bg-opacity-80 transition-colors"
+                        className="min-w-[190px] md:min-w-[235px] max-w-[190px] md:max-w-[235px] text-left rounded-xl border-2 bg-gray-50 p-2.5 md:p-3 shadow-[2px_2px_0px_black] transition-all duration-150 hover:scale-[1.03] hover:shadow-[3px_3px_0px_black]"
                         style={{ borderColor: tileColor }}
+                        onMouseEnter={e => { e.currentTarget.style.backgroundColor = tileColor + '18'; }}
+                        onMouseLeave={e => { e.currentTarget.style.backgroundColor = ''; }}
                       >
                         <div className="flex items-start gap-2">
                           <span className="text-2xl md:text-3xl leading-none">{e.representative_emoji || '🎉'}</span>
@@ -392,18 +397,21 @@ export default function CalendarPage({ events = [] }) {
                 className="relative overflow-visible transition-transform pb-1"
               >
                 <div
-                  className="relative z-10 bg-white border-3 border-black rounded-3xl shadow-[4px_4px_0px_black]"
-                  style={{ borderLeftColor: getTileAccentColor(e.hex_color, resolvedTheme), borderLeftWidth: 6 }}
+                  className="relative z-10 bg-white border-3 rounded-3xl shadow-[4px_4px_0px_black] transition-all duration-150 hover:scale-[1.01]"
+                  style={{ borderColor: getTileAccentColor(e.hex_color, resolvedTheme) }}
                 >
                   <div className="p-4 flex items-center gap-3 md:gap-4">
-                    <div className="w-14 h-14 md:w-16 md:h-16 rounded-2xl overflow-hidden flex-shrink-0" style={{ backgroundColor: `${getTileAccentColor(e.hex_color, resolvedTheme)}22` }}>
+                    <div className="w-14 h-14 md:w-16 md:h-16 rounded-2xl overflow-hidden flex-shrink-0 flex items-center justify-center">
                       {e.photos?.[0]
                         ? <img src={e.photos[0]} className="w-full h-full object-cover" alt="" onError={(ev) => { ev.currentTarget.style.display = 'none'; }} />
-                        : <div className="w-full h-full flex items-center justify-center text-3xl">{e.representative_emoji || '🎉'}</div>}
+                        : <div className="w-full h-full rounded-2xl flex items-center justify-center text-3xl"
+                            style={{ backgroundColor: getTileAccentColor(e.hex_color, resolvedTheme) }}>
+                            {e.representative_emoji || '🎉'}
+                          </div>}
                     </div>
 
                     <div className="min-w-0 flex-1">
-                      <h3 className="font-black text-sm md:text-base leading-tight line-clamp-2">{e.event_name}</h3>
+                      <h3 className="font-black text-sm md:text-base leading-tight line-clamp-2" style={{ color: getTileAccentColor(e.hex_color, resolvedTheme) }}>{e.event_name}</h3>
                       <p className="text-[11px] md:text-sm text-gray-500 font-bold">
                         {displayDate}{displayTime ? ` · ${displayTime}` : ''}
                       </p>
@@ -411,7 +419,8 @@ export default function CalendarPage({ events = [] }) {
 
                     <button
                       onClick={() => setExpandedEvents((prev) => ({ ...prev, [e.id]: !prev[e.id] }))}
-                      className="w-9 h-9 border-2 border-black rounded-xl bg-gray-100 hover:bg-violet-100 flex items-center justify-center text-base font-black shadow-[2px_2px_0px_black]"
+                      className="w-9 h-9 border-2 rounded-xl flex items-center justify-center text-base font-black shadow-[2px_2px_0px_black] transition-colors"
+                      style={{ borderColor: getTileAccentColor(e.hex_color, resolvedTheme), color: getTileAccentColor(e.hex_color, resolvedTheme) }}
                       aria-label="Toggle details"
                     >
                       {expanded ? '⌃' : '⌄'}
@@ -420,7 +429,7 @@ export default function CalendarPage({ events = [] }) {
                 </div>
 
                 {expanded && (
-                  <div className="relative z-0 -mt-5 px-2 md:px-3">
+                  <div className="relative z-0 -mt-4 pt-6 px-2 md:px-3">
                     <DayEventDetails event={e} />
                   </div>
                 )}
