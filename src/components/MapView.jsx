@@ -1329,6 +1329,9 @@ export default function MapView({ events, headerCollapsed = false }) {
   const buildingFGBRef      = useRef(null);  // parsed FeatureCollection (all 381K buildings)
   const buildingZctaMapRef  = useRef(null);  // Int16Array: building index → ZCTA feature index (-1 = not found)
   const fgbLoadingRef       = useRef(false); // prevents concurrent loads
+  // Pre-computed ZCTA bounding boxes — used in fetchViewportBuildings for O(1) bbox shortcut before expensive PiP.
+  // Calculated once when geoData loads, stored as parallel array to geoDataRef.current.features.
+  const zctaBboxesRef = useRef(null); // Array<{minX, minY, maxX, maxY}> | null
   // Real3D layer lifecycle — create once, toggle visibility
   const real3dLayersCreatedRef = useRef(false); // true after first initReal3DLayers
   // Tracks whether _tier_0.._tier_4 have been baked into building properties
@@ -1370,6 +1373,7 @@ export default function MapView({ events, headerCollapsed = false }) {
   const [styleVersion,  setStyleVersion]  = useState(0);
   // Cache status for FGB loading indicator: 'idle' | 'building' | 'paused' | 'done'
   const [fgbCacheStatus, setFgbCacheStatus] = useState('idle');
+  const fgbCacheStatusRef = useRef('idle'); // ref mirror for async closures (polls in Real3D mobile gate)
   const [fgbCacheProgress, setFgbCacheProgress] = useState(0); // 0-100
   // Mobile Real3D loading gate — shows popup while building data loads
   const [real3dLoading, setReal3dLoading] = useState(false);
@@ -1384,6 +1388,7 @@ export default function MapView({ events, headerCollapsed = false }) {
 
   // Auto-dismiss cache indicator 2 seconds after "done"
   useEffect(() => {
+    fgbCacheStatusRef.current = fgbCacheStatus; // keep ref in sync for async closure polls
     if (fgbCacheStatus !== 'done') return;
     const t = setTimeout(() => setFgbCacheStatus('idle'), 2000);
     return () => clearTimeout(t);
@@ -1486,6 +1491,26 @@ export default function MapView({ events, headerCollapsed = false }) {
     if (!geoData || !boroughGeoData) return;
     zipBoroughMapRef.current = computeZipBoroughMap(geoData.features, boroughGeoData.features);
   }, [geoData, boroughGeoData]);
+
+  // Pre-compute ZCTA bounding boxes once — used as O(1) shortcut before expensive PiP in fetchViewportBuildings.
+  // Skips ~95% of PiP math for buildings not near ZCTA boundaries, critical for mobile JIT streaming speed.
+  useEffect(() => {
+    if (!geoData?.features?.length) return;
+    zctaBboxesRef.current = geoData.features.map(f => {
+      if (!f.geometry) return null;
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      const polys = f.geometry.type === 'MultiPolygon' ? f.geometry.coordinates : [f.geometry.coordinates];
+      for (const poly of polys) {
+        for (const ring of poly) {
+          for (const [x, y] of ring) {
+            if (x < minX) minX = x; if (x > maxX) maxX = x;
+            if (y < minY) minY = y; if (y > maxY) maxY = y;
+          }
+        }
+      }
+      return { minX, minY, maxX, maxY };
+    });
+  }, [geoData]);
 
   // Map init — make canvas background transparent so CRT can show on edges
   useEffect(() => {
@@ -1783,12 +1808,14 @@ export default function MapView({ events, headerCollapsed = false }) {
     setReal3DLayersVisible(map, false);
   }, [mapReady, geoData]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Start background FGB cache building once map + ZCTA data are ready.
-  // On mobile: defer until Real3D is first activated to avoid main thread pressure during map intro.
+  // Gear 2 — MapView Active: start desktop FGB cache after map is ready and user has had time to use 2D/3D/heatmap/satellite.
+  // Delay 4 seconds so initial map render, ZCTA data load, and event rendering all settle first.
+  // Mobile: defer entirely to Real3D toggle (Gear 3) — raw bytes already staged by Gear 1.
   useEffect(() => {
     if (!mapReady || !geoData) return;
-    if (window.innerWidth < 768) return; // mobile: defer to Real3D toggle
-    buildFGBCache();
+    if (window.innerWidth < 768) return; // mobile: Gear 3 handles cache on Real3D activation
+    const t = setTimeout(() => buildFGBCache(), 4000);
+    return () => clearTimeout(t);
   }, [mapReady, geoData]);
 
   // Pre-compute tiers for all 5 timespans in background.
@@ -2457,7 +2484,7 @@ export default function MapView({ events, headerCollapsed = false }) {
 
   // Parse a Uint8Array of FGB data into a FeatureCollection.
   // Yields to the event loop every CHUNK features to prevent main-thread freeze.
-  const FGB_YIELD_CHUNK = 5000;
+  const FGB_YIELD_CHUNK = 10000; // yield every 10K — reduces frame budget pressure vs 5K, still non-blocking
   const FGB_ESTIMATED_TOTAL = 381000;
 
   async function parseFGBBuffer(buf, onProgress) {
@@ -2665,10 +2692,11 @@ export default function MapView({ events, headerCollapsed = false }) {
     };
 
     const zctaFeatures = geoDataRef.current?.features;
+    const zctaBboxes   = zctaBboxesRef.current; // pre-computed bboxes for O(1) early-exit before PiP
     const tiers = tiersRef.current;
 
     try {
-      const features = [];
+      let features = [];
       let count = 0;
       for await (const feature of fgbDeserialize(BUILDING_FGB_URL, rect)) {
         if (!feature?.geometry?.coordinates) continue;
@@ -2679,13 +2707,19 @@ export default function MapView({ events, headerCollapsed = false }) {
         const precomputed = precomputedTiersRef.current;
         if (zctaFeatures?.length && (tiers?.length || precomputed)) {
           const centroid = getGeomCentroid(feature.geometry);
+          const cx = centroid[0], cy = centroid[1];
           let foundZctaIdx = -1;
           for (let j = 0; j < zctaFeatures.length; j++) {
             if (zctaFeatures[j].properties?._special) continue;
+            // BBox shortcut: skip full PiP if centroid is outside ZCTA bounding box
+            if (zctaBboxes?.[j]) {
+              const bb = zctaBboxes[j];
+              if (cx < bb.minX || cx > bb.maxX || cy < bb.minY || cy > bb.maxY) continue;
+            }
             const geom = zctaFeatures[j].geometry;
             const polys = geom.type === 'MultiPolygon' ? geom.coordinates : [geom.coordinates];
             for (const poly of polys) {
-              if (pointInRing(centroid[0], centroid[1], poly[0])) { foundZctaIdx = j; break; }
+              if (pointInRing(cx, cy, poly[0])) { foundZctaIdx = j; break; }
             }
             if (foundZctaIdx >= 0) break;
           }
@@ -2710,12 +2744,15 @@ export default function MapView({ events, headerCollapsed = false }) {
       }
 
       // Desktop: skip if full cache arrived while we were fetching
-      if (!isMob && buildingFGBRef.current) return;
+      if (!isMob && buildingFGBRef.current) { features = null; return; }
 
       if (map.getSource('fgb-buildings') && map.getStyle()) {
         map.getSource('fgb-buildings').setData({ type: 'FeatureCollection', features });
         if (real3DRef.current) refreshBuildingColors();
       }
+      // Memory handshake: null the local array immediately so GC can reclaim it after MapLibre's worker
+      // has serialized the data. Critical on mobile to keep heap below crash threshold.
+      features = null;
     } catch (err) {
       if (err.name !== 'AbortError') console.error('FGB viewport fetch failed:', err);
     }
@@ -2991,7 +3028,7 @@ export default function MapView({ events, headerCollapsed = false }) {
       return;
     }
 
-    // Mobile: gated async path — show loading popup, then do viewport-only fetch.
+    // Mobile: gated async path — show loading popup, then do viewport-only JIT fetch.
     // NEVER loads full FGB dataset on mobile — avoids the ~300MB peak memory spike that crashes WebKit.
     let cancelled = false;
     (async () => {
@@ -2999,7 +3036,23 @@ export default function MapView({ events, headerCollapsed = false }) {
       setReal3dLoadProgress('Preparing Real3D layers…');
       await new Promise(r => setTimeout(r, 50)); // let UI render the popup
 
-      // Step 1: Create layers if needed (lightweight — just WebGL setup, no data)
+      // Step 1: Ensure raw FGB bytes are cached (Gear 3 handshake).
+      // buildFGBCache on mobile: fetch + store raw bytes → return immediately (no parse, no heap spike).
+      // If Gear 1 already ran this in the background, this is a near-instant cache hit.
+      if (fgbCacheStatus !== 'done') {
+        setReal3dLoadProgress('Caching map data…');
+        await buildFGBCache(); // mobile path returns immediately after raw bytes are stored
+        // Poll until cache status is confirmed done (in case concurrent build is in progress)
+        let polls = 0;
+        while (fgbCacheStatusRef.current !== 'done' && polls < 60) {
+          await new Promise(r => setTimeout(r, 200));
+          polls++;
+        }
+      }
+      if (cancelled) return;
+
+      // Step 2: Create layers if needed (lightweight — just WebGL setup, no data)
+      setReal3dLoadProgress('Preparing Real3D layers…');
       if (!real3dLayersCreatedRef.current) {
         initReal3DLayers(map, isHm, timespanIdxRef.current ?? 4);
       } else {
@@ -3007,25 +3060,20 @@ export default function MapView({ events, headerCollapsed = false }) {
       }
       if (cancelled) return;
 
-      // Step 2: Camera transition — user sees the 3D view immediately
+      // Step 3: Camera transition — user sees the 3D view immediately
       map.setLight({ anchor: 'map' });
       map.easeTo({ pitch: 55, bearing: -17, duration: 700 });
       await new Promise(r => setTimeout(r, 100));
       if (cancelled) return;
 
-      // Step 3: Apply road colors
+      // Step 4: Apply road colors
       if (map.getLayer('real3d-roads-motorway')) map.setPaintProperty('real3d-roads-motorway', 'line-color', isHm ? '#884400' : '#ff2200');
       if (map.getLayer('real3d-roads-primary')) map.setPaintProperty('real3d-roads-primary', 'line-color', isHm ? '#662200' : '#cc1800');
       if (map.getLayer('real3d-roads-tertiary')) map.setPaintProperty('real3d-roads-tertiary', 'line-color', isHm ? '#553300' : '#771100');
 
-      // Step 4: Ensure raw FGB bytes are cached (for fast R-Tree range queries).
-      // buildFGBCache on mobile fetches + stores raw bytes then returns immediately — no parse, no heap spike.
-      // Fire-and-forget; fetchViewportBuildings below can proceed immediately (uses network directly if cache miss).
-      buildFGBCache();
-
-      // Step 5: Fetch buildings for current viewport — R-Tree bbox query, only viewport features.
-      // Buildings appear at z13+ (baseplates) and z14+ (extrusions) — skip when zoomed out.
-      // Pan/zoom listeners will keep re-fetching as user moves (see onViewportChange below).
+      // Step 5: JIT viewport fetch — R-Tree bbox range query, only buildings in current viewport.
+      // Buildings appear at z13+ (baseplates) and z14+ (extrusions) — skip fetch when zoomed out.
+      // moveend/zoomend listeners will keep re-fetching as user pans and zooms.
       if (map.getZoom() >= 13) {
         setReal3dLoadProgress('Loading buildings…');
         await fetchViewportBuildings(map);
