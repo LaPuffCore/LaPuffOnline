@@ -2402,17 +2402,14 @@ export default function MapView({ events, headerCollapsed = false }) {
   // Path 2 (background): Full-file fetch → Cache API → parse → ZCTA index. Persists across sessions.
   // When cache is ready, viewport render uses cached data instead of network.
 
-  // Normalize a single FGB feature's properties. Pre-computes shade indices for GPU.
-  function normalizeFGBProps(props) {
+  // Normalize a single FGB feature's properties. Uses loop index i for shade clustering
+  // so objectid/FID columns are not needed in the FGB file.
+  function normalizeFGBProps(props, i) {
     const hr = parseFloat(props?.HEIGHT_ROOF ?? props?.height_roof);
-    const ge = parseFloat(props?.GROUND_ELEVATION ?? props?.ground_elevation);
-    const oid = parseInt(props?.OBJECTID ?? props?.objectid ?? '0', 10) || 0;
     return {
       height_roof: isNaN(hr) ? 8 : hr,
-      ground_elevation: isNaN(ge) ? 0 : ge,
-      objectid: String(oid),
-      _s5: oid % 5,
-      _s7: oid % 7,
+      _s5: i % 5,
+      _s7: i % 7,
       _tier_0: 0, _tier_1: 0, _tier_2: 0, _tier_3: 0, _tier_4: 0,
     };
   }
@@ -2427,7 +2424,7 @@ export default function MapView({ events, headerCollapsed = false }) {
     let count = 0;
     for await (const feature of fgbDeserialize(buf)) {
       if (!feature?.geometry?.coordinates) continue;
-      feature.properties = normalizeFGBProps(feature.properties);
+      feature.properties = normalizeFGBProps(feature.properties, count);
       features.push(feature);
       count++;
       if (count % FGB_YIELD_CHUNK === 0) {
@@ -2615,7 +2612,7 @@ export default function MapView({ events, headerCollapsed = false }) {
       for await (const feature of fgbDeserialize(BUILDING_FGB_URL, rect)) {
         if (!feature?.geometry?.coordinates) continue;
 
-        const props = normalizeFGBProps(feature.properties);
+        const props = normalizeFGBProps(feature.properties, features.length);
 
         // Inline PiP for viewport buildings — bake all 5 tier columns using precomputed data.
         // This ensures _tier_0.._tier_4 are correct even before the full FGB cache arrives.
