@@ -2584,13 +2584,16 @@ export default function MapView({ events, headerCollapsed = false }) {
     }
   }
 
-  // Instant viewport render — fetches buildings in visible area + padding via HTTP Range.
-  // Used as fallback when full cache isn't ready yet. Padded bbox catches nearby buildings
-  // so panning doesn't show empty edges.
+  // Instant viewport render — fetches buildings in visible bbox via FGB HTTP Range request.
+  // On DESKTOP: fallback only (used before full cache arrives). Skipped once buildingFGBRef is set.
+  // On MOBILE: permanent data path — never loads full dataset. Always fetches viewport-only.
+  //   Mobile never sets buildingFGBRef, so this guard is skipped on mobile by design.
+  // Only runs at zoom >= 13 (below that, no baseplates or buildings are rendered).
   async function fetchViewportBuildings(map) {
     if (!map || !map.getStyle() || !map.getSource('fgb-buildings')) return;
-    if (map.getZoom() < 13) return; // below baseplate zoom threshold (baseplates start at z13)
-    if (buildingFGBRef.current) return; // cache is ready, no need for viewport fetch
+    if (map.getZoom() < 13) return; // baseplates start at z13, buildings at z14 — nothing to fill below
+    const isMob = window.innerWidth < 768;
+    if (!isMob && buildingFGBRef.current) return; // desktop: full cache ready, skip viewport fetch
 
     const bounds = map.getBounds();
     // Pad the viewport bbox by 50% in each direction for pan coverage
@@ -2614,8 +2617,7 @@ export default function MapView({ events, headerCollapsed = false }) {
 
         const props = normalizeFGBProps(feature.properties, features.length);
 
-        // Inline PiP for viewport buildings — bake all 5 tier columns using precomputed data.
-        // This ensures _tier_0.._tier_4 are correct even before the full FGB cache arrives.
+        // Inline PiP — bake all 5 tier columns using precomputed tiers (no full ZCTA index needed).
         const precomputed = precomputedTiersRef.current;
         if (zctaFeatures?.length && (tiers?.length || precomputed)) {
           const centroid = getGeomCentroid(feature.geometry);
@@ -2632,7 +2634,6 @@ export default function MapView({ events, headerCollapsed = false }) {
           if (foundZctaIdx >= 0) {
             for (let t = 0; t < TIMESPAN_STEPS.length; t++) {
               const trs = precomputed?.[t]?.tiers;
-              // Fallback to current timespan tiers if precomputed not ready for this slot
               const tierVal = (trs && trs.length > foundZctaIdx) ? (trs[foundZctaIdx] ?? 0)
                 : (t === (timespanIdxRef.current ?? 4) ? (tiers?.[foundZctaIdx] ?? 0) : 0);
               props[`_tier_${t}`] = Math.max(0, tierVal);
@@ -2645,10 +2646,11 @@ export default function MapView({ events, headerCollapsed = false }) {
         features.push(feature);
       }
 
-      // Only set data if cache hasn't arrived in the meantime
-      if (!buildingFGBRef.current && map.getSource('fgb-buildings') && map.getStyle()) {
+      // Desktop: skip if full cache arrived while we were fetching
+      if (!isMob && buildingFGBRef.current) return;
+
+      if (map.getSource('fgb-buildings') && map.getStyle()) {
         map.getSource('fgb-buildings').setData({ type: 'FeatureCollection', features });
-        // Refresh paint so GPU reads updated _tier_X columns immediately
         if (real3DRef.current) refreshBuildingColors();
       }
     } catch (err) {
@@ -2753,17 +2755,15 @@ export default function MapView({ events, headerCollapsed = false }) {
     if (map.getLayer('real3d-roads-motorway')) map.moveLayer('real3d-roads-motorway');
     if (map.getLayer('borough-outline')) map.moveLayer('borough-outline');
 
-    // Deferred data loading — does not block Real3D toggle
+    // Deferred data loading — does not block Real3D toggle.
+    // Desktop: use full cache if ready, else fall back to viewport fetch.
+    // Mobile: always go straight to viewport fetch (never loads full cache).
     setTimeout(() => {
       if (!map.getSource('fgb-buildings')) return;
-      if (buildingFGBRef.current) {
+      const isMob = window.innerWidth < 768;
+      if (!isMob && buildingFGBRef.current) {
         if (!buildingTiersBakedRef.current && buildingZctaMapRef.current && precomputedTiersRef.current) {
-          const isMob = window.innerWidth < 768;
-          if (isMob) {
-            bakeAllTiersIntoBuildings(true);
-          } else {
-            bakeAllTiersIntoBuildings();
-          }
+          bakeAllTiersIntoBuildings();
         } else {
           map.getSource('fgb-buildings').setData(buildingFGBRef.current);
           refreshBuildingColors();
@@ -2928,14 +2928,15 @@ export default function MapView({ events, headerCollapsed = false }) {
       return;
     }
 
-    // Mobile: gated async path — show loading popup, defer heavy work
+    // Mobile: gated async path — show loading popup, then do viewport-only fetch.
+    // NEVER loads full FGB dataset on mobile — avoids the ~300MB peak memory spike that crashes WebKit.
     let cancelled = false;
     (async () => {
       setReal3dLoading(true);
       setReal3dLoadProgress('Preparing Real3D layers…');
       await new Promise(r => setTimeout(r, 50)); // let UI render the popup
 
-      // Step 1: Create layers if needed (lightweight — just WebGL setup)
+      // Step 1: Create layers if needed (lightweight — just WebGL setup, no data)
       if (!real3dLayersCreatedRef.current) {
         initReal3DLayers(map, isHm, timespanIdxRef.current ?? 4);
       } else {
@@ -2943,36 +2944,25 @@ export default function MapView({ events, headerCollapsed = false }) {
       }
       if (cancelled) return;
 
-      // Step 2: Start camera transition early so user sees something
+      // Step 2: Camera transition — user sees the 3D view immediately
       map.setLight({ anchor: 'map' });
       map.easeTo({ pitch: 55, bearing: -17, duration: 700 });
       await new Promise(r => setTimeout(r, 100));
       if (cancelled) return;
 
-      // Step 3: Load FGB data if not already cached
-      if (!buildingFGBRef.current) {
-        setReal3dLoadProgress('Loading building data…');
-        await buildFGBCache();
-        if (cancelled) return;
-      }
-
-      // Step 4: Bake tiers (async with yielding on mobile)
-      if (!buildingTiersBakedRef.current && buildingFGBRef.current && buildingZctaMapRef.current && precomputedTiersRef.current) {
-        setReal3dLoadProgress('Baking building colors…');
-        await bakeAllTiersIntoBuildings(true); // async mode
-        if (cancelled) return;
-      } else if (buildingFGBRef.current) {
-        // Data loaded but precomputed tiers not ready — push unbaked data
-        if (map.getSource('fgb-buildings') && map.getStyle()) {
-          map.getSource('fgb-buildings').setData(buildingFGBRef.current);
-        }
-        refreshBuildingColors();
-      }
-
-      // Step 5: Apply road colors
+      // Step 3: Apply road colors
       if (map.getLayer('real3d-roads-motorway')) map.setPaintProperty('real3d-roads-motorway', 'line-color', isHm ? '#884400' : '#ff2200');
       if (map.getLayer('real3d-roads-primary')) map.setPaintProperty('real3d-roads-primary', 'line-color', isHm ? '#662200' : '#cc1800');
       if (map.getLayer('real3d-roads-tertiary')) map.setPaintProperty('real3d-roads-tertiary', 'line-color', isHm ? '#553300' : '#771100');
+
+      // Step 4: Fetch buildings for current viewport — small bbox Range request, ~100-500 features.
+      // Buildings only appear at z13+ (baseplates) and z14+ (extrusions), so this is a no-op at far zoom.
+      // Pan/zoom listeners will keep fetching as the user moves (see onViewportChange below).
+      if (map.getZoom() >= 13) {
+        setReal3dLoadProgress('Loading buildings…');
+        await fetchViewportBuildings(map);
+      }
+      if (cancelled) return;
 
       setReal3dLoading(false);
       setReal3dLoadProgress('');
@@ -2981,20 +2971,21 @@ export default function MapView({ events, headerCollapsed = false }) {
     return () => { cancelled = true; };
   }, [real3D, mapReady]);
 
-  // Heatmap toggle in Real3D — swap paint expressions (GPU-only, instant)
+  // Heatmap toggle in Real3D — swap paint expressions (GPU-only on desktop, viewport re-fetch on mobile)
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady || !real3D) return;
-    // Safety: if tiers not yet baked but all prerequisites exist, bake now
-    if (!buildingTiersBakedRef.current && buildingFGBRef.current && buildingZctaMapRef.current && precomputedTiersRef.current) {
-      const isMob = window.innerWidth < 768;
-      if (isMob) {
-        bakeAllTiersIntoBuildings(true).then(() => refreshBuildingColors());
-      } else {
-        bakeAllTiersIntoBuildings();
-      }
+    const isMob = window.innerWidth < 768;
+    if (isMob) {
+      // Mobile: re-fetch viewport so tier columns are re-baked with current heatmap context
+      if (map.getZoom() >= 13) fetchViewportBuildings(map);
     } else {
-      refreshBuildingColors();
+      // Desktop: safety bake if prerequisites exist but not yet baked, else GPU-only refresh
+      if (!buildingTiersBakedRef.current && buildingFGBRef.current && buildingZctaMapRef.current && precomputedTiersRef.current) {
+        bakeAllTiersIntoBuildings();
+      } else {
+        refreshBuildingColors();
+      }
     }
     if (map.getLayer('real3d-roads-motorway')) {
       map.setPaintProperty('real3d-roads-motorway', 'line-color', heatmap ? '#884400' : '#ff2200');
@@ -3010,21 +3001,22 @@ export default function MapView({ events, headerCollapsed = false }) {
     }
   }, [heatmap, real3D, mapReady]);
 
-  // Timespan change in Real3D — swap which _tier_X column the paint reads (GPU-only, instant)
+  // Timespan change in Real3D — GPU column swap on desktop, viewport re-fetch on mobile
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady || !real3D) return;
     if (!heatmapRef.current) return;
-    // Safety: if tiers not yet baked but all prerequisites exist, bake now
-    if (!buildingTiersBakedRef.current && buildingFGBRef.current && buildingZctaMapRef.current && precomputedTiersRef.current) {
-      const isMob = window.innerWidth < 768;
-      if (isMob) {
-        bakeAllTiersIntoBuildings(true).then(() => refreshBuildingColors());
-      } else {
-        bakeAllTiersIntoBuildings();
-      }
+    const isMob = window.innerWidth < 768;
+    if (isMob) {
+      // Mobile: re-fetch viewport to rebake with updated timespanIdx
+      if (map.getZoom() >= 13) fetchViewportBuildings(map);
     } else {
-      refreshBuildingColors();
+      // Desktop: safety bake if needed, else GPU-only column swap
+      if (!buildingTiersBakedRef.current && buildingFGBRef.current && buildingZctaMapRef.current && precomputedTiersRef.current) {
+        bakeAllTiersIntoBuildings();
+      } else {
+        refreshBuildingColors();
+      }
     }
   }, [timespanIdx, real3D, mapReady]);
 
