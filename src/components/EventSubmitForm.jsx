@@ -18,7 +18,7 @@ export default function EventSubmitForm({ onClose }) {
     name: '', event_name: '', price_category: 'free',
     location_type: 'address',
     location_data: { city: 'New York', address: '', zipcode: '', rsvp_link: '' },
-    event_date: '', event_time: '', timezone: userTz,
+    event_date: '', event_time: '', event_end_time: '', timezone: userTz,
     relevant_links: [''], description: '', emoji: '🎉', color: '#7C3AED',
   });
   const [photoFiles, setPhotoFiles] = useState([]);
@@ -66,6 +66,9 @@ export default function EventSubmitForm({ onClose }) {
         : { ...form.location_data },
       event_date: form.event_date,
       event_time_utc: localToUTC(form.event_date, form.event_time, form.timezone.offset),
+      event_time_utc_end: form.event_end_time
+        ? localToUTC(form.event_date, form.event_end_time, form.timezone.offset)
+        : null,
       relevant_links: form.relevant_links.filter(l => l.trim()) || null,
       description: form.description,
       photos: photoUrls.length ? photoUrls : null,
@@ -221,20 +224,27 @@ export default function EventSubmitForm({ onClose }) {
                     {errors.event_date && <p className="text-red-500 text-xs mt-1">⚠ {errors.event_date}</p>}
                   </div>
                   <div>
-                    <label className="block text-xs font-black uppercase mb-1">Time *</label>
+                    <label className="block text-xs font-black uppercase mb-1">Start Time *</label>
                     <input type="time" value={form.event_time} onChange={e => setField('event_time', e.target.value)}
                       className={`w-full border-3 ${errors.event_time ? 'border-red-500' : 'border-black'} rounded-2xl px-3 py-2.5 text-sm font-medium focus:outline-none shadow-[3px_3px_0px_black]`} />
                     {errors.event_time && <p className="text-red-500 text-xs mt-1">⚠ {errors.event_time}</p>}
                   </div>
                 </div>
 
-                {/* Timezone */}
-                <div>
-                  <label className="block text-xs font-black uppercase mb-1">Timezone</label>
-                  <select value={form.timezone.value} onChange={e => setField('timezone', TIMEZONES.find(t => t.value === e.target.value))}
-                    className="w-full border-3 border-black rounded-2xl px-3 py-2.5 text-sm font-bold bg-white shadow-[3px_3px_0px_black] focus:outline-none">
-                    {TIMEZONES.map(tz => <option key={tz.value} value={tz.value}>{tz.label}</option>)}
-                  </select>
+                {/* Timezone + End Time */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-black uppercase mb-1">Timezone</label>
+                    <select value={form.timezone.value} onChange={e => setField('timezone', TIMEZONES.find(t => t.value === e.target.value))}
+                      className="w-full border-3 border-black rounded-2xl px-3 py-2.5 text-sm font-bold bg-white shadow-[3px_3px_0px_black] focus:outline-none">
+                      {TIMEZONES.map(tz => <option key={tz.value} value={tz.value}>{tz.label}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-black uppercase mb-1">End Time</label>
+                    <input type="time" value={form.event_end_time} onChange={e => setField('event_end_time', e.target.value)}
+                      className="w-full border-3 border-black rounded-2xl px-3 py-2.5 text-sm font-medium focus:outline-none shadow-[3px_3px_0px_black]" />
+                  </div>
                 </div>
 
                 {/* Description */}

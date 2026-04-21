@@ -9,6 +9,8 @@ import { useNavigate } from 'react-router-dom';
 import { awardPoints, POINTS, isEligibleForPoints } from '../lib/pointsSystem';
 import { getValidSession } from '../lib/supabaseAuth';
 import { getTileAccentColor, useSiteTheme } from '../lib/theme';
+import { pingLocation, isWithin750ft, markCheckedIn, isCheckedIn, isAutoPingEnabled, setAutoPingEnabled } from '../lib/locationService';
+import { isCheckInWindowOpen } from '../lib/eventUtils';
 
 function MiniMap({ lat, lng, address, city, borderColor, textColor }) {
   const [loaded, setLoaded] = useState(false);
@@ -77,6 +79,12 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
   const [isMobile, setIsMobile] = useState(false);
   const [imageIdx, setImageIdx] = useState(0);
   const touchStartX = useRef(null);
+
+  // Check-in state
+  const [showCheckInMenu, setShowCheckInMenu] = useState(false);
+  const [checkInResult, setCheckInResult] = useState(null); // { type: 'success'|'error'|'info', msg }
+  const [checkInLoading, setCheckInLoading] = useState(false);
+  const [autoPingOn, setAutoPingOn] = useState(() => isAutoPingEnabled());
 
   const tags = generateAutoTags(event);
   const borderColor = getTileAccentColor(event.hex_color, resolvedTheme);
@@ -187,6 +195,61 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
         initialView: 'weekly'
       } 
     });
+  };
+
+  const handleManualCheckIn = async () => {
+    setCheckInLoading(true);
+    setCheckInResult(null);
+    try {
+      const now = Date.now();
+      const start = event.event_time_utc ? new Date(event.event_time_utc).getTime() : null;
+      if (!start || now < start) {
+        setCheckInResult({ type: 'error', msg: '⏳ Event not yet started' });
+        return;
+      }
+      if (!isCheckInWindowOpen(event)) {
+        setCheckInResult({ type: 'error', msg: '🕐 This event has already ended' });
+        return;
+      }
+      const eLat = event.location_data?.lat ?? event.lat;
+      const eLng = event.location_data?.lng ?? event.lng;
+      if (!eLat || !eLng) {
+        setCheckInResult({ type: 'error', msg: '📍 No location set for this event' });
+        return;
+      }
+      const loc = await pingLocation();
+      if (!isWithin750ft(loc.lat, loc.lng, eLat, eLng)) {
+        setCheckInResult({ type: 'error', msg: '📡 You are not in range of the event' });
+        return;
+      }
+      markCheckedIn(event.id);
+      const session = await getValidSession();
+      if (isEligibleForPoints(session)) {
+        awardPoints(session, POINTS.EVENT_ATTEND_CHECKIN, `Event check-in: ${event.event_name}`);
+      }
+      setCheckInResult({ type: 'success', msg: '✅ You have checked in!' });
+    } catch (err) {
+      setCheckInResult({ type: 'error', msg: '📍 Could not get your location — please allow location access' });
+    } finally {
+      setCheckInLoading(false);
+    }
+  };
+
+  const handleToggleAutoPing = async () => {
+    if (!autoPingOn) {
+      try {
+        await pingLocation(); // triggers browser permission prompt
+        setAutoPingEnabled(true);
+        setAutoPingOn(true);
+        setCheckInResult({ type: 'info', msg: '✅ AutoPing enabled — open this site and refresh twice 30 minutes apart to check into any event' });
+      } catch {
+        setCheckInResult({ type: 'error', msg: '📍 Location permission required for AutoPing' });
+      }
+    } else {
+      setAutoPingEnabled(false);
+      setAutoPingOn(false);
+      setCheckInResult({ type: 'info', msg: '⏸ AutoPing disabled' });
+    }
   };
 
   const displayTime = event.event_time_utc ? utcToLocal(event.event_time_utc, getUserTZOffset()) : '';
@@ -363,6 +426,63 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
                     </a>
                   ))}
                 </div>
+              </div>
+            )}
+
+            {/* Location Check-In — user/sample events only, not auto events */}
+            {!event._auto && (
+              <div className="border-t-4 border-black pt-6 mt-2 relative">
+                {/* Result message */}
+                {checkInResult && (
+                  <div className={`mb-3 px-3 py-2 rounded-xl border-2 text-xs font-black ${
+                    checkInResult.type === 'success' ? 'bg-green-50 border-green-400 text-green-700'
+                    : checkInResult.type === 'info' ? 'bg-blue-50 border-blue-300 text-blue-700'
+                    : 'bg-red-50 border-red-300 text-red-700'
+                  }`}>
+                    {checkInResult.msg}
+                  </div>
+                )}
+
+                {/* Upward dropdown */}
+                {showCheckInMenu && (
+                  <div className="absolute bottom-full mb-2 left-0 right-0 bg-white border-3 border-black rounded-2xl shadow-[5px_5px_0px_black] overflow-hidden z-10">
+                    <button
+                      onClick={() => { handleManualCheckIn(); setShowCheckInMenu(false); }}
+                      disabled={checkInLoading || isCheckedIn(event.id)}
+                      className="w-full px-4 py-3 text-left text-xs font-black flex items-center gap-2 border-b-2 border-gray-100 hover:bg-gray-50 transition-colors disabled:opacity-50"
+                    >
+                      <span>📍</span>
+                      <span>{isCheckedIn(event.id) ? 'Already Checked In ✓' : checkInLoading ? 'Getting location…' : 'Manual Check In'}</span>
+                    </button>
+                    <button
+                      onClick={handleToggleAutoPing}
+                      className="w-full px-4 py-3 text-left text-xs font-black flex flex-col gap-0.5 hover:bg-gray-50 transition-colors"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span>📡</span>
+                        <span className="flex-1">Auto-Ping Events</span>
+                        <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full ${autoPingOn ? 'bg-green-500 text-white' : 'bg-gray-200 text-gray-500'}`}>
+                          {autoPingOn ? 'ON' : 'OFF'}
+                        </span>
+                      </div>
+                      <p className="text-[9px] text-red-500 font-bold ml-6 leading-tight">
+                        Turn on to enable location and auto-ping an event by refreshing the site 30 minutes apart while at any event
+                      </p>
+                    </button>
+                  </div>
+                )}
+
+                {/* Main toggle button */}
+                <button
+                  onClick={() => setShowCheckInMenu(v => !v)}
+                  className="w-full flex items-center justify-between p-3 sm:p-4 bg-gray-50 border-[2.5px] border-black rounded-xl transition-all group shadow-[4px_4px_0px_black] hover:bg-black hover:text-white active:translate-x-0.5 active:translate-y-0.5 active:shadow-none"
+                  style={isCheckedIn(event.id) ? { borderColor: '#22c55e', backgroundColor: '#f0fdf4' } : {}}
+                >
+                  <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-tighter">
+                    {isCheckedIn(event.id) ? '✅ CHECKED IN' : '📍 LOCATION CHECK IN'}
+                  </span>
+                  <span className="text-lg sm:text-xl transition-transform">{showCheckInMenu ? '↓' : '↑'}</span>
+                </button>
               </div>
             )}
 

@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { generateAutoTags } from '../lib/autoTags';
+import { isEventHappeningNow } from '../lib/eventUtils';
 import EmojiPicker from './EmojiPicker';
 import EventTile, { TrendIcon } from './EventTile';
 import EventDetailPopup from './EventDetailPopup';
@@ -259,6 +260,8 @@ export default function TileView({ events, eventsLoading = false }) {
     let list = events.filter(e => {
       const ed = new Date(e.event_date + 'T00:00:00');
       if (showArchive) return ed < now;
+      // Always show events that are happening right now, even if date is past
+      if (isEventHappeningNow(e)) return true;
       return ed >= now && ed <= maxDate;
     });
 

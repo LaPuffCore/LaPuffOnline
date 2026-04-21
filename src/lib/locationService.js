@@ -114,6 +114,102 @@ export const requestLocation = pingLocation;
 export function startWatching() {}
 export function stopWatching() {}
 
+// ─── CHECK-IN RADIUS ─────────────────────────────────────────────────────────
+// 750 feet ≈ 228.6 meters
+const CHECKIN_RADIUS_M = 229;
+
+export function isWithin750ft(userLat, userLng, eventLat, eventLng) {
+  return haversine(userLat, userLng, eventLat, eventLng) <= CHECKIN_RADIUS_M;
+}
+
+// ─── CHECKED-IN EVENTS CACHE ──────────────────────────────────────────────────
+const CHECKED_IN_KEY = 'lapuff_checked_in';
+
+export function getCheckedInEvents() {
+  try { return new Set(JSON.parse(localStorage.getItem(CHECKED_IN_KEY) || '[]')); }
+  catch { return new Set(); }
+}
+
+export function markCheckedIn(eventId) {
+  const set = getCheckedInEvents();
+  set.add(String(eventId));
+  localStorage.setItem(CHECKED_IN_KEY, JSON.stringify([...set]));
+}
+
+export function isCheckedIn(eventId) {
+  return getCheckedInEvents().has(String(eventId));
+}
+
+// ─── AUTO-PING SYSTEM ─────────────────────────────────────────────────────────
+const AUTOPINGS_KEY = 'lapuff_autopings';
+const AUTOPINGS_ENABLED_KEY = 'lapuff_autopings_enabled';
+const AUTOPINGS_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24h
+const AUTOPINGS_MIN_INTERVAL_MS = 30 * 60 * 1000;  // 30min apart
+
+export function isAutoPingEnabled() {
+  return localStorage.getItem(AUTOPINGS_ENABLED_KEY) === 'true';
+}
+
+export function setAutoPingEnabled(val) {
+  localStorage.setItem(AUTOPINGS_ENABLED_KEY, val ? 'true' : 'false');
+}
+
+function getStoredPings() {
+  try { return JSON.parse(localStorage.getItem(AUTOPINGS_KEY) || '[]'); }
+  catch { return []; }
+}
+
+function storePing(ping) {
+  const now = Date.now();
+  const prev = getStoredPings().filter(p => now - p.timestamp < AUTOPINGS_MAX_AGE_MS);
+  prev.push({ lat: ping.lat, lng: ping.lng, timestamp: now });
+  localStorage.setItem(AUTOPINGS_KEY, JSON.stringify(prev));
+  return prev;
+}
+
+/**
+ * Run on page load when auto-ping is enabled.
+ * Pings location, stores it, checks for 2 pings ≥30min apart near active events → auto check-in.
+ * @param {Array} events - all current events
+ * @param {any} session - auth session (may be null)
+ * @param {Function} onCheckIn - callback(event) when auto check-in happens
+ */
+export async function runAutoPingScan(events, session, onCheckIn) {
+  if (!isAutoPingEnabled()) return;
+  try {
+    const loc = await pingLocation();
+    const pings = storePing(loc);
+    const { isEventHappeningNow } = await import('./eventUtils.js');
+    const { awardPoints, POINTS, isEligibleForPoints } = await import('./pointsSystem.js');
+
+    for (const event of events) {
+      if (event._auto) continue;
+      if (isCheckedIn(event.id)) continue;
+      if (!isEventHappeningNow(event)) continue;
+      const eLat = event.location_data?.lat ?? event.lat;
+      const eLng = event.location_data?.lng ?? event.lng;
+      if (!eLat || !eLng) continue;
+
+      const nearPings = pings.filter(p => isWithin750ft(p.lat, p.lng, eLat, eLng));
+      if (nearPings.length < 2) continue;
+
+      // Check two pings are ≥30min apart
+      const sorted = nearPings.slice().sort((a, b) => a.timestamp - b.timestamp);
+      const hasInterval = sorted[sorted.length - 1].timestamp - sorted[0].timestamp >= AUTOPINGS_MIN_INTERVAL_MS;
+      if (!hasInterval) continue;
+
+      // Auto check-in!
+      markCheckedIn(event.id);
+      if (isEligibleForPoints(session)) {
+        awardPoints(session, POINTS.EVENT_ATTEND_CHECKIN, `Auto check-in: ${event.event_name}`);
+      }
+      onCheckIn?.(event);
+    }
+  } catch {
+    // Silently fail if location denied or not available
+  }
+}
+
 /**
  * When user becomes participant while signed in, mark favorite contributions.
  * Frontend will then call awardPoints() with calculated amount.

@@ -14,6 +14,8 @@ import PageNotFound from './lib/PageNotFound';
 import { AuthProvider, useAuth } from './lib/AuthContext'; // Fixed @ alias
 import { ThemeProvider } from './lib/theme';
 import { hydrateFavoriteEventCache } from './lib/favorites';
+import { runAutoPingScan } from './lib/locationService';
+import { getValidSession } from './lib/supabaseAuth';
 import CustomCursorOverlay from './components/CustomCursorOverlay';
 // Add page imports here
 import Home from './pages/Home';
@@ -120,6 +122,16 @@ function AppWithEvents() {
 
   useEffect(() => {
     hydrateFavoriteEventCache(events);
+  }, [events]);
+
+  useEffect(() => {
+    if (!events.length) return;
+    // Auto-ping scan: runs once when events are loaded, silently skips if disabled
+    getValidSession().then(session => {
+      runAutoPingScan(events, session, (event) => {
+        console.info(`[AutoPing] Auto-checked into: ${event.event_name}`);
+      });
+    });
   }, [events]);
 
   return (

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { generateAutoTags } from '../lib/autoTags';
+import { isEventHappeningNow } from '../lib/eventUtils';
 import { toggleFavorite, isFavorite, getFavoriteCount, getFavTrend, subscribeToFavoriteCount } from '../lib/favorites';
 import { getUserTZOffset, utcToLocal } from '../lib/timezones';
 import { TAG_COLORS } from '../lib/tagColors';
@@ -45,6 +46,7 @@ export default function EventTile({ event, onClick, onTagClick }) {
 
   // Normalization: 7-day expiry logic matches Popup exactly
   const isExpired = event.event_date && (Date.now() - new Date(event.event_date + 'T00:00:00').getTime()) > 7 * 86400000;
+  const happeningNow = isEventHappeningNow(event);
   const showImage = event.photos?.length > 0 && !imgError && !isExpired;
 
   useEffect(() => {
@@ -156,6 +158,13 @@ export default function EventTile({ event, onClick, onTagClick }) {
         <div className="absolute top-2 left-2 w-9 h-9 bg-white rounded-full border-[2.5px] border-black flex items-center justify-center text-base shadow-[2px_2px_0px_black] select-none">
           {event.representative_emoji || '🎉'}
         </div>
+
+        {happeningNow && (
+          <div className="absolute top-2 left-12 flex items-center gap-1 bg-green-500 text-white text-[9px] font-black px-2 py-0.5 rounded-full shadow-[2px_2px_0px_rgba(0,0,0,0.4)] animate-pulse select-none">
+            <span className="w-1.5 h-1.5 bg-white rounded-full inline-block flex-shrink-0"/>
+            LIVE
+          </div>
+        )}
       </div>
 
       {/* Info Section: Normalizing vertical lines */}

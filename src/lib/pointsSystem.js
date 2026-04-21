@@ -5,6 +5,7 @@ const SUPABASE_URL = 'https://gazuabyyugbbthonqnsp.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_tLCmZUz3bgISgxs4KVq28g_x36Xo6Cp';
 
 export const POINTS = {
+  EVENT_ATTEND_CHECKIN: 300,    // Highest — real-life attendance verified by GPS
   SELF_CHECKIN: 150,            
   ATTENDEE_TO_ORGANIZER: 80,    
   REFERRAL_SUCCESS: 50,         
