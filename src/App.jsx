@@ -65,10 +65,11 @@ function AppWithEvents() {
 
         if (!mounted) return;
 
-        // Merge: user/sample events first, auto-scraped events appended
-        const baseEvents = dbEvents && dbEvents.length > 0
-          ? dbEvents
-          : SAMPLE_MODE ? SAMPLE_EVENTS : [];
+        // In SAMPLE_MODE, always use SAMPLE_EVENTS directly — they have correct lat/lng and
+        // include all current test events. DB sync still runs for heatmap/colonist counting.
+        const baseEvents = SAMPLE_MODE
+          ? SAMPLE_EVENTS
+          : (dbEvents && dbEvents.length > 0 ? dbEvents : []);
 
         // Enrich DB events with lat/lng from sample data if missing (DB rows
         // inserted before the lat/lng columns were added won't have coords)

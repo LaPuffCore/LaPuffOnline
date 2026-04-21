@@ -184,8 +184,8 @@ export default function Home({ events = [], eventsLoading = false }) {
     setShowLeaderboard(false);
     if (!mapAutoPlayedRef.current) {
       mapAutoPlayedRef.current = true;
-      // setTimeout satisfies browser autoplay policy — the preceding click IS the user gesture
-      setTimeout(triggerCloutCullingGames, 300);
+      // Call immediately — staying in the same click event tick satisfies browser autoplay policy
+      triggerCloutCullingGames();
     }
   }
 
@@ -222,29 +222,68 @@ export default function Home({ events = [], eventsLoading = false }) {
               <ParticipantDot />
             </button>
 
-            {/* View Toggles - Scaled for mobile */}
-            <div className="bg-gray-100 border-2 md:border-3 border-black rounded-xl md:rounded-2xl p-0.5 md:p-1 flex shadow-[2px_2px_0px_black] md:shadow-[3px_3px_0px_black] scale-90 md:scale-100">
-              <button onClick={() => { setView('tiles'); setShowLeaderboard(false); setShowHeader(true); }}
-                className="px-2.5 py-1.5 md:px-4 md:py-2 rounded-lg md:rounded-xl text-xs md:text-sm font-black transition-all"
-                style={view === 'tiles' && !showLeaderboard ? { backgroundColor: accentColor, color: '#fff', boxShadow: '1px 1px 0px #333' } : {}}
-                onMouseEnter={e => { if (!(view === 'tiles' && !showLeaderboard)) e.currentTarget.style.backgroundColor = accentColor + '30'; }}
-                onMouseLeave={e => { if (!(view === 'tiles' && !showLeaderboard)) e.currentTarget.style.backgroundColor = ''; }}>
-                🎴 Tiles
-              </button>
-              <button onClick={handleMapClick}
-                className="px-2.5 py-1.5 md:px-4 md:py-2 rounded-lg md:rounded-xl text-xs md:text-sm font-black transition-all"
-                style={view === 'map' && !showLeaderboard ? { backgroundColor: accentColor, color: '#fff', boxShadow: '1px 1px 0px #333' } : {}}
-                onMouseEnter={e => { if (!(view === 'map' && !showLeaderboard)) e.currentTarget.style.backgroundColor = accentColor + '30'; }}
-                onMouseLeave={e => { if (!(view === 'map' && !showLeaderboard)) e.currentTarget.style.backgroundColor = ''; }}>
-                🗺️ Map
-              </button>
-              <button onClick={() => setShowLeaderboard(v => !v)}
-                className="px-2.5 py-1.5 md:px-4 md:py-2 rounded-lg md:rounded-xl text-xs md:text-sm font-black transition-all flex items-center gap-1"
-                style={showLeaderboard ? { backgroundColor: accentColor, color: '#fff', boxShadow: '1px 1px 0px #333' } : {}}
-                onMouseEnter={e => { if (!showLeaderboard) e.currentTarget.style.backgroundColor = accentColor + '30'; }}
-                onMouseLeave={e => { if (!showLeaderboard) e.currentTarget.style.backgroundColor = ''; }}>
-                🏆 Top
-              </button>
+            {/* View Toggles + Desktop Music — grouped together in center */}
+            <div className="flex items-center gap-2 scale-90 md:scale-100">
+              <div className="bg-gray-100 border-2 md:border-3 border-black rounded-xl md:rounded-2xl p-0.5 md:p-1 flex shadow-[2px_2px_0px_black] md:shadow-[3px_3px_0px_black]">
+                <button onClick={() => { setView('tiles'); setShowLeaderboard(false); setShowHeader(true); }}
+                  className="px-2.5 py-1.5 md:px-4 md:py-2 rounded-lg md:rounded-xl text-xs md:text-sm font-black transition-all"
+                  style={view === 'tiles' && !showLeaderboard ? { backgroundColor: accentColor, color: '#fff', boxShadow: '1px 1px 0px #333' } : {}}
+                  onMouseEnter={e => { if (!(view === 'tiles' && !showLeaderboard)) e.currentTarget.style.backgroundColor = accentColor + '30'; }}
+                  onMouseLeave={e => { if (!(view === 'tiles' && !showLeaderboard)) e.currentTarget.style.backgroundColor = ''; }}>
+                  🎴 Tiles
+                </button>
+                <button onClick={handleMapClick}
+                  className="px-2.5 py-1.5 md:px-4 md:py-2 rounded-lg md:rounded-xl text-xs md:text-sm font-black transition-all"
+                  style={view === 'map' && !showLeaderboard ? { backgroundColor: accentColor, color: '#fff', boxShadow: '1px 1px 0px #333' } : {}}
+                  onMouseEnter={e => { if (!(view === 'map' && !showLeaderboard)) e.currentTarget.style.backgroundColor = accentColor + '30'; }}
+                  onMouseLeave={e => { if (!(view === 'map' && !showLeaderboard)) e.currentTarget.style.backgroundColor = ''; }}>
+                  🗺️ Map
+                </button>
+                <button onClick={() => setShowLeaderboard(v => !v)}
+                  className="px-2.5 py-1.5 md:px-4 md:py-2 rounded-lg md:rounded-xl text-xs md:text-sm font-black transition-all flex items-center gap-1"
+                  style={showLeaderboard ? { backgroundColor: accentColor, color: '#fff', boxShadow: '1px 1px 0px #333' } : {}}
+                  onMouseEnter={e => { if (!showLeaderboard) e.currentTarget.style.backgroundColor = accentColor + '30'; }}
+                  onMouseLeave={e => { if (!showLeaderboard) e.currentTarget.style.backgroundColor = ''; }}>
+                  🏆 Top
+                </button>
+              </div>
+
+              {/* Desktop Music Button — square, just right of nav toggles */}
+              <div className="relative hidden md:block" ref={musicDesktopRef}>
+                <button
+                  onClick={() => setShowMusicMenu(v => !v)}
+                  className="w-9 h-9 md:w-10 md:h-10 flex items-center justify-center rounded-xl border-2 md:border-3 border-black bg-white shadow-[2px_2px_0px_black] md:shadow-[3px_3px_0px_black] transition-all hover:scale-105"
+                  title="Radio"
+                  style={isMusicOn ? { borderColor: accentColor, boxShadow: `3px 3px 0px ${accentColor}`, color: accentColor } : {}}>
+                  {/* Single music note SVG */}
+                  <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16" style={isMusicOn ? { filter: `drop-shadow(0 0 3px ${accentColor})` } : {}}>
+                    <path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6z"/>
+                  </svg>
+                </button>
+                {showMusicMenu && (
+                  <div className="absolute left-0 top-full mt-2 z-[200] w-52 bg-white border-3 border-black rounded-2xl shadow-[5px_5px_0px_black] overflow-hidden">
+                    <div className="px-3 py-2 border-b-2 border-gray-100">
+                      <p className="font-black text-[10px] text-gray-400 uppercase tracking-widest">Radio</p>
+                    </div>
+                    <button
+                      onClick={() => { triggerCloutCullingGames(); setShowMusicMenu(false); }}
+                      className="w-full px-3 py-2.5 text-left text-xs font-black hover:bg-gray-50 flex items-center gap-2 border-b border-gray-100 transition-colors"
+                      style={currentMode === 'clout' ? { color: accentColor } : {}}>
+                      <span>🎮</span>
+                      <span className="flex-1">Clout Culling Games</span>
+                      {currentMode === 'clout' && isMusicOn && <span className="text-[8px] animate-pulse" style={{ color: accentColor }}>▶</span>}
+                    </button>
+                    <button
+                      onClick={() => { stopMusic(); setShowMusicMenu(false); }}
+                      className="w-full px-3 py-2.5 text-left text-xs font-black hover:bg-gray-50 flex items-center gap-2 transition-colors"
+                      style={!isMusicOn ? { color: accentColor } : { color: '#9ca3af' }}>
+                      <span>⏹</span>
+                      <span className="flex-1">Off</span>
+                      {!isMusicOn && <span className="text-[8px]">✓</span>}
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Desktop Actions / Mobile Hamburger */}
@@ -298,42 +337,6 @@ export default function Home({ events = [], eventsLoading = false }) {
                 )}
               </div>
               <HamburgerMenu events={events} user={user} onAuthClick={() => setShowAuth(true)} />
-
-              {/* ── Desktop Music Button (ghost player) ── */}
-              <div className="relative hidden md:block" ref={musicDesktopRef}>
-                <button
-                  onClick={() => setShowMusicMenu(v => !v)}
-                  className="w-10 h-10 flex items-center justify-center rounded-full border-3 border-black bg-white shadow-[2px_2px_0px_black] transition-all hover:scale-105"
-                  title="Radio"
-                  style={isMusicOn ? { borderColor: accentColor, boxShadow: `2px 2px 0px ${accentColor}` } : {}}>
-                  <span className="text-base" style={isMusicOn ? { filter: `drop-shadow(0 0 4px ${accentColor})` } : {}}>
-                    {isMusicOn ? '🎶' : '🎵'}
-                  </span>
-                </button>
-                {showMusicMenu && (
-                  <div className="absolute right-0 top-full mt-2 z-[200] w-52 bg-white border-3 border-black rounded-2xl shadow-[5px_5px_0px_black] overflow-hidden">
-                    <div className="px-3 py-2 border-b-2 border-gray-100">
-                      <p className="font-black text-[10px] text-gray-400 uppercase tracking-widest">🎵 Radio</p>
-                    </div>
-                    <button
-                      onClick={() => { triggerCloutCullingGames(); setShowMusicMenu(false); }}
-                      className="w-full px-3 py-2.5 text-left text-xs font-black hover:bg-gray-50 flex items-center gap-2 border-b border-gray-100 transition-colors"
-                      style={currentMode === 'clout' ? { color: accentColor } : {}}>
-                      <span>🎮</span>
-                      <span className="flex-1">Clout Culling Games</span>
-                      {currentMode === 'clout' && isMusicOn && <span className="text-[8px] animate-pulse" style={{ color: accentColor }}>▶</span>}
-                    </button>
-                    <button
-                      onClick={() => { stopMusic(); setShowMusicMenu(false); }}
-                      className="w-full px-3 py-2.5 text-left text-xs font-black hover:bg-gray-50 flex items-center gap-2 transition-colors"
-                      style={!isMusicOn ? { color: accentColor } : { color: '#9ca3af' }}>
-                      <span>⏹</span>
-                      <span className="flex-1">Off</span>
-                      {!isMusicOn && <span className="text-[8px]">✓</span>}
-                    </button>
-                  </div>
-                )}
-              </div>
             </div>
           </div>
 
@@ -344,17 +347,17 @@ export default function Home({ events = [], eventsLoading = false }) {
              <div className="relative" ref={musicMobileRef}>
                <button
                  onClick={() => setShowMusicMenu(v => !v)}
-                 className="w-9 h-9 flex items-center justify-center rounded-full border-2 border-black bg-white shadow-[2px_2px_0px_black] transition-all flex-shrink-0"
+                 className="w-9 h-9 flex items-center justify-center rounded-xl border-2 border-black bg-white shadow-[2px_2px_0px_black] transition-all flex-shrink-0"
                  title="Radio"
-                 style={isMusicOn ? { borderColor: accentColor, boxShadow: `2px 2px 0px ${accentColor}` } : {}}>
-                 <span className="text-sm" style={isMusicOn ? { filter: `drop-shadow(0 0 4px ${accentColor})` } : {}}>
-                   {isMusicOn ? '🎶' : '🎵'}
-                 </span>
+                 style={isMusicOn ? { borderColor: accentColor, boxShadow: `2px 2px 0px ${accentColor}`, color: accentColor } : {}}>
+                 <svg viewBox="0 0 24 24" fill="currentColor" width="15" height="15" style={isMusicOn ? { filter: `drop-shadow(0 0 3px ${accentColor})` } : {}}>
+                   <path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6z"/>
+                 </svg>
                </button>
                {showMusicMenu && (
-                 <div className="absolute left-0 bottom-full mb-2 z-[200] w-48 max-w-[calc(100vw-2rem)] bg-white border-3 border-black rounded-2xl shadow-[5px_5px_0px_black] overflow-hidden">
+                 <div className="absolute left-0 top-full mt-2 z-[200] w-48 max-w-[calc(100vw-2rem)] bg-white border-3 border-black rounded-2xl shadow-[5px_5px_0px_black] overflow-hidden">
                    <div className="px-3 py-2 border-b-2 border-gray-100">
-                     <p className="font-black text-[10px] text-gray-400 uppercase tracking-widest">🎵 Radio</p>
+                     <p className="font-black text-[10px] text-gray-400 uppercase tracking-widest">Radio</p>
                    </div>
                    <button
                      onClick={() => { triggerCloutCullingGames(); setShowMusicMenu(false); }}
