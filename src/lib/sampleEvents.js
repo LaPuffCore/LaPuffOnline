@@ -746,8 +746,8 @@ const ALL_SAMPLE_EVENTS = [
     is_approved: true,
     _sample: true,
     borough: 'Queens',
-    lat: 40.787855,
-    lng: -73.909944,
+    lat: 40.779316,
+    lng: -73.921975,
   },
   {
     id: 'sample-39',

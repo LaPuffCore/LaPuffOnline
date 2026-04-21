@@ -1950,7 +1950,7 @@ export default function MapView({ events, headerCollapsed = false }) {
       if (threeD) {
         map.setPaintProperty('zcta-safe-line', 'line-opacity', 0);
         // Safezone extrusion is the sole white renderer — ensure it stays visible in all 3D/Real3D modes
-        if (map.getLayer('zcta-safezone-extrusion')) map.setPaintProperty('zcta-safezone-extrusion', 'fill-extrusion-opacity', 1.0);
+        if (map.getLayer('zcta-safezone-extrusion')) map.setPaintProperty('zcta-safezone-extrusion', 'fill-extrusion-opacity', satellite ? 0.8 : 1.0);
 
         const extrudeColorExpr = ['step', ['get', '_tier'], HEAT_COLORS.cold, 1, HEAT_COLORS.cool, 2, HEAT_COLORS.warm, 3, HEAT_COLORS.orange, 4, HEAT_COLORS.hot];
         // FIX SATELLITE: 3D+heatmap extrusion stays solid (1.0) even when satellite is on
@@ -1977,7 +1977,7 @@ export default function MapView({ events, headerCollapsed = false }) {
       } else {
         // 2D heatmap — safe-line visible only when NOT in Real3D (where safezone-extrusion handles it)
         map.setPaintProperty('zcta-safe-line', 'line-opacity', real3D ? 0 : 1);
-        if (map.getLayer('zcta-safezone-extrusion')) map.setPaintProperty('zcta-safezone-extrusion', 'fill-extrusion-opacity', 1.0);
+        if (map.getLayer('zcta-safezone-extrusion')) map.setPaintProperty('zcta-safezone-extrusion', 'fill-extrusion-opacity', satellite ? 0.8 : 1.0);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-color', '#1a0505');
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-height', 0);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', 0);
@@ -2006,7 +2006,7 @@ export default function MapView({ events, headerCollapsed = false }) {
       if (threeD) {
         map.setPaintProperty('zcta-safe-line', 'line-opacity', 0);
         // Safezone extrusion is the sole white renderer — ensure it stays visible in all 3D/Real3D modes
-        if (map.getLayer('zcta-safezone-extrusion')) map.setPaintProperty('zcta-safezone-extrusion', 'fill-extrusion-opacity', 1.0);
+        if (map.getLayer('zcta-safezone-extrusion')) map.setPaintProperty('zcta-safezone-extrusion', 'fill-extrusion-opacity', satellite ? 0.8 : 1.0);
         // FIX SATELLITE: 3D no-heatmap extrusion is semi-transparent when satellite is on
         const flatColorExpr = '#220202';
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-color', withHoverColor(flatColorExpr));
@@ -2032,7 +2032,7 @@ export default function MapView({ events, headerCollapsed = false }) {
       } else {
         // 2D non-heatmap — safe-line visible only when NOT in Real3D
         map.setPaintProperty('zcta-safe-line', 'line-opacity', real3D ? 0 : 1);
-        if (map.getLayer('zcta-safezone-extrusion')) map.setPaintProperty('zcta-safezone-extrusion', 'fill-extrusion-opacity', 1.0);
+        if (map.getLayer('zcta-safezone-extrusion')) map.setPaintProperty('zcta-safezone-extrusion', 'fill-extrusion-opacity', satellite ? 0.8 : 1.0);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-color', '#1a0505');
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-height', 0);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', 0);
@@ -2731,7 +2731,7 @@ export default function MapView({ events, headerCollapsed = false }) {
         paint: {
           'fill-extrusion-color': baseplateColorExpr(isHeatmap, tsIdx),
           'fill-extrusion-height': 7,
-          'fill-extrusion-base': 2,
+          'fill-extrusion-base': 0,
           'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'], 13, 0, 13.5, 0.9],
           'fill-extrusion-vertical-gradient': false,
         },
@@ -2746,7 +2746,7 @@ export default function MapView({ events, headerCollapsed = false }) {
         paint: {
           'fill-extrusion-color': buildingColorExprByState(isHeatmap, tsIdx),
           'fill-extrusion-height': ['coalesce', ['get', 'height_roof'], 8],
-          'fill-extrusion-base': ['max', 2, ['coalesce', ['get', 'ground_elevation'], 0]],
+          'fill-extrusion-base': ['coalesce', ['get', 'ground_elevation'], 0],
           'fill-extrusion-opacity': 1.0,
           'fill-extrusion-vertical-gradient': false,
         },
@@ -3009,7 +3009,7 @@ export default function MapView({ events, headerCollapsed = false }) {
       map.setPaintProperty('real3d-roads-tertiary', 'line-color', heatmap ? '#553300' : '#771100');
     }
     if (map.getLayer('zcta-safezone-extrusion')) {
-      map.setPaintProperty('zcta-safezone-extrusion', 'fill-extrusion-opacity', 1.0);
+      map.setPaintProperty('zcta-safezone-extrusion', 'fill-extrusion-opacity', satellite ? 0.8 : 1.0);
     }
   }, [heatmap, real3D, mapReady]);
 
@@ -3226,11 +3226,19 @@ export default function MapView({ events, headerCollapsed = false }) {
         ctx.lineWidth = 1.5;
         ctx.stroke();
 
-        // Emoji centered in the white circle
+        // Emoji centered in the white circle — with drop shadow for visibility
+        ctx.shadowColor = 'rgba(0,0,0,0.55)';
+        ctx.shadowBlur = 4;
+        ctx.shadowOffsetX = 1;
+        ctx.shadowOffsetY = 1;
         ctx.font = '24px "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(emoji, cx, circleY + 1);
+        ctx.shadowColor = 'transparent';
+        ctx.shadowBlur = 0;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 0;
 
         const imgData = ctx.getImageData(0, 0, W * 2, H * 2);
         map.addImage(pinKey, { width: W * 2, height: H * 2, data: imgData.data }, { pixelRatio: 2 });
@@ -3344,22 +3352,7 @@ export default function MapView({ events, headerCollapsed = false }) {
     }
   }, [showPins, events, mapReady, timespanIdx]);
 
-  // 3D pin elevation — shift pins upward in 3D ZCTA mode to sit above extrusion blocks
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !mapReady) return;
-    ['event-pins-dots', 'event-pins-layer'].forEach(id => {
-      if (!map.getLayer(id)) return;
-      // Only 3D ZCTA mode (not 2D or Real3D) — shift pins up visually
-      if (threeD) {
-        // In 3D+heatmap, taller extrusions need more offset. In 3D non-heatmap, fixed 400m height.
-        const offset = heatmap ? -55 : -40;
-        map.setPaintProperty(id, 'icon-translate', [0, offset]);
-      } else {
-        map.setPaintProperty(id, 'icon-translate', [0, 0]);
-      }
-    });
-  }, [threeD, heatmap, mapReady]);
+  // 3D pin elevation removed — pins use precise coordinates in all modes
 
   useEffect(() => {
     const h = e => { if (e.key === 'Escape') { setHoloFeature(null); setSideZip(null); setSideEvents([]); setSideColonists([]); } };
