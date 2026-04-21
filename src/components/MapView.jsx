@@ -1307,7 +1307,7 @@ export default function MapView({ events, headerCollapsed = false }) {
   const heatmapRef      = useRef(false);
   const threeDRef       = useRef(false);
   const tiersRef        = useRef([]);
-  const timespanIdxRef  = useRef(4);
+  const timespanIdxRef  = useRef(2);
   const geoDataRef      = useRef(null);
   const layerHandlersRef = useRef({ handleZctaHover: null, handleZctaLeave: null, handleZctaClick: null });
   // FIX ADDITIVE STATE: refs for satellite and real3D for use in async callbacks
@@ -1346,7 +1346,7 @@ export default function MapView({ events, headerCollapsed = false }) {
     try { localStorage.setItem('lapuff_topo_on', topoOn ? '1' : '0'); } catch (e) { /* ignore */ }
   }, [topoOn]);
 
-  const [timespanIdx,   setTimespanIdx]   = useState(4);
+  const [timespanIdx,   setTimespanIdx]   = useState(2);
   const [heatmap,       setHeatmap]       = useState(false);
   const [satellite,     setSatellite]     = useState(false);
   const [threeD,        setThreeD]        = useState(false);
@@ -1808,7 +1808,7 @@ export default function MapView({ events, headerCollapsed = false }) {
     const map = mapRef.current;
     if (!map || !mapReady || !geoData) return;
     if (real3dLayersCreatedRef.current) return;
-    initReal3DLayers(map, heatmapRef.current, timespanIdxRef.current ?? 4);
+    initReal3DLayers(map, heatmapRef.current, timespanIdxRef.current ?? 2);
     setReal3DLayersVisible(map, false);
   }, [mapReady, geoData]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -2033,7 +2033,10 @@ export default function MapView({ events, headerCollapsed = false }) {
       }
     } else {
       // No heatmap — use dark red theme (zcta-fill filter excludes _special, so no case needed)
-      map.setPaintProperty('zcta-fill', 'fill-color', '#1a0505');
+      // In pure 2D mode (no 3D/Real3D/satellite) use a slightly lighter fill so zips are
+      // distinguishable from the #0d0000 canvas background without overpowering the bright outlines.
+      const noHeatFill = (!threeD && !real3D && !satellite) ? '#2d0a0a' : '#1a0505';
+      map.setPaintProperty('zcta-fill', 'fill-color', noHeatFill);
       // FIX ADDITIVE STATE / 3D ARTIFACTING: zero opacity in 3D so the flat fill
       // doesn't appear as stray 2D surfaces beneath or through extrusions.
       // In 2D and Real3D non-heatmap modes make the dark fill more visible; leave 3D unchanged
@@ -2424,7 +2427,7 @@ export default function MapView({ events, headerCollapsed = false }) {
     const map = mapRef.current;
     if (!map || !map.getStyle()) return;
     const isHm = heatmapRef.current;
-    const tsIdx = timespanIdxRef.current ?? 4;
+    const tsIdx = timespanIdxRef.current ?? 2;
     memoizedExprs.current = {};
     if (map.getLayer('real3d-buildings')) {
       map.setPaintProperty('real3d-buildings', 'fill-extrusion-color', buildingColorExprByState(isHm, tsIdx));
@@ -2738,10 +2741,10 @@ export default function MapView({ events, headerCollapsed = false }) {
             for (let t = 0; t < TIMESPAN_STEPS.length; t++) {
               const trs = precomputed?.[t]?.tiers;
               const tierVal = (trs && trs.length > foundZctaIdx) ? (trs[foundZctaIdx] ?? 0)
-                : (t === (timespanIdxRef.current ?? 4) ? (tiers?.[foundZctaIdx] ?? 0) : 0);
+                : (t === (timespanIdxRef.current ?? 2) ? (tiers?.[foundZctaIdx] ?? 0) : 0);
               props[`_tier_${t}`] = Math.max(0, tierVal);
             }
-            props._tier = props[`_tier_${timespanIdxRef.current ?? 4}`];
+            props._tier = props[`_tier_${timespanIdxRef.current ?? 2}`];
           }
         }
 
@@ -2918,7 +2921,7 @@ export default function MapView({ events, headerCollapsed = false }) {
         filter: ['match', ['get', 'class'], ['motorway', 'trunk'], true, false],
         paint: {
           'line-color': isHeatmap ? '#884400' : '#ff2200',
-          'line-width': ['interpolate', ['linear'], ['zoom'], 9, 1.5, 13, 5, 16, 10],
+          'line-width': ['interpolate', ['linear'], ['zoom'], 9, 1.5, 13, 6, 16, 14],
           'line-blur': 1.5, 'line-opacity': 0.9,
         },
       });
@@ -2930,7 +2933,7 @@ export default function MapView({ events, headerCollapsed = false }) {
         filter: ['all', ['match', ['get', 'class'], ['primary', 'secondary'], true, false], ['within', NYC_BBOX_GEOM]],
         paint: {
           'line-color': isHeatmap ? '#662200' : '#cc1800',
-          'line-width': ['interpolate', ['linear'], ['zoom'], 10, 0.5, 13, 3, 16, 6],
+          'line-width': ['interpolate', ['linear'], ['zoom'], 10, 0.5, 13, 4, 16, 9],
           'line-blur': 0.8, 'line-opacity': 0.75,
         },
       });
@@ -2942,7 +2945,7 @@ export default function MapView({ events, headerCollapsed = false }) {
         filter: ['all', ['match', ['get', 'class'], ['tertiary', 'minor', 'residential'], true, false], ['within', NYC_BBOX_GEOM]],
         paint: {
           'line-color': isHeatmap ? '#553300' : '#771100',
-          'line-width': ['interpolate', ['linear'], ['zoom'], 11, 0.3, 13, 1.5, 16, 3.5],
+          'line-width': ['interpolate', ['linear'], ['zoom'], 11, 0.3, 13, 2.5, 16, 6],
           'line-blur': 0.3, 'line-opacity': 0.65,
         },
       });
@@ -3022,7 +3025,7 @@ export default function MapView({ events, headerCollapsed = false }) {
     // Desktop: immediate (sync) path — unchanged
     if (!isMob) {
       if (!real3dLayersCreatedRef.current) {
-        initReal3DLayers(map, isHm, timespanIdxRef.current ?? 4);
+        initReal3DLayers(map, isHm, timespanIdxRef.current ?? 2);
       } else {
         setReal3DLayersVisible(map, true);
         if (!buildingTiersBakedRef.current && buildingFGBRef.current && buildingZctaMapRef.current && precomputedTiersRef.current) {
@@ -3065,7 +3068,7 @@ export default function MapView({ events, headerCollapsed = false }) {
       // Step 2: Create layers if needed (lightweight — just WebGL setup, no data)
       setReal3dLoadProgress('Preparing Real3D layers…');
       if (!real3dLayersCreatedRef.current) {
-        initReal3DLayers(map, isHm, timespanIdxRef.current ?? 4);
+        initReal3DLayers(map, isHm, timespanIdxRef.current ?? 2);
       } else {
         setReal3DLayersVisible(map, true);
       }

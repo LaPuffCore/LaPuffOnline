@@ -10,10 +10,11 @@ export default function CRTEffect({ active = true, limitMobile = false }) {
 
   useEffect(() => {
     if (!active) return;
-    let y = -20;
+    let y = -15;
     let frame;
+    const speed = limitMobile ? 0.22 : 0.11; // faster on mobile for more visible sweep
     const tick = () => {
-      y = (y + (limitMobile ? 0.18 : 0.11)) % 120;
+      y = (y + speed) % 115;
       if (washRef.current) washRef.current.style.top = `${y}%`;
       frame = requestAnimationFrame(tick);
     };
@@ -23,9 +24,9 @@ export default function CRTEffect({ active = true, limitMobile = false }) {
 
   if (!active) return null;
 
-  const latticeSize = limitMobile ? '56px 56px' : '32px 32px';
-  const scanlineSize = limitMobile ? '100% 7px' : '100% 4px';
-  const scanBarHeight = limitMobile ? '20%' : '10%';
+  const latticeSize = limitMobile ? '48px 48px' : '32px 32px';
+  const scanlineSize = limitMobile ? '100% 5px' : '100% 4px';
+  const scanBarHeight = limitMobile ? '12%' : '10%';
 
   return (
     /* zIndex 1: behind map canvas (zIndex 2), in front of background */
@@ -33,13 +34,14 @@ export default function CRTEffect({ active = true, limitMobile = false }) {
       className="absolute inset-0 pointer-events-none overflow-hidden"
       style={{ zIndex: 1 }}
     >
-      {/* 1. NOISE GRAIN */}
+      {/* 1. NOISE GRAIN — larger tile + higher opacity on mobile for visibility on high-DPI screens */}
       <div
-        className="absolute inset-0 opacity-[0.07]"
+        className="absolute inset-0"
         style={{
-          backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 250 250' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E")`,
-          backgroundSize: limitMobile ? '180px 180px' : '250px 250px',
-          filter: 'brightness(110%) contrast(120%)',
+          opacity: limitMobile ? 0.13 : 0.07,
+          backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 250 250' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E")`,
+          backgroundSize: limitMobile ? '320px 320px' : '250px 250px',
+          filter: 'brightness(115%) contrast(130%)',
           mixBlendMode: 'screen',
           animation: 'vhs-flicker 0.18s steps(2) infinite',
         }}
@@ -63,13 +65,15 @@ export default function CRTEffect({ active = true, limitMobile = false }) {
       <div className="absolute inset-0" style={{
         background: 'linear-gradient(90deg, rgba(255,0,0,0.06) 0%, transparent 15%, transparent 85%, rgba(0,255,255,0.06) 100%)',
       }} />
-      {/* 5. DATA WASH LINE (Animated) */}
+      {/* 5. DATA WASH LINE (Animated) — brighter on mobile, proper gradient for visible horizontal bar */}
       <div
         ref={washRef}
         className="absolute left-0 right-0 z-10"
         style={{
           height: scanBarHeight,
-          background: 'linear-gradient(180deg, transparent 0%, rgba(255,255,255,0.04) 50%, transparent 100%)',
+          background: limitMobile
+            ? 'linear-gradient(180deg, transparent 0%, rgba(255,255,255,0.03) 20%, rgba(255,255,255,0.11) 50%, rgba(255,255,255,0.03) 80%, transparent 100%)'
+            : 'linear-gradient(180deg, transparent 0%, rgba(255,255,255,0.04) 50%, transparent 100%)',
         }}
       />
       {/* 6. TUBE VIGNETTE */}
