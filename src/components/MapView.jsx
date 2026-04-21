@@ -2292,10 +2292,14 @@ export default function MapView({ events, headerCollapsed = false }) {
       prevZoom = zoom;
       if (!is3D && !isR3D) return;
 
-      // Desktop only: small RAF debounce so setData doesn't fire 60x/sec during smooth scroll zoom.
+      // Desktop: RAF debounce so setData doesn't fire 60x/sec during smooth scroll zoom.
+      // Mobile 3D: small timeout debounce (80ms) so spike geometry updates on pinch-zoom without freezing.
       if (!isMob) {
         if (rafId) cancelAnimationFrame(rafId);
         rafId = requestAnimationFrame(doOutlineRebuild);
+      } else if (is3D) {
+        if (rafId) clearTimeout(rafId);
+        rafId = setTimeout(doOutlineRebuild, 80);
       }
     };
     map.on('zoom', onZoom);
@@ -2303,7 +2307,8 @@ export default function MapView({ events, headerCollapsed = false }) {
     return () => {
       map.off('zoom', onZoom);
       map.off('pitch', onZoom);
-      if (rafId) cancelAnimationFrame(rafId);
+      if (!isMob && rafId) cancelAnimationFrame(rafId);
+      else if (rafId) clearTimeout(rafId);
       if (mobileVpTimer) clearTimeout(mobileVpTimer);
     };
   }, [mapReady]);
@@ -2564,6 +2569,16 @@ export default function MapView({ events, headerCollapsed = false }) {
         }
       }
 
+      // Mobile: raw bytes are now cached — that's all mobile needs.
+      // Mobile uses viewport R-Tree range queries (fetchViewportBuildings) as sole data path.
+      // Parsing 381K features into JS heap would cause ~300MB memory spike → WebKit OOM crash.
+      if (window.innerWidth < 768) {
+        setFgbCacheProgress(100);
+        setFgbCacheStatus('done');
+        console.log('FGB raw bytes cached (mobile — skipping full parse)');
+        return;
+      }
+
       // ── Parse FGB binary → GeoJSON (yielding, non-blocking) ──
       const geojson = await parseFGBBuffer(buf, reportParseProgress);
       buildingFGBRef.current = geojson;
@@ -2627,7 +2642,13 @@ export default function MapView({ events, headerCollapsed = false }) {
   // Only runs at zoom >= 13 (below that, no baseplates or buildings are rendered).
   async function fetchViewportBuildings(map) {
     if (!map || !map.getStyle() || !map.getSource('fgb-buildings')) return;
-    if (map.getZoom() < 13) return; // baseplates start at z13, buildings at z14 — nothing to fill below
+
+    // GPU flush: clear buildings from GPU when zoomed out past the render threshold.
+    if (map.getZoom() < 13) {
+      map.getSource('fgb-buildings').setData({ type: 'FeatureCollection', features: [] });
+      return;
+    }
+
     const isMob = window.innerWidth < 768;
     if (!isMob && buildingFGBRef.current) return; // desktop: full cache ready, skip viewport fetch
 
@@ -2648,6 +2669,7 @@ export default function MapView({ events, headerCollapsed = false }) {
 
     try {
       const features = [];
+      let count = 0;
       for await (const feature of fgbDeserialize(BUILDING_FGB_URL, rect)) {
         if (!feature?.geometry?.coordinates) continue;
 
@@ -2680,6 +2702,11 @@ export default function MapView({ events, headerCollapsed = false }) {
 
         feature.properties = props;
         features.push(feature);
+        count++;
+
+        // Yield every 2000 features — lets browser breathe and prevents iOS/Android Watchdog kill.
+        // Critical for mobile: without this, processing 10K-40K buildings blocks the main thread.
+        if (count % 2000 === 0) await new Promise(r => setTimeout(r, 0));
       }
 
       // Desktop: skip if full cache arrived while we were fetching
@@ -2991,9 +3018,14 @@ export default function MapView({ events, headerCollapsed = false }) {
       if (map.getLayer('real3d-roads-primary')) map.setPaintProperty('real3d-roads-primary', 'line-color', isHm ? '#662200' : '#cc1800');
       if (map.getLayer('real3d-roads-tertiary')) map.setPaintProperty('real3d-roads-tertiary', 'line-color', isHm ? '#553300' : '#771100');
 
-      // Step 4: Fetch buildings for current viewport — small bbox Range request, ~100-500 features.
-      // Buildings only appear at z13+ (baseplates) and z14+ (extrusions), so this is a no-op at far zoom.
-      // Pan/zoom listeners will keep fetching as the user moves (see onViewportChange below).
+      // Step 4: Ensure raw FGB bytes are cached (for fast R-Tree range queries).
+      // buildFGBCache on mobile fetches + stores raw bytes then returns immediately — no parse, no heap spike.
+      // Fire-and-forget; fetchViewportBuildings below can proceed immediately (uses network directly if cache miss).
+      buildFGBCache();
+
+      // Step 5: Fetch buildings for current viewport — R-Tree bbox query, only viewport features.
+      // Buildings appear at z13+ (baseplates) and z14+ (extrusions) — skip when zoomed out.
+      // Pan/zoom listeners will keep re-fetching as user moves (see onViewportChange below).
       if (map.getZoom() >= 13) {
         setReal3dLoadProgress('Loading buildings…');
         await fetchViewportBuildings(map);
