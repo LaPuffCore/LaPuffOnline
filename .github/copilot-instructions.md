@@ -659,62 +659,80 @@ TileView: live events are retained in the present event list even when they'd be
 - If re-adding sources, use JSON extraction (`__SERVER_DATA__`, `__NEXT_DATA__`, JSON-LD) not HTML scraping.
 
 ### GeoPost System
-- Component: `src/components/GeoPostView.jsx` — full feed + editor in one file.
-- Nav tab: 🌍 GeoPost button added to view toggle group in Home.jsx (`view === 'geo'`). GeoPost button text intentionally wraps to 2 lines on small mobile to fit all 4 tabs.
-- Session: `session` state now stored in Home.jsx (in addition to `user`) and passed as prop to GeoPostView.
+- Component: `src/components/GeoPostView.jsx` — full feed + editor in one file (~905 lines).
+- Nav tab: 🌍 GeoPost button in view toggle group in Home.jsx (`view === 'geo'`). Mobile: emoji above 2-line "Geo-/Post" text, `px-2.5` same width as other tabs.
+- Session: `session` state stored in Home.jsx and passed as prop to GeoPostView.
 
 #### DB Schema:
-- `geoposts`: id (UUID), user_id (nullable FK → profiles), content (JSONB `{html, fillColor}`), image_url, zip_code, borough, is_participant, post_approved, created_at.
+- `geoposts`: id (UUID), user_id (nullable FK → profiles), content (JSONB `{html, fillColor}`), image_url, zip_code (nullable TEXT), borough (nullable TEXT), scope (TEXT DEFAULT 'digital'), is_participant, post_approved, created_at.
+- **Required migration**: `ALTER TABLE geoposts ALTER COLUMN zip_code DROP NOT NULL; ALTER TABLE geoposts ALTER COLUMN borough DROP NOT NULL; ALTER TABLE geoposts ADD COLUMN IF NOT EXISTS scope TEXT NOT NULL DEFAULT 'digital';`
 - `post_reactions`: id, post_id FK, user_id (nullable), emoji_text, UNIQUE(post_id, user_id, emoji_text).
 - `post_clout_given`: (user_id, post_id) PRIMARY KEY — audit log, one unique reactor = one 5pt award.
 - `clout_ledger` updated: added `geopost_id UUID`, unique constraint `UNIQUE(user_id, event_id, geopost_id, checkin_type)`.
 - `geopost_feed` VIEW: joins profiles for username (defaults to 'Orbiter'), includes total_reactions count, filters post_approved=true.
 - Trigger `on_reaction_added` → `handle_post_reaction_clout()`: 5 pts to author via `clout_ledger` insert. Only fires when reactor has a user_id. SECURITY DEFINER for offline accrual. Blocks self-voting.
 
+#### Scope & location hierarchy:
+- `scope='digital'`: null borough, null zip. Visible only in "All" filter.
+- `scope='nyc'`: null borough, null zip. Visible only in "All" filter.
+- `scope='borough'`: borough set, null zip. Visible in All + their specific borough filter.
+- `scope='zip'`: both borough and zip_code set. Visible in All + their borough + their specific zip filter.
+- PostgREST `eq` filter naturally excludes NULLs — `borough=eq.Brooklyn` excludes digital/nyc scope posts automatically.
+- Location tag on post card: zip → `📍 zip · borough`, borough → `🏙 borough`, nyc → `🗽 NYC`, digital → `💻 Digital`.
+
+#### Filter bar (GeoPostView):
+- 🌀 All | 🏙 Borough▼ | 📍 Zip▼ | Time▼ | Status▼ | 🔥 Top toggle
+- All dropdowns are inline (open from button), never modal popups.
+- Zip dropdown: shows borough selector row first, then zip list for chosen borough.
+- Active filter = accent color background (EXCEPT "Time" button when filter is 'all' — no highlight).
+- Time options: All Time (default 'all'), 1d, 7d, 1mo, 3mo, 6mo.
+- Status: All / Participant / Orbiter.
+- 🔥 Top: sorts by `total_reactions.desc` when on, `created_at.desc` when off.
+- Show More/Less: 10 per page, "Show More" +10, "Show Less" collapses to 10. Client-side slice.
+
 #### Supabase helpers (src/lib/supabase.js):
-- `fetchGeoPostFeed(filter)` — filter: `{type:'nyc'|'borough'|'zip', value?}`. Queries geopost_feed.
-- `submitGeoPost(payload, session)` — inserts to geoposts. Passes auth token if signed in.
-- `addPostReaction(postId, emojiText, session)` — inserts to post_reactions. 409 = duplicate (silent).
+- `fetchGeoPostFeed({ type, value, timeFilter, statusFilter, sortByTop })` — full filter support.
+- `submitGeoPost(payload, session)` — payload includes `scope` field. Uses `baseHeaders` (not `SB_HEADERS`).
+- `addPostReaction(postId, emojiText, session)` — 409 = duplicate (silent).
 - `removePostReaction(postId, emojiText, session)` — deletes reaction.
-- `fetchPostReactions(postId)` — returns all reactions for one post.
-- `fetchReactionsForPosts(postIds)` — batch fetch reactions with profiles join for username.
-- `uploadGeoPostImage(file, session)` — uploads to Supabase `event-images` bucket. Fallback when OCI env vars not set.
-- `uploadToOracleCloud(file)` in `src/lib/oracleStorage.js` — OCI Object Storage upload with Web Crypto RSA-SHA256 signing. Primary upload path when `VITE_OCI_*` env vars are set.
-- OCI bucket: `geopost-images`, namespace `idfnjqqb9g0p`, region `us-ashburn-1`. URL: `https://objectstorage.us-ashburn-1.oraclecloud.com/n/idfnjqqb9g0p/b/geopost-images/o/[FILENAME]`.
-- Required Vite env vars: `VITE_OCI_TENANCY`, `VITE_OCI_USER`, `VITE_OCI_FINGERPRINT`, `VITE_OCI_PRIVATE_KEY` (PEM string, literal `\n` allowed).
-- `isOciConfigured()` returns true when all 4 OCI vars are present. GeoPostView uses OCI if configured, Supabase otherwise.
-- OCI private key supports both PKCS#1 (BEGIN RSA PRIVATE KEY) and PKCS#8 (BEGIN PRIVATE KEY). PKCS#1 auto-wrapped to PKCS#8 via ASN.1 DER manipulation in `pkcs1ToPkcs8()`.
-- **CORS required**: OCI bucket must have CORS policy allowing PUT from site origin before browser uploads work.
+- `fetchReactionsForPosts(postIds)` — batch fetch reactions with profiles join.
+- `uploadGeoPostImage(file, session)` — Supabase fallback.
+- `uploadToOracleCloud(file)` in `src/lib/oracleStorage.js` — OCI primary path.
+- OCI bucket: `geopost-images`, namespace `idfnjqqb9g0p`, region `us-ashburn-1`.
+- Required Vite env vars: `VITE_OCI_TENANCY`, `VITE_OCI_USER`, `VITE_OCI_FINGERPRINT`, `VITE_OCI_PRIVATE_KEY`.
 
-#### Location check (src/lib/locationService.js):
-- `isUserInZipCode(targetZip)` — pings GPS → Nominatim reverse geocode → compares postcode. Returns `'confirmed' | 'cant_connect' | 'not_in_zip'`.
+#### Location selector (create post):
+- Progressive: Digital (default) → NYC → Borough▼ → Zip▼
+- Digital scope: no checkin popup, always orbiter.
+- NYC/Borough scope: checkin popup with self-attestation (no GPS), user picks Participant or Orbiter.
+- Zip scope: checkin popup → GPS `isUserInZipCode(zip)` check → Participant confirmed; failure or GPS error → stays Orbiter.
+- Subtext: "you can post at the zip, borough, or city level"
 
-#### Submission flow:
-1. User writes rich text (contenteditable + `document.execCommand`), selects zip, optionally attaches image (compressed to ≤500KB).
-2. Clicks Post → profanityFilter.js checks `innerText`. If flagged: post saved with `post_approved: false` (pending manual review), shown as error.
-3. If clean: `CheckInPopup` appears with "Check In to send this post as a Participant with Yes, select No to continue posting to this zip as an Orbiter" text + [Yes]/[No].
-4. Yes → `isUserInZipCode(zip)` → shows Confirmed ✅ / Can't Connect ⚠️ / Not in Zipcode ❌. Confirmed: post with `is_participant: true`. Failure: close popup after 1.2s, content preserved.
-5. No → post with `is_participant: false` (Orbiter mode).
-6. `user_id` = `session?.user?.id ?? null`. Null = anonymous (no points, no reactions give points).
+#### Editor toolbar (v2):
+- Rendered BELOW contenteditable, ABOVE image preview and submit button.
+- All toolbar buttons use `onMouseDown + e.preventDefault()` to preserve editor selection.
+- `selectionchange` listener updates bold/italic/underline/align/fontSize states live.
+- Undo/Redo | B/I/U with active states | Align L/C/R (SVG icons) with active state.
+- Font size A↓/A↑: 6 levels (1-6), 3=normal. A↑ highlighted when >3, A↓ highlighted when <3.
+- Lists dropdown: bullet / numbered / roman numeral / remove.
+- Cool Font dropdown: 9 Unicode styles + Zalgo. With selection = convert selection; no selection = toggle intercept mode (keydown listener converts typed chars). `src/lib/unicodeFonts.js` has `convertFont(text, key)`, `toZalgo(text)`, `ALL_COOL_FONTS`.
+- Text color + Highlight: inline `HexColorPicker` component (preset grid + hex input). Selection preserved via `savedRangeRef` (saved on mousedown, restored before execCommand).
+- Emoji picker: 16 QUICK_EMOJIS, inserts at cursor via `execCommand('insertText')`.
+- Clear button: clears editor innerHTML.
 
 #### Reaction display:
-- Top 4 emoji by count shown as pill buttons. Clicking one adds that reaction.
-- `+` button opens inline `QuickEmojiPicker` (16 common emojis, click outside to close).
-- `…` ellipsis button always visible. Opens `ReactorListModal` showing username + emoji per reactor. Dismiss: X, backdrop click, Esc.
-- Reactions batch-loaded for all visible posts via `fetchReactionsForPosts`.
+- Top 4 emoji by count shown as pill buttons. Clicking adds/removes reaction.
+- `+` button toggles inline 16-emoji quick picker per post.
+- `…` button opens ReactorListModal (username + emoji list). Dismiss: backdrop, X.
+- Reactions batch-loaded for all posts via `fetchReactionsForPosts`.
 
 #### Badges:
 - Green `● PARTICIPANT` pill next to username if `is_participant: true`.
-- Red `● ORBITER` pill if false. Matches existing participant/orbiter color convention.
+- Red `● ORBITER` pill if false.
 
 #### Points:
 - `POINTS.GEOPOST_REACTION: 5` in pointsSystem.js (documentation only — DB trigger handles award).
-- Client does NOT call `awardPoints` for reactions. Just inserts to post_reactions, trigger fires automatically.
+- Client does NOT call `awardPoints` for reactions.
 
 #### Image compression:
-- `compressGeoImage(file)` in GeoPostView.jsx — max 500KB, max 1280px dimension, JPEG quality ramp 0.82→0.3.
-- Separate from EventSubmitForm's compressImage (which targets 1MB / 5 photos).
-
-#### Filter bar:
-- 🗽 All NYC | 🏙 Borough (dropdown) | 📍 Zip (dropdown). Borough defaults to Manhattan, Zip defaults to first in sorted list.
-- Empty state: "Nothing here to see yet! Be the first!" with 🗽 emoji.
+- `compressGeoImage(file)` in GeoPostView.jsx — max 500KB, max 1280px, JPEG quality ramp 0.82→0.3.
