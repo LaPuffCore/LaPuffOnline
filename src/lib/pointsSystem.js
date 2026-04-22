@@ -19,29 +19,32 @@ export const POINTS = {
 
 /**
  * SECURE POINT AWARDING
- * Checks for a valid, signed-in session before allowing a point trigger.
- * The 'award_clout' function in SQL ensures only the auth.uid() can trigger their own growth,
- * or the Growth Loop trigger (SQL side) handles the Referral recipient.
+ * Policy-driven: auth.uid() is evaluated server-side by award_clout().
+ * If the user is not authenticated, Supabase silently rejects the insert.
+ * Dedup is enforced by unique_point_action(user_id, reason, event_id, geopost_id).
  */
 /**
  * SECURE POINT AWARDING
  * @param {object} session - auth session with access_token
  * @param {number} amount - points to award
- * @param {string} reason - audit reason string
- * @param {string|null} eventId - optional event UUID for dedup
- * @param {string|null} checkinType - 'main' | 'afters' | null
+ * @param {string} reason - audit reason string (also used for dedup via unique_point_action)
+ * @param {string|null} eventId - optional event UUID
+ * @param {string|null} _unused - kept for call-site compat (was checkinType, no longer a DB param)
+ * @param {string|null} geopostId - optional geopost UUID
  */
-export async function awardPoints(session, amount, reason, eventId = null, checkinType = null) {
+export async function awardPoints(session, amount, reason, eventId = null, _unused = null, geopostId = null) {
   if (!session?.access_token) {
     console.warn("Points ignored: No active session or unvalidated user.");
     return false;
   }
 
+  // award_clout uses auth.uid() internally — no p_user_id or p_checkin_type params.
+  // Dedup is via unique_point_action(user_id, reason, event_id, geopost_id).
   const body = {
     p_amount: amount,
     p_reason: reason,
-    ...(eventId && { p_event_id: eventId }),
-    ...(checkinType && { p_checkin_type: checkinType }),
+    ...(eventId    && { p_event_id:   eventId }),
+    ...(geopostId  && { p_geopost_id: geopostId }),
   };
 
   const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/award_clout`, {
