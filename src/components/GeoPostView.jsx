@@ -11,6 +11,7 @@ import {
 import { uploadToOracleCloud, isOciConfigured } from '../lib/oracleStorage';
 import { NYC_ZIP_FEATURES } from '../lib/nycZipGeoJSON';
 import { ALL_COOL_FONTS, convertFont, toPlainText } from '../lib/unicodeFonts';
+import { isLocalParticipant, addPendingReactSync, removePendingReactSync } from '../lib/pointsSystem';
 import EmojiPicker from './EmojiPicker';
 
 // ── constants ─────────────────────────────────────────────────────────────────
@@ -320,6 +321,9 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor })
 function ReactorListModal({ postId, reactions, onClose }) {
   if (!postId) return null;
   const list = reactions[postId] || [];
+  const named = list.filter(r => r.user_id != null);
+  const anon  = list.filter(r => r.user_id == null);
+
   return (
     <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/50" onClick={onClose} />
@@ -328,10 +332,28 @@ function ReactorListModal({ postId, reactions, onClose }) {
         <h3 className="font-black mb-3">Reactions</h3>
         {list.length === 0 && <p className="text-sm text-gray-400">No reactions yet</p>}
         <div className="max-h-60 overflow-y-auto space-y-1">
-          {list.map((r, i) => (
+          {named.map((r, i) => (
             <div key={i} className="flex items-center gap-2 text-sm">
               <span className="text-lg">{r.emoji_text}</span>
-              <span className="font-semibold">{r.username || 'Orbiter'}</span>
+              <span className="font-semibold">{r.profiles?.username || r.username || 'User'}</span>
+              {r._pending && (
+                <span className="text-[9px] font-black px-1 py-0.5 rounded-full bg-yellow-100 text-yellow-700">
+                  ORBITER
+                </span>
+              )}
+            </div>
+          ))}
+          {named.length > 0 && anon.length > 0 && (
+            <div className="flex items-center gap-2 py-1.5">
+              <div className="flex-1 border-t border-dashed border-gray-200" />
+              <span className="text-[9px] font-semibold text-gray-400 uppercase tracking-wide">anonymous</span>
+              <div className="flex-1 border-t border-dashed border-gray-200" />
+            </div>
+          )}
+          {anon.map((r, i) => (
+            <div key={`anon-${i}`} className="flex items-center gap-2 text-sm opacity-60">
+              <span className="text-lg">{r.emoji_text}</span>
+              <span className="font-semibold text-gray-500 italic">Anonymous</span>
             </div>
           ))}
         </div>
@@ -696,7 +718,33 @@ export default function GeoPostView({ session }) {
   // ── reactions ─────────────────────────────────────────────────────────────────
   const handleReact = async (postId, emoji) => {
     if (session?.user?.id) {
-      // ── Authenticated path ──────────────────────────────────────────────────
+      // ── Orbiter path: signed in but not participant ─────────────────────────
+      if (!isLocalParticipant()) {
+        const existingPending = (reactions[postId] || []).find(
+          r => r.user_id === session.user.id && r.emoji_text === emoji
+        );
+        if (existingPending) {
+          removePendingReactSync(postId, emoji);
+          setReactions(prev => ({
+            ...prev,
+            [postId]: (prev[postId] || []).filter(r => !(r.user_id === session.user.id && r.emoji_text === emoji)),
+          }));
+        } else {
+          addPendingReactSync(postId, emoji);
+          setReactions(prev => ({
+            ...prev,
+            [postId]: [...(prev[postId] || []), {
+              post_id: postId, emoji_text: emoji,
+              user_id: session.user.id,
+              username: session.user.user_metadata?.username,
+              _pending: true,
+            }],
+          }));
+        }
+        return; // No DB write — will sync when they become participant
+      }
+
+      // ── Participant path: full DB sync ──────────────────────────────────────
       const existing = (reactions[postId] || []).find(r => r.user_id === session.user.id && r.emoji_text === emoji);
       try {
         if (existing) {

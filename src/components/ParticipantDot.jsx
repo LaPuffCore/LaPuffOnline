@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { pingNYCLocation, getNYCParticipantStatus, markFavoriteContributions } from '../lib/locationService';
 import { getValidSession } from '../lib/supabaseAuth';
-import { awardPoints, POINTS } from '../lib/pointsSystem';
+import { awardPoints, POINTS, syncOrbiterPending } from '../lib/pointsSystem';
 
 /**
  * Status dot near logo shows participant (green) or orbiter (red)
@@ -98,6 +98,9 @@ export default function ParticipantDot({ onStatusChange }) {
       if (result.inNYC) {
         const session = await getValidSession();
         if (session?.user?.id) {
+          // Flush any pending favorites + reactions queued while user was an Orbiter.
+          // Must run BEFORE markFavoriteContributions so the RPC sees the new event_favorites rows.
+          await syncOrbiterPending(session);
           const eventsContributed = await markFavoriteContributions(session);
           if (eventsContributed > 0) {
             const pointsAmount = eventsContributed * POINTS.EVENT_FAVORITED;

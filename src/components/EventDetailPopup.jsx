@@ -6,7 +6,7 @@ import { TrendIcon } from './EventTile';
 import { TAG_COLORS } from '../lib/tagColors';
 import { getUserTZOffset, utcToLocal } from '../lib/timezones';
 import { useNavigate } from 'react-router-dom';
-import { awardPoints, POINTS, isEligibleForPoints } from '../lib/pointsSystem';
+import { awardPoints, POINTS, isEligibleForPoints, rewardEventSubmitter } from '../lib/pointsSystem';
 import { getValidSession } from '../lib/supabaseAuth';
 import { getTileAccentColor, useSiteTheme } from '../lib/theme';
 import { pingLocation, isWithin750ft, markCheckedIn, isCheckedIn, isAutoPingEnabled, setAutoPingEnabled } from '../lib/locationService';
@@ -227,6 +227,8 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
         const pts = isAfters ? POINTS.AFTERS_ATTEND_CHECKIN : POINTS.EVENT_ATTEND_CHECKIN;
         const reason = isAfters ? `Afters Attendance: ${event.event_name}` : `Event check-in: ${event.event_name}`;
         awardPoints(session, pts, reason, event.id, checkinType);
+        // Award points to the event's original submitter (fire-and-forget, non-blocking)
+        if (!isAfters) rewardEventSubmitter(session, event.id);
       }
       setCheckInResult({ type: 'success', msg: isAfters ? '🎉 Afters check-in confirmed!' : '✅ You have checked in!' });
     } catch {

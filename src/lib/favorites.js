@@ -44,6 +44,29 @@
 
 import { getValidSession, supabase } from './supabaseAuth';
 
+// ─── PARTICIPANT STATUS (inline — avoids circular import with locationService) ─
+function _isFavParticipant() {
+  try {
+    const d = JSON.parse(localStorage.getItem('lapuff_nyc_24h'));
+    return !!(d && (Date.now() - d.timestamp) < 24 * 3600 * 1000);
+  } catch { return false; }
+}
+
+// ─── PENDING FAV SYNC (orbiter favorites deferred until participant) ──────────
+const PENDING_FAV_SYNC_KEY = 'lapuff_pending_fav_sync';
+
+export function getPendingFavSync() {
+  try { return JSON.parse(localStorage.getItem(PENDING_FAV_SYNC_KEY) || '[]'); } catch { return []; }
+}
+export function addPendingFavSync(eventId) {
+  const list = getPendingFavSync();
+  if (!list.includes(eventId)) { list.push(eventId); localStorage.setItem(PENDING_FAV_SYNC_KEY, JSON.stringify(list)); }
+}
+export function removePendingFavSync(eventId) {
+  localStorage.setItem(PENDING_FAV_SYNC_KEY, JSON.stringify(getPendingFavSync().filter(id => id !== eventId)));
+}
+export function clearPendingFavSync() { localStorage.removeItem(PENDING_FAV_SYNC_KEY); }
+
 // ─── ORIGINAL KEYS (all preserved) ───────────────────────────────────────────
 const FAVS_KEY    = 'lapuff_favorites';
 const COUNTS_KEY  = 'lapuff_fav_counts';
@@ -325,11 +348,14 @@ export async function toggleFavorite(eventId, eventSnapshot = null) {
 
     if (userId) {
       // ── AUTHENTICATED ──────────────────────────────────────────────────────
-      // The Supabase trigger on event_favorites handles EVERYTHING server-side:
-      //   - INSERT trigger: increments events.fav_count + awards points (once, via clout_ledger)
-      //   - DELETE trigger: decrements events.fav_count (no points removed)
-      // We do NOT call update_event_fav_count RPC here — the trigger does it.
       if (adding) {
+        if (!_isFavParticipant()) {
+          // Orbiter: defer DB sync until they become a participant.
+          // Local state is already updated above for instant UI feedback.
+          addPendingFavSync(id);
+          return adding;
+        }
+        // Participant: DB upsert — trigger handles fav_count increment
         const { error } = await supabase
           .from('event_favorites')
           .upsert(
@@ -338,6 +364,13 @@ export async function toggleFavorite(eventId, eventSnapshot = null) {
           );
         if (error) throw error;
       } else {
+        // Removing: if it was only in pending (never reached DB), remove from pending only
+        const pending = getPendingFavSync();
+        if (pending.includes(id)) {
+          removePendingFavSync(id);
+          return adding; // was never in DB — nothing to delete
+        }
+        // Was previously synced to DB (while participant) — delete it
         const { error } = await supabase
           .from('event_favorites')
           .delete()
