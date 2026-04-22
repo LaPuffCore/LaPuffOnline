@@ -85,11 +85,16 @@
 - Tags limited to 3 max to prevent height shifts.
 - Auto events show 🤖 AUTO badge overlay.
 - Title: `font-black text-[13px] sm:text-sm` with `line-clamp-2` and `min-h-[2.5rem]`.
+- **Mobile title truncation**: On screens < 640px (`isMobile` state, resize listener), title is hard-capped at 35 chars: `title.slice(0, 32) + '...'`. `EventDetailPopup` always receives full `event.event_name` untouched.
 - Favorite badge: count + trend icon (green up, red down, blue dash).
 - Expiry: events older than 7 days (`7 * 86400000` ms) are marked expired; images hidden.
 - `getTileAccentColor(event.hex_color, theme)` determines accent: tileAccentOverride > event hex > default.
 - Real-time fav count via `subscribeToFavoriteCount(event.id, callback)`.
 - Date, time, location text → `bodyTextColor` via inline style (not hardcoded Tailwind text-gray-*); opacity dimming 0.75/0.7 for secondary text.
+- **LIVE badge**: Pulsing green pill when `isEventLive(event)` (start−30min → end). Bottom-left of image.
+- **AFTERS badge**: Purple pill when `isAftersWindow(event)` (end → end+1hr). Bottom-left of image.
+- **Attendance count overlay**: Bottom-right of image, people icon + count, visible when event is live. Fetched from `attendance_count` on event object (from `events_with_counts` view).
+- **TileView keeps live events visible**: Events happening now are retained in the present filter even if they would otherwise be excluded by date range.
 
 ### EventDetailPopup Conventions
 - Portal renders to `document.body`, z-index `100000`.
@@ -104,6 +109,10 @@
 - **Text color split**: date button and MiniMap address → `buttonTextColor`; event description → `bodyTextColor`. Both inherit `bg-gray-50` (= `--lp-button-fill`) and `buttonShadowColor` for consistent button styling.
 - `border-black` class must NOT be on the popup card or any element that needs `style={{ borderColor }}` inline — the CSS scope `!important` override will win. Remove the class and use only inline style.
 - Image carousel arrows: always `bg-black/55 text-white` with z-20 — never inherit fill color (would be invisible on light images).
+- **LIVE/AFTERS image overlay**: Green LIVE or purple AFTERS badge shown on popup image when `isEventLive` or `isAftersWindow`.
+- **Attendance count**: Bottom-right of image (people icon + count) when event is live. From `event.attendance_count`.
+- **Check-in dropdown**: When `isEventHappeningNow(event)` (or afters window) is active, a check-in button appears. `handleManualCheckIn(type)` accepts `'main'` or `'afters'`. Afters check-in button only shows when `event.afters_lat && isAftersWindow(event)`.
+- **Always shows full title** — `event.event_name` raw, never truncated (contrast to EventTile mobile truncation).
 
 ### Theme System
 - 54 customizable fields via `THEME_FIELDS` in `src/lib/theme.js`.
@@ -418,18 +427,38 @@ borough-outline (fill-extrusion, unrestricted, topmost)
 - Storage keys: `lapuff_favorites` (IDs), `lapuff_fav_counts` (counts), `lapuff_fav_history` (activity), `lapuff_favorite_event_cache` (snapshots, max 240), `lapuff_sb_favs` (synced set).
 - **Anonymous**: localStorage only + one-time `update_event_fav_count` RPC (delta +1). No points.
 - **Authenticated (Orbiter)**: upsert to `event_favorites` table, triggers `fav_count` increment. No points yet.
-- **Authenticated + Participant**: `markFavoriteContributions(session)` → RPC awards 5 points per favorited event.
+- **Authenticated + Participant**: `markFavoriteContributions(session)` → RPC awards 20 points per favorited event (EVENT_FAVORITED=20 as of current).
 - **Auto-event guard**: `isAutoEvent(id, snapshot)` checks `_auto` flag → skips DB sync entirely. Local star/count still works. Auto events in `auto_events` table have no FK to `events`.
 - Trend calculation: `resolveTrendFromThreshold(count, threshold)` — up if `count >= threshold`, neutral if within 4, down otherwise. Threshold = 12h peak.
 - Real-time subscription: `subscribeToFavoriteCount(eventId, callback)` via Postgres changes channel. Multiple listeners reuse single channel.
 - `window.dispatchEvent(new Event('favoritesChanged'))` broadcasts all favorite state changes.
+- **LIVE/AFTERS badges**: FavoritesPage FavoriteCard shows green LIVE or purple AFTERS overlay on image when `isEventLive(event)` or `isAftersWindow(event)`.
 
 ### Points / Clout System
-- Values: SELF_CHECKIN=150, ATTENDEE_TO_ORGANIZER=80, REFERRAL_SUCCESS=50, SUBMIT_EVENT=20, EVENT_FAVORITED=5, HOT_ZONE_BASE=3, HOT_ZONE_MULTIPLIER_MAX=8.
-- Roaming: 15-minute throttle, multiplier `1 + heatValue * 7` → 3 to 24 points per roam.
-- RPC: `award_clout(points_to_add, audit_reason)` — server enforces `auth.uid()`.
-- Eligibility: `email_confirmed_at` must be set.
-- Referral: localStorage `lapuff_pending_referral` from `?ref=CODE` URL param. Auto-opens auth after 1s.
+**Current point values (snapshot — may be tuned):**
+- EVENT_ATTEND_CHECKIN: 250 (GPS-gated, 750ft, within event window)
+- AFTERS_ATTEND_CHECKIN: 200 (GPS-gated, 750ft, during +1hr afters window)
+- SELF_CHECKIN: 150 (organizer at own event — user_id matches event.user_id)
+- REFERRAL_SUCCESS: 50 (someone signs up via your ?ref=CODE)
+- SUBMIT_EVENT: 50 (awarded at approval time, not at submit; `checkAndAwardSubmitPoints` runs on events load, checks user's approved events vs clout_ledger via ON CONFLICT DO NOTHING dedup)
+- EVENT_FAVORITED: 20 (one-time per event, when someone favorites your submitted event)
+- HOT_ZONE_BASE: 1, HOT_ZONE_MAX: 10 (roam pts = `round(1 + heat × 9)`, 30-min throttle)
+- ATTENDEE_TO_ORGANIZER: **REMOVED** — no mechanism to distinguish organizer role yet
+
+**Roaming:**
+- 30-minute throttle (`lapuff_last_roam_award` localStorage key).
+- Heat value sourced from `lapuff_zip_heat` (JSON, zip→0–1 float), written by MapView after every tier computation.
+- `runAutoPingScan` does Nominatim reverse geocode after check-in loop to get current zip → heat → `processRoamingPoints`.
+- If `lapuff_zip_heat` is empty (map never loaded), roam skips silently.
+
+**RPC (upgraded):** `award_clout(p_user_id, p_amount, p_reason, p_event_id, p_checkin_type)` — DB-enforced unique constraint `unique_clout_award(user_id, event_id, checkin_type)` with `ON CONFLICT DO NOTHING`. Prevents double-award including race conditions.
+- `awardPoints(session, amount, reason, eventId=null, checkinType=null)` sends `p_user_id` in body.
+- Submit events use `checkin_type='submit'` in ledger for audit.
+
+**Eligibility:** `email_confirmed_at` must be set (`isEligibleForPoints`).
+**Referral:** localStorage `lapuff_pending_referral` from `?ref=CODE` URL param. Auto-opens auth after 1s.
+
+**Zip heat index:** `lapuff_zip_heat` written to localStorage by MapView whenever tier computation runs (on events/timespan change). Format: `{ "10001": 0.82, "11201": 0.34, ... }`. Universal index — reusable by any future feature.
 
 ### Location & Participant Status
 - NYC bounding box: lat 40.47–40.93, lng -74.27 to -73.68.
@@ -438,7 +467,10 @@ borough-outline (fill-extrusion, unrestricted, topmost)
 - 24h participant window: `localStorage['lapuff_nyc_24h']`.
 - Status: 'participant' (< 24h since NYC ping), 'orbiter' (else).
 - Dot colors: green (participant), red (orbiter), yellow (loading).
-- Check-in radius: 200m (Haversine). Active window: `[eventTime, eventTime + 6h]`.
+- **Check-in radius: 750ft (~229m) Haversine** (`isWithin750ft`). Active window: start−30min → end (main); end → end+1hr (afters). 30-min early grace period for all check-ins.
+- **Typed check-in**: `markCheckedIn(id, type)` / `isCheckedIn(id, type)` where type = `'main'` or `'afters'`. Key format: `"${eventId}:${type}"`. Legacy bare key `"${eventId}"` also written for main for backward compat.
+- Auto-ping scan (`runAutoPingScan`) requires 2 pings ≥ 30min apart within 750ft — then auto-checks in.
+- `checkAndAwardSubmitPoints(session, events)` called in App.jsx on every events load — awards 50pts per approved event owned by user (DB dedup blocks repeats).
 
 ### Authentication
 - Custom auth via `supabaseAuth.js` — NOT using `@supabase/supabase-js` auth client directly.
@@ -448,22 +480,60 @@ borough-outline (fill-extrusion, unrestricted, topmost)
 - Profanity filter: leet-speak normalization (`0→o, 1→i, 3→e, 4→a, 5→s`), spacer stripping, repeated-char collapse.
 - Username displayed: `username` → `user_metadata.username` → `email prefix` → "Account".
 
+### Live / Afters Event Timing System
+All timing logic lives in `src/lib/eventUtils.js`. Key functions:
+- `isEventHappeningNow(event)` — `start−30min → end+1hr` (includes afters buffer). For auto events: `start → start+2hr`.
+- `isEventLive(event)` — `start−30min → end` (no afters). Shows LIVE badge.
+- `isAftersWindow(event)` — `end → end+1hr`. Shows AFTERS badge. Not for auto events.
+- `isCheckInWindowOpen(event)` — alias for `isEventHappeningNow`.
+- All use 30-min early grace: `startMs - 30 * 60 * 1000`.
+- `event_time_utc_end` is the source of end time. If missing, some functions may fall back to `start + 6hr` internally.
+
+LIVE/AFTERS badges appear in: EventTile (image overlay), EventDetailPopup (image overlay), FavoritesPage (FavoriteCard image), CalendarPage weekly + daily views. **Not** in CalendarPage monthly view.
+
+TileView: live events are retained in the present event list even when they'd be filtered out by date range.
+
+### Event Check-In System
+- **Manual check-in**: In `EventDetailPopup`, a check-in dropdown appears when `isEventHappeningNow`. User taps "Check In Here" → GPS acquired → distance checked (750ft / ~229m Haversine) → points awarded if eligible + session valid.
+- **Auto-ping**: `runAutoPingScan(events, session, onCheckIn)` in `locationService.js`. Requires `lapuff_autopings_enabled` localStorage. Pings location, stores in `lapuff_autopings` ring buffer. When 2 pings ≥ 30min apart are within 750ft of an event → auto check-in.
+- **Check-in dedup**: `markCheckedIn(id, type)` / `isCheckedIn(id, type)`. Key: `"${eventId}:${type}"` in `lapuff_checkedins` localStorage. Legacy bare key `"${eventId}"` also written for `main`.
+- **Afters check-in**: `handleManualCheckIn('afters')` in EventDetailPopup. Only shown when `event.afters_lat && isAftersWindow(event)`. Uses `event.afters_lat/lng` for distance check.
+- **DB dedup**: `event_attendance` table has `UNIQUE(user_id, event_id, checkin_type)`. `clout_ledger` has `UNIQUE(user_id, event_id, checkin_type)` with `ON CONFLICT DO NOTHING`. Server-side guard against race conditions and bot abuse.
+- **Attendance count**: `events_with_counts` view provides `attendance_count` (count of all `event_attendance` rows per event). Used in EventTile/EventDetailPopup image overlay when live.
+- **30-min early grace** for all check-ins (both manual and auto-ping).
+
+### Afters System
+- **Afters window**: `end → end+1hr` after `event_time_utc_end`.
+- **Afters pin**: Spawns on map when `isAftersWindow(event) && event.afters_lat`. Purple canvas `Marker` (`aftersMarkersRef`).
+- **Route line**: OSRM `/route/v1/walking/{lng1},{lat1};{lng2},{lat2}?overview=full&geometries=geojson` draws a dotted purple GeoJSON line between main pin and afters pin. Source: `afters-route`, layer: `afters-route-line`, `line-dasharray: [3,4]`. Straight-line fallback if OSRM fails.
+- **AftersCheckInModal**: Module-level component in `MapView.jsx`. Opens on afters pin click. Lazy-imports GPS + points libs. Shows 750ft GPS check-in with same logic as EventDetailPopup afters check-in.
+- **Navigation (AFTERS button)**: Clicking AFTERS badge in EventTile/EventDetailPopup navigates to map, fits both main + afters pin in viewport. If already on map, adjusts viewport only (does not switch to 2D). If on tiles view, switches to map view and pans to frame both pins.
+- **DB columns**: `events.afters_address` (TEXT), `events.afters_lat` (FLOAT8), `events.afters_lng` (FLOAT8).
+- All 30 sample events have artificial nearby afters addresses for testing.
+
 ### Event Submission
 - Location types: `'address'` (full address + city + zip) or `'rsvp'` (link only, city = 'Private/Online').
-- Photo upload: max 5, max 1MB each, stored in Supabase `event-images` bucket. Filename: `Date.now()-random.ext`.
+- Photo upload: max 5, **any size accepted** — compressed client-side via canvas API (`compressImage()`) to < 1MB JPEG before upload. Max dimension 1920px, quality loop 0.85→0.1. Stored in Supabase `event-images` bucket. Filename: `Date.now()-random.ext`.
 - Timezone: auto-detected from browser, converted via `localToUTC(date, time, offset)`.
-- Submitted events await approval (`is_approved = false`).
+- **Submitted events always set `is_approved: false`** — must be manually approved in Supabase (or future admin UI). Approved events appear on site and trigger submit points.
+- Both Start Time and End Time are required fields. End time drives `event_time_utc_end` column.
+- **Afters Address field** (optional, below description): uses same `AddressSearch.jsx` Nominatim geocoder, outputs `afters_address`, `afters_lat`, `afters_lng` to Supabase.
 - Links: flexible array, trimmed on submit.
-- **Geocoding at submit**: `AddressSearch.jsx` uses Nominatim — `lat`/`lng` from search results are passed to `EventSubmitForm.jsx` and included in the Supabase INSERT payload. Events table has `lat FLOAT8` and `lng FLOAT8` columns with `idx_events_lat_lng` index.
-- `toSampleEventRow` in `supabase.js` includes `lat`, `lng`, `borough` fields for sample sync.
-- All 40 sample events in `sampleEvents.js` have hardcoded lat/lng coordinates.
+- **Geocoding at submit**: `AddressSearch.jsx` uses Nominatim — `lat`/`lng` from search results are passed to `EventSubmitForm.jsx` and included in the Supabase INSERT payload. Events table has `lat FLOAT8` and `lng FLOAT8` columns.
+- All 30 sample events in `sampleEvents.js` have hardcoded `lat`, `lng`, `afters_address`, `afters_lat`, `afters_lng`, and `event_time_utc_end` (start+6hrs).
 
 ### Event Pin Markers (MapView)
 - Pin toggle button: `showPins` state, 📍 pill button next to time toggles (separate element, not inside time toggle box).
+- **Pin visibility window**: user/sample events persist from start−30min through `event_time_utc_end + 1hr` (afters window). Pins are removed after end+1hr.
 - Pin effect: `[showPins, events, mapReady]` deps. Filters `!e._auto` and requires valid `parseFloat(lat/lng)`.
 - Pin DOM: MapLibre `Marker` with custom SVG element (pin shape + emoji), `anchor: 'bottom'`.
 - Pin colors: `hex_color` fill, darkened stroke, white inner circle.
 - Hover: tooltip with event name/date. Click: opens EventDetailPopup.
+- **LIVE pill**: When `isEventLive(event)`, a small green pill badge floats above the pin (`pillMarkersRef`, `offset: [0, -112]`). DOM `Marker` with `anchor: 'bottom'`.
+- **AFTERS pill**: When `isAftersWindow(event)`, pill turns purple and reads "AFTERS". Cleared and re-evaluated on pin effect re-run.
+- **Afters pin**: When an event is in its afters window AND has `afters_lat`/`afters_lng`, a separate purple canvas `Marker` spawns at the afters location (`aftersMarkersRef`).
+- **Route line**: OSRM `/route/v1/walking/` API draws dotted purple line between main pin and afters pin during afters window. Source: `afters-route`, layer: `afters-route-line`, `line-dasharray: [3,4]`. Falls back to straight line if OSRM fails.
+- **AftersCheckInModal**: Clicking an afters pin opens `AftersCheckInModal` (module-level component in MapView.jsx). Lazy-imports GPS + points libs. Shows afters check-in UI with same 750ft GPS logic.
 - **Critical data flow**: DB rows synced before `lat`/`lng` columns existed will have null coords. `AppWithEvents` enriches DB events from SAMPLE_EVENTS by matching `event_name__event_date` keys to backfill missing lat/lng. This enrichment only runs in SAMPLE_MODE when base events differ from SAMPLE_EVENTS array reference.
 - MapView reads `e.lat`/`e.lng` directly — zero geocoding API calls at runtime.
 
@@ -513,12 +583,18 @@ borough-outline (fill-extrusion, unrestricted, topmost)
 - Description: HTML stripped, entities decoded, whitespace collapsed, truncated at 800 chars.
 
 ### Supabase Schema
-- `events` table: user-submitted events with `is_approved`, `fav_count`, `trend_threshold_count`.
+- `events` table: user-submitted events. Key columns: `id`, `event_name`, `user_id`, `is_approved` (bool, default false — manual approval gate), `fav_count`, `lat`, `lng`, `event_time_utc`, `event_time_utc_end`, `afters_address`, `afters_lat`, `afters_lng`, `zip_code`, `borough`.
 - `auto_events` table: scraped events with `external_id` UNIQUE, `source_site`, `source_url`. No FK to `events`.
 - `profiles` table: `username`, `clout_points`, `home_zip`, `bio`.
 - `event_favorites` table: `user_id`, `event_id` — authenticated favorites.
+- `event_attendance` table: `user_id`, `event_id`, `checkin_type` (`'main'` or `'afters'`), `status`, `verified_at`. Unique constraint: `unique_user_event_type(user_id, event_id, checkin_type)`.
+- `clout_ledger` table: `user_id`, `amount`, `reason`, `event_id`, `checkin_type`. Unique constraint: `unique_clout_award(user_id, event_id, checkin_type)` — DB-enforced dedup for all point awards.
 - `favorite_point_contributions` table: one-time point tracking per user per event.
-- RPCs: `update_event_fav_count(p_event_id, p_delta)`, `award_clout(points_to_add, audit_reason)`, `award_points_for_active_favorites(p_user_id)`.
+- `events_with_counts` VIEW: `SELECT events.*, (SELECT count(*) FROM event_attendance WHERE event_attendance.event_id = events.id) AS attendance_count FROM events`. Used by `getApprovedEvents()` — provides `attendance_count` on every event object.
+- **RPCs (current):**
+  - `update_event_fav_count(p_event_id, p_delta)` — increments fav_count
+  - `award_clout(p_user_id, p_amount, p_reason, p_event_id, p_checkin_type)` — inserts to clout_ledger + updates profiles.clout_points. Uses `ON CONFLICT DO NOTHING` on `unique_clout_award`. Also updates profiles via trigger.
+  - `award_points_for_active_favorites(p_user_id)` — batch favorite point awards
 - Supabase URL: `https://gazuabyyugbbthonqnsp.supabase.co`.
 - Publishable key in `supabase.js`, service role key in GitHub Secrets only.
 
@@ -530,6 +606,7 @@ borough-outline (fill-extrusion, unrestricted, topmost)
 ### Home Page
 - Dual views: 'tiles' (TileView) and 'map' (MapView) toggle.
 - Mobile header auto-hide: hysteresis scroll detection, `MIN_DELTA=4px`, `HIDE_AFTER_Y=96px`, `HIDE_SCROLL_DISTANCE=18px`.
+- **Header hide mechanism (tile view)**: Uses `marginTop: -headerHeight` (measured via `useLayoutEffect` + `headerRef`) to pull header out of the flex column layout. Content fills the space synchronously — same duration/easing `500ms cubic-bezier(0.22,1,0.36,1)`. Map mode uses `position: absolute` + `-translateY-full` (unchanged).
 - Referral: captures `?ref=CODE` param, persists to `lapuff_pending_referral`, auto-opens auth after 1s.
 - Logo hover: swaps background/shadow colors dynamically from theme.
 - Desktop: Submit Event button + user dropdown. Mobile: HamburgerMenu.
@@ -537,15 +614,26 @@ borough-outline (fill-extrusion, unrestricted, topmost)
 ### FavoritesPage
 - Merges live + cached favorites via `mergeFavoriteEventsWithCache(events)`.
 - Grouped by `event_date`, sorted by date then name.
-- FavoriteCard: `getTileAccentColor(hex_color, theme)` for border-top color.
+- FavoriteCard: `getTileAccentColor(hex_color, theme)` for border-top color (uses `style={{ border }}` full shorthand).
 - Real-time fav count + trend subscription per card.
+- **LIVE/AFTERS badges** on FavoriteCard image: green pulsing LIVE or purple AFTERS pill when event is in its window.
 - Empty state: emoji + "No favorites yet!" + browse link.
+- **Events persist in favorites view during their live/afters window** even if they'd otherwise be past-dated.
 
 ### CalendarPage
 - Views: monthly (7-col grid, max 3 events/cell), weekly (7-day vertical list, 2–3 events/day), daily (full list with expand/collapse).
 - Navigation preserves `location.state.initialDate` and `initialView` from EventDetailPopup.
 - MiniMap in day view: OpenStreetMap embed (if lat/lng) or Google Maps fallback.
 - Theme-aware: calendar bg from `resolvedTheme.calendarBackgroundColor`.
+- **Monthly event tile truncation**: Event names sliced to 40 chars: `.slice(0, 37) + '...'`. Uses `whitespace-nowrap` to enforce single line.
+- **Daily view z-index**: Expanded `DayEventDetails` card uses `style={{ zIndex: expanded ? 50 : 'auto' }}` on outer div and inner card. Outer div has no `overflow-hidden` (was causing clip). Entire card is `onClick` toggle (not just a button header).
+- **DayEventDetails hover states**:
+  - Time+Date button: `onMouseEnter` → `bg:#000, color:#fff`; reset on leave.
+  - Links: same invert + border color reset.
+  - Tags: same invert pattern + `border-color` inline reset. `cursor-pointer`.
+  - Map wrapper: border color → black on hover.
+  - `borderColor` passed as prop to `DayEventDetails` (computed outside component, not inside).
+- **Weekly + Daily LIVE/AFTERS badges**: Green LIVE or purple AFTERS pill shown on event card when in window.
 
 ### Leaderboard
 - Top 50 users by `clout_points` from `profiles`.
