@@ -11,7 +11,7 @@ import {
 import { uploadToOracleCloud, isOciConfigured } from '../lib/oracleStorage';
 import { NYC_ZIP_FEATURES } from '../lib/nycZipGeoJSON';
 import { ALL_COOL_FONTS, convertFont, toPlainText } from '../lib/unicodeFonts';
-import { isLocalParticipant, addPendingReactSync, removePendingReactSync } from '../lib/pointsSystem';
+import { isLocalParticipant } from '../lib/pointsSystem';
 import EmojiPicker from './EmojiPicker';
 
 // ── constants ─────────────────────────────────────────────────────────────────
@@ -718,33 +718,10 @@ export default function GeoPostView({ session }) {
   // ── reactions ─────────────────────────────────────────────────────────────────
   const handleReact = async (postId, emoji) => {
     if (session?.user?.id) {
-      // ── Orbiter path: signed in but not participant ─────────────────────────
-      if (!isLocalParticipant()) {
-        const existingPending = (reactions[postId] || []).find(
-          r => r.user_id === session.user.id && r.emoji_text === emoji
-        );
-        if (existingPending) {
-          removePendingReactSync(postId, emoji);
-          setReactions(prev => ({
-            ...prev,
-            [postId]: (prev[postId] || []).filter(r => !(r.user_id === session.user.id && r.emoji_text === emoji)),
-          }));
-        } else {
-          addPendingReactSync(postId, emoji);
-          setReactions(prev => ({
-            ...prev,
-            [postId]: [...(prev[postId] || []), {
-              post_id: postId, emoji_text: emoji,
-              user_id: session.user.id,
-              username: session.user.user_metadata?.username,
-              _pending: true,
-            }],
-          }));
-        }
-        return; // No DB write — will sync when they become participant
-      }
-
-      // ── Participant path: full DB sync ──────────────────────────────────────
+      // ── Signed-in path (BOTH orbiter AND participant) ────────────────────────
+      // Write to DB immediately for all authenticated users.
+      // The DB trigger 'handle_post_reaction_clout' fires on INSERT when user_id IS NOT NULL,
+      // awarding 5pts to the post author. post_clout_given PK deduplicates (once per user per post).
       const existing = (reactions[postId] || []).find(r => r.user_id === session.user.id && r.emoji_text === emoji);
       try {
         if (existing) {
