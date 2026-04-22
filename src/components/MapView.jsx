@@ -1532,6 +1532,7 @@ export default function MapView({ events, headerCollapsed = false }) {
   const [mapReady,      setMapReady]      = useState(false);
   const [entered,       setEntered]       = useState(false);
   const [hoveredZip,    setHoveredZip]    = useState(null);
+  const [hoveredBorough, setHoveredBorough] = useState(null);
   const [hoveredEvents, setHoveredEvents] = useState([]);
   const [hoveredColonists, setHoveredColonists] = useState(null);
   const [tooltipPos,    setTooltipPos]    = useState(null);
@@ -1955,13 +1956,8 @@ export default function MapView({ events, headerCollapsed = false }) {
           'line-opacity': ['case', ['boolean', ['feature-state', 'hovered'], false], 1, 0],
         },
       });
-      // Thick transparent hit-test line — events register on this instead of fill so
-      // hover/click only fire when cursor is near the BORDER (not the interior fill area).
-      // line-opacity 0.001 is invisible but still responds to map.queryRenderedFeatures.
-      map.addLayer({
-        id: 'borough-border-hit', type: 'line', source: 'borough-hover-source',
-        paint: { 'line-color': '#ffffff', 'line-width': 14, 'line-opacity': 0.001 },
-      });
+      // No borough-border-hit line layer — we use 'borough-hover-fill' events directly,
+      // with a queryRenderedFeatures guard that skips when a ZCTA zip is under the cursor.
     }
     const handleZctaHover = e => {
       if (!e.features.length) return;
@@ -2007,7 +2003,7 @@ export default function MapView({ events, headerCollapsed = false }) {
     map.on('mouseleave', 'zcta-safezone-hover', handleZctaLeave);
     map.on('click', 'zcta-safezone-hover', handleZctaClick);
 
-    // Right-click on zip → geopost panel; right-click on borough border → borough geopost panel
+    // Right-click on zip → geopost panel; right-click in borough border area → borough geopost panel
     map.on('contextmenu', e => {
       e.originalEvent.preventDefault();
       const features = map.queryRenderedFeatures(e.point, { layers: ['zcta-fill', 'zcta-safezone-hover'] });
@@ -2015,42 +2011,65 @@ export default function MapView({ events, headerCollapsed = false }) {
         const zip = String(features[0].properties.MODZCTA || '');
         if (zip) { setMapPostsPanel({ type: 'zip', value: zip }); setMapPostsPage(0); return; }
       }
-      // Fall through to borough border hit
-      const bbox = [[e.point.x - 8, e.point.y - 8], [e.point.x + 8, e.point.y + 8]];
-      const boroughFeatures = map.queryRenderedFeatures(bbox, { layers: ['borough-border-hit'] });
+      // Check borough border area (no zip under cursor)
+      const boroughFeatures = map.queryRenderedFeatures(e.point, { layers: ['borough-hover-fill'] });
       if (boroughFeatures.length > 0) {
         const boroughName = String(boroughFeatures[0].properties.BoroName || '');
         if (boroughName) { setMapPostsPanel({ type: 'borough', value: boroughName }); setMapPostsPage(0); }
       }
     });
 
-    // Borough border events — register on 'borough-border-hit' (line layer) so hover/click
-    // only fire near the actual borough border edge, not anywhere inside the borough fill.
-    const handleBoroughHover = e => {
+    // Borough hover via 'borough-hover-fill' layer.
+    // When cursor is inside a borough polygon, we check if a ZCTA zip is also under the cursor.
+    // If yes → zip takes priority (return early, existing ZCTA handlers manage it).
+    // If no (cursor in harbour/water border area) → borough hover activates.
+    const handleBoroughFillHover = e => {
       if (!e.features.length) return;
+      // Check all possible ZCTA layers (varies by 2D/3D mode) for zip under cursor
+      const zctaLayers = ['zcta-fill', 'zcta-extrude', 'zcta-safezone-hover', 'zcta-safezone-extrusion']
+        .filter(l => map.getLayer(l));
+      if (zctaLayers.length > 0 && map.queryRenderedFeatures(e.point, { layers: zctaLayers }).length > 0) {
+        // A zip is under the cursor — clear borough hover and let ZCTA handlers manage
+        if (hoveredBoroughIdRef.current !== null) {
+          map.setFeatureState({ source: 'borough-hover-source', id: hoveredBoroughIdRef.current }, { hovered: false });
+          hoveredBoroughIdRef.current = null;
+          setHoveredBorough(null);
+        }
+        return;
+      }
+      // No zip under cursor → this is harbour/water border area: activate borough hover
       const f = e.features[0];
-      if (hoveredBoroughIdRef.current !== null && hoveredBoroughIdRef.current !== f.id)
-        map.setFeatureState({ source: 'borough-hover-source', id: hoveredBoroughIdRef.current }, { hovered: false });
-      hoveredBoroughIdRef.current = f.id;
-      map.setFeatureState({ source: 'borough-hover-source', id: f.id }, { hovered: true });
+      if (hoveredBoroughIdRef.current !== f.id) {
+        if (hoveredBoroughIdRef.current !== null)
+          map.setFeatureState({ source: 'borough-hover-source', id: hoveredBoroughIdRef.current }, { hovered: false });
+        hoveredBoroughIdRef.current = f.id;
+        map.setFeatureState({ source: 'borough-hover-source', id: f.id }, { hovered: true });
+      }
       map.getCanvas().style.cursor = 'pointer';
+      setHoveredBorough(String(f.properties.BoroName || ''));
+      setTooltipPos({ x: e.point.x, y: e.point.y });
     };
-    const handleBoroughLeave = () => {
+    const handleBoroughFillLeave = () => {
       if (hoveredBoroughIdRef.current !== null) {
         map.setFeatureState({ source: 'borough-hover-source', id: hoveredBoroughIdRef.current }, { hovered: false });
         hoveredBoroughIdRef.current = null;
       }
-      map.getCanvas().style.cursor = '';
+      setHoveredBorough(null);
+      if (hoveredIdRef.current === null) map.getCanvas().style.cursor = '';
     };
-    // Left-click on borough border → events+colonists side panel (right panel)
-    const handleBoroughClick = e => {
+    // Left-click on borough border area → events+colonists side panel (right)
+    const handleBoroughFillClick = e => {
       if (!e.features.length) return;
+      // Zip takes priority for clicks too
+      const zctaLayers = ['zcta-fill', 'zcta-extrude', 'zcta-safezone-hover', 'zcta-safezone-extrusion']
+        .filter(l => map.getLayer(l));
+      if (zctaLayers.length > 0 && map.queryRenderedFeatures(e.point, { layers: zctaLayers }).length > 0) return;
       const boroughName = String(e.features[0].properties.BoroName || '');
-      if (boroughName) { openBoroughSidePanel(boroughName); }
+      if (boroughName) openBoroughSidePanel(boroughName);
     };
-    map.on('mousemove', 'borough-border-hit', handleBoroughHover);
-    map.on('mouseleave', 'borough-border-hit', handleBoroughLeave);
-    map.on('click', 'borough-border-hit', handleBoroughClick);
+    map.on('mousemove', 'borough-hover-fill', handleBoroughFillHover);
+    map.on('mouseleave', 'borough-hover-fill', handleBoroughFillLeave);
+    map.on('click', 'borough-hover-fill', handleBoroughFillClick);
 
     // Mobile long-press: 1 second hold on zip opens MapPostsPanel; hold on borough border opens borough events panel
     const canvas = map.getCanvas();
@@ -2069,9 +2088,8 @@ export default function MapView({ events, headerCollapsed = false }) {
           if (zip) { setMapPostsPanel({ type: 'zip', value: zip }); setMapPostsPage(0); }
           return;
         }
-        // Borough border long-press — opens borough events side panel
-        const bbox = [touchPoint.x - 10, touchPoint.y - 10, touchPoint.x + 10, touchPoint.y + 10];
-        const boroughFeats = map.queryRenderedFeatures(bbox, { layers: ['borough-border-hit'] });
+        // Borough border area long-press (no zip under cursor) — opens borough events side panel
+        const boroughFeats = map.queryRenderedFeatures([touchPoint.x, touchPoint.y], { layers: ['borough-hover-fill'] });
         if (boroughFeats.length > 0) {
           const bn = String(boroughFeats[0].properties.BoroName || '');
           if (bn) openBoroughSidePanel(bn);
@@ -3542,6 +3560,8 @@ export default function MapView({ events, headerCollapsed = false }) {
   async function openSidePanel(zip) {
     const isSafezone = zip.startsWith('SAFE:');
     const rawZip = isSafezone ? zip.slice(5) : zip;
+    // Opening zip events panel (right) takes over from borough events panel
+    setSideBorough(null); setSideBoroughEvents([]); setSideBoroughColonists([]);
     // Store the full SAFEZONE_N string so the label can show "Safe Zone 3" etc.
     setSideZip(rawZip);
     if (isSafezone && isSafezoneModzcta(rawZip)) {
@@ -4082,6 +4102,20 @@ export default function MapView({ events, headerCollapsed = false }) {
               </div>
             </div>,
             document.body
+          )}
+
+          {/* Borough hover tooltip — shown when hovering in harbour/border area */}
+          {hoveredBorough && !hoveredZip && tooltipPos && (
+            <div className="absolute z-30 pointer-events-none"
+              style={{ left: Math.min(tooltipPos.x + 12, window.innerWidth - 220), top: tooltipPos.y + 20, width: 210 }}>
+              <div className="bg-gray-950/95 border border-purple-800/60 rounded-2xl overflow-hidden shadow-[0_0_15px_rgba(124,58,237,0.35)]">
+                <div className="px-3 py-2 border-b border-white/10">
+                  <p className="text-purple-400 font-black text-xs">🏙 {hoveredBorough}</p>
+                  <p className="text-white/50 text-xs">Click — events &amp; colonists</p>
+                  <p className="text-white/35 text-xs">Right-click — borough posts</p>
+                </div>
+              </div>
+            </div>
           )}
 
           {/* Hover tooltip — positioned below cursor so pin tooltip can stack above */}

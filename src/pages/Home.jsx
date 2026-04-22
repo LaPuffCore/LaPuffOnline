@@ -215,7 +215,21 @@ export default function Home({ events = [], eventsLoading = false }) {
   }
 
   function handleNextTrack() {
-    if (scWidgetRef.current && scReadyRef.current) scWidgetRef.current.next();
+    if (!scWidgetRef.current || !scReadyRef.current) return;
+    // True shuffle: pick a random track index different from current
+    scWidgetRef.current.getSounds(sounds => {
+      if (!sounds || sounds.length === 0) { scWidgetRef.current.next(); return; }
+      if (sounds.length === 1) { scWidgetRef.current.skip(0); return; }
+      scWidgetRef.current.getCurrentSoundIndex(currentIdx => {
+        let nextIdx;
+        let attempts = 0;
+        do {
+          nextIdx = Math.floor(Math.random() * sounds.length);
+          attempts++;
+        } while (nextIdx === currentIdx && attempts < 20);
+        scWidgetRef.current.skip(nextIdx);
+      });
+    });
   }
 
   function handleTogglePlayPause() {
@@ -529,7 +543,7 @@ export default function Home({ events = [], eventsLoading = false }) {
               <MapView events={events} headerCollapsed={headerCollapsed} />
             </div>
         ) : view === 'geo' ? (
-          <div className="h-full overflow-hidden">
+          <div className="h-full overflow-y-auto">
             <GeoPostView session={session} />
           </div>
         ) : (

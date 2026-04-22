@@ -34,6 +34,20 @@ const PRESET_COLORS = [
   '#3b82f6','#8b5cf6','#ec4899','#06b6d4','#84cc16','#f43f5e',
 ];
 
+// Sample posts shown in SAMPLE_MODE when feed is empty
+const SAMPLE_POSTS = [
+  { id: 'sp1', user_id: 'fake-user-1', username: 'xo_brooklynite', is_participant: true, scope: 'zip', borough: 'Brooklyn', zip_code: '11211', content: { html: '<b>Williamsburg block party this Saturday 🎉</b> — come thru Havemeyer St around 4pm, free food and live DJs. Bring the whole squad, all ages welcome!' }, post_fill: '#fff7ed', post_outline: '#f97316', total_reactions: 18, created_at: new Date(Date.now() - 2 * 3600000).toISOString(), post_approved: true },
+  { id: 'sp2', user_id: null, username: 'Anonymous', is_participant: false, scope: 'borough', borough: 'Manhattan', zip_code: null, content: { html: 'Anyone else notice how crowded the 1/2/3 trains are rn? Serious sardine energy 😩 why is the MTA like this' }, post_fill: '', post_outline: '', total_reactions: 9, created_at: new Date(Date.now() - 5 * 3600000).toISOString(), post_approved: true },
+  { id: 'sp3', user_id: 'fake-user-3', username: 'queensbridge_kev', is_participant: true, scope: 'zip', borough: 'Queens', zip_code: '11101', content: { html: '<i>Just found the most underrated bodega in LIC — iced coffee for $1.50 no cap 🧊</i><br/>It\'s on 21st St near the park. Go before they raise prices.' }, post_fill: '#f0fdf4', post_outline: '#22c55e', total_reactions: 24, created_at: new Date(Date.now() - 8 * 3600000).toISOString(), post_approved: true },
+  { id: 'sp4', user_id: 'fake-user-4', username: 'nyc_culture_vulture', is_participant: false, scope: 'nyc', borough: null, zip_code: null, content: { html: '🗽 <u>NYC wide art week incoming</u> — dozens of galleries opening simultaneously across all 5 boroughs. Check lapuff for all the events this weekend.' }, post_fill: '#fdf4ff', post_outline: '#8b5cf6', total_reactions: 31, created_at: new Date(Date.now() - 12 * 3600000).toISOString(), post_approved: true },
+  { id: 'sp5', user_id: 'fake-user-5', username: 'bronx_wave_rider', is_participant: true, scope: 'borough', borough: 'Bronx', zip_code: null, content: { html: 'Real talk the Bronx has the best food scene in the city rn 🔥 Grand Concourse hits different. Mofongo, birria, doubles — all within 2 blocks.' }, post_fill: '', post_outline: '#ef4444', total_reactions: 15, created_at: new Date(Date.now() - 15 * 3600000).toISOString(), post_approved: true },
+  { id: 'sp6', user_id: null, username: 'Anonymous', is_participant: false, scope: 'digital', borough: null, zip_code: null, content: { html: 'Anyone know if the red line on NYC MTA has delays tonight? Can\'t find real info anywhere 🤔' }, post_fill: '', post_outline: '', total_reactions: 4, created_at: new Date(Date.now() - 18 * 3600000).toISOString(), post_approved: true },
+  { id: 'sp7', user_id: 'fake-user-7', username: 'staten_island_sal', is_participant: true, scope: 'zip', borough: 'Staten Island', zip_code: '10301', content: { html: '<span style="font-weight:900">Ferry vibes are unmatched fr ⛴️</span><br/>Caught the sunset from the deck tonight. Free trip, best view in the city. Tourists don\'t even know.' }, post_fill: '#eff6ff', post_outline: '#3b82f6', total_reactions: 22, created_at: new Date(Date.now() - 22 * 3600000).toISOString(), post_approved: true },
+  { id: 'sp8', user_id: 'fake-user-8', username: 'harlem_renaissance_gal', is_participant: true, scope: 'zip', borough: 'Manhattan', zip_code: '10027', content: { html: 'Sunday service brunch in Harlem hits different when the choir starts 🙏 Marcus Garvey Park after = perfect day. Who\'s linking?' }, post_fill: '#fff1f2', post_outline: '#f43f5e', total_reactions: 37, created_at: new Date(Date.now() - 26 * 3600000).toISOString(), post_approved: true },
+  { id: 'sp9', user_id: 'fake-user-9', username: 'dumbo_design_kid', is_participant: false, scope: 'borough', borough: 'Brooklyn', zip_code: null, content: { html: 'DUMBO art walk tonight was insane 🎨 found 3 new artists I want to commission. Brooklyn keeps winning with the creative energy.' }, post_fill: '', post_outline: '#ec4899', total_reactions: 12, created_at: new Date(Date.now() - 30 * 3600000).toISOString(), post_approved: true },
+  { id: 'sp10', user_id: 'fake-user-10', username: 'flushing_local', is_participant: true, scope: 'zip', borough: 'Queens', zip_code: '11354', content: { html: 'Flushing night market season is BACK 🥟🍜 New vendors this year and the soup dumpling spot from last year expanded. Bring cash and an appetite.' }, post_fill: '#fefce8', post_outline: '#eab308', total_reactions: 45, created_at: new Date(Date.now() - 36 * 3600000).toISOString(), post_approved: true },
+];
+
 // Anonymous reaction dedup via localStorage (prevents refresh-spam without accounts)
 const ANON_REACTIONS_KEY = 'lapuff_geo_anon_reactions';
 function getAnonSet() {
@@ -374,6 +388,17 @@ function InlineDropdown({ open, onClose, children, alignRight = false, className
   );
 }
 
+// Filter SAMPLE_POSTS by type/value/etc. for demo mode
+function filterSamplePosts(type, value, timeFilter, statusFilter, sortByTop) {
+  let posts = [...SAMPLE_POSTS];
+  if (type === 'borough' && value) posts = posts.filter(p => p.borough === value);
+  else if (type === 'zip' && value) posts = posts.filter(p => p.zip_code === value);
+  if (statusFilter === 'participant') posts = posts.filter(p => p.is_participant);
+  else if (statusFilter === 'orbiter') posts = posts.filter(p => !p.is_participant);
+  if (sortByTop) posts.sort((a, b) => (b.total_reactions || 0) - (a.total_reactions || 0));
+  return posts;
+}
+
 // ── GeoPostView ───────────────────────────────────────────────────────────────
 export default function GeoPostView({ session }) {
   const { resolvedTheme } = useSiteTheme();
@@ -443,15 +468,24 @@ export default function GeoPostView({ session }) {
       const type  = locTab === 'borough' ? 'borough' : locTab === 'zip' ? 'zip' : 'all';
       const value = locTab === 'borough' ? filterBorough : locTab === 'zip' ? filterZip : null;
       const data  = await fetchGeoPostFeed({ type, value, timeFilter, statusFilter, sortByTop });
-      setPosts(data || []);
+      // Fall back to sample posts when feed is empty (for development / demo purposes)
+      const finalData = (data && data.length > 0) ? data : filterSamplePosts(type, value, timeFilter, statusFilter, sortByTop);
+      setPosts(finalData);
       setVisibleCount(PAGE_SIZE);
-      if (data?.length > 0) {
-        const rxns = await fetchReactionsForPosts(data.map(p => p.id));
-        const byPost = {};
-        (rxns || []).forEach(r => { if (!byPost[r.post_id]) byPost[r.post_id] = []; byPost[r.post_id].push(r); });
-        setReactions(byPost);
+      if (finalData.length > 0) {
+        const realIds = finalData.filter(p => !p.id.startsWith('sp')).map(p => p.id);
+        if (realIds.length > 0) {
+          const rxns = await fetchReactionsForPosts(realIds);
+          const byPost = {};
+          (rxns || []).forEach(r => { if (!byPost[r.post_id]) byPost[r.post_id] = []; byPost[r.post_id].push(r); });
+          setReactions(byPost);
+        }
       }
-    } catch {}
+    } catch {
+      const type  = locTab === 'borough' ? 'borough' : locTab === 'zip' ? 'zip' : 'all';
+      const value = locTab === 'borough' ? filterBorough : locTab === 'zip' ? filterZip : null;
+      setPosts(filterSamplePosts(type, value, timeFilter, statusFilter, sortByTop));
+    }
     setLoading(false);
   }, [locTab, filterBorough, filterZip, timeFilter, statusFilter, sortByTop]);
 
@@ -712,7 +746,7 @@ export default function GeoPostView({ session }) {
   const Divider = () => <div className="w-px h-4 bg-gray-300 mx-0.5 flex-shrink-0" />;
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 max-w-2xl mx-auto w-full px-3 pt-3 pb-8 gap-3">
+    <div className="w-full max-w-7xl mx-auto px-3 pt-3 pb-8 flex flex-col gap-3">
 
       {/* ── Create Post ──────────────────────────────────────────────────────── */}
       <div className="rounded-2xl border-3 border-black shadow-[4px_4px_0px_black]"
@@ -734,14 +768,25 @@ export default function GeoPostView({ session }) {
             zip={editorZip} setZip={setEditorZip} accentColor={accentColor} />
         </div>
 
-        {/* contenteditable editor — border shows postOutline simulation */}
+        {/* contenteditable editor — border shows postOutline simulation, expands with content */}
         <div ref={editorRef} contentEditable suppressContentEditableWarning
-          className="min-h-[80px] px-3 py-2 text-sm border-t border-gray-100"
+          className="min-h-[80px] md:min-h-[104px] px-3 py-2 text-sm border-t border-gray-100"
           style={{
             overflowWrap: 'break-word',
             backgroundColor: postFill || undefined,
             outline: postOutline ? `3px solid ${postOutline}` : 'none',
-          }} />
+          }}
+          onKeyDown={e => {
+            if (e.ctrlKey || e.metaKey) {
+              if (e.key === 'b') { e.preventDefault(); execCmd('bold'); }
+              else if (e.key === 'i') { e.preventDefault(); execCmd('italic'); }
+              else if (e.key === 'u') { e.preventDefault(); execCmd('underline'); }
+              else if (e.key === 'l') { e.preventDefault(); handleAlign('left'); }
+              else if (e.key === 'e') { e.preventDefault(); handleAlign('center'); }
+              else if (e.key === 'r') { e.preventDefault(); handleAlign('right'); }
+            }
+          }}
+        />
 
         {/* ── Toolbar ──────────────────────────────────────────────────────── */}
         <div className="border-t border-gray-200 px-2 py-1 flex items-center gap-0.5 flex-wrap bg-gray-50">
@@ -909,23 +954,36 @@ export default function GeoPostView({ session }) {
           className={baseFB} style={locTab === 'all' ? activeFS : {}}>
           🌀 All
         </button>
-        {/* 🏙 Borough */}
+        {/* 🏙 Borough — shows X when active to clear selection */}
         <div className="relative">
-          <button onMouseDown={e => e.preventDefault()} onClick={() => setOpenDropdown(p => p === 'borough' ? null : 'borough')}
+          <button onMouseDown={e => e.preventDefault()}
+            onClick={() => {
+              if (locTab === 'borough' && filterBorough) {
+                // Clear borough selection and return to All
+                setFilterBorough(''); setLocTab('all'); setOpenDropdown(null);
+              } else {
+                setOpenDropdown(p => p === 'borough' ? null : 'borough');
+              }
+            }}
             className={baseFB}
             style={locTab === 'borough' && filterBorough ? activeFS : {}}>
-            🏙 {locTab === 'borough' && filterBorough ? filterBorough : 'Borough'} ▾
+            🏙 {locTab === 'borough' && filterBorough ? filterBorough : 'Borough'}
+            {locTab === 'borough' && filterBorough
+              ? <span className="ml-0.5 text-[11px] font-black">✕</span>
+              : <span className="ml-0.5">▾</span>}
           </button>
-          <InlineDropdown open={openDropdown === 'borough'} onClose={() => setOpenDropdown(null)}>
-            {BOROUGHS.map(b => (
-              <button key={b} onMouseDown={e => e.preventDefault()}
-                onClick={() => { setFilterBorough(b); setLocTab('borough'); setFilterZipBoro(b); setOpenDropdown(null); }}
-                className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100"
-                style={filterBorough === b ? { background: accentColor + '22', color: accentColor } : {}}>
-                {b}
-              </button>
-            ))}
-          </InlineDropdown>
+          {!(locTab === 'borough' && filterBorough) && (
+            <InlineDropdown open={openDropdown === 'borough'} onClose={() => setOpenDropdown(null)}>
+              {BOROUGHS.map(b => (
+                <button key={b} onMouseDown={e => e.preventDefault()}
+                  onClick={() => { setFilterBorough(b); setLocTab('borough'); setFilterZipBoro(b); setOpenDropdown(null); }}
+                  className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100"
+                  style={filterBorough === b ? { background: accentColor + '22', color: accentColor } : {}}>
+                  {b}
+                </button>
+              ))}
+            </InlineDropdown>
+          )}
         </div>
         {/* 📍 Zip */}
         <div className="relative">
