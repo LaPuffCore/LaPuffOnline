@@ -34,12 +34,34 @@ export function convertFont(text, key) {
   const upper = [...map.upper];
   const lower = [...map.lower];
   return [...text].map(c => {
-    const u = c.charCodeAt(0) - 65;
-    const l = c.charCodeAt(0) - 97;
+    const cp = c.codePointAt(0);
+    const u = cp - 65;
+    const l = cp - 97;
     if (u >= 0 && u < 26 && upper[u]) return upper[u];
     if (l >= 0 && l < 26 && lower[l]) return lower[l];
     return c;
   }).join('');
+}
+
+// Build a reverse map: Unicode cool-font char → plain ASCII char
+// Only maps chars outside basic ASCII (codePoint > 127) to avoid false matches
+// (e.g. smallCaps lower has 'Q' which is ASCII — skip it)
+const _PLAIN_TEXT_REVERSE_MAP = (() => {
+  const map = {};
+  for (const font of Object.values(COOL_FONTS)) {
+    [...font.upper].forEach((char, i) => {
+      if (char.codePointAt(0) > 127) map[char] = String.fromCharCode(65 + i);
+    });
+    [...font.lower].forEach((char, i) => {
+      if (char.codePointAt(0) > 127) map[char] = String.fromCharCode(97 + i);
+    });
+  }
+  return map;
+})();
+
+/** Strip all Unicode cool-font characters back to plain ASCII. */
+export function toPlainText(text) {
+  return [...text].map(c => _PLAIN_TEXT_REVERSE_MAP[c] ?? c).join('');
 }
 
 // All font options including zalgo

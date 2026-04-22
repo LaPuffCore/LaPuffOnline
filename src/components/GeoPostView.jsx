@@ -10,7 +10,7 @@ import {
 } from '../lib/supabase';
 import { uploadToOracleCloud, isOciConfigured } from '../lib/oracleStorage';
 import { NYC_ZIP_FEATURES } from '../lib/nycZipGeoJSON';
-import { ALL_COOL_FONTS, convertFont } from '../lib/unicodeFonts';
+import { ALL_COOL_FONTS, convertFont, toPlainText } from '../lib/unicodeFonts';
 import EmojiPicker from './EmojiPicker';
 
 // ── constants ─────────────────────────────────────────────────────────────────
@@ -33,6 +33,14 @@ const PRESET_COLORS = [
   '#000000','#ffffff','#ef4444','#f97316','#eab308','#22c55e',
   '#3b82f6','#8b5cf6','#ec4899','#06b6d4','#84cc16','#f43f5e',
 ];
+
+// Anonymous reaction dedup via localStorage (prevents refresh-spam without accounts)
+const ANON_REACTIONS_KEY = 'lapuff_geo_anon_reactions';
+function getAnonSet() {
+  try { return new Set(JSON.parse(localStorage.getItem(ANON_REACTIONS_KEY) || '[]')); }
+  catch { return new Set(); }
+}
+function saveAnonSet(s) { localStorage.setItem(ANON_REACTIONS_KEY, JSON.stringify([...s])); }
 
 // ── PortalPopup ───────────────────────────────────────────────────────────────
 // Renders children via createPortal, positioned near a trigger button.
@@ -74,19 +82,33 @@ function PortalPopup({ btnRef, open, onClose, children, alignRight = false, minW
 }
 
 // ── HexColorPicker ─────────────────────────────────────────────────────────────
+// Includes native OS color wheel (input type=color) + preset grid + hex input.
 function HexColorPicker({ value, onChange, onClose }) {
   const [hex, setHex] = useState((value || '#000000').replace('#', ''));
   const isValid = (h) => /^[0-9a-fA-F]{6}$/.test(h);
+  const fullHex = isValid(hex) ? '#' + hex : '#000000';
   return (
-    <div className="bg-white border-3 border-black rounded-xl shadow-[4px_4px_0px_black] p-2 w-[180px]">
+    <div className="bg-white border-3 border-black rounded-xl shadow-[4px_4px_0px_black] p-2 w-[200px]">
+      {/* Native OS color wheel — click the swatch to open browser color picker */}
+      <div className="relative mb-2 rounded-lg overflow-hidden border-2 border-black h-9 cursor-pointer">
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none select-none"
+          style={{ background: fullHex }}>
+          <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-black/40 text-white">🎨 Color Wheel</span>
+        </div>
+        <input type="color" value={fullHex}
+          onChange={e => { const v = e.target.value.replace('#', ''); setHex(v); onChange(e.target.value); }}
+          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
+      </div>
+      {/* Preset swatches */}
       <div className="grid grid-cols-6 gap-1 mb-2">
         {PRESET_COLORS.map(c => (
           <button key={c} onMouseDown={e => e.preventDefault()}
-            onClick={() => { onChange(c); onClose(); }}
+            onClick={() => { const v = c.replace('#',''); setHex(v); onChange(c); onClose(); }}
             className="w-5 h-5 rounded border border-gray-300 hover:scale-110 transition-transform"
-            style={{ background: c, outline: ('#' + hex === c) ? '2px solid #7C3AED' : 'none' }} />
+            style={{ background: c, outline: (fullHex === c) ? '2px solid #7C3AED' : 'none' }} />
         ))}
       </div>
+      {/* Hex text input */}
       <div className="flex items-center gap-1">
         <span className="font-black text-[10px]">#</span>
         <input value={hex} maxLength={6}
@@ -178,7 +200,7 @@ function LocationSelector({ scope, setScope, borough, setBorough, zip, setZip, a
             <div className="relative">
               {ghostBtn(zipBtnRef, 'Zip Region', () => setZipOpen(v => !v))}
               <PortalPopup btnRef={zipBtnRef} open={zipOpen} onClose={() => setZipOpen(false)} minWidth={190}>
-                <div className="bg-white border-3 border-black rounded-xl shadow-[4px_4px_0px_black] overflow-hidden" style={{ maxHeight: 200, overflowY: 'auto' }}>
+                <div className="bg-white border-3 border-black rounded-xl shadow-[4px_4px_0px_black] overflow-hidden" style={{ maxHeight: 200, overflowY: 'auto', width: 220 }}>
                   {zipList.map(z => (
                     <button key={z.zip} onMouseDown={e => e.preventDefault()}
                       onClick={() => { setZip(z.zip); setScope('zip'); setZipOpen(false); }}
@@ -233,9 +255,9 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor })
       )}
       <div className="p-3">
         <div className="flex items-center gap-1.5 mb-2 flex-wrap">
-          <span className="font-black text-xs">{post.username || 'Orbiter'}</span>
+          <span className="font-black text-xs">{post.username || (post.user_id ? 'Orbiter' : 'Anonymous')}</span>
           <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full ${post.is_participant ? 'bg-green-500 text-white' : 'bg-red-500 text-white'}`}>
-            ● {post.is_participant ? 'PARTICIPANT' : 'ORBITER'}
+            ● {post.is_participant ? 'PARTICIPANT' : post.user_id ? 'ORBITER' : 'ANON'}
           </span>
           <span className="text-[9px] text-gray-400 ml-auto">{dateStr} · {timeStr}</span>
         </div>
@@ -322,7 +344,7 @@ async function compressGeoImage(file) {
 }
 
 // ── InlineDropdown (for filter bar — not portaled, fine outside overflow:hidden) ─
-function InlineDropdown({ open, onClose, children, alignRight = false }) {
+function InlineDropdown({ open, onClose, children, alignRight = false, className = '' }) {
   const ref = useRef(null);
   useEffect(() => {
     if (!open) return;
@@ -333,7 +355,7 @@ function InlineDropdown({ open, onClose, children, alignRight = false }) {
   if (!open) return null;
   return (
     <div ref={ref}
-      className={`absolute top-full mt-1 z-[9999] bg-white border-3 border-black rounded-xl shadow-[4px_4px_0px_black] overflow-hidden min-w-[120px] max-h-[280px] overflow-y-auto ${alignRight ? 'right-0' : 'left-0'}`}>
+      className={`absolute top-full mt-1 z-[9999] bg-white border-3 border-black rounded-xl shadow-[4px_4px_0px_black] overflow-y-auto min-w-[120px] max-h-[280px] ${alignRight ? 'right-0' : 'left-0'} ${className}`}>
       {children}
     </div>
   );
@@ -528,7 +550,9 @@ export default function GeoPostView({ session }) {
     const sel = window.getSelection();
     if (sel && sel.toString().length > 0) {
       focusEditor();
-      document.execCommand('insertText', false, convertFont(sel.toString(), key));
+      // Strip any existing Unicode font chars back to ASCII, then apply the new font
+      const plain = toPlainText(sel.toString());
+      document.execCommand('insertText', false, convertFont(plain, key));
       setActiveCoolFont(null);
     } else {
       setActiveCoolFont(prev => prev === key ? null : key);
@@ -624,16 +648,43 @@ export default function GeoPostView({ session }) {
 
   // ── reactions ─────────────────────────────────────────────────────────────────
   const handleReact = async (postId, emoji) => {
-    const existing = (reactions[postId] || []).find(r => r.user_id === session?.user?.id && r.emoji_text === emoji);
-    try {
-      if (existing) {
-        await removePostReaction(postId, emoji, session);
-        setReactions(prev => ({ ...prev, [postId]: (prev[postId] || []).filter(r => !(r.user_id === session?.user?.id && r.emoji_text === emoji)) }));
+    if (session?.user?.id) {
+      // ── Authenticated path ──────────────────────────────────────────────────
+      const existing = (reactions[postId] || []).find(r => r.user_id === session.user.id && r.emoji_text === emoji);
+      try {
+        if (existing) {
+          await removePostReaction(postId, emoji, session);
+          setReactions(prev => ({ ...prev, [postId]: (prev[postId] || []).filter(r => !(r.user_id === session.user.id && r.emoji_text === emoji)) }));
+        } else {
+          await addPostReaction(postId, emoji, session);
+          setReactions(prev => ({ ...prev, [postId]: [...(prev[postId] || []), { post_id: postId, emoji_text: emoji, user_id: session.user.id, username: session.user.user_metadata?.username }] }));
+        }
+      } catch {}
+    } else {
+      // ── Anonymous path — localStorage dedup, no points awarded ─────────────
+      const key = `${postId}:${emoji}`;
+      const anonSet = getAnonSet();
+      if (anonSet.has(key)) {
+        // Toggle off: remove from localStorage + local state (can't remove from DB for null user_id)
+        anonSet.delete(key);
+        saveAnonSet(anonSet);
+        setReactions(prev => {
+          const list = [...(prev[postId] || [])];
+          const idx = list.findIndex(r => r.emoji_text === emoji && r.user_id == null);
+          if (idx !== -1) list.splice(idx, 1);
+          return { ...prev, [postId]: list };
+        });
       } else {
-        await addPostReaction(postId, emoji, session);
-        setReactions(prev => ({ ...prev, [postId]: [...(prev[postId] || []), { post_id: postId, emoji_text: emoji, user_id: session?.user?.id, username: session?.user?.user_metadata?.username }] }));
+        // Toggle on: add to DB (null user_id = no points trigger) + localStorage + local state
+        anonSet.add(key);
+        saveAnonSet(anonSet);
+        try { await addPostReaction(postId, emoji, null); } catch {}
+        setReactions(prev => ({
+          ...prev,
+          [postId]: [...(prev[postId] || []), { post_id: postId, emoji_text: emoji, user_id: null }],
+        }));
       }
-    } catch {}
+    }
   };
 
   // ── filter helpers ────────────────────────────────────────────────────────────
@@ -670,10 +721,14 @@ export default function GeoPostView({ session }) {
             zip={editorZip} setZip={setEditorZip} accentColor={accentColor} />
         </div>
 
-        {/* contenteditable editor */}
+        {/* contenteditable editor — border shows postOutline simulation */}
         <div ref={editorRef} contentEditable suppressContentEditableWarning
-          className="min-h-[80px] px-3 py-2 text-sm outline-none border-t border-gray-100"
-          style={{ overflowWrap: 'break-word', backgroundColor: postFill || undefined }} />
+          className="min-h-[80px] px-3 py-2 text-sm border-t border-gray-100"
+          style={{
+            overflowWrap: 'break-word',
+            backgroundColor: postFill || undefined,
+            outline: postOutline ? `3px solid ${postOutline}` : 'none',
+          }} />
 
         {/* ── Toolbar ──────────────────────────────────────────────────────── */}
         <div className="border-t border-gray-200 px-2 py-1 flex items-center gap-0.5 flex-wrap bg-gray-50">
@@ -865,7 +920,7 @@ export default function GeoPostView({ session }) {
             className={baseFB} style={locTab === 'zip' && filterZip ? activeFS : {}}>
             📍 {locTab === 'zip' && filterZip ? filterZip : 'Zip'} ▾
           </button>
-          <InlineDropdown open={openDropdown === 'zip'} onClose={() => setOpenDropdown(null)}>
+          <InlineDropdown open={openDropdown === 'zip'} onClose={() => setOpenDropdown(null)} className="w-[220px] max-h-[280px]">
             {/* Borough row only when no borough filter active */}
             {!(locTab === 'borough' && filterBorough) && (
               <div className="p-2 border-b border-gray-200">
