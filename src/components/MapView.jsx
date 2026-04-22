@@ -1999,6 +1999,17 @@ export default function MapView({ events, headerCollapsed = false }) {
       cachedTierDataRef.current = { events, timespanIdx, geoData, zipMap, maxCount, tiers, withHeat };
       tiersRef.current = tiers;
       withHeatRef.current = withHeat;
+      // Publish zip heat index to localStorage — used by roaming points + future features.
+      // Updated every time the heatmap data changes (events or timespan).
+      try {
+        const zipHeat = {};
+        if (maxCount > 0) {
+          for (const [zip, evts] of Object.entries(zipMap)) {
+            zipHeat[zip] = normalizeHeat(evts.length, maxCount);
+          }
+        }
+        localStorage.setItem('lapuff_zip_heat', JSON.stringify(zipHeat));
+      } catch (e) { /* storage unavailable */ }
       if (map.getSource('zcta')) map.getSource('zcta').setData(withHeat);
       if (map.getSource('zcta-outline')) {
         map.getSource('zcta-outline').setData(createZctaOutlineGeoJSON(withHeat, getZoomAwareOutlineWidth(map, undefined, threeD)));

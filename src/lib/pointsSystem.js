@@ -5,15 +5,14 @@ const SUPABASE_URL = 'https://gazuabyyugbbthonqnsp.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_tLCmZUz3bgISgxs4KVq28g_x36Xo6Cp';
 
 export const POINTS = {
-  EVENT_ATTEND_CHECKIN: 300,    // Highest — real-life attendance verified by GPS
+  EVENT_ATTEND_CHECKIN: 250,    // Highest — real-life attendance verified by GPS
   AFTERS_ATTEND_CHECKIN: 200,   // Afters location check-in — post-event social
-  SELF_CHECKIN: 150,            
-  ATTENDEE_TO_ORGANIZER: 80,    
-  REFERRAL_SUCCESS: 50,         
-  SUBMIT_EVENT: 20,             
-  EVENT_FAVORITED: 5,           
-  HOT_ZONE_BASE: 3,             
-  HOT_ZONE_MULTIPLIER_MAX: 8,   
+  SELF_CHECKIN: 150,            // Organizer check-in at own event
+  REFERRAL_SUCCESS: 50,         // Someone signed up via your referral link
+  SUBMIT_EVENT: 50,             // Awarded when submitted event gets approved
+  EVENT_FAVORITED: 20,          // When someone favorites your submitted event (one-time)
+  HOT_ZONE_BASE: 1,             // Minimum roam pts (cold zone, every 30 min)
+  HOT_ZONE_MAX: 10,             // Maximum roam pts (hottest zone, every 30 min)
 };
 
 /**
@@ -63,19 +62,30 @@ export async function awardPoints(session, amount, reason, eventId = null, check
 }
 
 /**
- * Roaming Tracker - Only triggers if session is present
+ * Roaming Tracker — 1-10 pts based on zip heat, throttled to every 30 min.
  */
 export async function processRoamingPoints(session, heatValue) {
   if (!session || !canAwardRoamPoints()) return 0;
-  
-  const multiplier = 1 + heatValue * (POINTS.HOT_ZONE_MULTIPLIER_MAX - 1);
-  const pts = Math.round(POINTS.HOT_ZONE_BASE * multiplier);
-  
-  // Award via secure RPC
+
+  const pts = Math.max(1, Math.round(POINTS.HOT_ZONE_BASE + heatValue * (POINTS.HOT_ZONE_MAX - POINTS.HOT_ZONE_BASE)));
+
   await awardPoints(session, pts, `Hot zone roaming (heat: ${heatValue.toFixed(2)})`);
-  
+
   recordRoamAward();
   return pts;
+}
+
+/**
+ * Check approved events owned by the user and award submit points.
+ * Safe to call on every events load — DB unique_clout_award blocks duplicates silently.
+ */
+export async function checkAndAwardSubmitPoints(session, events) {
+  if (!isEligibleForPoints(session)) return;
+  const userId = session.user.id;
+  const mine = events.filter(e => e.user_id === userId && e.is_approved && !e._auto && !e._sample);
+  for (const event of mine) {
+    await awardPoints(session, POINTS.SUBMIT_EVENT, `Event Submission: ${event.event_name}`, event.id, 'submit');
+  }
 }
 
 /**
@@ -86,7 +96,7 @@ export function isEligibleForPoints(session) {
   return !!(session?.user && session.user.email_confirmed_at);
 }
 
-const ROAM_INTERVAL = 15 * 60 * 1000; 
+const ROAM_INTERVAL = 30 * 60 * 1000; 
 const ROAM_STORAGE_KEY = 'lapuff_last_roam_award';
 
 function canAwardRoamPoints() {

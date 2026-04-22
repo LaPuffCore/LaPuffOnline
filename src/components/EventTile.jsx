@@ -36,13 +36,24 @@ export default function EventTile({ event, onClick, onTagClick }) {
   const [favCount, setFavCount] = useState(0);
   const [trend, setTrend] = useState('neutral');
   const [hovered, setHovered] = useState(false);
-  
+  const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth < 640);
+
+  useEffect(() => {
+    const handler = () => setIsMobile(window.innerWidth < 640);
+    window.addEventListener('resize', handler);
+    return () => window.removeEventListener('resize', handler);
+  }, []);
+
   const bodyTextColor = resolvedTheme?.bodyTextColor || '#374151';
 
   const tags = generateAutoTags(event);
   const tzOffset = getUserTZOffset();
   const baseBorderColor = getTileAccentColor(event.hex_color, resolvedTheme);
   const borderColor = hovered ? (resolvedTheme?.accentColor || '#7C3AED') : baseBorderColor;
+
+  // Mobile title: hard-cap at 35 chars (32 + '...')
+  const rawTitle = event.event_name || '';
+  const displayTitle = isMobile && rawTitle.length > 32 ? rawTitle.slice(0, 32) + '...' : rawTitle;
 
   // Normalization: 7-day expiry logic matches Popup exactly
   const isExpired = event.event_date && (Date.now() - new Date(event.event_date + 'T00:00:00').getTime()) > 7 * 86400000;
@@ -186,7 +197,7 @@ export default function EventTile({ event, onClick, onTagClick }) {
       <div className="p-4">
         {/* min-h ensures the date/tags stay aligned across tiles */}
         <h3 className="font-black text-[13px] sm:text-sm leading-tight line-clamp-2 mb-2 min-h-[2.5rem]">
-          {event.event_name}
+          {displayTitle}
         </h3>
         
         <div className="flex flex-col gap-1 mb-3">

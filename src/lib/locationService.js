@@ -185,7 +185,7 @@ export async function runAutoPingScan(events, session, onCheckIn) {
     const loc = await pingLocation();
     const pings = storePing(loc);
     const { isEventHappeningNow } = await import('./eventUtils.js');
-    const { awardPoints, POINTS, isEligibleForPoints } = await import('./pointsSystem.js');
+    const { awardPoints, POINTS, isEligibleForPoints, processRoamingPoints } = await import('./pointsSystem.js');
 
     for (const event of events) {
       if (event._auto) continue;
@@ -209,6 +209,25 @@ export async function runAutoPingScan(events, session, onCheckIn) {
         awardPoints(session, POINTS.EVENT_ATTEND_CHECKIN, `Auto check-in: ${event.event_name}`, event.id, 'main');
       }
       onCheckIn?.(event);
+    }
+
+    // Roam points — award based on the user's current zip heat value (30-min throttle enforced in processRoamingPoints)
+    if (isEligibleForPoints(session)) {
+      try {
+        const heatMap = JSON.parse(localStorage.getItem('lapuff_zip_heat') || '{}');
+        if (Object.keys(heatMap).length > 0) {
+          const revRes = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${loc.lat}&lon=${loc.lng}&zoom=10`,
+            { headers: { 'User-Agent': 'LaPuffOnline/1.0' } }
+          );
+          if (revRes.ok) {
+            const revData = await revRes.json();
+            const zip = (revData.address?.postcode || '').replace(/\D/g, '').slice(0, 5);
+            const heatValue = zip && heatMap[zip] != null ? heatMap[zip] : 0;
+            await processRoamingPoints(session, heatValue);
+          }
+        }
+      } catch { /* silent — roam points are optional */ }
     }
   } catch {
     // Silently fail if location denied or not available

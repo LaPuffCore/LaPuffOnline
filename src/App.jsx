@@ -15,6 +15,7 @@ import { AuthProvider, useAuth } from './lib/AuthContext'; // Fixed @ alias
 import { ThemeProvider } from './lib/theme';
 import { hydrateFavoriteEventCache } from './lib/favorites';
 import { runAutoPingScan } from './lib/locationService';
+import { checkAndAwardSubmitPoints } from './lib/pointsSystem';
 import { getValidSession } from './lib/supabaseAuth';
 import CustomCursorOverlay from './components/CustomCursorOverlay';
 // Add page imports here
@@ -131,6 +132,7 @@ function AppWithEvents() {
       runAutoPingScan(events, session, (event) => {
         console.info(`[AutoPing] Auto-checked into: ${event.event_name}`);
       });
+      if (session) checkAndAwardSubmitPoints(session, events);
     });
   }, [events]);
 

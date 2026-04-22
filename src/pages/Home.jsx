@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import EventSubmitForm from '../components/EventSubmitForm';
 import TileView from '../components/TileView';
@@ -25,6 +25,11 @@ export default function Home({ events = [], eventsLoading = false }) {
   const [logoHovered, setLogoHovered] = useState(false);
   const lastScrollY = useRef(0);
   const downScrollAccum = useRef(0);
+  const headerRef = useRef(null);
+  const [measuredHeaderH, setMeasuredHeaderH] = useState(0);
+  useLayoutEffect(() => {
+    if (headerRef.current) setMeasuredHeaderH(headerRef.current.offsetHeight);
+  }, []);
 
   // ── Ghost Music Player state ──────────────────────────────────────────────
   const [isMusicOn,     setIsMusicOn]     = useState(false);
@@ -240,7 +245,7 @@ export default function Home({ events = [], eventsLoading = false }) {
   return (
     <div className="h-[100dvh] lp-page-bg flex flex-col overflow-hidden" style={{ fontFamily: "'Nunito', cursive, sans-serif" }}>
       {/* Header — hidden when map is active and user collapsed it */}
-      <header className={`lp-topbar bg-white border-b-4 border-black z-50 shadow-[0_4px_0px_black] flex-shrink-0 transition-[transform,opacity] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform ${(!showHeader || (isMap && headerCollapsed)) ? '-translate-y-full opacity-0' : 'translate-y-0 opacity-100'} ${isMap ? 'absolute w-full' : 'relative'}`}>
+      <header ref={headerRef} className={`lp-topbar bg-white border-b-4 border-black z-50 shadow-[0_4px_0px_black] flex-shrink-0 transition-[margin-top,transform,opacity] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform ${(isMap && headerCollapsed) ? '-translate-y-full opacity-0' : 'translate-y-0'} ${isMap ? 'absolute w-full' : 'relative'}`} style={!isMap ? { marginTop: !showHeader && measuredHeaderH ? `-${measuredHeaderH}px` : '0px', opacity: !showHeader ? 0 : 1 } : {}}>
         <div className="max-w-7xl mx-auto px-3 py-2 md:px-4 md:py-3">
           {/* Top Row: Logo, Nav, Menu */}
           <div className="flex items-center justify-between gap-2">
@@ -517,7 +522,7 @@ export default function Home({ events = [], eventsLoading = false }) {
             </div>
         ) : (
           <main className="h-full overflow-y-auto" onScroll={handleScroll}>
-            <div className={`max-w-7xl mx-auto w-full transition-all duration-300 ${!showHeader ? 'pt-2' : 'pt-0'}`}>
+            <div className="max-w-7xl mx-auto w-full">
               <TileView key={tileViewKey} events={events} eventsLoading={eventsLoading} />
             </div>
           </main>
