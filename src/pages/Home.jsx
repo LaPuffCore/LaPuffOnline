@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import EventSubmitForm from '../components/EventSubmitForm';
 import TileView from '../components/TileView';
 import MapView from '../components/MapView';
+import GeoPostView from '../components/GeoPostView';
 import HamburgerMenu from '../components/HamburgerMenu';
 import AuthModal from '../components/AuthModal';
 import ParticipantDot from '../components/ParticipantDot';
@@ -19,6 +20,7 @@ export default function Home({ events = [], eventsLoading = false }) {
   const [showAuth, setShowAuth] = useState(false);
   const [showLeaderboard, setShowLeaderboard] = useState(false);
   const [user, setUser] = useState(null);
+  const [session, setSession] = useState(null);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showHeader, setShowHeader] = useState(true);
   const [headerCollapsed, setHeaderCollapsed] = useState(false);
@@ -73,7 +75,7 @@ export default function Home({ events = [], eventsLoading = false }) {
   useEffect(() => {
     async function initAuth() {
       const session = await getValidSession();
-      if (session?.user) setUser(session.user);
+      if (session?.user) { setUser(session.user); setSession(session); }
     }
     initAuth();
   }, []);
@@ -128,8 +130,8 @@ export default function Home({ events = [], eventsLoading = false }) {
   };
 
   function handleAuthSuccess() {
-    getValidSession().then(session => {
-      if (session) setUser(session.user);
+    getValidSession().then(sess => {
+      if (sess) { setUser(sess.user); setSession(sess); }
       setShowAuth(false);
     });
   }
@@ -352,6 +354,13 @@ export default function Home({ events = [], eventsLoading = false }) {
                   onMouseLeave={e => { if (!showLeaderboard) e.currentTarget.style.backgroundColor = ''; }}>
                   🏆 Top
                 </button>
+                <button onClick={() => { setView('geo'); setShowLeaderboard(false); }}
+                  className="px-2.5 py-1.5 md:px-4 md:py-2 rounded-lg md:rounded-xl text-[10px] leading-tight md:text-sm font-black transition-all flex items-center gap-0.5 md:gap-1"
+                  style={view === 'geo' && !showLeaderboard ? { backgroundColor: accentColor, color: '#fff', boxShadow: '1px 1px 0px #333' } : {}}
+                  onMouseEnter={e => { if (!(view === 'geo' && !showLeaderboard)) e.currentTarget.style.backgroundColor = accentColor + '30'; }}
+                  onMouseLeave={e => { if (!(view === 'geo' && !showLeaderboard)) e.currentTarget.style.backgroundColor = ''; }}>
+                  🌍<span className="hidden xs:inline"> Geo</span><br className="xs:hidden" /><span className="xs:hidden">Post</span><span className="hidden xs:inline md:hidden"> Post</span><span className="hidden md:inline"> Post</span>
+                </button>
               </div>
             </div>
 
@@ -520,6 +529,10 @@ export default function Home({ events = [], eventsLoading = false }) {
               )}
               <MapView events={events} headerCollapsed={headerCollapsed} />
             </div>
+        ) : view === 'geo' ? (
+          <div className="h-full overflow-hidden">
+            <GeoPostView session={session} />
+          </div>
         ) : (
           <main className="h-full overflow-y-auto" onScroll={handleScroll}>
             <div className="max-w-7xl mx-auto w-full">

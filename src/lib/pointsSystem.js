@@ -11,6 +11,7 @@ export const POINTS = {
   REFERRAL_SUCCESS: 50,         // Someone signed up via your referral link
   SUBMIT_EVENT: 50,             // Awarded when submitted event gets approved
   EVENT_FAVORITED: 20,          // When someone favorites your submitted event (one-time)
+  GEOPOST_REACTION: 5,          // When a signed-in user reacts to your GeoPost (DB trigger handles award)
   HOT_ZONE_BASE: 1,             // Minimum roam pts (cold zone, every 30 min)
   HOT_ZONE_MAX: 10,             // Maximum roam pts (hottest zone, every 30 min)
 };

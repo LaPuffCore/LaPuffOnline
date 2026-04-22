@@ -183,6 +183,138 @@ export async function uploadEventPhoto(file) {
   return `${SUPABASE_URL}/storage/v1/object/public/event-images/${fileName}`;
 }
 
+// ─── GeoPost helpers ──────────────────────────────────────────────────────────
+
+/**
+ * Fetch posts from geopost_feed view.
+ * filter: { type: 'nyc' | 'borough' | 'zip', value?: string }
+ */
+export async function fetchGeoPostFeed(filter = { type: 'nyc' }) {
+  let url = `${SUPABASE_URL}/rest/v1/geopost_feed?select=*&order=created_at.desc`;
+  if (filter.type === 'borough' && filter.value) {
+    url += `&borough=eq.${encodeURIComponent(filter.value)}`;
+  } else if (filter.type === 'zip' && filter.value) {
+    url += `&zip_code=eq.${encodeURIComponent(filter.value)}`;
+  }
+  const res = await fetch(url, { headers: baseHeaders });
+  if (!res.ok) return [];
+  return res.json();
+}
+
+/**
+ * Insert a new geopost.
+ * payload: { content, image_url, zip_code, borough, is_participant, post_approved, user_id? }
+ * Returns the inserted row.
+ */
+export async function submitGeoPost(payload, session = null) {
+  const headers = {
+    ...SB_HEADERS,
+    'Prefer': 'return=representation',
+  };
+  if (session?.access_token) {
+    headers['Authorization'] = `Bearer ${session.access_token}`;
+  }
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/geoposts`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(err || 'GeoPost submission failed');
+  }
+  const rows = await res.json();
+  return rows[0];
+}
+
+/**
+ * Add an emoji reaction to a post.
+ * Requires a signed-in session to award points (trigger fires).
+ * Anonymous calls pass session=null — reaction stored but no points.
+ */
+export async function addPostReaction(postId, emojiText, session = null) {
+  const headers = { ...baseHeaders };
+  const userId = session?.user?.id ?? null;
+  if (session?.access_token) {
+    headers['Authorization'] = `Bearer ${session.access_token}`;
+  }
+  const body = { post_id: postId, emoji_text: emojiText, user_id: userId };
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/post_reactions`, {
+    method: 'POST',
+    headers: { ...headers, 'Prefer': 'return=minimal' },
+    body: JSON.stringify(body),
+  });
+  // 409 = duplicate (already reacted with same emoji) — treat as success
+  if (!res.ok && res.status !== 409) {
+    throw new Error('Reaction failed');
+  }
+}
+
+/**
+ * Remove an emoji reaction.
+ */
+export async function removePostReaction(postId, emojiText, session = null) {
+  const headers = { ...baseHeaders };
+  const userId = session?.user?.id ?? null;
+  if (session?.access_token) {
+    headers['Authorization'] = `Bearer ${session.access_token}`;
+  }
+  await fetch(
+    `${SUPABASE_URL}/rest/v1/post_reactions?post_id=eq.${postId}&emoji_text=eq.${encodeURIComponent(emojiText)}&user_id=eq.${userId}`,
+    { method: 'DELETE', headers }
+  );
+}
+
+/**
+ * Fetch all reactions for a post.
+ * Returns array of { id, post_id, user_id, emoji_text, created_at }
+ */
+export async function fetchPostReactions(postId) {
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/post_reactions?post_id=eq.${postId}&select=*`,
+    { headers: baseHeaders }
+  );
+  if (!res.ok) return [];
+  return res.json();
+}
+
+/**
+ * Fetch reactions for multiple posts at once (batch).
+ * Returns array of reactions with username joined via profiles.
+ */
+export async function fetchReactionsForPosts(postIds) {
+  if (!postIds.length) return [];
+  const ids = postIds.map(id => `"${id}"`).join(',');
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/post_reactions?post_id=in.(${ids})&select=post_id,emoji_text,user_id,profiles(username)`,
+    { headers: baseHeaders }
+  );
+  if (!res.ok) return [];
+  return res.json();
+}
+
+/**
+ * Upload a geopost image to Supabase storage.
+ * (Placeholder: uses same event-images bucket. Replace with Oracle Cloud when ready.)
+ */
+export async function uploadGeoPostImage(file, session = null) {
+  const ext = file.name.split('.').pop();
+  const fileName = `geopost-${Date.now()}-${Math.random().toString(36).substring(2, 7)}.${ext}`;
+  const headers = {
+    'apikey': SUPABASE_KEY,
+    'Authorization': session?.access_token ? `Bearer ${session.access_token}` : `Bearer ${SUPABASE_KEY}`,
+    'Content-Type': file.type,
+  };
+  const res = await fetch(
+    `${SUPABASE_URL}/storage/v1/object/event-images/${fileName}`,
+    { method: 'POST', headers, body: file }
+  );
+  if (!res.ok) throw new Error('Image upload failed');
+  return `${SUPABASE_URL}/storage/v1/object/public/event-images/${fileName}`;
+}
+
+// ─── End GeoPost helpers ──────────────────────────────────────────────────────
+
 export async function sendSubmissionEmail() {
   try {
     await fetch('https://formsubmit.co/ajax/justinlapuff@gmail.com', {

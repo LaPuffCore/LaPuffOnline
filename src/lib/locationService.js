@@ -273,3 +273,27 @@ export async function markFavoriteContributions(session) {
     return 0;
   }
 }
+/**
+ * Check if the user's current GPS position is within the given NYC zip code.
+ * Returns: 'confirmed' | 'cant_connect' | 'not_in_zip'
+ */
+export async function isUserInZipCode(targetZip) {
+  try {
+    const loc = await pingLocation();
+    if (!loc || typeof loc.lat !== 'number') return 'cant_connect';
+
+    // Reverse-geocode via Nominatim to get zip
+    const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${loc.lat}&lon=${loc.lng}&zoom=18&addressdetails=1`;
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'LaPuffOnline/1.0 (contact@lapuff.online)' },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return 'cant_connect';
+    const data = await res.json();
+    const reverseZip = data?.address?.postcode?.split('-')[0] ?? '';
+    if (!reverseZip) return 'cant_connect';
+    return reverseZip === String(targetZip) ? 'confirmed' : 'not_in_zip';
+  } catch {
+    return 'cant_connect';
+  }
+}

@@ -657,3 +657,58 @@ TileView: live events are retained in the present event list even when they'd be
 - NYC Open Data (`nycdata.js`): removed — returned permit events, not real public events.
 - NYC Parks, RA, Meetup, Dice, TimeOut: all removed — blocked by Cloudflare, auth requirements, or returned 0 events.
 - If re-adding sources, use JSON extraction (`__SERVER_DATA__`, `__NEXT_DATA__`, JSON-LD) not HTML scraping.
+
+### GeoPost System
+- Component: `src/components/GeoPostView.jsx` — full feed + editor in one file.
+- Nav tab: 🌍 GeoPost button added to view toggle group in Home.jsx (`view === 'geo'`). GeoPost button text intentionally wraps to 2 lines on small mobile to fit all 4 tabs.
+- Session: `session` state now stored in Home.jsx (in addition to `user`) and passed as prop to GeoPostView.
+
+#### DB Schema:
+- `geoposts`: id (UUID), user_id (nullable FK → profiles), content (JSONB `{html, fillColor}`), image_url, zip_code, borough, is_participant, post_approved, created_at.
+- `post_reactions`: id, post_id FK, user_id (nullable), emoji_text, UNIQUE(post_id, user_id, emoji_text).
+- `post_clout_given`: (user_id, post_id) PRIMARY KEY — audit log, one unique reactor = one 5pt award.
+- `clout_ledger` updated: added `geopost_id UUID`, unique constraint `UNIQUE(user_id, event_id, geopost_id, checkin_type)`.
+- `geopost_feed` VIEW: joins profiles for username (defaults to 'Orbiter'), includes total_reactions count, filters post_approved=true.
+- Trigger `on_reaction_added` → `handle_post_reaction_clout()`: 5 pts to author via `clout_ledger` insert. Only fires when reactor has a user_id. SECURITY DEFINER for offline accrual. Blocks self-voting.
+
+#### Supabase helpers (src/lib/supabase.js):
+- `fetchGeoPostFeed(filter)` — filter: `{type:'nyc'|'borough'|'zip', value?}`. Queries geopost_feed.
+- `submitGeoPost(payload, session)` — inserts to geoposts. Passes auth token if signed in.
+- `addPostReaction(postId, emojiText, session)` — inserts to post_reactions. 409 = duplicate (silent).
+- `removePostReaction(postId, emojiText, session)` — deletes reaction.
+- `fetchPostReactions(postId)` — returns all reactions for one post.
+- `fetchReactionsForPosts(postIds)` — batch fetch reactions with profiles join for username.
+- `uploadGeoPostImage(file, session)` — uploads to Supabase `event-images` bucket. Filename prefixed `geopost-`. Placeholder for Oracle Cloud.
+
+#### Location check (src/lib/locationService.js):
+- `isUserInZipCode(targetZip)` — pings GPS → Nominatim reverse geocode → compares postcode. Returns `'confirmed' | 'cant_connect' | 'not_in_zip'`.
+
+#### Submission flow:
+1. User writes rich text (contenteditable + `document.execCommand`), selects zip, optionally attaches image (compressed to ≤500KB).
+2. Clicks Post → profanityFilter.js checks `innerText`. If flagged: post saved with `post_approved: false` (pending manual review), shown as error.
+3. If clean: `CheckInPopup` appears with "Check In to send this post as a Participant with Yes, select No to continue posting to this zip as an Orbiter" text + [Yes]/[No].
+4. Yes → `isUserInZipCode(zip)` → shows Confirmed ✅ / Can't Connect ⚠️ / Not in Zipcode ❌. Confirmed: post with `is_participant: true`. Failure: close popup after 1.2s, content preserved.
+5. No → post with `is_participant: false` (Orbiter mode).
+6. `user_id` = `session?.user?.id ?? null`. Null = anonymous (no points, no reactions give points).
+
+#### Reaction display:
+- Top 4 emoji by count shown as pill buttons. Clicking one adds that reaction.
+- `+` button opens inline `QuickEmojiPicker` (16 common emojis, click outside to close).
+- `…` ellipsis button always visible. Opens `ReactorListModal` showing username + emoji per reactor. Dismiss: X, backdrop click, Esc.
+- Reactions batch-loaded for all visible posts via `fetchReactionsForPosts`.
+
+#### Badges:
+- Green `● PARTICIPANT` pill next to username if `is_participant: true`.
+- Red `● ORBITER` pill if false. Matches existing participant/orbiter color convention.
+
+#### Points:
+- `POINTS.GEOPOST_REACTION: 5` in pointsSystem.js (documentation only — DB trigger handles award).
+- Client does NOT call `awardPoints` for reactions. Just inserts to post_reactions, trigger fires automatically.
+
+#### Image compression:
+- `compressGeoImage(file)` in GeoPostView.jsx — max 500KB, max 1280px dimension, JPEG quality ramp 0.82→0.3.
+- Separate from EventSubmitForm's compressImage (which targets 1MB / 5 photos).
+
+#### Filter bar:
+- 🗽 All NYC | 🏙 Borough (dropdown) | 📍 Zip (dropdown). Borough defaults to Manhattan, Zip defaults to first in sorted list.
+- Empty state: "Nothing here to see yet! Be the first!" with 🗽 emoji.
