@@ -12,6 +12,7 @@ import { isEventHappeningNow, isAftersWindow, isEventLive } from '../lib/eventUt
 import { SAMPLE_MODE } from '../lib/sampleConfig';
 import { getSampleUsersForZip } from '../lib/sampleUsers';
 import { deserialize as fgbDeserialize } from 'flatgeobuf/lib/mjs/geojson.js';
+import { fetchGeoPostFeed, fetchReactionsForPosts } from '../lib/supabase';
 
 const GEOJSON_URL = './data/MODZCTA_2010_WGS1984.geo.json';
 const BOROUGH_GEOJSON_URL = './data/borough.geo.json';
@@ -1353,6 +1354,114 @@ function ZipHologramMobile({ feature, color, onClose, embedded = false }) {
   );
 }
 
+// ── MapPostsPanelView ──────────────────────────────────────────────────────────
+const POSTS_PER_PAGE = 6;
+
+function stripHtml(html) {
+  if (!html) return '';
+  const tmp = document.createElement('div');
+  tmp.innerHTML = html;
+  return tmp.textContent || tmp.innerText || '';
+}
+
+function truncateText(text, maxLen = 200) {
+  if (!text || text.length <= maxLen) return text;
+  return text.slice(0, maxLen).trimEnd() + '…';
+}
+
+function MapPostsPanelView({ panel, posts, reactions, sort, setSort, page, setPage, loading, headerCollapsed, isMobile = false, onClose }) {
+  const accentPurple = '#7C3AED';
+  const totalPages = Math.ceil(posts.length / POSTS_PER_PAGE);
+  const visiblePosts = posts.slice(page * POSTS_PER_PAGE, (page + 1) * POSTS_PER_PAGE);
+
+  const topStyle = headerCollapsed ? '0px' : isMobile ? '62px' : '72px';
+  const title = panel.type === 'borough' ? `🏙 ${panel.value}` : `📍 ZIP ${panel.value}`;
+
+  const containerStyle = isMobile
+    ? { position: 'absolute', left: 0, right: 0, bottom: 0, top: topStyle, zIndex: 60, background: 'rgba(3,0,10,0.93)', backdropFilter: 'blur(16px)', borderTop: '1px solid rgba(124,58,237,0.4)', display: 'flex', flexDirection: 'column', overflow: 'hidden', transition: 'top 300ms' }
+    : { position: 'absolute', left: 0, top: topStyle, bottom: 0, width: '33.333%', zIndex: 50, background: 'rgba(3,0,10,0.58)', backdropFilter: 'blur(18px)', borderRight: '1px solid rgba(124,58,237,0.35)', display: 'flex', flexDirection: 'column', overflow: 'hidden', transition: 'top 300ms' };
+
+  return (
+    <div style={containerStyle}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', borderBottom: '1px solid rgba(255,255,255,0.08)', flexShrink: 0, background: 'rgba(0,0,0,0.3)' }}>
+        <div>
+          <p style={{ color: '#a78bfa', fontWeight: 900, fontSize: 13, lineHeight: 1 }}>{title}</p>
+          <p style={{ color: 'rgba(255,255,255,0.35)', fontSize: 10, marginTop: 2 }}>{posts.length} posts</p>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {/* Sort toggle */}
+          <div style={{ display: 'flex', background: 'rgba(255,255,255,0.07)', borderRadius: 99, padding: 2, gap: 2 }}>
+            {['newest', 'top'].map(s => (
+              <button key={s} onClick={() => { setSort(s); setPage(0); }}
+                style={{ padding: '3px 10px', borderRadius: 99, fontSize: 10, fontWeight: 900, cursor: 'pointer', border: 'none', background: sort === s ? accentPurple : 'transparent', color: sort === s ? '#fff' : 'rgba(255,255,255,0.5)', transition: 'all 0.15s' }}>
+                {s === 'newest' ? '⏱ New' : '🔥 Top'}
+              </button>
+            ))}
+          </div>
+          <button onClick={onClose}
+            style={{ width: 26, height: 26, borderRadius: 99, border: '1px solid rgba(255,255,255,0.2)', background: 'transparent', color: 'rgba(255,255,255,0.5)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 900 }}>✕</button>
+        </div>
+      </div>
+
+      {/* Post list */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '6px 8px' }}>
+        {loading && <p style={{ color: 'rgba(255,255,255,0.4)', textAlign: 'center', padding: '24px 0', fontSize: 12 }}>Loading...</p>}
+        {!loading && posts.length === 0 && (
+          <div style={{ textAlign: 'center', padding: '32px 16px' }}>
+            <p style={{ fontSize: 28, marginBottom: 8 }}>🌀</p>
+            <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12, fontWeight: 700 }}>No posts here yet</p>
+          </div>
+        )}
+        {!loading && visiblePosts.map(post => {
+          const plain = truncateText(stripHtml(post.content?.html || post.content || ''), 200);
+          const emojiCounts = {};
+          (reactions[post.id] || []).forEach(r => { emojiCounts[r.emoji_text] = (emojiCounts[r.emoji_text] || 0) + 1; });
+          const topEmojis = Object.entries(emojiCounts).sort((a, b) => b[1] - a[1]).slice(0, 3);
+          const dateStr = new Date(post.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+          const cardBg = post.post_fill ? post.post_fill + 'dd' : 'rgba(255,255,255,0.06)';
+          const cardBdr = post.post_outline || 'rgba(255,255,255,0.12)';
+          return (
+            <div key={post.id} style={{ marginBottom: 8, borderRadius: 14, border: `2px solid ${cardBdr}`, background: cardBg, overflow: 'hidden', boxShadow: '2px 2px 0px rgba(0,0,0,0.4)' }}>
+              {post.image_url && (
+                <img src={post.image_url} alt="" style={{ width: '100%', height: 100, objectFit: 'cover', display: 'block' }} loading="lazy" />
+              )}
+              <div style={{ padding: '8px 10px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 5, flexWrap: 'wrap' }}>
+                  <span style={{ fontWeight: 900, fontSize: 11, color: post.post_fill ? '#000' : '#fff' }}>{post.username || 'Orbiter'}</span>
+                  <span style={{ fontSize: 9, fontWeight: 900, padding: '1px 5px', borderRadius: 99, background: post.is_participant ? '#22c55e' : '#ef4444', color: '#fff' }}>
+                    ● {post.is_participant ? 'PART.' : 'ORB.'}
+                  </span>
+                  <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.35)', marginLeft: 'auto' }}>{dateStr}</span>
+                </div>
+                {plain && <p style={{ fontSize: 11, lineHeight: 1.45, color: post.post_fill ? '#111' : 'rgba(255,255,255,0.85)', marginBottom: 5, wordBreak: 'break-word' }}>{plain}</p>}
+                {topEmojis.length > 0 && (
+                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                    {topEmojis.map(([emoji, count]) => (
+                      <span key={emoji} style={{ fontSize: 10, background: 'rgba(255,255,255,0.1)', borderRadius: 99, padding: '1px 6px', color: 'rgba(255,255,255,0.7)' }}>{emoji} {count}</span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '8px 12px', borderTop: '1px solid rgba(255,255,255,0.06)', flexShrink: 0 }}>
+          <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}
+            style={{ padding: '4px 12px', borderRadius: 99, border: '1px solid rgba(255,255,255,0.2)', background: 'transparent', color: page === 0 ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.7)', cursor: page === 0 ? 'default' : 'pointer', fontSize: 11, fontWeight: 900 }}>← Prev</button>
+          <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', fontWeight: 700 }}>{page + 1} / {totalPages}</span>
+          <button onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={page >= totalPages - 1}
+            style={{ padding: '4px 12px', borderRadius: 99, border: '1px solid rgba(255,255,255,0.2)', background: 'transparent', color: page >= totalPages - 1 ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.7)', cursor: page >= totalPages - 1 ? 'default' : 'pointer', fontSize: 11, fontWeight: 900 }}>Next →</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 export default function MapView({ events, headerCollapsed = false }) {
   const [topoOn, setTopoOn] = useState(() => {
@@ -1441,6 +1550,14 @@ export default function MapView({ events, headerCollapsed = false }) {
   // FIX ADDITIVE STATE: bump this after style swap so the main heatmap effect
   // re-runs and re-applies all paint properties to the freshly added layers.
   const [styleVersion,  setStyleVersion]  = useState(0);
+  // MapPostsPanel state
+  const [mapPostsPanel, setMapPostsPanel] = useState(null); // null | { type: 'zip'|'borough', value: string }
+  const [mapPosts, setMapPosts] = useState([]);
+  const [mapPostsSort, setMapPostsSort] = useState('newest');
+  const [mapPostsPage, setMapPostsPage] = useState(0);
+  const [mapPostsLoading, setMapPostsLoading] = useState(false);
+  const [mapPostsReactions, setMapPostsReactions] = useState({});
+  const hoveredBoroughIdRef = useRef(null);
   // Cache status for FGB loading indicator: 'idle' | 'building' | 'paused' | 'done'
   const [fgbCacheStatus, setFgbCacheStatus] = useState('idle');
   const fgbCacheStatusRef = useRef('idle'); // ref mirror for async closures (polls in Real3D mobile gate)
@@ -1566,6 +1683,11 @@ export default function MapView({ events, headerCollapsed = false }) {
   useEffect(() => {
     if (!geoData || !boroughGeoData) return;
     zipBoroughMapRef.current = computeZipBoroughMap(geoData.features, boroughGeoData.features);
+    // Populate borough hover source with raw borough polygons for interaction
+    const mapInst = mapRef.current;
+    if (mapInst && mapInst.getSource('borough-hover-source')) {
+      mapInst.getSource('borough-hover-source').setData(boroughGeoData);
+    }
   }, [geoData, boroughGeoData]);
 
   // Pre-compute ZCTA bounding boxes once — used as O(1) shortcut before expensive PiP in fetchViewportBuildings.
@@ -1812,6 +1934,25 @@ export default function MapView({ events, headerCollapsed = false }) {
         },
       });
     }
+    // Borough hover fill + outline for interaction (uses raw borough polygons)
+    if (!map.getSource('borough-hover-source')) {
+      map.addSource('borough-hover-source', { type: 'geojson', data: { type: 'FeatureCollection', features: [] }, generateId: true });
+      map.addLayer({
+        id: 'borough-hover-fill', type: 'fill', source: 'borough-hover-source',
+        paint: {
+          'fill-color': '#7C3AED',
+          'fill-opacity': ['case', ['boolean', ['feature-state', 'hovered'], false], 0.18, 0],
+        },
+      });
+      map.addLayer({
+        id: 'borough-hover-outline', type: 'line', source: 'borough-hover-source',
+        paint: {
+          'line-color': '#4C1D95',
+          'line-width': ['case', ['boolean', ['feature-state', 'hovered'], false], 3, 0],
+          'line-opacity': ['case', ['boolean', ['feature-state', 'hovered'], false], 1, 0],
+        },
+      });
+    }
     const handleZctaHover = e => {
       if (!e.features.length) return;
       const f = e.features[0];
@@ -1855,6 +1996,71 @@ export default function MapView({ events, headerCollapsed = false }) {
     map.on('mousemove', 'zcta-safezone-hover', handleZctaHover);
     map.on('mouseleave', 'zcta-safezone-hover', handleZctaLeave);
     map.on('click', 'zcta-safezone-hover', handleZctaClick);
+
+    // Right-click on zip → open MapPostsPanel
+    map.on('contextmenu', e => {
+      e.originalEvent.preventDefault();
+      const features = map.queryRenderedFeatures(e.point, { layers: ['zcta-fill', 'zcta-safezone-hover'] });
+      if (features.length > 0) {
+        const zip = String(features[0].properties.MODZCTA || '');
+        if (zip) { setMapPostsPanel({ type: 'zip', value: zip }); setMapPostsPage(0); }
+      }
+    });
+
+    // Borough hover handlers
+    const handleBoroughHover = e => {
+      if (!e.features.length) return;
+      const f = e.features[0];
+      if (hoveredBoroughIdRef.current !== null && hoveredBoroughIdRef.current !== f.id)
+        map.setFeatureState({ source: 'borough-hover-source', id: hoveredBoroughIdRef.current }, { hovered: false });
+      hoveredBoroughIdRef.current = f.id;
+      map.setFeatureState({ source: 'borough-hover-source', id: f.id }, { hovered: true });
+      map.getCanvas().style.cursor = 'pointer';
+    };
+    const handleBoroughLeave = () => {
+      if (hoveredBoroughIdRef.current !== null) {
+        map.setFeatureState({ source: 'borough-hover-source', id: hoveredBoroughIdRef.current }, { hovered: false });
+        hoveredBoroughIdRef.current = null;
+      }
+      map.getCanvas().style.cursor = '';
+    };
+    const handleBoroughClick = e => {
+      if (!e.features.length) return;
+      const boroughName = String(e.features[0].properties.BoroName || '');
+      if (boroughName) { setMapPostsPanel({ type: 'borough', value: boroughName }); setMapPostsPage(0); }
+    };
+    map.on('mousemove', 'borough-hover-fill', handleBoroughHover);
+    map.on('mouseleave', 'borough-hover-fill', handleBoroughLeave);
+    map.on('click', 'borough-hover-fill', handleBoroughClick);
+
+    // Mobile long-press: 1 second hold on zip OR borough opens MapPostsPanel
+    const canvas = map.getCanvas();
+    let touchTimer = null;
+    let touchPoint = null;
+    const onTouchStart = e => {
+      if (e.touches.length !== 1) return;
+      const touch = e.touches[0];
+      const rect = canvas.getBoundingClientRect();
+      touchPoint = { x: touch.clientX - rect.left, y: touch.clientY - rect.top };
+      touchTimer = setTimeout(() => {
+        if (!touchPoint) return;
+        const zipFeats = map.queryRenderedFeatures([touchPoint.x, touchPoint.y], { layers: ['zcta-fill', 'zcta-safezone-hover'] });
+        if (zipFeats.length > 0) {
+          const zip = String(zipFeats[0].properties.MODZCTA || '');
+          if (zip) { setMapPostsPanel({ type: 'zip', value: zip }); setMapPostsPage(0); }
+          return;
+        }
+        const boroughFeats = map.queryRenderedFeatures([touchPoint.x, touchPoint.y], { layers: ['borough-hover-fill'] });
+        if (boroughFeats.length > 0) {
+          const bn = String(boroughFeats[0].properties.BoroName || '');
+          if (bn) { setMapPostsPanel({ type: 'borough', value: bn }); setMapPostsPage(0); }
+        }
+      }, 1000);
+    };
+    const onTouchCancel = () => { clearTimeout(touchTimer); touchPoint = null; };
+    canvas.addEventListener('touchstart', onTouchStart, { passive: true });
+    canvas.addEventListener('touchmove', onTouchCancel, { passive: true });
+    canvas.addEventListener('touchend', onTouchCancel, { passive: true });
   }
 
   function openHologram(clickedFeature) {
@@ -2221,7 +2427,7 @@ export default function MapView({ events, headerCollapsed = false }) {
     // In Real3D: fill-extrusion renders in the GPU 3D pass, sits above the stencil and
     // occludes correctly behind taller buildings via the depth buffer.
     if (map.getSource('borough-source')) {
-      if ((threeD || real3D) && boroughGeoDataRef.current) {
+      if (boroughGeoDataRef.current) {
         const avgTiers = computeBoroughAvgTiers(
           tiers,
           zipBoroughMapRef.current,
@@ -2367,8 +2573,8 @@ export default function MapView({ events, headerCollapsed = false }) {
           map.getSource('zcta-outline').setData(createZctaOutlineGeoJSON(withHeatRef.current, getZoomAwareOutlineWidth(map, undefined, true)));
         }
       }
-      // Borough outline — 3D and Real3D
-      if ((is3D || isR3D) && map.getSource('borough-source')) {
+      // Borough outline — all modes
+      if (map.getSource('borough-source')) {
         const filterSet = boroughQuadFilterRef.current;
         if (boroughSkeletonRef.current && boroughWithColorRef.current) {
           const overrides = boroughWithColorRef.current.features.map(f => f.properties);
@@ -3283,6 +3489,34 @@ export default function MapView({ events, headerCollapsed = false }) {
     }
   }, [hoveredZip, timespanIdx, events]);
 
+  // Fetch posts for MapPostsPanel
+  useEffect(() => {
+    if (!mapPostsPanel) { setMapPosts([]); setMapPostsReactions({}); return; }
+    let cancelled = false;
+    (async () => {
+      setMapPostsLoading(true);
+      try {
+        const data = await fetchGeoPostFeed({
+          type: mapPostsPanel.type,
+          value: mapPostsPanel.value,
+          sortByTop: mapPostsSort === 'top',
+        });
+        if (cancelled) return;
+        setMapPosts(data || []);
+        setMapPostsPage(0);
+        if (data?.length > 0) {
+          const rxns = await fetchReactionsForPosts(data.map(p => p.id));
+          if (cancelled) return;
+          const byPost = {};
+          (rxns || []).forEach(r => { if (!byPost[r.post_id]) byPost[r.post_id] = []; byPost[r.post_id].push(r); });
+          setMapPostsReactions(byPost);
+        }
+      } catch {}
+      if (!cancelled) setMapPostsLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [mapPostsPanel, mapPostsSort]);
+
   async function openSidePanel(zip) {
     const isSafezone = zip.startsWith('SAFE:');
     const rawZip = isSafezone ? zip.slice(5) : zip;
@@ -3868,6 +4102,37 @@ export default function MapView({ events, headerCollapsed = false }) {
                 </div>
               </div>
             </div>
+          )}
+
+          {/* ── MapPostsPanel: GeoPost feed for a zip or borough ── */}
+          {mapPostsPanel && !isMobile && (
+            <MapPostsPanelView
+              panel={mapPostsPanel}
+              posts={mapPosts}
+              reactions={mapPostsReactions}
+              sort={mapPostsSort}
+              setSort={setMapPostsSort}
+              page={mapPostsPage}
+              setPage={setMapPostsPage}
+              loading={mapPostsLoading}
+              headerCollapsed={headerCollapsed}
+              onClose={() => setMapPostsPanel(null)}
+            />
+          )}
+          {mapPostsPanel && isMobile && (
+            <MapPostsPanelView
+              panel={mapPostsPanel}
+              posts={mapPosts}
+              reactions={mapPostsReactions}
+              sort={mapPostsSort}
+              setSort={setMapPostsSort}
+              page={mapPostsPage}
+              setPage={setMapPostsPage}
+              loading={mapPostsLoading}
+              headerCollapsed={headerCollapsed}
+              isMobile={true}
+              onClose={() => setMapPostsPanel(null)}
+            />
           )}
 
           {/* ── DESKTOP side panel — sits below header when not collapsed ── */}
