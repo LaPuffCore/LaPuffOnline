@@ -129,3 +129,25 @@ export async function getZipColonists(zip) {
   });
   return res.ok ? await res.json() : [];
 }
+export async function getBoroughColonists(boroughName) {
+  const BOROUGH_ZIP_RANGES = {
+    'Manhattan':    [10001, 10282],
+    'Brooklyn':     [11201, 11256],
+    'Queens':       [11004, 11697],
+    'Bronx':        [10451, 10475],
+    'Staten Island':[10301, 10314],
+  };
+  const range = BOROUGH_ZIP_RANGES[boroughName];
+  if (!range) return [];
+  // Fetch top 50 profiles by clout, then filter to borough zip range client-side
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/profiles?select=username,clout_points,updated_at,home_zip&order=clout_points.desc&limit=100`,
+    { headers: { 'apikey': SUPABASE_KEY } }
+  );
+  if (!res.ok) return [];
+  const all = await res.json();
+  return all.filter(p => {
+    const z = parseInt(p.home_zip, 10);
+    return !isNaN(z) && z >= range[0] && z <= range[1];
+  }).slice(0, 30);
+}

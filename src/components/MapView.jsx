@@ -6,7 +6,7 @@ import { generateAutoTags } from '../lib/autoTags';
 import EventDetailPopup from './EventDetailPopup';
 import MapIntro from './MapIntro';
 import CRTEffect from './CRTEffect';
-import { getZipColonists } from '../lib/pointsSystem';
+import { getZipColonists, getBoroughColonists } from '../lib/pointsSystem';
 import { pingNYCLocation, getLastLocation } from '../lib/locationService';
 import { isEventHappeningNow, isAftersWindow, isEventLive } from '../lib/eventUtils';
 import { SAMPLE_MODE } from '../lib/sampleConfig';
@@ -1217,7 +1217,7 @@ function AftersCheckInModal({ event, onClose }) {
 }
 
 // ── ZipHologram desktop ───────────────────────────────────────────────────────
-function ZipHologram({ feature, color, onClose }) {
+function ZipHologram({ feature, color, onClose, leftOffset = 0 }) {
   const canvasRef = useRef(null);
   const animRef   = useRef(null);
   const timeRef   = useRef(0);
@@ -1271,7 +1271,7 @@ function ZipHologram({ feature, color, onClose }) {
 
   const zipLabel = feature?.properties?.MODZCTA;
   return (
-    <div className="absolute z-40 pointer-events-none" style={{ left: 0, right: 400, top: 0, bottom: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+    <div className="absolute z-40 pointer-events-none" style={{ left: leftOffset, right: 400, top: 0, bottom: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <div className="absolute inset-0" style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)' }} />
       <div className="relative pointer-events-auto flex flex-col items-center" style={{ width: 480, maxWidth: '90%', zIndex: 1 }}>
         <div className="flex items-center justify-between w-full mb-3 px-1">
@@ -1538,6 +1538,9 @@ export default function MapView({ events, headerCollapsed = false }) {
   const [sideZip,       setSideZip]       = useState(null);
   const [sideEvents,    setSideEvents]    = useState([]);
   const [sideColonists, setSideColonists] = useState([]);
+  const [sideBorough,   setSideBorough]   = useState(null);
+  const [sideBoroughEvents,    setSideBoroughEvents]    = useState([]);
+  const [sideBoroughColonists, setSideBoroughColonists] = useState([]);
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [userLocation,  setUserLocation]  = useState(getLastLocation());
   const [notInNYC,      setNotInNYC]      = useState(false);
@@ -1952,6 +1955,13 @@ export default function MapView({ events, headerCollapsed = false }) {
           'line-opacity': ['case', ['boolean', ['feature-state', 'hovered'], false], 1, 0],
         },
       });
+      // Thick transparent hit-test line — events register on this instead of fill so
+      // hover/click only fire when cursor is near the BORDER (not the interior fill area).
+      // line-opacity 0.001 is invisible but still responds to map.queryRenderedFeatures.
+      map.addLayer({
+        id: 'borough-border-hit', type: 'line', source: 'borough-hover-source',
+        paint: { 'line-color': '#ffffff', 'line-width': 14, 'line-opacity': 0.001 },
+      });
     }
     const handleZctaHover = e => {
       if (!e.features.length) return;
@@ -1997,17 +2007,25 @@ export default function MapView({ events, headerCollapsed = false }) {
     map.on('mouseleave', 'zcta-safezone-hover', handleZctaLeave);
     map.on('click', 'zcta-safezone-hover', handleZctaClick);
 
-    // Right-click on zip → open MapPostsPanel
+    // Right-click on zip → geopost panel; right-click on borough border → borough geopost panel
     map.on('contextmenu', e => {
       e.originalEvent.preventDefault();
       const features = map.queryRenderedFeatures(e.point, { layers: ['zcta-fill', 'zcta-safezone-hover'] });
       if (features.length > 0) {
         const zip = String(features[0].properties.MODZCTA || '');
-        if (zip) { setMapPostsPanel({ type: 'zip', value: zip }); setMapPostsPage(0); }
+        if (zip) { setMapPostsPanel({ type: 'zip', value: zip }); setMapPostsPage(0); return; }
+      }
+      // Fall through to borough border hit
+      const bbox = [[e.point.x - 8, e.point.y - 8], [e.point.x + 8, e.point.y + 8]];
+      const boroughFeatures = map.queryRenderedFeatures(bbox, { layers: ['borough-border-hit'] });
+      if (boroughFeatures.length > 0) {
+        const boroughName = String(boroughFeatures[0].properties.BoroName || '');
+        if (boroughName) { setMapPostsPanel({ type: 'borough', value: boroughName }); setMapPostsPage(0); }
       }
     });
 
-    // Borough hover handlers
+    // Borough border events — register on 'borough-border-hit' (line layer) so hover/click
+    // only fire near the actual borough border edge, not anywhere inside the borough fill.
     const handleBoroughHover = e => {
       if (!e.features.length) return;
       const f = e.features[0];
@@ -2024,16 +2042,17 @@ export default function MapView({ events, headerCollapsed = false }) {
       }
       map.getCanvas().style.cursor = '';
     };
+    // Left-click on borough border → events+colonists side panel (right panel)
     const handleBoroughClick = e => {
       if (!e.features.length) return;
       const boroughName = String(e.features[0].properties.BoroName || '');
-      if (boroughName) { setMapPostsPanel({ type: 'borough', value: boroughName }); setMapPostsPage(0); }
+      if (boroughName) { openBoroughSidePanel(boroughName); }
     };
-    map.on('mousemove', 'borough-hover-fill', handleBoroughHover);
-    map.on('mouseleave', 'borough-hover-fill', handleBoroughLeave);
-    map.on('click', 'borough-hover-fill', handleBoroughClick);
+    map.on('mousemove', 'borough-border-hit', handleBoroughHover);
+    map.on('mouseleave', 'borough-border-hit', handleBoroughLeave);
+    map.on('click', 'borough-border-hit', handleBoroughClick);
 
-    // Mobile long-press: 1 second hold on zip OR borough opens MapPostsPanel
+    // Mobile long-press: 1 second hold on zip opens MapPostsPanel; hold on borough border opens borough events panel
     const canvas = map.getCanvas();
     let touchTimer = null;
     let touchPoint = null;
@@ -2050,10 +2069,12 @@ export default function MapView({ events, headerCollapsed = false }) {
           if (zip) { setMapPostsPanel({ type: 'zip', value: zip }); setMapPostsPage(0); }
           return;
         }
-        const boroughFeats = map.queryRenderedFeatures([touchPoint.x, touchPoint.y], { layers: ['borough-hover-fill'] });
+        // Borough border long-press — opens borough events side panel
+        const bbox = [touchPoint.x - 10, touchPoint.y - 10, touchPoint.x + 10, touchPoint.y + 10];
+        const boroughFeats = map.queryRenderedFeatures(bbox, { layers: ['borough-border-hit'] });
         if (boroughFeats.length > 0) {
           const bn = String(boroughFeats[0].properties.BoroName || '');
-          if (bn) { setMapPostsPanel({ type: 'borough', value: bn }); setMapPostsPage(0); }
+          if (bn) openBoroughSidePanel(bn);
         }
       }, 1000);
     };
@@ -2448,9 +2469,10 @@ export default function MapView({ events, headerCollapsed = false }) {
         // Height stagger by _boroughIdx * 0.1m prevents Z-fighting at shared top edges.
         map.setPaintProperty('borough-outline', 'fill-extrusion-base',   0);
         map.setPaintProperty('borough-outline', 'fill-extrusion-height', ['+', 32, ['*', 0.1, ['coalesce', ['get', '_boroughIdx'], 0]]]);
-        // Zoom-interpolated opacity — softens thin extrusions at distance to reduce pixelation
+        // Borough outlines only visible in 3D and Real3D modes (fill-extrusion blocks
+        // appear as floating squares in 2D / pitch=0 mode, which looks wrong).
         map.setPaintProperty('borough-outline', 'fill-extrusion-opacity',
-          ['interpolate', ['linear'], ['zoom'], 9, 0.4, 11, 1.0]);
+          (threeD || real3D) ? ['interpolate', ['linear'], ['zoom'], 9, 0.4, 11, 1.0] : 0);
       } else {
         map.setPaintProperty('borough-outline', 'fill-extrusion-opacity', 0);
         boroughWithColorRef.current = null;
@@ -3542,6 +3564,18 @@ export default function MapView({ events, headerCollapsed = false }) {
     }
   }
 
+  async function openBoroughSidePanel(boroughName) {
+    setSideBorough(boroughName);
+    setSideZip(null); setSideEvents([]); setSideColonists([]); setHoloFeature(null);
+    // Filter events by borough from the already-loaded events array
+    const boroughEvts = events.filter(e => e.borough === boroughName && !e._auto && !e._sample);
+    setSideBoroughEvents(boroughEvts);
+    try {
+      const colonists = await getBoroughColonists(boroughName);
+      setSideBoroughColonists(colonists);
+    } catch { setSideBoroughColonists([]); }
+  }
+
   async function handleCenterLocation() {
     if (locLoading) return;
     setLocLoading(true); setNotInNYC(false);
@@ -3920,7 +3954,7 @@ export default function MapView({ events, headerCollapsed = false }) {
   }, [showPins, events, mapReady, timespanIdx]);
 
   useEffect(() => {
-    const h = e => { if (e.key === 'Escape') { setHoloFeature(null); setSideZip(null); setSideEvents([]); setSideColonists([]); } };
+    const h = e => { if (e.key === 'Escape') { setHoloFeature(null); setSideZip(null); setSideEvents([]); setSideColonists([]); setSideBorough(null); setSideBoroughEvents([]); setSideBoroughColonists([]); } };
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
   }, []);
@@ -4227,6 +4261,59 @@ export default function MapView({ events, headerCollapsed = false }) {
             </div>
           )}
 
+          {/* ── DESKTOP: Borough side panel (right side, events + colonists) ── */}
+          {sideBorough && !isMobile && (
+            <div className={`absolute right-0 bottom-0 z-50 flex flex-col overflow-hidden transition-[top] duration-300 ${headerCollapsed ? 'top-0' : 'top-[72px]'}`}
+              style={{ width: 400, background: 'rgba(3,0,10,0.52)', backdropFilter: 'blur(16px)', borderLeft: '1px solid rgba(124,58,237,0.3)' }}>
+              {/* Header */}
+              <div className="flex items-center justify-between px-4 py-3 border-b border-purple-500/20">
+                <div>
+                  <h2 className="text-white font-black text-base">{sideBorough}</h2>
+                  <p className="text-white/40 text-xs">{sideBoroughEvents.length} events · {sideBoroughColonists.length} colonists</p>
+                </div>
+                <button onClick={() => { setSideBorough(null); setSideBoroughEvents([]); setSideBoroughColonists([]); }}
+                  className="text-white/50 hover:text-white text-xl leading-none w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/10">×</button>
+              </div>
+              {/* Events */}
+              <div className="flex-1 overflow-y-auto px-3 py-2">
+                <p className="text-purple-300/70 text-[10px] font-bold uppercase tracking-widest mb-2 mt-1">Events</p>
+                {sideBoroughEvents.length === 0 ? (
+                  <p className="text-white/30 text-xs text-center py-6">No events found for {sideBorough}</p>
+                ) : (
+                  <PaginatedSection items={sideBoroughEvents} pageSize={6} renderItem={ev => (
+                    <div key={ev.id}
+                      className="flex items-start gap-3 p-3 border-b border-white/5 cursor-pointer hover:bg-white/5 transition-colors"
+                      style={{ borderLeftColor: ev.hex_color || '#7C3AED', borderLeftWidth: 3 }}
+                      onClick={() => setSelectedEvent(ev)}>
+                      <div className="w-10 h-10 rounded-xl flex-shrink-0 overflow-hidden flex items-center justify-center text-xl relative"
+                        style={{ background: (ev.hex_color || '#7C3AED') + '33', border: `2px solid ${ev.hex_color || '#7C3AED'}` }}>
+                        <span className="absolute inset-0 flex items-center justify-center text-xl pointer-events-none">{ev.representative_emoji || '🎉'}</span>
+                        {ev.photos?.[0] && <img src={ev.photos[0]} className="w-full h-full object-cover relative z-10" alt="" onError={e => e.target.style.display = 'none'} />}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-white font-black text-sm truncate">{ev.event_name}</p>
+                        <p className="text-white/40 text-xs">{ev.event_date} · {ev.price_category === 'free' ? 'FREE' : ev.price_category || '?'}</p>
+                      </div>
+                    </div>
+                  )} />
+                )}
+                {/* Colonists */}
+                {sideBoroughColonists.length > 0 && (
+                  <>
+                    <p className="text-purple-300/70 text-[10px] font-bold uppercase tracking-widest mb-2 mt-4">Top Colonists</p>
+                    {sideBoroughColonists.slice(0, 10).map((u, i) => (
+                      <div key={i} className="flex items-center gap-2 py-1.5 border-b border-white/5">
+                        <span className="text-white/30 text-[10px] w-4 text-right">{i + 1}</span>
+                        <span className="text-white text-xs font-semibold flex-1">{u.username || 'Orbiter'}</span>
+                        <span className="text-yellow-400 text-[10px] font-bold">⚡ {u.clout_points || 0}</span>
+                      </div>
+                    ))}
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* ── MOBILE: hologram top 50%, side panel bottom 50% ── */}
           {holoFeature && isMobile && !sideZip && (
             <ZipHologramMobile feature={holoFeature} color={holoColor} onClose={() => setHoloFeature(null)} />
@@ -4331,9 +4418,59 @@ export default function MapView({ events, headerCollapsed = false }) {
             </div>
           )}
 
-          {/* Desktop hologram */}
+          {/* Desktop hologram — offset right if MapPostsPanel (left 1/3) is open */}
           {holoFeature && !isMobile && (
-            <ZipHologram feature={holoFeature} color={holoColor} onClose={() => setHoloFeature(null)} />
+            <ZipHologram feature={holoFeature} color={holoColor} onClose={() => setHoloFeature(null)}
+              leftOffset={mapPostsPanel ? '33.333%' : 0} />
+          )}
+
+          {/* ── MOBILE: Borough side panel (full-screen, same as zip panel) ── */}
+          {sideBorough && isMobile && (
+            <div className="absolute inset-x-0 bottom-0 z-50 flex flex-col overflow-hidden transition-[top] duration-300"
+              style={{ top: headerCollapsed ? '56px' : '62px', background: 'rgba(3,0,10,0.55)', backdropFilter: 'blur(14px)', borderTop: '1px solid rgba(124,58,237,0.3)' }}>
+              <div className="flex items-center justify-between px-3 py-2 border-b border-purple-500/20 flex-shrink-0">
+                <div>
+                  <div className="text-purple-300 font-black text-sm tracking-widest uppercase">{sideBorough} — BOROUGH</div>
+                  <p className="text-white/40 text-xs">{sideBoroughEvents.length} events · {sideBoroughColonists.length} colonists</p>
+                </div>
+                <button onClick={() => { setSideBorough(null); setSideBoroughEvents([]); setSideBoroughColonists([]); }}
+                  className="text-white/50 hover:text-white text-xl leading-none w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10">×</button>
+              </div>
+              <div className="flex-1 overflow-y-auto px-3 py-2">
+                <p className="text-purple-300/70 text-[10px] font-bold uppercase tracking-widest mb-2">Events</p>
+                {sideBoroughEvents.length === 0 ? (
+                  <p className="text-white/30 text-xs text-center py-8">No events in {sideBorough}</p>
+                ) : (
+                  <PaginatedSection items={sideBoroughEvents} pageSize={6} renderItem={ev => (
+                    <div key={ev.id} className="flex items-start gap-3 p-3 border-b border-white/5 cursor-pointer hover:bg-white/5 transition-colors"
+                      style={{ borderLeftColor: ev.hex_color || '#7C3AED', borderLeftWidth: 3 }}
+                      onClick={() => setSelectedEvent(ev)}>
+                      <div className="w-10 h-10 rounded-xl flex-shrink-0 overflow-hidden flex items-center justify-center text-xl relative"
+                        style={{ background: (ev.hex_color || '#7C3AED') + '33', border: `2px solid ${ev.hex_color || '#7C3AED'}` }}>
+                        <span className="absolute inset-0 flex items-center justify-center pointer-events-none">{ev.representative_emoji || '🎉'}</span>
+                        {ev.photos?.[0] && <img src={ev.photos[0]} className="w-full h-full object-cover relative z-10" alt="" onError={e => e.target.style.display = 'none'} />}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-white font-black text-sm truncate">{ev.event_name}</p>
+                        <p className="text-white/40 text-xs">{ev.event_date} · {ev.price_category === 'free' ? 'FREE' : ev.price_category || '?'}</p>
+                      </div>
+                    </div>
+                  )} />
+                )}
+                {sideBoroughColonists.length > 0 && (
+                  <>
+                    <p className="text-purple-300/70 text-[10px] font-bold uppercase tracking-widest mb-2 mt-4">Top Colonists</p>
+                    {sideBoroughColonists.slice(0, 10).map((u, i) => (
+                      <div key={i} className="flex items-center gap-2 py-1.5 border-b border-white/5">
+                        <span className="text-white/30 text-[10px] w-4 text-right">{i + 1}</span>
+                        <span className="text-white text-xs font-semibold flex-1">{u.username || 'Orbiter'}</span>
+                        <span className="text-yellow-400 text-[10px] font-bold">⚡ {u.clout_points || 0}</span>
+                      </div>
+                    ))}
+                  </>
+                )}
+              </div>
+            </div>
           )}
 
           {/* Location active marker removed per user request */}

@@ -255,9 +255,22 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor })
       )}
       <div className="p-3">
         <div className="flex items-center gap-1.5 mb-2 flex-wrap">
-          <span className="font-black text-xs">{post.username || (post.user_id ? 'Orbiter' : 'Anonymous')}</span>
-          <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full ${post.is_participant ? 'bg-green-500 text-white' : 'bg-red-500 text-white'}`}>
-            ● {post.is_participant ? 'PARTICIPANT' : post.user_id ? 'ORBITER' : 'ANON'}
+          {post.user_id == null ? (
+            <span className="font-black text-xs flex items-center gap-1">
+              <svg width="13" height="13" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect x="2" y="9" width="16" height="2.5" rx="1.25" fill="#111"/>
+                <rect x="5" y="3" width="10" height="7" rx="1.5" fill="#111"/>
+                <rect x="5" y="7.5" width="10" height="1.5" fill="#000"/>
+                <circle cx="9.5" cy="15" r="3" stroke="#111" strokeWidth="1.5" fill="none"/>
+                <line x1="12" y1="17.5" x2="14" y2="19.5" stroke="#111" strokeWidth="1.5" strokeLinecap="round"/>
+              </svg>
+              Anonymous
+            </span>
+          ) : (
+            <span className="font-black text-xs">{post.username || 'Orbiter'}</span>
+          )}
+          <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full ${post.is_participant ? 'bg-green-500 text-white' : post.user_id == null ? 'bg-gray-700 text-gray-200' : 'bg-red-500 text-white'}`}>
+            ● {post.is_participant ? 'PARTICIPANT' : post.user_id == null ? 'ANON' : 'ORBITER'}
           </span>
           <span className="text-[9px] text-gray-400 ml-auto">{dateStr} · {timeStr}</span>
         </div>

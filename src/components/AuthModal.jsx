@@ -28,6 +28,7 @@ export default function AuthModal({ onClose, onSuccess }) {
       } else {
         // Validations
         if (!form.username.trim()) throw new Error('Username required');
+        if (form.username.trim().toLowerCase() === 'anonymous') throw new Error('Username "anonymous" is reserved');
         if (form.password.length < 8) throw new Error('Password must be at least 8 characters');
         if (form.password !== form.confirmPassword) throw new Error('Passwords do not match');
         if (containsProfanity(form.username)) throw new Error('Error profanity filter');
