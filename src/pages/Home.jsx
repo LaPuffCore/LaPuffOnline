@@ -250,7 +250,7 @@ export default function Home({ events = [], eventsLoading = false }) {
       <header ref={headerRef} className={`lp-topbar bg-white border-b-4 border-black z-50 shadow-[0_4px_0px_black] flex-shrink-0 transition-[margin-top,transform,opacity] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform ${(isMap && headerCollapsed) ? '-translate-y-full opacity-0' : 'translate-y-0'} ${isMap ? 'absolute w-full' : 'relative'}`} style={!isMap ? { marginTop: !showHeader && measuredHeaderH ? `-${measuredHeaderH}px` : '0px', opacity: !showHeader ? 0 : 1 } : {}}>
         <div className="max-w-7xl mx-auto px-3 py-2 md:px-4 md:py-3">
           {/* Top Row: Logo, Nav, Menu */}
-          <div className="flex items-center justify-between gap-1 md:gap-2">
+          <div className="flex items-center gap-1 md:gap-2 md:justify-between">
             {/* Logo + Music Button — grouped so music button stays right of the orbiter button */}
             <div className="flex items-center gap-2">
             {/* Logo - Scaled down for mobile */}
@@ -355,19 +355,19 @@ export default function Home({ events = [], eventsLoading = false }) {
                   🏆 Top
                 </button>
                 <button onClick={() => { setView('geo'); setShowLeaderboard(false); }}
-                  className="px-1.5 py-1 md:px-4 md:py-2 rounded-lg md:rounded-xl text-[9px] md:text-sm font-black transition-all flex flex-col md:flex-row items-center justify-center gap-0 md:gap-1"
+                  className="px-2.5 py-1 md:px-4 md:py-2 rounded-lg md:rounded-xl text-[8px] md:text-sm font-black transition-all flex flex-col md:flex-row items-center justify-center gap-0 md:gap-1"
                   style={view === 'geo' && !showLeaderboard ? { backgroundColor: accentColor, color: '#fff', boxShadow: '1px 1px 0px #333' } : {}}
                   onMouseEnter={e => { if (!(view === 'geo' && !showLeaderboard)) e.currentTarget.style.backgroundColor = accentColor + '30'; }}
                   onMouseLeave={e => { if (!(view === 'geo' && !showLeaderboard)) e.currentTarget.style.backgroundColor = ''; }}>
                   <span className="text-xs md:text-sm leading-none">🌍</span>
                   <span className="leading-none hidden md:inline"> Geo-Post</span>
-                  <span className="leading-[1.1] md:hidden text-center">Geo-<br />Post</span>
+                  <span className="leading-[1.15] md:hidden text-center">Geo-<br />Post</span>
                 </button>
               </div>
             </div>
 
             {/* Desktop Actions / Mobile Hamburger */}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 ml-auto md:ml-0">
               {/* Map-only collapse button (desktop) */}
               {isMap && (
                 <button onClick={() => setHeaderCollapsed(true)}

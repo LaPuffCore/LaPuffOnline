@@ -189,13 +189,42 @@ export async function uploadEventPhoto(file) {
  * Fetch posts from geopost_feed view.
  * filter: { type: 'nyc' | 'borough' | 'zip', value?: string }
  */
-export async function fetchGeoPostFeed(filter = { type: 'nyc' }) {
-  let url = `${SUPABASE_URL}/rest/v1/geopost_feed?select=*&order=created_at.desc`;
-  if (filter.type === 'borough' && filter.value) {
-    url += `&borough=eq.${encodeURIComponent(filter.value)}`;
-  } else if (filter.type === 'zip' && filter.value) {
-    url += `&zip_code=eq.${encodeURIComponent(filter.value)}`;
+function getTimeFilterSince(tf) {
+  if (!tf || tf === 'all') return null;
+  const now = new Date();
+  const map = { '1d': 1, '7d': 7, '1mo': 30, '3mo': 90, '6mo': 180 };
+  const days = map[tf];
+  if (!days) return null;
+  const since = new Date(now.getTime() - days * 86400000);
+  return since.toISOString();
+}
+
+export async function fetchGeoPostFeed({
+  type = 'all',
+  value = null,
+  timeFilter = 'all',
+  statusFilter = 'all',
+  sortByTop = false,
+} = {}) {
+  const order = sortByTop ? 'total_reactions.desc,created_at.desc' : 'created_at.desc';
+  let url = `${SUPABASE_URL}/rest/v1/geopost_feed?select=*&order=${order}`;
+
+  if (type === 'borough' && value) {
+    url += `&borough=eq.${encodeURIComponent(value)}`;
+  } else if (type === 'zip' && value) {
+    url += `&zip_code=eq.${encodeURIComponent(value)}`;
   }
+  // digital scope: null borough + null zip_code + scope=digital
+  if (type === 'all') {
+    // no extra filter — all scopes visible in All view
+  }
+
+  const since = getTimeFilterSince(timeFilter);
+  if (since) url += `&created_at=gte.${encodeURIComponent(since)}`;
+
+  if (statusFilter === 'participant') url += '&is_participant=eq.true';
+  else if (statusFilter === 'orbiter')   url += '&is_participant=eq.false';
+
   const res = await fetch(url, { headers: baseHeaders });
   if (!res.ok) return [];
   return res.json();
@@ -208,7 +237,7 @@ export async function fetchGeoPostFeed(filter = { type: 'nyc' }) {
  */
 export async function submitGeoPost(payload, session = null) {
   const headers = {
-    ...SB_HEADERS,
+    ...baseHeaders,
     'Prefer': 'return=representation',
   };
   if (session?.access_token) {
