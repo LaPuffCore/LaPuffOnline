@@ -207,6 +207,8 @@ export async function runAutoPingScan(events, session, onCheckIn) {
       markCheckedIn(event.id, 'main');
       if (isEligibleForPoints(session)) {
         awardPoints(session, POINTS.EVENT_ATTEND_CHECKIN, `Auto check-in: ${event.event_name}`, event.id, 'main');
+        // Record to DB (makes attendance_count live) — lazy import to avoid circular deps
+        import('./supabase.js').then(({ recordAttendance }) => recordAttendance(session, event.id, 'main')).catch(() => {});
       }
       onCheckIn?.(event);
     }

@@ -7,6 +7,7 @@ import { TAG_COLORS } from '../lib/tagColors';
 import { getUserTZOffset, utcToLocal } from '../lib/timezones';
 import { useNavigate } from 'react-router-dom';
 import { awardPoints, POINTS, isEligibleForPoints, rewardEventSubmitter } from '../lib/pointsSystem';
+import { recordAttendance } from '../lib/supabase';
 import { getValidSession } from '../lib/supabaseAuth';
 import { getTileAccentColor, useSiteTheme } from '../lib/theme';
 import { pingLocation, isWithin750ft, markCheckedIn, isCheckedIn, isAutoPingEnabled, setAutoPingEnabled } from '../lib/locationService';
@@ -201,6 +202,12 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
     setCheckInLoading(true);
     setCheckInResult(null);
     try {
+      // Hard wall: only signed-in users can check in — no GPS ping for anonymous users.
+      const session = await getValidSession();
+      if (!isEligibleForPoints(session)) {
+        setCheckInResult({ type: 'error', msg: '🔒 Sign in to check in to events' });
+        return;
+      }
       if (!isCheckInWindowOpen(event)) {
         setCheckInResult({ type: 'error', msg: '🕐 This event check-in window is not open' });
         return;
@@ -222,14 +229,13 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
         return;
       }
       markCheckedIn(event.id, checkinType);
-      const session = await getValidSession();
-      if (isEligibleForPoints(session)) {
-        const pts = isAfters ? POINTS.AFTERS_ATTEND_CHECKIN : POINTS.EVENT_ATTEND_CHECKIN;
-        const reason = isAfters ? `Afters Attendance: ${event.event_name}` : `Event check-in: ${event.event_name}`;
-        awardPoints(session, pts, reason, event.id, checkinType);
-        // Award points to the event's original submitter (fire-and-forget, non-blocking)
-        if (!isAfters) rewardEventSubmitter(session, event.id);
-      }
+      // Record to DB (makes attendance_count live in events_with_counts view)
+      recordAttendance(session, event.id, checkinType);
+      const pts = isAfters ? POINTS.AFTERS_ATTEND_CHECKIN : POINTS.EVENT_ATTEND_CHECKIN;
+      const reason = isAfters ? `Afters Attendance: ${event.event_name}` : `Event check-in: ${event.event_name}`;
+      awardPoints(session, pts, reason, event.id, checkinType);
+      // Award points to the event's original submitter (fire-and-forget, non-blocking)
+      if (!isAfters) rewardEventSubmitter(session, event.id);
       setCheckInResult({ type: 'success', msg: isAfters ? '🎉 Afters check-in confirmed!' : '✅ You have checked in!' });
     } catch {
       setCheckInResult({ type: 'error', msg: '📍 Could not get your location — please allow location access' });

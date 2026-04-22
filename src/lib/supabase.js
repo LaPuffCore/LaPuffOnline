@@ -357,3 +357,30 @@ export async function sendSubmissionEmail() {
     });
   } catch { /* silent */ }
 }
+
+/**
+ * Record a verified check-in to the event_attendance table.
+ * Only called for authenticated users (RLS blocks anonymous inserts server-side too).
+ * Uses ON CONFLICT DO NOTHING on (user_id, event_id, checkin_type) to prevent duplicates.
+ */
+export async function recordAttendance(session, eventId, checkinType = 'main') {
+  if (!session?.access_token || !session?.user?.id || !eventId) return;
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/event_attendance`, {
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${session.access_token}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'resolution=ignore-duplicates,return=minimal',
+      },
+      body: JSON.stringify({
+        user_id: session.user.id,
+        event_id: eventId,
+        checkin_type: checkinType,
+        status: 'verified',
+        verified_at: new Date().toISOString(),
+      }),
+    });
+  } catch { /* non-critical — attendance count is best-effort */ }
+}

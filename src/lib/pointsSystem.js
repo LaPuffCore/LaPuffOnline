@@ -38,7 +38,6 @@ export async function awardPoints(session, amount, reason, eventId = null, check
   }
 
   const body = {
-    p_user_id: session.user.id,
     p_amount: amount,
     p_reason: reason,
     ...(eventId && { p_event_id: eventId }),
