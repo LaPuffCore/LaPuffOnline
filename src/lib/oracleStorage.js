@@ -18,12 +18,12 @@ export async function uploadToOracleCloud(file) {
   const parUrl = import.meta.env.VITE_OCI_PAR_URL;
   if (!parUrl) throw new Error('VITE_OCI_PAR_URL is not configured');
 
-  const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
-  const fileName = `geopost-${Date.now()}-${Math.random().toString(36).slice(2, 7)}.${ext}`;
+  // Always use .jpg extension — compressGeoImage always produces image/jpeg
+  const fileName = `geopost-${Date.now()}-${Math.random().toString(36).slice(2, 7)}.jpg`;
 
   const res = await fetch(`${parUrl}${fileName}`, {
     method: 'PUT',
-    headers: { 'Content-Type': file.type || 'image/jpeg' },
+    headers: { 'Content-Type': 'image/jpeg' },
     body: file,
   });
 
@@ -32,14 +32,14 @@ export async function uploadToOracleCloud(file) {
     throw new Error(`OCI upload failed (${res.status}): ${errText.slice(0, 200)}`);
   }
 
-  // Derive the public URL from the PAR path — extract namespace and bucket from the PAR URL
+  // Return the direct public read URL (bucket is public — no PAR token needed to read)
   // PAR format: .../p/<token>/n/<namespace>/b/<bucket>/o/
   const m = parUrl.match(/\/n\/([^/]+)\/b\/([^/]+)\/o\//);
   if (m) {
-    return `https://objectstorage.us-ashburn-1.oraclecloud.com/n/${m[1]}/b/${m[2]}/o/${encodeURIComponent(fileName)}`;
+    return `https://objectstorage.us-ashburn-1.oraclecloud.com/n/${m[1]}/b/${m[2]}/o/${fileName}`;
   }
-  // Fallback: PAR URL itself + filename is also publicly accessible
-  return `${parUrl}${encodeURIComponent(fileName)}`;
+  // Fallback: use PAR URL + filename (also publicly readable for public buckets)
+  return `${parUrl}${fileName}`;
 }
 
 /**
