@@ -10,6 +10,7 @@ import {
   addPostReaction,
   fetchReactionsForPosts,
 } from '../lib/supabase';
+import { uploadToOracleCloud, isOciConfigured } from '../lib/oracleStorage';
 import { NYC_ZIP_FEATURES } from '../lib/nycZipGeoJSON';
 
 // ── constants ──────────────────────────────────────────────────────────────────
@@ -402,7 +403,11 @@ function GeoPostEditor({ session, accentColor, onPosted }) {
         const confirmed = true; // still submit but mark not approved
         const html = getHtml();
         let imageUrl = null;
-        if (imageFile) imageUrl = await uploadGeoPostImage(imageFile, session);
+        if (imageFile) {
+          imageUrl = isOciConfigured()
+            ? await uploadToOracleCloud(imageFile)
+            : await uploadGeoPostImage(imageFile, session);
+        }
         await submitGeoPost({
           user_id: session?.user?.id ?? null,
           content: { html },
@@ -419,7 +424,11 @@ function GeoPostEditor({ session, accentColor, onPosted }) {
 
       const html = getHtml();
       let imageUrl = null;
-      if (imageFile) imageUrl = await uploadGeoPostImage(imageFile, session);
+      if (imageFile) {
+        imageUrl = isOciConfigured()
+          ? await uploadToOracleCloud(imageFile)
+          : await uploadGeoPostImage(imageFile, session);
+      }
 
       await submitGeoPost({
         user_id: session?.user?.id ?? null,

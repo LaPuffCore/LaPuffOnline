@@ -678,7 +678,13 @@ TileView: live events are retained in the present event list even when they'd be
 - `removePostReaction(postId, emojiText, session)` — deletes reaction.
 - `fetchPostReactions(postId)` — returns all reactions for one post.
 - `fetchReactionsForPosts(postIds)` — batch fetch reactions with profiles join for username.
-- `uploadGeoPostImage(file, session)` — uploads to Supabase `event-images` bucket. Filename prefixed `geopost-`. Placeholder for Oracle Cloud.
+- `uploadGeoPostImage(file, session)` — uploads to Supabase `event-images` bucket. Fallback when OCI env vars not set.
+- `uploadToOracleCloud(file)` in `src/lib/oracleStorage.js` — OCI Object Storage upload with Web Crypto RSA-SHA256 signing. Primary upload path when `VITE_OCI_*` env vars are set.
+- OCI bucket: `geopost-images`, namespace `idfnjqqb9g0p`, region `us-ashburn-1`. URL: `https://objectstorage.us-ashburn-1.oraclecloud.com/n/idfnjqqb9g0p/b/geopost-images/o/[FILENAME]`.
+- Required Vite env vars: `VITE_OCI_TENANCY`, `VITE_OCI_USER`, `VITE_OCI_FINGERPRINT`, `VITE_OCI_PRIVATE_KEY` (PEM string, literal `\n` allowed).
+- `isOciConfigured()` returns true when all 4 OCI vars are present. GeoPostView uses OCI if configured, Supabase otherwise.
+- OCI private key supports both PKCS#1 (BEGIN RSA PRIVATE KEY) and PKCS#8 (BEGIN PRIVATE KEY). PKCS#1 auto-wrapped to PKCS#8 via ASN.1 DER manipulation in `pkcs1ToPkcs8()`.
+- **CORS required**: OCI bucket must have CORS policy allowing PUT from site origin before browser uploads work.
 
 #### Location check (src/lib/locationService.js):
 - `isUserInZipCode(targetZip)` — pings GPS → Nominatim reverse geocode → compares postcode. Returns `'confirmed' | 'cant_connect' | 'not_in_zip'`.
