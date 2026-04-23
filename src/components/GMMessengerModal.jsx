@@ -3,13 +3,13 @@ import { supabase } from '../lib/supabaseAuth';
 import { getDeviceId } from '../lib/deviceId';
 import { useSiteTheme } from '../lib/theme';
 
-export default function GMMessengerModal({ onClose }) {
-  const [message, setMessage] = useState('');
+export default function GMMessengerModal({ onClose, user }) {
+  const [formData, setFormData] = useState({ name: '', title: '', message: '' });
   const [loading, setLoading] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
   const [status, setStatus] = useState({ type: '', msg: '' });
   const { resolvedTheme } = useSiteTheme();
 
-  // Close on Escape key
   useEffect(() => {
     function onKey(e) { if (e.key === 'Escape') onClose(); }
     window.addEventListener('keydown', onKey);
@@ -18,7 +18,7 @@ export default function GMMessengerModal({ onClose }) {
 
   async function handleSubmit(e) {
     e.preventDefault();
-    if (!message.trim() || message.length < 10) {
+    if (!formData.message.trim() || formData.message.length < 10) {
       setStatus({ type: 'error', msg: 'Message too short. Be descriptive.' });
       return;
     }
@@ -33,7 +33,10 @@ export default function GMMessengerModal({ onClose }) {
         .from('gm_messages')
         .insert([
           { 
-            content: message.trim(), 
+            sender_name: formData.name.trim() || 'Anonymous',
+            subject_title: formData.title.trim() || 'No Subject',
+            content: formData.message.trim(), 
+            user_id: user?.id || null,
             device_id: deviceId,
             metadata: { 
               ua: navigator.userAgent,
@@ -44,23 +47,30 @@ export default function GMMessengerModal({ onClose }) {
 
       if (error) throw error;
 
+      // Local 12-hour lockout
       localStorage.setItem(`gm_msg_${deviceId}`, Date.now().toString());
       
-      setStatus({ type: 'success', msg: 'Transmission received. The GM will review your report.' });
-      setTimeout(() => onClose(), 2500);
+      // TRIGGER SUCCESS STATE
+      setSubmitted(true);
+      
+      // Auto-close after 2 seconds
+      setTimeout(() => onClose(), 2000);
 
     } catch (err) {
       setStatus({ type: 'error', msg: 'System failure: Could not reach the GM.' });
       console.error('GM Message Error:', err);
-    } finally {
       setLoading(false);
     }
   }
 
+  const inputStyle = {
+    borderColor: resolvedTheme.buttonOutlineColor,
+    backgroundColor: resolvedTheme.surfaceBackgroundColor,
+    color: resolvedTheme.bodyTextColor,
+    boxShadow: `4px 4px 0px ${resolvedTheme.tileShadowColor}`
+  };
+
   return (
-    /* The 'fixed' class combined with 'inset-0' and 'z-[9999]' forces the 
-       overlay to ignore the TopBar container and cover the entire screen. 
-    */
     <div 
       className="fixed inset-0 w-screen h-screen bg-black/60 z-[9999] flex items-center justify-center p-4" 
       onClick={onClose}
@@ -75,67 +85,100 @@ export default function GMMessengerModal({ onClose }) {
         }}
         onClick={e => e.stopPropagation()}
       >
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b-3 border-black" style={{ borderColor: resolvedTheme.buttonOutlineColor }}>
-          <h2 className="text-xl font-black flex items-center gap-2" style={{ color: resolvedTheme.titleTextColor }}>
-            <span className="lp-emoji">📟</span> GM Handshake
-          </h2>
-          <button 
-            onClick={onClose} 
-            className="w-8 h-8 bg-black text-white rounded-full font-black text-sm flex items-center justify-center hover:bg-red-500 transition-colors"
-            style={{ backgroundColor: resolvedTheme.buttonOutlineColor }}
-          >
-            ✕
-          </button>
-        </div>
+        {!submitted ? (
+          <>
+            <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b-3 border-black" style={{ borderColor: resolvedTheme.buttonOutlineColor }}>
+              <h2 className="text-xl font-black flex items-center gap-2" style={{ color: resolvedTheme.titleTextColor }}>
+                <span className="lp-emoji">📟</span> GM Handshake
+              </h2>
+              <button onClick={onClose} className="w-8 h-8 bg-black text-white rounded-full font-black text-sm flex items-center justify-center hover:bg-red-500 transition-colors" style={{ backgroundColor: resolvedTheme.buttonOutlineColor }}>✕</button>
+            </div>
 
-        <form onSubmit={handleSubmit} className="p-6">
-          <p className="text-xs font-bold uppercase tracking-widest mb-4" style={{ color: resolvedTheme.bodyTextColor + '80' }}>
-            Direct report to the Game Master. 12-hour cooldown applies.
-          </p>
+            <form onSubmit={handleSubmit} className="p-6">
+              <div className="grid grid-cols-2 gap-4 mb-4">
+                <div>
+                  <label className="text-[10px] font-black uppercase mb-1 block opacity-60">Your Name</label>
+                  <input 
+                    type="text" 
+                    placeholder="Handle..."
+                    value={formData.name}
+                    onChange={e => setFormData({...formData, name: e.target.value})}
+                    className="w-full border-3 border-black rounded-xl px-3 py-2 text-sm focus:outline-none"
+                    style={inputStyle}
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-black uppercase mb-1 block opacity-60">Subject</label>
+                  <input 
+                    type="text" 
+                    placeholder="Bug, Idea, etc..."
+                    value={formData.title}
+                    onChange={e => setFormData({...formData, title: e.target.value})}
+                    className="w-full border-3 border-black rounded-xl px-3 py-2 text-sm focus:outline-none"
+                    style={inputStyle}
+                  />
+                </div>
+              </div>
 
-          <div className="relative mb-4">
-            <textarea
-              autoFocus
-              value={message}
-              onChange={(e) => setMessage(e.target.value.slice(0, 500))}
-              placeholder="Report a bug, suggestion, or clout dispute..."
-              rows={5}
-              disabled={loading || status.type === 'success'}
-              className="w-full border-3 border-black rounded-2xl px-4 py-3 text-sm font-medium resize-none focus:outline-none transition-all"
-              style={{ 
-                borderColor: resolvedTheme.buttonOutlineColor,
-                backgroundColor: resolvedTheme.surfaceBackgroundColor,
-                color: resolvedTheme.bodyTextColor,
-                boxShadow: `4px 4px 0px ${resolvedTheme.tileShadowColor}`
-              }}
-            />
-            <div className="absolute bottom-3 right-3 text-[10px] font-black opacity-40">
-              {message.length}/500
+              <div className="relative mb-4">
+                <label className="text-[10px] font-black uppercase mb-1 block opacity-60">Message Body</label>
+                <textarea
+                  autoFocus
+                  value={formData.message}
+                  onChange={(e) => setFormData({...formData, message: e.target.value.slice(0, 500)})}
+                  placeholder="Be descriptive..."
+                  rows={4}
+                  disabled={loading}
+                  className="w-full border-3 border-black rounded-2xl px-4 py-3 text-sm font-medium resize-none focus:outline-none transition-all"
+                  style={inputStyle}
+                />
+                <div className="absolute bottom-3 right-3 text-[10px] font-black opacity-30">{formData.message.length}/500</div>
+              </div>
+
+              {status.msg && (
+                <div className="mb-4 p-3 rounded-xl border-2 bg-red-100 border-red-500 text-red-700 font-bold text-xs animate-in slide-in-from-bottom-1">
+                  ⚠️ {status.msg}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full text-white font-black text-lg py-4 rounded-2xl transition-all disabled:opacity-50 active:translate-y-1"
+                style={{ backgroundColor: resolvedTheme.accentColor, boxShadow: `4px 4px 0px ${resolvedTheme.tileShadowColor}` }}
+              >
+                {loading ? 'TRANSMITTING...' : 'SEND MESSAGE'}
+              </button>
+            </form>
+          </>
+        ) : (
+          /* SUCCESS STATE - 2 SECOND DELAY */
+          <div className="p-12 flex flex-col items-center justify-center text-center animate-in fade-in zoom-in duration-300">
+            <div className="w-20 h-20 bg-green-500 rounded-full flex items-center justify-center mb-6 shadow-lg animate-bounce">
+              <span className="text-4xl text-white">✓</span>
+            </div>
+            <h2 className="text-2xl font-black mb-2" style={{ color: resolvedTheme.titleTextColor }}>Transmission Received</h2>
+            <p className="font-bold opacity-60 px-4">Your request was submitted. The GM will review your report shortly.</p>
+            
+            {/* Visual Countdown Progress Bar */}
+            <div className="mt-8 w-full bg-gray-100 h-1.5 rounded-full overflow-hidden max-w-[200px]">
+               <div 
+                 className="h-full bg-green-500" 
+                 style={{ 
+                   animation: 'progress-shrink 2s linear forwards' 
+                 }}
+               ></div>
             </div>
           </div>
-
-          {status.msg && (
-            <div className={`mb-4 p-3 rounded-xl border-2 font-bold text-xs animate-in slide-in-from-bottom-1 ${
-              status.type === 'success' ? 'bg-green-100 border-green-500 text-green-700' : 'bg-red-100 border-red-500 text-red-700'
-            }`}>
-              {status.type === 'success' ? '✅' : '⚠️'} {status.msg}
-            </div>
-          )}
-
-          <button
-            type="submit"
-            disabled={loading || status.type === 'success'}
-            className="w-full text-white font-black text-lg py-4 rounded-2xl transition-all disabled:opacity-50 active:translate-y-1"
-            style={{ 
-              backgroundColor: resolvedTheme.accentColor,
-              boxShadow: `4px 4px 0px ${resolvedTheme.tileShadowColor}`
-            }}
-          >
-            {loading ? 'TRANSMITTING...' : 'SEND MESSAGE'}
-          </button>
-        </form>
+        )}
       </div>
+
+      <style dangerouslySetInnerHTML={{ __html: `
+        @keyframes progress-shrink {
+          from { width: 100%; }
+          to { width: 0%; }
+        }
+      `}} />
     </div>
   );
 }
