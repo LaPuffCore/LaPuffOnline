@@ -1,0 +1,154 @@
+.
+├── LOCATION_POINTS_SYSTEM.md
+├── SQL_SCHEMA_SETUP.sql
+├── components.json
+├── eslint.config.js
+├── index.html
+├── jsconfig.json
+├── package-lock.json
+├── package.json
+├── postcss.config.js
+├── project_structure.txt
+├── public
+│   ├── 404.html
+│   └── data
+│       ├── MODZCTA_2010_WGS1984.geo.json
+│       ├── MODZCTA_2010_WGS1984.topo.json
+│       ├── Supabase Snippet Project manifest JSON generator.csv
+│       ├── borough.geo.json
+│       ├── final_building.fgb
+│       ├── koganebottom.png
+│       ├── koganefull.png
+│       ├── koganetop.png
+│       └── topo-thumb.png
+├── readme.md
+├── scripts
+│   ├── calibrate-red.js
+│   ├── package-lock.json
+│   ├── package.json
+│   ├── sample_json
+│   │   ├── allevents_sample.json
+│   │   ├── eventbrite_sample.json
+│   │   └── luma_sample.json
+│   ├── scrape-events.js
+│   ├── scrapers
+│   │   ├── allevents.js
+│   │   ├── eventbrite.js
+│   │   ├── luma.js
+│   │   └── songkick.js
+│   └── utils
+│       ├── dedup.js
+│       ├── emoji-color.js
+│       ├── normalize.js
+│       ├── nyc-validate.js
+│       └── price-detect.js
+├── src
+│   ├── App.jsx
+│   ├── components
+│   │   ├── AddressSearch.jsx
+│   │   ├── AuthModal.jsx
+│   │   ├── CRTEffect.jsx
+│   │   ├── ColorPicker.jsx
+│   │   ├── CustomCursorOverlay.jsx
+│   │   ├── EmojiPicker.jsx
+│   │   ├── EventDetailPopup.jsx
+│   │   ├── EventSubmitForm.jsx
+│   │   ├── EventTile.jsx
+│   │   ├── GeoPostView.jsx
+│   │   ├── HamburgerMenu.jsx
+│   │   ├── Leaderboard.jsx
+│   │   ├── MapIntro.jsx
+│   │   ├── MapView.jsx
+│   │   ├── ParticipantDot.jsx
+│   │   ├── ReferralModal.jsx
+│   │   ├── ThemeCustomizerModal.jsx
+│   │   ├── TileView.jsx
+│   │   └── ui
+│   │       ├── accordion.jsx
+│   │       ├── alert-dialog.jsx
+│   │       ├── alert.jsx
+│   │       ├── aspect-ratio.jsx
+│   │       ├── avatar.jsx
+│   │       ├── badge.jsx
+│   │       ├── breadcrumb.jsx
+│   │       ├── button.jsx
+│   │       ├── calendar.jsx
+│   │       ├── card.jsx
+│   │       ├── carousel.jsx
+│   │       ├── chart.jsx
+│   │       ├── checkbox.jsx
+│   │       ├── collapsible.jsx
+│   │       ├── command.jsx
+│   │       ├── context-menu.jsx
+│   │       ├── dialog.jsx
+│   │       ├── drawer.jsx
+│   │       ├── dropdown-menu.jsx
+│   │       ├── form.jsx
+│   │       ├── hover-card.jsx
+│   │       ├── input-otp.jsx
+│   │       ├── input.jsx
+│   │       ├── label.jsx
+│   │       ├── menubar.jsx
+│   │       ├── navigation-menu.jsx
+│   │       ├── pagination.jsx
+│   │       ├── popover.jsx
+│   │       ├── progress.jsx
+│   │       ├── radio-group.jsx
+│   │       ├── resizable.jsx
+│   │       ├── scroll-area.jsx
+│   │       ├── select.jsx
+│   │       ├── separator.jsx
+│   │       ├── sheet.jsx
+│   │       ├── sidebar.jsx
+│   │       ├── skeleton.jsx
+│   │       ├── slider.jsx
+│   │       ├── sonner.jsx
+│   │       ├── switch.jsx
+│   │       ├── table.jsx
+│   │       ├── tabs.jsx
+│   │       ├── textarea.jsx
+│   │       ├── toast.jsx
+│   │       ├── toaster.jsx
+│   │       ├── toggle-group.jsx
+│   │       ├── toggle.jsx
+│   │       ├── tooltip.jsx
+│   │       └── use-toast.jsx
+│   ├── hooks
+│   │   ├── use-mobile.jsx
+│   │   └── use-toast.js
+│   ├── index.css
+│   ├── lib
+│   │   ├── AuthContext.jsx
+│   │   ├── PageNotFound.jsx
+│   │   ├── anonDevice.js
+│   │   ├── autoTags.js
+│   │   ├── deviceId.js
+│   │   ├── eventUtils.js
+│   │   ├── favorites.js
+│   │   ├── locationService.js
+│   │   ├── nycZipGeoJSON.js
+│   │   ├── oracleStorage.js
+│   │   ├── pointsSystem.js
+│   │   ├── profanityFilter.js
+│   │   ├── query-client.js
+│   │   ├── sampleConfig.js
+│   │   ├── sampleEvents.js
+│   │   ├── sampleUsers.js
+│   │   ├── supabase.js
+│   │   ├── supabaseAuth.js
+│   │   ├── tagColors.js
+│   │   ├── theme.js
+│   │   ├── timezones.js
+│   │   ├── unicodeFonts.js
+│   │   └── utils.js
+│   ├── main.jsx
+│   ├── pages
+│   │   ├── CalendarPage.jsx
+│   │   ├── FavoritesPage.jsx
+│   │   └── Home.jsx
+│   └── utils
+│       └── index.ts
+├── tailwind.config.js
+└── vite.config.js
+
+14 directories, 138 files

@@ -2,46 +2,66 @@
 // when the device identity has changed (cache wipe). Also performs selective volatile-key cleanup
 // when the app version changes.
 import { supabase } from './supabaseAuth';
-import { getDeviceId } from './deviceId';
+import { initializeDeviceId } from './deviceId';
 
-const PREV_KEY = 'lapuff_prev_device_id';
 const APP_VERSION_KEY = 'APP_VERSION';
 const SITE_VERSION = '2.0.4';
 
+/**
+ * Main Handshake Initialization.
+ * Called on app boot to ensure anonymous contributions are honest and subtract spoofed counts.
+ */
 export async function initAnonDeviceHandshake() {
   try {
-    const current = await getDeviceId();
+    // 1) Initialize Triple-Lock identity and detect cache wipes via recovery anchors
+    const { id: current, wasWiped, prevId } = await initializeDeviceId();
     if (!current) return;
 
-    // Version-based volatile key cleanup (selective persistence)
+    // 2) Version-based volatile key cleanup (selective persistence)
     try {
       const lastVersion = localStorage.getItem(APP_VERSION_KEY);
       if (lastVersion !== SITE_VERSION) {
-        // Clear only UI/volatile keys — keep identity keys intact
-        const volatileKeys = ['old_ui_layout_config', 'temp_event_filters', 'last_viewed_event'];
-        volatileKeys.forEach(k => { try { localStorage.removeItem(k); } catch (e) {} });
+        // Clear UI/volatile keys — keep identity keys (deviceId, interactions) intact
+        const volatileKeys = [
+          'old_ui_layout_config', 
+          'temp_event_filters', 
+          'last_viewed_event',
+          'active_filters',      // Added for comprehensive UI reset
+          'map_position'         // Added to reset map view to defaults
+        ];
+        
+        volatileKeys.forEach(k => { 
+          try { localStorage.removeItem(k); } catch (e) {} 
+        });
+        
         try { localStorage.setItem(APP_VERSION_KEY, SITE_VERSION); } catch (e) {}
       }
-    } catch (e) { /* non-fatal */ }
+    } catch (e) { /* non-fatal version check error */ }
 
-    // Read last known device id (if any)
-    let prev = null;
-    try { prev = localStorage.getItem(PREV_KEY) || null; } catch (e) { prev = null; }
-
-    // If we have a previous device id and it differs from current, call RPC to
-    // subtract the old device's contributions and delete its anon rows.
-    if (prev && prev !== current) {
+    // 3) SUBTRACTIVE HANDSHAKE
+    // If wasWiped is true, it means localStorage was empty but the identity was 
+    // recovered from the backup anchors. We must now "clean" the DB contributions.
+    if (wasWiped && prevId && prevId !== current) {
+      console.log('🔄 Detection: Cache wipe detected. Syncing subtractive identity...');
+      
       try {
-        await supabase.rpc('sync_and_clean_anon_cache', { p_new_device_id: current, p_old_device_id: prev });
+        const { error } = await supabase.rpc('sync_and_clean_anon_cache', { 
+          p_new_device_id: current, 
+          p_old_device_id: prevId 
+        });
+
+        if (error) throw error;
+        console.log('✅ Success: Old anonymous contributions subtracted.');
       } catch (err) {
-        console.warn('sync_and_clean_anon_cache RPC failed', err?.message || err);
+        console.warn('⚠️ sync_and_clean_anon_cache RPC failed:', err?.message || err);
       }
     }
 
-    // Ensure the current device id is persisted as the "last known" id
-    try { localStorage.setItem(PREV_KEY, current); } catch (e) {}
+    // Note: Manual PREV_KEY storage is no longer needed here, as deviceId.js 
+    // now manages identity persistence across all three storage layers internally.
+    
   } catch (e) {
-    console.warn('initAnonDeviceHandshake error', e?.message || e);
+    console.warn('❌ initAnonDeviceHandshake error:', e?.message || e);
   }
 }
 
