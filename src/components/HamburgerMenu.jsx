@@ -6,6 +6,7 @@ import { hexToRgba, useSiteTheme } from '../lib/theme';
 import { getDeviceId } from '../lib/deviceId';
 import ReferralModal from './ReferralModal';
 import ThemeCustomizerModal from './ThemeCustomizerModal';
+import GMMessengerModal from './GMMessengerModal';
 
 export default function HamburgerMenu({ events, user, onAuthClick }) {
   const [open, setOpen] = useState(false);
@@ -50,7 +51,7 @@ export default function HamburgerMenu({ events, user, onAuthClick }) {
       const { data } = await supabase
         .from('profiles')
         .select('clout_points')
-        .eq('id', user.id)
+        .eq(user.id)
         .single();
 
       if (mounted) setCloutPoints(data?.clout_points || 0);
@@ -214,7 +215,7 @@ export default function HamburgerMenu({ events, user, onAuthClick }) {
         />
       )}
 
-      showCustomizer && <ThemeCustomizerModal onClose={() => setShowCustomizer(false)} />}
+      {showCustomizer && <ThemeCustomizerModal onClose={() => setShowCustomizer(false)} />}
 
       {/* PHASE 4: Final GMMessenger Integration */}
       {showGMMessenger && (
