@@ -51,7 +51,7 @@ export default function HamburgerMenu({ events, user, onAuthClick }) {
       const { data } = await supabase
         .from('profiles')
         .select('clout_points')
-        .eq(user.id)
+        .eq('id', user.id)
         .single();
 
       if (mounted) setCloutPoints(data?.clout_points || 0);

@@ -60,14 +60,15 @@ export default function GMMessengerModal({ onClose }) {
   }
 
   return (
+    /* FIXED OVERLAY: This ensures it covers the whole screen and centers the content */
     <div 
-      className="lp-theme-scope fixed inset-0 bg-black/70 backdrop-blur-sm z-[1100] flex items-center justify-center p-4" 
+      className="fixed inset-0 w-screen h-screen bg-black/70 backdrop-blur-sm z-[2000] flex items-center justify-center p-4 overflow-y-auto" 
       onClick={onClose}
     >
       <div 
         className="bg-white border-4 border-black rounded-3xl w-full shadow-[8px_8px_0px_black] overflow-hidden animate-in zoom-in duration-200"
         style={{ 
-          maxWidth: 500, 
+          maxWidth: '500px', 
           backgroundColor: resolvedTheme.surfaceBackgroundColor,
           borderColor: resolvedTheme.buttonOutlineColor,
           boxShadow: `8px 8px 0px ${resolvedTheme.tileShadowColor}` 
@@ -101,7 +102,7 @@ export default function GMMessengerModal({ onClose }) {
               placeholder="Report a bug, suggestion, or clout dispute..."
               rows={5}
               disabled={loading || status.type === 'success'}
-              className="w-full border-3 border-black rounded-2xl px-4 py-3 text-sm font-medium resize-none focus:outline-none focus:bg-violet-50 transition-all shadow-[4px_4px_0px_black]"
+              className="w-full border-3 border-black rounded-2xl px-4 py-3 text-sm font-medium resize-none focus:outline-none transition-all shadow-[4px_4px_0px_black]"
               style={{ 
                 borderColor: resolvedTheme.buttonOutlineColor,
                 backgroundColor: resolvedTheme.surfaceBackgroundColor,
