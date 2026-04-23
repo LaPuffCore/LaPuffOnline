@@ -10,6 +10,7 @@ export default function GMMessengerModal({ onClose, user }) {
   const [status, setStatus] = useState({ type: '', msg: '' });
   const { resolvedTheme } = useSiteTheme();
 
+  // Close on Escape key
   useEffect(() => {
     function onKey(e) { if (e.key === 'Escape') onClose(); }
     window.addEventListener('keydown', onKey);
@@ -47,10 +48,10 @@ export default function GMMessengerModal({ onClose, user }) {
 
       if (error) throw error;
 
-      // Local 12-hour lockout
+      // Local 12-hour lockout timestamp
       localStorage.setItem(`gm_msg_${deviceId}`, Date.now().toString());
       
-      // TRIGGER SUCCESS STATE
+      // Trigger success animation
       setSubmitted(true);
       
       // Auto-close after 2 seconds
@@ -97,7 +98,7 @@ export default function GMMessengerModal({ onClose, user }) {
             <form onSubmit={handleSubmit} className="p-6">
               <div className="grid grid-cols-2 gap-4 mb-4">
                 <div>
-                  <label className="text-[10px] font-black uppercase mb-1 block opacity-60">Your Name</label>
+                  <label className="text-[10px] font-black uppercase mb-1 block opacity-60" style={{ color: resolvedTheme.titleTextColor }}>Your Name</label>
                   <input 
                     type="text" 
                     placeholder="Handle..."
@@ -108,7 +109,7 @@ export default function GMMessengerModal({ onClose, user }) {
                   />
                 </div>
                 <div>
-                  <label className="text-[10px] font-black uppercase mb-1 block opacity-60">Subject</label>
+                  <label className="text-[10px] font-black uppercase mb-1 block opacity-60" style={{ color: resolvedTheme.titleTextColor }}>Subject</label>
                   <input 
                     type="text" 
                     placeholder="Bug, Idea, etc..."
@@ -121,7 +122,7 @@ export default function GMMessengerModal({ onClose, user }) {
               </div>
 
               <div className="relative mb-4">
-                <label className="text-[10px] font-black uppercase mb-1 block opacity-60">Message Body</label>
+                <label className="text-[10px] font-black uppercase mb-1 block opacity-60" style={{ color: resolvedTheme.titleTextColor }}>Message Body</label>
                 <textarea
                   autoFocus
                   value={formData.message}
@@ -132,7 +133,9 @@ export default function GMMessengerModal({ onClose, user }) {
                   className="w-full border-3 border-black rounded-2xl px-4 py-3 text-sm font-medium resize-none focus:outline-none transition-all"
                   style={inputStyle}
                 />
-                <div className="absolute bottom-3 right-3 text-[10px] font-black opacity-30">{formData.message.length}/500</div>
+                <div className="absolute bottom-3 right-3 text-[10px] font-black opacity-30" style={{ color: resolvedTheme.bodyTextColor }}>
+                  {formData.message.length}/500
+                </div>
               </div>
 
               {status.msg && (
@@ -145,27 +148,32 @@ export default function GMMessengerModal({ onClose, user }) {
                 type="submit"
                 disabled={loading}
                 className="w-full text-white font-black text-lg py-4 rounded-2xl transition-all disabled:opacity-50 active:translate-y-1"
-                style={{ backgroundColor: resolvedTheme.accentColor, boxShadow: `4px 4px 0px ${resolvedTheme.tileShadowColor}` }}
+                style={{ 
+                  backgroundColor: resolvedTheme.accentColor, 
+                  boxShadow: `4px 4px 0px ${resolvedTheme.tileShadowColor}` 
+                }}
               >
                 {loading ? 'TRANSMITTING...' : 'SEND MESSAGE'}
               </button>
             </form>
           </>
         ) : (
-          /* SUCCESS STATE - 2 SECOND DELAY */
+          /* SUCCESS STATE - 2 SECOND AUTO-CLOSE SEQUENCE */
           <div className="p-12 flex flex-col items-center justify-center text-center animate-in fade-in zoom-in duration-300">
             <div className="w-20 h-20 bg-green-500 rounded-full flex items-center justify-center mb-6 shadow-lg animate-bounce">
               <span className="text-4xl text-white">✓</span>
             </div>
             <h2 className="text-2xl font-black mb-2" style={{ color: resolvedTheme.titleTextColor }}>Transmission Received</h2>
-            <p className="font-bold opacity-60 px-4">Your request was submitted. The GM will review your report shortly.</p>
+            <p className="font-bold opacity-60 px-4" style={{ color: resolvedTheme.bodyTextColor }}>
+              Your request was submitted. The GM will review your report shortly.
+            </p>
             
-            {/* Visual Countdown Progress Bar */}
+            {/* Countdown Progress Bar */}
             <div className="mt-8 w-full bg-gray-100 h-1.5 rounded-full overflow-hidden max-w-[200px]">
                <div 
                  className="h-full bg-green-500" 
                  style={{ 
-                   animation: 'progress-shrink 2s linear forwards' 
+                   animation: 'lp-progress-shrink 2s linear forwards' 
                  }}
                ></div>
             </div>
@@ -174,7 +182,7 @@ export default function GMMessengerModal({ onClose, user }) {
       </div>
 
       <style dangerouslySetInnerHTML={{ __html: `
-        @keyframes progress-shrink {
+        @keyframes lp-progress-shrink {
           from { width: 100%; }
           to { width: 0%; }
         }
