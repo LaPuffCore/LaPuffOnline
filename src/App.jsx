@@ -16,7 +16,8 @@ import { ThemeProvider } from './lib/theme';
 import { hydrateFavoriteEventCache } from './lib/favorites';
 import { runAutoPingScan } from './lib/locationService';
 import { checkAndAwardSubmitPoints } from './lib/pointsSystem';
-import { getValidSession } from './lib/supabaseAuth';
+import { getValidSession, supabase } from './lib/supabaseAuth'; // Added supabase
+import { captureSessionIP } from './lib/security'; // IP tracking utility
 import CustomCursorOverlay from './components/CustomCursorOverlay';
 // Add page imports here
 import Home from './pages/Home';
@@ -68,14 +69,12 @@ function AppWithEvents() {
 
         if (!mounted) return;
 
-        // In SAMPLE_MODE, always use SAMPLE_EVENTS directly — they have correct lat/lng and
-        // include all current test events. DB sync still runs for heatmap/colonist counting.
+        // In SAMPLE_MODE, always use SAMPLE_EVENTS directly
         const baseEvents = SAMPLE_MODE
           ? SAMPLE_EVENTS
           : (dbEvents && dbEvents.length > 0 ? dbEvents : []);
 
-        // Enrich DB events with lat/lng from sample data if missing (DB rows
-        // inserted before the lat/lng columns were added won't have coords)
+        // Enrich DB events with lat/lng from sample data if missing
         let enrichedBase = baseEvents;
         if (SAMPLE_MODE && baseEvents.length > 0 && baseEvents !== SAMPLE_EVENTS) {
           const sampleByKey = {};
@@ -104,7 +103,6 @@ function AppWithEvents() {
           return;
         }
 
-        // Safety fallback while developing if DB is unreachable.
         if (SAMPLE_MODE) setEvents(SAMPLE_EVENTS);
         setEventsLoading(false);
       } catch {
@@ -127,7 +125,6 @@ function AppWithEvents() {
 
   useEffect(() => {
     if (!events.length) return;
-    // Auto-ping scan: runs once when events are loaded, silently skips if disabled
     getValidSession().then(session => {
       runAutoPingScan(events, session, (event) => {
         console.info(`[AutoPing] Auto-checked into: ${event.event_name}`);
@@ -149,7 +146,27 @@ function AppWithEvents() {
 const AuthenticatedApp = () => {
   const { user, loading } = useAuth();
 
-  // Standard loading state while checking Supabase session
+  useEffect(() => {
+    // Initial site-load IP capture
+    const initTracking = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      captureSessionIP(session?.user?.id);
+    };
+
+    if (!loading) {
+      initTracking();
+    }
+
+    // Capture IP again if user state changes (Login/Logout)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_IN') {
+        captureSessionIP(session?.user?.id);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, [loading]);
+
   if (loading) {
     return (
       <div className="fixed inset-0 flex items-center justify-center">
@@ -167,7 +184,6 @@ function App() {
       <ThemeProvider>
         <QueryClientProvider client={queryClientInstance}>
           <CustomCursorOverlay />
-          {/* IMPORTANT: Added basename so Router knows it lives in a subfolder */}
           <Router basename="/LaPuffOnline">
             <AuthenticatedApp />
           </Router>
@@ -178,4 +194,4 @@ function App() {
   )
 }
 
-export default App
+export default App;
