@@ -8,7 +8,7 @@ import AddressSearch from './AddressSearch';
 import { useSiteTheme } from '../lib/theme';
 
 const PRICE_OPTIONS = ['free', '$', '$$', '$$$'];
-const MAX_PHOTO_BYTES = 1024 * 1024; // 1MB
+const MAX_PHOTO_BYTES = 500 * 1024; // 500KB target (client-side compressed)
 
 /** Compress a File to ≤ maxBytes using canvas, returns a new File */
 async function compressImage(file, maxBytes = MAX_PHOTO_BYTES) {
@@ -253,7 +253,7 @@ export default function EventSubmitForm({ onClose }) {
                     ))}
                     {photoFiles.length < 5 && (
                       <label className="w-16 h-16 border-3 border-dashed border-black rounded-xl flex items-center justify-center cursor-pointer hover:bg-violet-50 text-2xl">
-                        📷<input type="file" accept=".svg,.png,.jpg,.jpeg,.gif,.webp" multiple onChange={handlePhotoAdd} className="hidden" />
+                        📷<input type="file" accept="image/*" multiple onChange={handlePhotoAdd} className="hidden" />
                       </label>
                     )}
                   </div>

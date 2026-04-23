@@ -6,6 +6,7 @@ import { hexToRgba, useSiteTheme } from '../lib/theme';
 import { getDeviceId } from '../lib/deviceId';
 import ReferralModal from './ReferralModal';
 import ThemeCustomizerModal from './ThemeCustomizerModal';
+import KoganePopup from './KoganePopup';
 import GMMessengerModal from './GMMessengerModal';
 
 export default function HamburgerMenu({ events, user, onAuthClick }) {
@@ -16,6 +17,7 @@ export default function HamburgerMenu({ events, user, onAuthClick }) {
   const [favCount, setFavCount] = useState(0);
   const [cloutPoints, setCloutPoints] = useState(0);
   const [isGMTimedOut, setIsGMTimedOut] = useState(false);
+  const [showKogane, setShowKogane] = useState(false);
   const ref = useRef(null);
   const { resolvedTheme } = useSiteTheme();
 
@@ -189,6 +191,17 @@ export default function HamburgerMenu({ events, user, onAuthClick }) {
               </div>
             </button>
 
+            <button
+              onClick={() => { setOpen(false); setShowKogane(true); }}
+              className="w-full text-left px-4 py-3 rounded-2xl font-bold flex items-center gap-3 transition-colors"
+              style={{ color: resolvedTheme.buttonTextColor || resolvedTheme.bodyTextColor || resolvedTheme.microIconColor, backgroundColor: hexToRgba(resolvedTheme.buttonFillColor || "#ffffff", 0.22) }}
+              onMouseEnter={(event) => { event.currentTarget.style.backgroundColor = resolvedTheme.accentColor + '14'; }}
+              onMouseLeave={(event) => { event.currentTarget.style.backgroundColor = 'transparent'; }}
+            >
+              <span className="text-xl">🎮</span>
+              <span>Clout Culling Games Rules</span>
+            </button>
+
             {user && (
               <div className="mt-2 rounded-2xl border-3 px-4 py-3" style={{ backgroundColor: resolvedTheme.surfaceBackgroundColor, borderColor: resolvedTheme.buttonOutlineColor, boxShadow: `3px 3px 0px ${resolvedTheme.tileShadowColor}` }}>
                 <div className="flex items-start gap-3">
@@ -221,6 +234,8 @@ export default function HamburgerMenu({ events, user, onAuthClick }) {
       {showGMMessenger && (
         <GMMessengerModal onClose={() => setShowGMMessenger(false)} />
       )}
+
+      {showKogane && <KoganePopup onClose={() => setShowKogane(false)} />}
     </div>
   );
 }

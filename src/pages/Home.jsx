@@ -423,6 +423,7 @@ export default function Home({ events = [], eventsLoading = false }) {
                 ) : (
                   <button onClick={() => setShowAuth(true)}
                     className="bg-white border-2 border-black rounded-full px-3.5 py-1.5 font-black text-xs transition-all shadow-[2px_2px_0px_black] whitespace-nowrap text-center"
+                    style={{ minWidth: '112px' }}
                     onMouseEnter={e => { e.currentTarget.style.backgroundColor = accentColor; e.currentTarget.style.color = '#fff'; e.currentTarget.style.borderColor = accentColor; }}
                     onMouseLeave={e => { e.currentTarget.style.backgroundColor = ''; e.currentTarget.style.color = ''; e.currentTarget.style.borderColor = ''; }}>
                     Sign In / Up
