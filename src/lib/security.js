@@ -1,7 +1,7 @@
 import { supabase } from './supabaseAuth';
 import { getDeviceId } from './deviceId';
 
-// Module-level lock to prevent multiple captures in a single session/tab life
+// Module-level lock: lives in the browser's memory for the duration of the tab session
 let hasCapturedPulse = false;
 
 /**
@@ -9,7 +9,7 @@ let hasCapturedPulse = false;
  * Can be called anonymously or with a userId.
  */
 export async function captureSessionIP(userId = null) {
-  // If the pulse has already been captured for this session, exit early
+  // EXIT EARLY: If we've already logged this session, don't waste a DB request
   if (hasCapturedPulse) return;
 
   try {
@@ -37,11 +37,12 @@ export async function captureSessionIP(userId = null) {
 
     if (error) throw error;
 
-    // Set lock to true only after a successful or attempted insert
+    // LOCK ENGAGED: No more requests will fire from this tab
     hasCapturedPulse = true;
+    console.log("[Security] Pulse captured and locked.");
+    
   } catch (err) {
-    // Silent fail so site load is never blocked by tracking errors
+    // Silent fail so site load is never blocked
     console.warn("[Security] IP capture bypassed.");
-    // We do not set the lock here to allow for a retry if the network was just blipping
   }
 }
