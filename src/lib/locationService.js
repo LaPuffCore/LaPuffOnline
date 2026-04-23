@@ -174,10 +174,6 @@ function storePing(ping) {
 
 /**
  * Run on page load when auto-ping is enabled.
- * Pings location, stores it, checks for 2 pings ≥30min apart near active events → auto check-in.
- * @param {Array} events - all current events
- * @param {any} session - auth session (may be null)
- * @param {Function} onCheckIn - callback(event) when auto check-in happens
  */
 export async function runAutoPingScan(events, session, onCheckIn) {
   if (!isAutoPingEnabled()) return;
@@ -198,22 +194,19 @@ export async function runAutoPingScan(events, session, onCheckIn) {
       const nearPings = pings.filter(p => isWithin750ft(p.lat, p.lng, eLat, eLng));
       if (nearPings.length < 2) continue;
 
-      // Check two pings are ≥30min apart
       const sorted = nearPings.slice().sort((a, b) => a.timestamp - b.timestamp);
       const hasInterval = sorted[sorted.length - 1].timestamp - sorted[0].timestamp >= AUTOPINGS_MIN_INTERVAL_MS;
       if (!hasInterval) continue;
 
-      // Auto check-in!
       markCheckedIn(event.id, 'main');
       if (isEligibleForPoints(session)) {
+        // Updated awardPoints call with _unused parameter preserved
         awardPoints(session, POINTS.EVENT_ATTEND_CHECKIN, `Auto check-in: ${event.event_name}`, event.id, 'main');
-        // Record to DB (makes attendance_count live) — lazy import to avoid circular deps
         import('./supabase.js').then(({ recordAttendance }) => recordAttendance(session, event.id, 'main')).catch(() => {});
       }
       onCheckIn?.(event);
     }
 
-    // Roam points — award based on the user's current zip heat value (30-min throttle enforced in processRoamingPoints)
     if (isEligibleForPoints(session)) {
       try {
         const heatMap = JSON.parse(localStorage.getItem('lapuff_zip_heat') || '{}');
@@ -229,29 +222,23 @@ export async function runAutoPingScan(events, session, onCheckIn) {
             await processRoamingPoints(session, heatValue);
           }
         }
-      } catch { /* silent — roam points are optional */ }
+      } catch { /* optional */ }
     }
-  } catch {
-    // Silently fail if location denied or not available
-  }
+  } catch { /* silent */ }
 }
 
 /**
- * When user becomes participant while signed in, mark favorite contributions.
- * Frontend will then call awardPoints() with calculated amount.
- * @param {any} session - the authenticated session from getValidSession()
- * @returns {Promise<number>} number of events that received contribution marks
+ * Marks favorite contributions in the DB when user arrives in NYC.
+ * Returns: number of events that received contribution marks
  */
 export async function markFavoriteContributions(session) {
-  if (!session?.user?.id || !session?.access_token) {
-    console.warn('markFavoriteContributions: No valid session');
-    return 0;
-  }
+  if (!session?.user?.id || !session?.access_token) return 0;
 
   try {
     const SUPABASE_URL = 'https://gazuabyyugbbthonqnsp.supabase.co';
     const SUPABASE_KEY = 'sb_publishable_tLCmZUz3bgISgxs4KVq28g_x36Xo6Cp';
 
+    // Calls the upgraded RPC from SQL_SCHEMA_SETUP (2).sql
     const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/award_points_for_active_favorites`, {
       method: 'POST',
       headers: {
@@ -275,16 +262,15 @@ export async function markFavoriteContributions(session) {
     return 0;
   }
 }
+
 /**
  * Check if the user's current GPS position is within the given NYC zip code.
- * Returns: 'confirmed' | 'cant_connect' | 'not_in_zip'
  */
 export async function isUserInZipCode(targetZip) {
   try {
     const loc = await pingLocation();
     if (!loc || typeof loc.lat !== 'number') return 'cant_connect';
 
-    // Reverse-geocode via Nominatim to get zip
     const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${loc.lat}&lon=${loc.lng}&zoom=18&addressdetails=1`;
     const res = await fetch(url, {
       headers: { 'User-Agent': 'LaPuffOnline/1.0 (contact@lapuff.online)' },

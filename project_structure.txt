@@ -2,6 +2,24 @@
 ├── LOCATION_POINTS_SYSTEM.md
 ├── SQL_SCHEMA_SETUP.sql
 ├── components.json
+├── dist
+│   ├── 404.html
+│   ├── assets
+│   │   ├── anonDevice-DEcyA8Oo.js
+│   │   ├── deviceId-4lYOcD4G.js
+│   │   ├── index-CDA6FLVW.css
+│   │   └── index-YbmvXqzA.js
+│   ├── data
+│   │   ├── MODZCTA_2010_WGS1984.geo.json
+│   │   ├── MODZCTA_2010_WGS1984.topo.json
+│   │   ├── Supabase Snippet Project manifest JSON generator.csv
+│   │   ├── borough.geo.json
+│   │   ├── final_building.fgb
+│   │   ├── koganebottom.png
+│   │   ├── koganefull.png
+│   │   ├── koganetop.png
+│   │   └── topo-thumb.png
+│   └── index.html
 ├── eslint.config.js
 ├── index.html
 ├── jsconfig.json
@@ -14,7 +32,7 @@
 │   └── data
 │       ├── MODZCTA_2010_WGS1984.geo.json
 │       ├── MODZCTA_2010_WGS1984.topo.json
-│       ├── Supabase Snippet Project manifest JSON generator.csv
+│       ├── Supabase Snippet Schema Columns and Row-Level Policies Report.csv
 │       ├── borough.geo.json
 │       ├── final_building.fgb
 │       ├── koganebottom.png
@@ -54,6 +72,7 @@
 │   │   ├── EventDetailPopup.jsx
 │   │   ├── EventSubmitForm.jsx
 │   │   ├── EventTile.jsx
+│   │   ├── GMMessengerModal.jsx
 │   │   ├── GeoPostView.jsx
 │   │   ├── HamburgerMenu.jsx
 │   │   ├── Leaderboard.jsx
@@ -134,6 +153,7 @@
 │   │   ├── sampleConfig.js
 │   │   ├── sampleEvents.js
 │   │   ├── sampleUsers.js
+│   │   ├── security.js
 │   │   ├── supabase.js
 │   │   ├── supabaseAuth.js
 │   │   ├── tagColors.js
@@ -151,4 +171,4 @@
 ├── tailwind.config.js
 └── vite.config.js
 
-14 directories, 138 files
+17 directories, 155 files

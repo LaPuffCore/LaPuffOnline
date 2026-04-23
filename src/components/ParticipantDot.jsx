@@ -75,7 +75,6 @@ export default function ParticipantDot({ onStatusChange }) {
   async function handleConfirm() {
     if (loading) return;
 
-    // Lock the popup open for the full validation flow regardless of hover state
     setManualOpen(true);
     setLoading(true);
     setStage('validating');
@@ -98,19 +97,20 @@ export default function ParticipantDot({ onStatusChange }) {
       if (result.inNYC) {
         const session = await getValidSession();
         if (session?.user?.id) {
-          // Flush any pending favorites + reactions queued while user was an Orbiter.
-          // Must run BEFORE markFavoriteContributions so the RPC sees the new event_favorites rows.
           await syncOrbiterPending(session);
           const eventsContributed = await markFavoriteContributions(session);
           if (eventsContributed > 0) {
             const pointsAmount = eventsContributed * POINTS.EVENT_FAVORITED;
-            const awarded = await awardPoints(
+            // FIX APPLIED: Capture the new total from the RPC
+            const newTotal = await awardPoints(
               session,
               pointsAmount,
               `Favorite point contributions (${eventsContributed} event${eventsContributed > 1 ? 's' : ''} as active participant)`
             );
-            if (awarded) {
-              console.log(`Awarded ${pointsAmount} points for ${eventsContributed} favorite(s)`);
+            
+            // Attach the actual additive total to the payload for the UI
+            if (newTotal !== null) {
+              statusResultPayload = { ...statusResultPayload, clout_points: newTotal };
             }
           }
         }
@@ -133,6 +133,7 @@ export default function ParticipantDot({ onStatusChange }) {
 
       if (nextStatus) {
         setStatus(nextStatus);
+        // Dispatch status and the updated point payload to parent
         if (onStatusChange) onStatusChange(nextStatus, statusResultPayload);
       }
 
@@ -209,7 +210,6 @@ export default function ParticipantDot({ onStatusChange }) {
         </span>
       </button>
 
-      {/* Invisible bridge covers the gap between button bottom and popup top so hover doesn't dismiss mid-travel */}
       {hoverOpen && !manualOpen && (
         <div
           className="absolute top-full left-0 right-0 h-3"
@@ -266,7 +266,7 @@ export default function ParticipantDot({ onStatusChange }) {
               <p className="mt-2 text-[11px] font-black uppercase tracking-wide">Validating Location....</p>
               <div className="mt-2 h-2 w-full rounded-full bg-white/20 overflow-hidden">
                 <div
-                  className="h-full bg-gradient-to-r from-emerald-300 via-lime-300 to-cyan-300 transition-all duration-200"
+                  className="h-full bg-gradient-to-r from-emerald-3 via-lime-300 to-cyan-300 transition-all duration-200"
                   style={{ width: `${Math.min(progress, 100)}%` }}
                 />
               </div>

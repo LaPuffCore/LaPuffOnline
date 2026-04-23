@@ -13,6 +13,7 @@ export const POINTS = {
   SUBMITTER_REWARD_PER_CHECKIN: 50,  // Awarded to event creator each time an attendee checks in
   EVENT_FAVORITED: 20,               // When someone favorites your submitted event (one-time)
   GEOPOST_REACTION: 5,               // When a signed-in user reacts to your GeoPost (DB trigger handles award)
+  HOT_ZONE_FAVORITE: 5,              // Retroactive points for favorites once in NYC
   HOT_ZONE_BASE: 1,                  // Minimum roam pts (cold zone, every 30 min)
   HOT_ZONE_MAX: 10,                  // Maximum roam pts (hottest zone, every 30 min)
 };
@@ -20,17 +21,7 @@ export const POINTS = {
 /**
  * SECURE POINT AWARDING
  * Policy-driven: auth.uid() is evaluated server-side by award_clout().
- * If the user is not authenticated, Supabase silently rejects the insert.
- * Dedup is enforced by unique_point_action(user_id, reason, event_id, geopost_id).
- */
-/**
- * SECURE POINT AWARDING
- * @param {object} session - auth session with access_token
- * @param {number} amount - points to award
- * @param {string} reason - audit reason string (also used for dedup via unique_point_action)
- * @param {string|null} eventId - optional event UUID
- * @param {string|null} _unused - kept for call-site compat (was checkinType, no longer a DB param)
- * @param {string|null} geopostId - optional geopost UUID
+ * Uses the ledger to ensure points are ADDITIVE and synced server-side.
  */
 export async function awardPoints(session, amount, reason, eventId = null, _unused = null, geopostId = null) {
   if (!session?.access_token) {
@@ -38,8 +29,6 @@ export async function awardPoints(session, amount, reason, eventId = null, _unus
     return false;
   }
 
-  // award_clout uses auth.uid() internally — no p_user_id or p_checkin_type params.
-  // Dedup is via unique_point_action(user_id, reason, event_id, geopost_id).
   const body = {
     p_amount: amount,
     p_reason: reason,
@@ -66,10 +55,40 @@ export async function awardPoints(session, amount, reason, eventId = null, _unus
 }
 
 /**
+ * Specifically for the Hot Zone / NYC Participant sync
+ * Checks if user is in NYC and awards points for new favorites without double-counting.
+ */
+export async function syncHotZonePoints(session) {
+  if (!session?.access_token) return { new_points_total: 0, events_processed: 0 };
+  
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/sync_hotzone_points`, {
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${session.access_token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ p_user_id: session.user.id }),
+    });
+
+    if (!res.ok) throw new Error('HotZone Sync failed');
+    const data = await res.json();
+    return data[0] || { new_points_total: 0, events_processed: 0 };
+  } catch (error) {
+    console.error('[PointsSystem] HotZone Sync error:', error);
+    return { new_points_total: 0, events_processed: 0 };
+  }
+}
+
+/**
  * Roaming Tracker — 1-10 pts based on zip heat, throttled to every 30 min.
  */
 export async function processRoamingPoints(session, heatValue) {
   if (!session || !canAwardRoamPoints()) return 0;
+
+  // Verify they are actually in NYC before awarding roam points
+  if (!isLocalParticipant()) return 0;
 
   const pts = Math.max(1, Math.round(POINTS.HOT_ZONE_BASE + heatValue * (POINTS.HOT_ZONE_MAX - POINTS.HOT_ZONE_BASE)));
 
@@ -79,10 +98,6 @@ export async function processRoamingPoints(session, heatValue) {
   return pts;
 }
 
-/**
- * Check approved events owned by the user and award submit points.
- * Safe to call on every events load — DB unique_clout_award blocks duplicates silently.
- */
 export async function checkAndAwardSubmitPoints(session, events) {
   if (!isEligibleForPoints(session)) return;
   const userId = session.user.id;
@@ -92,11 +107,7 @@ export async function checkAndAwardSubmitPoints(session, events) {
   }
 }
 
-/**
- * Helper to check if a user is currently eligible for points (Validated & Authenticated)
- */
 export function isEligibleForPoints(session) {
-  // Checks if user is signed in AND their email is confirmed
   return !!(session?.user && session.user.email_confirmed_at);
 }
 
@@ -132,6 +143,7 @@ export async function getZipColonists(zip) {
   });
   return res.ok ? await res.json() : [];
 }
+
 export async function getBoroughColonists(boroughName) {
   const BOROUGH_ZIP_RANGES = {
     'Manhattan':    [10001, 10282],
@@ -142,7 +154,6 @@ export async function getBoroughColonists(boroughName) {
   };
   const range = BOROUGH_ZIP_RANGES[boroughName];
   if (!range) return [];
-  // Fetch top 50 profiles by clout, then filter to borough zip range client-side
   const res = await fetch(
     `${SUPABASE_URL}/rest/v1/profiles?select=username,clout_points,updated_at,home_zip&order=clout_points.desc&limit=100`,
     { headers: { 'apikey': SUPABASE_KEY } }
@@ -155,10 +166,6 @@ export async function getBoroughColonists(boroughName) {
   }).slice(0, 30);
 }
 
-/**
- * Returns true if the user has a valid NYC participant ping within the last 24h.
- * Safe to call anywhere — no imports needed (pure localStorage read).
- */
 export function isLocalParticipant() {
   try {
     const d = JSON.parse(localStorage.getItem('lapuff_nyc_24h'));
@@ -166,9 +173,7 @@ export function isLocalParticipant() {
   } catch { return false; }
 }
 
-// ── Pending reaction sync (orbiter → participant flush) ───────────────────────
 const PENDING_REACT_KEY = 'lapuff_pending_react_sync';
-// Same key as favorites.js PENDING_FAV_SYNC_KEY — shared localStorage namespace
 const PENDING_FAV_KEY   = 'lapuff_pending_fav_sync';
 
 function _getPendingReacts() {
@@ -190,13 +195,6 @@ export function removePendingReactSync(postId, emoji) {
   localStorage.setItem(PENDING_REACT_KEY, JSON.stringify(list));
 }
 
-/**
- * Award points to the original event submitter when an attendee checks in.
- * Uses the award_submitter_clout SQL function which:
- *  - Finds the event's user_id
- *  - Prevents self-award (submitter checking into own event)
- *  - Uses ON CONFLICT DO NOTHING for dedup
- */
 export async function rewardEventSubmitter(session, eventId) {
   if (!isEligibleForPoints(session) || !eventId) return;
   try {
@@ -212,22 +210,13 @@ export async function rewardEventSubmitter(session, eventId) {
         clout_amount: POINTS.SUBMITTER_REWARD_PER_CHECKIN,
       }),
     });
-  } catch {} // Non-critical — silent fail, never block check-in UX
+  } catch {}
 }
 
-/**
- * Sync orbiter's pending favorites + reactions to DB when they become a participant.
- * Called from ParticipantDot BEFORE markFavoriteContributions so the RPC sees them.
- *
- * Tier hierarchy reminder:
- *  - Anonymous  (no session):   no points, no DB writes for favs/reactions
- *  - Orbiter    (session, no participant ping): pending storage only
- *  - Participant (session + valid 24h NYC ping): full points, immediate DB writes
- */
 export async function syncOrbiterPending(session) {
   if (!isEligibleForPoints(session)) return;
 
-  // 1. Sync pending favorites → event_favorites (trigger handles fav_count increment)
+  // 1. Sync pending favorites -> event_favorites
   let pendingFavs;
   try { pendingFavs = JSON.parse(localStorage.getItem(PENDING_FAV_KEY) || '[]'); } catch { pendingFavs = []; }
   for (const eventId of pendingFavs) {
@@ -246,7 +235,7 @@ export async function syncOrbiterPending(session) {
   }
   if (pendingFavs.length > 0) localStorage.removeItem(PENDING_FAV_KEY);
 
-  // 2. Sync pending reactions → post_reactions (DB trigger awards points to post author)
+  // 2. Sync pending reactions -> post_reactions
   const pendingReacts = _getPendingReacts();
   for (const { postId, emoji } of pendingReacts) {
     try {
@@ -263,4 +252,7 @@ export async function syncOrbiterPending(session) {
     } catch {}
   }
   if (pendingReacts.length > 0) localStorage.removeItem(PENDING_REACT_KEY);
+
+  // 3. SECURE HOTZONE SYNC: Award points for these newly synced favorites via RPC
+  await syncHotZonePoints(session);
 }
