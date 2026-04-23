@@ -90,7 +90,7 @@ export default function GMMessengerModal({ onClose, user }) {
           <>
             <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b-3 border-black" style={{ borderColor: resolvedTheme.buttonOutlineColor }}>
               <h2 className="text-xl font-black flex items-center gap-2" style={{ color: resolvedTheme.titleTextColor }}>
-                <span className="lp-emoji">📟</span> GM Handshake
+                <span className="lp-emoji">📟</span> Message Game Master
               </h2>
               <button onClick={onClose} className="w-8 h-8 bg-black text-white rounded-full font-black text-sm flex items-center justify-center hover:bg-red-500 transition-colors" style={{ backgroundColor: resolvedTheme.buttonOutlineColor }}>✕</button>
             </div>
@@ -98,10 +98,10 @@ export default function GMMessengerModal({ onClose, user }) {
             <form onSubmit={handleSubmit} className="p-6">
               <div className="grid grid-cols-2 gap-4 mb-4">
                 <div>
-                  <label className="text-[10px] font-black uppercase mb-1 block opacity-60" style={{ color: resolvedTheme.titleTextColor }}>Your Name</label>
+                  <label className="text-[10px] font-black uppercase mb-1 block opacity-60" style={{ color: resolvedTheme.titleTextColor }}>Name</label>
                   <input 
                     type="text" 
-                    placeholder="Handle..."
+                    placeholder="Clout Alias"
                     value={formData.name}
                     onChange={e => setFormData({...formData, name: e.target.value})}
                     className="w-full border-3 border-black rounded-xl px-3 py-2 text-sm focus:outline-none"
@@ -127,7 +127,7 @@ export default function GMMessengerModal({ onClose, user }) {
                   autoFocus
                   value={formData.message}
                   onChange={(e) => setFormData({...formData, message: e.target.value.slice(0, 500)})}
-                  placeholder="Be descriptive..."
+                  placeholder="Enter Text Here"
                   rows={4}
                   disabled={loading}
                   className="w-full border-3 border-black rounded-2xl px-4 py-3 text-sm font-medium resize-none focus:outline-none transition-all"

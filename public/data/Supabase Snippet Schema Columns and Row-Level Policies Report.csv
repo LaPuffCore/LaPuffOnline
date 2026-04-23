@@ -1,0 +1,178 @@
+report_type,table_name,column_name,data_type,is_nullable,column_default
+COLUMNS,anon_device_interactions,device_id,text,NO,null
+COLUMNS,anon_device_interactions,created_at,timestamp with time zone,YES,now()
+COLUMNS,anon_device_interactions,interaction_type,text,NO,null
+COLUMNS,anon_device_interactions,target_id,uuid,NO,null
+COLUMNS,auto_events,price_category,text,YES,'$'::text
+COLUMNS,auto_events,description,text,YES,null
+COLUMNS,auto_events,event_name,text,NO,null
+COLUMNS,auto_events,created_at,timestamp with time zone,YES,now()
+COLUMNS,auto_events,updated_at,timestamp with time zone,YES,now()
+COLUMNS,auto_events,hex_color,text,YES,'#7C3AED'::text
+COLUMNS,auto_events,representative_emoji,text,YES,'🎉'::text
+COLUMNS,auto_events,id,uuid,NO,gen_random_uuid()
+COLUMNS,auto_events,location_data,jsonb,NO,'{}'::jsonb
+COLUMNS,auto_events,event_date,date,NO,null
+COLUMNS,auto_events,name,text,YES,null
+COLUMNS,auto_events,external_id,text,YES,null
+COLUMNS,auto_events,source_url,text,NO,null
+COLUMNS,auto_events,source_site,text,NO,null
+COLUMNS,auto_events,event_time_utc,timestamp with time zone,YES,null
+COLUMNS,auto_events,borough,text,YES,null
+COLUMNS,auto_events,relevant_links,ARRAY,YES,ARRAY[]::text[]
+COLUMNS,auto_events,photos,ARRAY,YES,ARRAY[]::text[]
+COLUMNS,auto_events,is_approved,boolean,YES,true
+COLUMNS,auto_events,fav_count,integer,YES,0
+COLUMNS,clout_ledger,id,uuid,NO,gen_random_uuid()
+COLUMNS,clout_ledger,user_id,uuid,NO,null
+COLUMNS,clout_ledger,amount,integer,NO,null
+COLUMNS,clout_ledger,created_at,timestamp with time zone,YES,now()
+COLUMNS,clout_ledger,event_id,uuid,YES,null
+COLUMNS,clout_ledger,geopost_id,uuid,YES,null
+COLUMNS,clout_ledger,checkin_type,text,YES,null
+COLUMNS,clout_ledger,reason,text,NO,null
+COLUMNS,event_attendance,user_id,uuid,NO,null
+COLUMNS,event_attendance,event_id,uuid,NO,null
+COLUMNS,event_attendance,id,uuid,NO,gen_random_uuid()
+COLUMNS,event_attendance,created_at,timestamp with time zone,YES,now()
+COLUMNS,event_attendance,status,text,YES,'pending'::text
+COLUMNS,event_attendance,checkin_type,text,YES,'main'::text
+COLUMNS,event_attendance,verified_at,timestamp with time zone,YES,null
+COLUMNS,event_favorites,user_id,uuid,NO,null
+COLUMNS,event_favorites,event_id,uuid,NO,null
+COLUMNS,events,id,uuid,NO,gen_random_uuid()
+COLUMNS,events,fav_count,integer,YES,0
+COLUMNS,events,trend_threshold_count,integer,NO,0
+COLUMNS,events,trend_window_peak_count,integer,NO,0
+COLUMNS,events,trend_window_started_at,timestamp with time zone,NO,now()
+COLUMNS,events,lat,double precision,YES,null
+COLUMNS,events,lng,double precision,YES,null
+COLUMNS,events,event_time_utc_end,timestamp with time zone,YES,null
+COLUMNS,events,afters_lat,double precision,YES,null
+COLUMNS,events,afters_lng,double precision,YES,null
+COLUMNS,events,afters_address,text,YES,null
+COLUMNS,events,price_category,text,YES,null
+COLUMNS,events,event_name,text,NO,null
+COLUMNS,events,name,text,NO,null
+COLUMNS,events,location_data,jsonb,NO,null
+COLUMNS,events,created_at,timestamp with time zone,YES,now()
+COLUMNS,events,event_date,date,NO,null
+COLUMNS,events,zip_code,text,YES,null
+COLUMNS,events,hex_color,character varying,YES,null
+COLUMNS,events,representative_emoji,character varying,YES,null
+COLUMNS,events,photos,ARRAY,YES,null
+COLUMNS,events,description,character varying,YES,null
+COLUMNS,events,event_time_utc,timestamp with time zone,NO,null
+COLUMNS,events,is_approved,boolean,YES,false
+COLUMNS,events,user_id,uuid,YES,auth.uid()
+COLUMNS,events,relevant_links,ARRAY,YES,null
+COLUMNS,events_with_counts,attendance_count,bigint,YES,null
+COLUMNS,events_with_counts,id,uuid,YES,null
+COLUMNS,events_with_counts,created_at,timestamp with time zone,YES,null
+COLUMNS,events_with_counts,location_data,jsonb,YES,null
+COLUMNS,events_with_counts,event_date,date,YES,null
+COLUMNS,events_with_counts,event_time_utc,timestamp with time zone,YES,null
+COLUMNS,events_with_counts,is_approved,boolean,YES,null
+COLUMNS,events_with_counts,user_id,uuid,YES,null
+COLUMNS,events_with_counts,fav_count,integer,YES,null
+COLUMNS,events_with_counts,trend_threshold_count,integer,YES,null
+COLUMNS,events_with_counts,trend_window_peak_count,integer,YES,null
+COLUMNS,events_with_counts,trend_window_started_at,timestamp with time zone,YES,null
+COLUMNS,events_with_counts,lat,double precision,YES,null
+COLUMNS,events_with_counts,lng,double precision,YES,null
+COLUMNS,events_with_counts,event_time_utc_end,timestamp with time zone,YES,null
+COLUMNS,events_with_counts,afters_lat,double precision,YES,null
+COLUMNS,events_with_counts,afters_lng,double precision,YES,null
+COLUMNS,events_with_counts,hex_color,character varying,YES,null
+COLUMNS,events_with_counts,representative_emoji,character varying,YES,null
+COLUMNS,events_with_counts,photos,ARRAY,YES,null
+COLUMNS,events_with_counts,description,character varying,YES,null
+COLUMNS,events_with_counts,relevant_links,ARRAY,YES,null
+COLUMNS,events_with_counts,price_category,text,YES,null
+COLUMNS,events_with_counts,event_name,text,YES,null
+COLUMNS,events_with_counts,name,text,YES,null
+COLUMNS,events_with_counts,zip_code,text,YES,null
+COLUMNS,events_with_counts,afters_address,text,YES,null
+COLUMNS,favorite_point_contributions,id,uuid,NO,gen_random_uuid()
+COLUMNS,favorite_point_contributions,contributed_at,timestamp without time zone,YES,now()
+COLUMNS,favorite_point_contributions,event_id,uuid,NO,null
+COLUMNS,favorite_point_contributions,user_id,uuid,NO,null
+COLUMNS,geopost_feed,total_reactions,bigint,YES,null
+COLUMNS,geopost_feed,username,text,YES,null
+COLUMNS,geopost_feed,image_url,text,YES,null
+COLUMNS,geopost_feed,zip_code,text,YES,null
+COLUMNS,geopost_feed,created_at,timestamp with time zone,YES,null
+COLUMNS,geopost_feed,post_approved,boolean,YES,null
+COLUMNS,geopost_feed,is_participant,boolean,YES,null
+COLUMNS,geopost_feed,borough,text,YES,null
+COLUMNS,geopost_feed,content,jsonb,YES,null
+COLUMNS,geopost_feed,user_id,uuid,YES,null
+COLUMNS,geopost_feed,id,uuid,YES,null
+COLUMNS,geoposts,content,jsonb,NO,null
+COLUMNS,geoposts,borough,text,YES,null
+COLUMNS,geoposts,post_fill,text,YES,null
+COLUMNS,geoposts,post_outline,text,YES,null
+COLUMNS,geoposts,is_participant,boolean,YES,false
+COLUMNS,geoposts,created_at,timestamp with time zone,YES,now()
+COLUMNS,geoposts,post_approved,boolean,YES,true
+COLUMNS,geoposts,image_url,text,YES,null
+COLUMNS,geoposts,zip_code,text,YES,null
+COLUMNS,geoposts,id,uuid,NO,uuid_generate_v4()
+COLUMNS,geoposts,user_id,uuid,YES,auth.uid()
+COLUMNS,geoposts,scope,text,NO,'digital'::text
+COLUMNS,gm_messages,id,uuid,NO,gen_random_uuid()
+COLUMNS,gm_messages,content,text,NO,null
+COLUMNS,gm_messages,subject_title,text,YES,null
+COLUMNS,gm_messages,created_at,timestamp with time zone,YES,now()
+COLUMNS,gm_messages,sender_name,text,YES,null
+COLUMNS,gm_messages,device_id,text,NO,null
+COLUMNS,gm_messages,archived,boolean,YES,false
+COLUMNS,gm_messages,is_read,boolean,YES,false
+COLUMNS,gm_messages,metadata,jsonb,YES,'{}'::jsonb
+COLUMNS,gm_messages,user_id,uuid,YES,null
+COLUMNS,post_clout_given,post_id,uuid,NO,null
+COLUMNS,post_clout_given,user_id,uuid,NO,null
+COLUMNS,post_reactions,user_id,uuid,YES,null
+COLUMNS,post_reactions,created_at,timestamp with time zone,YES,now()
+COLUMNS,post_reactions,emoji_text,text,NO,null
+COLUMNS,post_reactions,id,uuid,NO,uuid_generate_v4()
+COLUMNS,post_reactions,post_id,uuid,YES,null
+COLUMNS,profiles,bio,character varying,YES,null
+COLUMNS,profiles,username,text,NO,null
+COLUMNS,profiles,updated_at,timestamp with time zone,YES,now()
+COLUMNS,profiles,clout_points,integer,YES,0
+COLUMNS,profiles,id,uuid,NO,null
+COLUMNS,profiles,last_nyc_ping_at,timestamp without time zone,YES,null
+COLUMNS,profiles,last_participant_status,text,YES,'orbiter'::text
+COLUMNS,profiles,referred_by_code,text,YES,null
+COLUMNS,profiles,referral_code,text,YES,"SUBSTRING(replace((gen_random_uuid())::text, '-'::text, ''::text) FROM 1 FOR 8)"
+COLUMNS,profiles,home_zip,text,NO,null
+COLUMNS,referral_logs,new_user_id,uuid,NO,null
+COLUMNS,referral_logs,id,uuid,NO,gen_random_uuid()
+COLUMNS,referral_logs,referrer_id,uuid,NO,null
+COLUMNS,referral_logs,created_at,timestamp with time zone,YES,now()
+POLICIES,auto_events,Anyone can read approved auto events,SELECT,(is_approved = true),null
+POLICIES,clout_ledger,Users can view own ledger,SELECT,(auth.uid() = user_id),null
+POLICIES,event_attendance,Only signed-in users can check in,INSERT,null,(auth.uid() = user_id)
+POLICIES,event_favorites,Authenticated users can insert own favorites,INSERT,null,(auth.uid() = user_id)
+POLICIES,event_favorites,Anyone can read event_favorites,SELECT,true,null
+POLICIES,event_favorites,Authenticated users can delete own favorites,DELETE,(auth.uid() = user_id),null
+POLICIES,event_favorites,favorites_own_all,ALL,(auth.uid() = user_id),null
+POLICIES,events,Enable read access for all users,SELECT,true,null
+POLICIES,events,Enable insert for everyone,INSERT,null,true
+POLICIES,events,events_select_public,SELECT,true,null
+POLICIES,favorite_point_contributions,Users can read own contributions,SELECT,(auth.uid() = user_id),null
+POLICIES,favorite_point_contributions,Service role can insert contributions,INSERT,null,true
+POLICIES,geoposts,Allow public insert access,INSERT,null,true
+POLICIES,geoposts,Allow public select access,SELECT,true,null
+POLICIES,gm_messages,Enable insert for all users,INSERT,null,true
+POLICIES,gm_messages,Enable select for admins,SELECT,(auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid),null
+POLICIES,post_clout_given,Users can view own given clout,SELECT,(auth.uid() = user_id),null
+POLICIES,post_clout_given,System can manage post clout tracking,ALL,(auth.uid() = user_id),null
+POLICIES,post_reactions,Allow public reactions insert,INSERT,null,true
+POLICIES,post_reactions,Allow public reactions select,SELECT,true,null
+POLICIES,post_reactions,Allow public reactions delete,DELETE,true,null
+POLICIES,profiles,Users can update limited profile fields.,UPDATE,(auth.uid() = id),((auth.uid() = id) AND (NOT (clout_points IS DISTINCT FROM clout_points)))
+POLICIES,profiles,Users can update own bio and username,UPDATE,(auth.uid() = id),(auth.uid() = id)
+POLICIES,profiles,Public profiles are viewable by everyone.,SELECT,true,null
+POLICIES,referral_logs,Users can view own referrals,SELECT,(auth.uid() = new_user_id),null

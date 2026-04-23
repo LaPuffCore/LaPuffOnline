@@ -172,6 +172,13 @@ export default function AuthModal({ onClose, onSuccess }) {
                 className="w-full bg-[#7C3AED] text-white font-black text-lg py-4 rounded-2xl hover:bg-[#6D28D9] transition-colors disabled:opacity-50 shadow-[4px_4px_0px_#333]">
                 {loading ? '...' : mode === 'signin' ? '🔑 Sign In' : '🚀 Join the Games'}
               </button>
+              
+              {/* Privacy Disclaimer Subtitle */}
+              {mode === 'signup' && (
+                <p className="text-[9px] text-center mt-3 font-bold uppercase tracking-widest text-gray-400">
+                  By clicking Sign Up, you agree to our Terms of Service and Privacy Policy.
+                </p>
+              )}
             </div>
           </form>
         )}
