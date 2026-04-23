@@ -18,10 +18,33 @@ export default function KoganePopup({ onClose }) {
     const h = hdr ? hdr.getBoundingClientRect().height : 72;
     setTopOffset(Math.round(h));
 
-    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+    const handleKey = (e) => { if (e.key === 'Escape') handleClose(); };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // internal close that will collapse spacer then call parent onClose
+  const handleClose = () => {
+    // collapse visible content
+    const el = contentRef.current;
+    if (el) {
+      el.style.height = '0px';
+      el.style.opacity = '0';
+    }
+    // collapse spacer
+    const spacer = document.getElementById('kogane-spacer');
+    if (spacer) {
+      spacer.style.height = '0px';
+      // remove after transition
+      setTimeout(() => {
+        if (spacer && spacer.parentNode) spacer.parentNode.removeChild(spacer);
+        onClose && onClose();
+      }, 950);
+    } else {
+      onClose && onClose();
+    }
+  };
 
   useEffect(() => {
     // Start sequence after 2s
@@ -31,26 +54,52 @@ export default function KoganePopup({ onClose }) {
 
   useEffect(() => {
     if (!started) return;
-    // Give a short delay then expand content to measured height
+    // Give a short delay then expand content to measured height and insert spacer to push page down
     const el = contentRef.current;
     if (!el) return;
-    // Allow browser to paint the hidden content then measure
+
+    // Measure after paint
     requestAnimationFrame(() => {
-      const contentH = el.scrollHeight;
-      // set CSS variable for animation target
+      const contentH = el.scrollHeight + 60; // include 30px top+bottom overlap
+
+      // Create or update spacer element in document flow
+      let spacer = document.getElementById('kogane-spacer');
+      if (!spacer) {
+        spacer = document.createElement('div');
+        spacer.id = 'kogane-spacer';
+        // spacer sits where the expanding screen will be, so it pushes the page content down
+        spacer.style.width = '100%';
+        spacer.style.height = '0px';
+        spacer.style.transition = 'height 900ms ease';
+        // Insert spacer right before the main app container so it shifts everything below the topbar
+        const appRoot = document.querySelector('#root') || document.querySelector('body');
+        if (appRoot && appRoot.parentNode) {
+          appRoot.parentNode.insertBefore(spacer, appRoot);
+        } else {
+          // fallback: append to body
+          document.body.insertBefore(spacer, document.body.firstChild);
+        }
+      }
+
+      // Animate spacer height from 0 to target to push content down
+      requestAnimationFrame(() => {
+        spacer.style.height = contentH + 'px';
+      });
+
+      // Animate the visible content panel height & opacity in parallel (already absolute positioned inside container)
       if (containerRef.current) {
-        containerRef.current.style.setProperty('--kogane-target-h', `${contentH + 60}px`); // 30px top+bottom overlap
-        // fade in content visibility and expand height
-        el.style.transition = 'height 900ms ease, opacity 700ms ease 200ms';
-        el.style.height = '0px';
-        el.style.opacity = '0';
-        // force reflow
-        void el.offsetHeight;
-        el.style.height = `${contentH + 60}px`;
-        el.style.opacity = '0.9';
-        // after animation ends mark expanded
-        const done = setTimeout(() => setExpanded(true), 1000);
-        return () => clearTimeout(done);
+        const container = containerRef.current;
+        if (container) {
+          const inner = el;
+          inner.style.transition = 'height 900ms ease, opacity 700ms ease 200ms';
+          inner.style.height = '0px';
+          inner.style.opacity = '0';
+          void inner.offsetHeight;
+          inner.style.height = contentH + 'px';
+          inner.style.opacity = '0.95';
+          const done = setTimeout(() => setExpanded(true), 1000);
+          return () => clearTimeout(done);
+        }
       }
     });
   }, [started]);
@@ -58,14 +107,14 @@ export default function KoganePopup({ onClose }) {
   // click outside to close is handled by overlay div below
 
   return (
-    <div className="absolute left-0 top-0 w-full pointer-events-none z-[200000]" style={{ top: 0 }}>
-      {/* overlay clickable area to close (no blur) */}
-      <div className="fixed inset-0 bg-black/30" onClick={onClose} style={{ pointerEvents: 'auto' }} />
+    <div className="fixed inset-0 pointer-events-none z-[1000001]">
+      {/* overlay clickable area to close (no blur) - covers entire viewport and above all layers */}
+      <div className="fixed inset-0" onClick={handleClose} style={{ backgroundColor: 'rgba(0,0,0,0.45)', pointerEvents: 'auto', zIndex: 1000002 }} />
 
       {/* container anchored below topbar */}
       <div ref={containerRef}
         className="mx-auto w-full max-w-3xl pointer-events-none"
-        style={{ position: 'fixed', left: '50%', transform: 'translateX(-50%)', top: `${topOffset}px`, zIndex: 200001 }}>
+        style={{ position: 'fixed', left: '50%', transform: 'translateX(-50%)', top: `${topOffset}px`, zIndex: 1000003 }}>
 
         {/* Top half image (anchored) */}
         <img src={topSrc} alt="kogane top"
@@ -78,17 +127,17 @@ export default function KoganePopup({ onClose }) {
           className="mx-auto w-full overflow-hidden pointer-events-auto"
           style={{
             height: '0px',
-            background: 'rgba(0,255,100,0.09)',
-            borderTop: '1px solid rgba(0,255,100,0.28)',
-            borderBottom: '1px solid rgba(0,255,100,0.28)',
-            boxShadow: 'inset 0 0 30px rgba(0,255,100,0.06), 0 6px 30px rgba(0,255,100,0.06)',
+            background: 'rgba(120,255,60,0.95)',
+            borderTop: '1px solid rgba(0,200,80,0.9)',
+            borderBottom: '1px solid rgba(0,200,80,0.9)',
+            boxShadow: 'inset 0 0 40px rgba(0,255,100,0.18), 0 12px 50px rgba(0,255,100,0.25)',
             padding: '30px',
             opacity: 0,
             transition: 'height 900ms ease, opacity 700ms ease',
             // glitchy pixel effect
-            backgroundImage: 'linear-gradient(rgba(0,0,0,0.02) 1px, transparent 1px), repeating-linear-gradient(90deg, rgba(0,255,100,0.02) 0 2px, transparent 2px 4px)',
+            backgroundImage: 'linear-gradient(rgba(0,0,0,0.03) 1px, transparent 1px), repeating-linear-gradient(90deg, rgba(0,255,100,0.04) 0 2px, transparent 2px 4px)',
             backgroundBlendMode: 'overlay',
-            backgroundSize: '100% 3px, 4px 100%'
+            backgroundSize: '100% 2px, 4px 100%'
           }}>
 
           <div style={{ color: '#000', maxWidth: '980px', margin: '0 auto', fontFamily: 'Nunito, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial' }}>
@@ -127,7 +176,7 @@ export default function KoganePopup({ onClose }) {
         <img src={bottomSrc} alt="kogane bottom"
           onError={(e)=>{ e.currentTarget.src = bottomSrc; }}
           className="block w-full pointer-events-none"
-          style={{ marginTop: '-30px', display: 'block' }} />
+          style={{ marginTop: '-90px', display: 'block' }} />
 
       </div>
     </div>
