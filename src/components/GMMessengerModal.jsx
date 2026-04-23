@@ -29,7 +29,6 @@ export default function GMMessengerModal({ onClose }) {
     try {
       const deviceId = await getDeviceId();
       
-      // Send to Supabase 'gm_messages' table
       const { error } = await supabase
         .from('gm_messages')
         .insert([
@@ -45,7 +44,6 @@ export default function GMMessengerModal({ onClose }) {
 
       if (error) throw error;
 
-      // SUCCESS: Set the 12-hour lockout timestamp
       localStorage.setItem(`gm_msg_${deviceId}`, Date.now().toString());
       
       setStatus({ type: 'success', msg: 'Transmission received. The GM will review your report.' });
@@ -60,9 +58,11 @@ export default function GMMessengerModal({ onClose }) {
   }
 
   return (
-    /* FIXED OVERLAY: This ensures it covers the whole screen and centers the content */
+    /* The 'fixed' class combined with 'inset-0' and 'z-[9999]' forces the 
+       overlay to ignore the TopBar container and cover the entire screen. 
+    */
     <div 
-      className="fixed inset-0 w-screen h-screen bg-black/70 backdrop-blur-sm z-[2000] flex items-center justify-center p-4 overflow-y-auto" 
+      className="fixed inset-0 w-screen h-screen bg-black/60 z-[9999] flex items-center justify-center p-4" 
       onClick={onClose}
     >
       <div 
@@ -75,7 +75,7 @@ export default function GMMessengerModal({ onClose }) {
         }}
         onClick={e => e.stopPropagation()}
       >
-        {/* Header - Styled like AuthModal */}
+        {/* Header */}
         <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b-3 border-black" style={{ borderColor: resolvedTheme.buttonOutlineColor }}>
           <h2 className="text-xl font-black flex items-center gap-2" style={{ color: resolvedTheme.titleTextColor }}>
             <span className="lp-emoji">📟</span> GM Handshake
@@ -102,7 +102,7 @@ export default function GMMessengerModal({ onClose }) {
               placeholder="Report a bug, suggestion, or clout dispute..."
               rows={5}
               disabled={loading || status.type === 'success'}
-              className="w-full border-3 border-black rounded-2xl px-4 py-3 text-sm font-medium resize-none focus:outline-none transition-all shadow-[4px_4px_0px_black]"
+              className="w-full border-3 border-black rounded-2xl px-4 py-3 text-sm font-medium resize-none focus:outline-none transition-all"
               style={{ 
                 borderColor: resolvedTheme.buttonOutlineColor,
                 backgroundColor: resolvedTheme.surfaceBackgroundColor,
@@ -126,7 +126,7 @@ export default function GMMessengerModal({ onClose }) {
           <button
             type="submit"
             disabled={loading || status.type === 'success'}
-            className="w-full text-white font-black text-lg py-4 rounded-2xl transition-all disabled:opacity-50 active:translate-y-1 shadow-[4px_4px_0px_#333]"
+            className="w-full text-white font-black text-lg py-4 rounded-2xl transition-all disabled:opacity-50 active:translate-y-1"
             style={{ 
               backgroundColor: resolvedTheme.accentColor,
               boxShadow: `4px 4px 0px ${resolvedTheme.tileShadowColor}`
@@ -135,12 +135,6 @@ export default function GMMessengerModal({ onClose }) {
             {loading ? 'TRANSMITTING...' : 'SEND MESSAGE'}
           </button>
         </form>
-
-        <div className="px-6 pb-4 text-center">
-          <p className="text-[9px] font-black uppercase opacity-30 tracking-tighter">
-            Hardware ID: { (localStorage.getItem('lapuff_device_id') || 'unidentified').slice(0, 18) }...
-          </p>
-        </div>
       </div>
     </div>
   );
