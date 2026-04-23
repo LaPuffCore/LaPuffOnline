@@ -1,56 +1,134 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 
 export default function KoganePopup({ onClose }) {
-  const [opened, setOpened] = useState(false);
+  const [started, setStarted] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const [topOffset, setTopOffset] = useState(72);
+  const contentRef = useRef(null);
+  const containerRef = useRef(null);
+
+  // compute BASE_URL-aware asset path (works with Vite base)
+  const base = (import.meta.env && import.meta.env.BASE_URL) ? import.meta.env.BASE_URL : '/';
+  const topSrc = `${base}data/koganetop.png`;
+  const bottomSrc = `${base}data/koganebottom.png`;
 
   useEffect(() => {
-    const t = setTimeout(() => setOpened(true), 1500);
+    // measure header height if present so top image anchors below it
+    const hdr = document.querySelector('header');
+    const h = hdr ? hdr.getBoundingClientRect().height : 72;
+    setTopOffset(Math.round(h));
+
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  useEffect(() => {
+    // Start sequence after 2s
+    const t = setTimeout(() => setStarted(true), 2000);
     return () => clearTimeout(t);
   }, []);
 
+  useEffect(() => {
+    if (!started) return;
+    // Give a short delay then expand content to measured height
+    const el = contentRef.current;
+    if (!el) return;
+    // Allow browser to paint the hidden content then measure
+    requestAnimationFrame(() => {
+      const contentH = el.scrollHeight;
+      // set CSS variable for animation target
+      if (containerRef.current) {
+        containerRef.current.style.setProperty('--kogane-target-h', `${contentH + 60}px`); // 30px top+bottom overlap
+        // fade in content visibility and expand height
+        el.style.transition = 'height 900ms ease, opacity 700ms ease 200ms';
+        el.style.height = '0px';
+        el.style.opacity = '0';
+        // force reflow
+        void el.offsetHeight;
+        el.style.height = `${contentH + 60}px`;
+        el.style.opacity = '0.9';
+        // after animation ends mark expanded
+        const done = setTimeout(() => setExpanded(true), 1000);
+        return () => clearTimeout(done);
+      }
+    });
+  }, [started]);
+
+  // click outside to close is handled by overlay div below
+
   return (
-    <div className="fixed inset-0 z-[100000] flex items-start justify-center pointer-events-auto">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+    <div className="absolute left-0 top-0 w-full pointer-events-none z-[200000]" style={{ top: 0 }}>
+      {/* overlay clickable area to close (no blur) */}
+      <div className="fixed inset-0 bg-black/30" onClick={onClose} style={{ pointerEvents: 'auto' }} />
 
-      {/* Top image (sticks to top) */}
-      <img src="/data/koganetop.png" alt="kogane top"
-        className="pointer-events-none fixed left-1/2 -translate-x-1/2 top-0 w-full max-w-3xl" style={{ maxHeight: '45vh', objectFit: 'cover', zIndex: 100001 }} />
+      {/* container anchored below topbar */}
+      <div ref={containerRef}
+        className="mx-auto w-full max-w-3xl pointer-events-none"
+        style={{ position: 'fixed', left: '50%', transform: 'translateX(-50%)', top: `${topOffset}px`, zIndex: 200001 }}>
 
-      {/* Bottom image (animated down) */}
-      <img src="/data/koganebottom.png" alt="kogane bottom"
-        className="pointer-events-none fixed left-1/2 -translate-x-1/2 w-full max-w-3xl transition-transform duration-1000 ease-out"
-        style={{ zIndex: 100001, transform: opened ? 'translate(-50%, 35vh)' : 'translate(-50%, 0)' }} />
+        {/* Top half image (anchored) */}
+        <img src={topSrc} alt="kogane top"
+          onError={(e)=>{ e.currentTarget.src = topSrc; }}
+          className="block w-full pointer-events-none"
+          style={{ display: 'block' }} />
 
-      {/* Center holographic screen appearing between halves */}
-      <div className="relative z-[100002] w-full max-w-2xl mt-24 px-6 py-8 rounded-xl" style={{ pointerEvents: 'auto' }}>
-        <div className="mx-auto bg-[rgba(0,255,100,0.09)] border border-[rgba(0,255,100,0.28)] shadow-[0_6px_20px_rgba(0,255,100,0.06)] rounded-lg p-6 backdrop-blur-sm"
-          style={{ color: '#021', minHeight: opened ? 240 : 40, transition: 'min-height 600ms ease', boxShadow: '0 6px 30px rgba(0,255,100,0.08), inset 0 0 60px rgba(0,255,100,0.06)' }}>
+        {/* expanding screen area between halves */}
+        <div ref={contentRef}
+          className="mx-auto w-full overflow-hidden pointer-events-auto"
+          style={{
+            height: '0px',
+            background: 'rgba(0,255,100,0.09)',
+            borderTop: '1px solid rgba(0,255,100,0.28)',
+            borderBottom: '1px solid rgba(0,255,100,0.28)',
+            boxShadow: 'inset 0 0 30px rgba(0,255,100,0.06), 0 6px 30px rgba(0,255,100,0.06)',
+            padding: '30px',
+            opacity: 0,
+            transition: 'height 900ms ease, opacity 700ms ease',
+            // glitchy pixel effect
+            backgroundImage: 'linear-gradient(rgba(0,0,0,0.02) 1px, transparent 1px), repeating-linear-gradient(90deg, rgba(0,255,100,0.02) 0 2px, transparent 2px 4px)',
+            backgroundBlendMode: 'overlay',
+            backgroundSize: '100% 3px, 4px 100%'
+          }}>
 
-          <h2 className="text-center font-black text-2xl md:text-4xl mb-4" style={{ color: '#0f0', textShadow: '0 0 6px rgba(0,255,100,0.6)' }}>CLOUT CULLING GAME RULES</h2>
+          <div style={{ color: '#000', maxWidth: '980px', margin: '0 auto', fontFamily: 'Nunito, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial' }}>
+            <h2 style={{ textAlign: 'center', fontWeight: 900, fontSize: '28px', marginBottom: '12px', color: '#8B0000' }}>CLOUT CULLING GAME RULES</h2>
 
-          <div className="prose text-[13px] md:text-sm leading-snug max-h-[60vh] overflow-auto" style={{ color: '#001', fontFamily: 'Nunito, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial' }}>
-            <p className="font-black">I. Once a player has awakened their Clout Alias, they must declare their participation in the Clout Culling Games at a zip-colony of their choice within 28 days - these Players are the two types of either Orbiter or Participant.</p>
-            <p className="font-black">II. Any Players who break the previous rule will be subject to clout technique removal and coincidingly will be giga-mogged by other players.</p>
-            <p className="font-black">III. Orbiters who enter a colony without one chosen become Participants at the moment of entry and will be considered to have declared participation in the Clout Culling Games (Normies already inside a barrier at the start of the games will be given at least one chance to exit safely).</p>
-            <p className="font-black">IV. Players score points by engaging in more motion than other Players.</p>
-            <p className="font-black">V. Players who refuse to participate by either not joining or becoming inactive will be Simulated at a fraction of their potential and coincidingly will be giga-mogged by other Players.</p>
-            <p className="font-black">VI. The point value categories of a Player's motion is decided by Game Master LaPuff. As a general rule, in real life motion is weighted more than digital motion (though both are still counted).</p>
-            <div>
-              <p className="font-black">VII. Players can expend a set amount of points as determined by Game Master LaPuff to engage one of the three following options:</p>
-              <ol className="ml-6 list-decimal" style={{ listStyleType: 'upper-alpha' }}>
-                <li className="font-black">Players may add a rule to the Clout Culling Games provided that the rule described does not end the Games. Rules added may not be subtracted.</li>
-                <li className="font-black">Players may add a site function to the site which hosts the Clout Culling Games - if this function adds a way for Players to gain or lose points it will be accordingly balanced by Games Master LaPuff.</li>
-                <li className="font-black">Players may claim a zip region as theirs to form as an Official Clout Colony gaining a name of their choosing, color of their choosing, and other perks as to be determined by the development of the Game.</li>
-              </ol>
+            <div style={{ fontSize: '15px', lineHeight: 1.45 }}>
+              <p style={{ marginBottom: '14px', fontWeight: 800 }}>I. Once a player has awakened their Clout Alias, they must declare their participation in the Clout Culling Games at a zip-colony of their choice within 28 days - these Players are the two types of either Orbiter or Participant.</p>
+
+              <p style={{ marginBottom: '14px', fontWeight: 800 }}>II. Any Players who break the previous rule will be subject to clout technique removal and coincidingly will be giga-mogged by other players.</p>
+
+              <p style={{ marginBottom: '14px', fontWeight: 800 }}>III. Orbiters who enter a colony without one chosen become Participants at the moment of entry and will be considered to have declared participation in the Clout Culling Games (Normies already inside a barrier at the start of the games will be given at least one chance to exit safely).</p>
+
+              <p style={{ marginBottom: '14px', fontWeight: 800 }}>IV. Players score points by engaging in more motion than other Players.</p>
+
+              <p style={{ marginBottom: '14px', fontWeight: 800 }}>V. Players who refuse to participate by either not joining or becoming inactive will be Simulated at a fraction of their potential and coincidingly will be giga-mogged by other Players.</p>
+
+              <p style={{ marginBottom: '14px', fontWeight: 800 }}>VI. The point value categories of a Player's motion is decided by Game Master LaPuff. As a general rule, in real life motion is weighted more than digital motion (though both are still counted).</p>
+
+              <div style={{ marginBottom: '8px' }}>
+                <p style={{ fontWeight: 800, marginBottom: '6px' }}>VII. Players can expend a set amount of points as determined by Game Master LaPuff to engage one of the three following options:</p>
+                <ol style={{ marginLeft: '18px', paddingLeft: '8px', fontWeight: 800, listStyleType: 'upper-alpha' }}>
+                  <li style={{ marginBottom: '6px' }}>Players may add a rule to the Clout Culling Games provided that the rule described does not end the Games. Rules added may not be subtracted.</li>
+                  <li style={{ marginBottom: '6px' }}>Players may add a site function to the site which hosts the Clout Culling Games - if this function adds a way for Players to gain or lose points it will be accordingly balanced by Games Master LaPuff.</li>
+                  <li style={{ marginBottom: '6px' }}>Players may claim a zip region as theirs to form as an Official Clout Colony gaining a name of their choosing, color of their choosing, and other perks as to be determined by the development of the Game.</li>
+                </ol>
+              </div>
+
+              <p style={{ marginBottom: '14px', fontWeight: 800 }}>VIII. In accordance with rule VII, Game Master LaPuff must accept any proposed new addition as long as it doesn't have a destructive effect on the Game.</p>
+
+              <p style={{ marginBottom: '14px', fontWeight: 800 }}>IX. If a Player's score remains the same for 28 days they will be subject to clout removal and they will enter ‘Fallen Off’ status.</p>
             </div>
-            <p className="font-black">VIII. In accordance with rule VII, Game Master LaPuff must accept any proposed new addition as long as it doesn't have a destructive effect on the Game.</p>
-            <p className="font-black">IX. If a Player's score remains the same for 28 days they will be subject to clout removal and they will enter ‘Fallen Off’ status.</p>
-          </div>
-
-          <div className="flex justify-center mt-4">
-            <button onClick={onClose} className="px-4 py-2 bg-black text-white rounded-xl font-black">Close</button>
           </div>
         </div>
+
+        {/* Bottom half image - overlap top by ~30px via negative margin */}
+        <img src={bottomSrc} alt="kogane bottom"
+          onError={(e)=>{ e.currentTarget.src = bottomSrc; }}
+          className="block w-full pointer-events-none"
+          style={{ marginTop: '-30px', display: 'block' }} />
+
       </div>
     </div>
   );
