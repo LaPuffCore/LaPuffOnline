@@ -244,7 +244,7 @@ const AlignCenterIcon = () => <svg width="13" height="13" viewBox="0 0 16 16" fi
 const AlignRightIcon  = () => <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><rect x="1" y="2" width="14" height="2" rx="1"/><rect x="5" y="7" width="10" height="2" rx="1"/><rect x="3" y="12" width="12" height="2" rx="1"/></svg>;
 
 // ── PostCard ──────────────────────────────────────────────────────────────────
-function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor }) {
+function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, onSelectTag }) {
   const { resolvedTheme } = useSiteTheme();
   const cardBg  = post.post_fill    || resolvedTheme?.surfaceBackgroundColor || '#fff';
   const cardBdr = post.post_outline || '#000';
@@ -254,43 +254,87 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor })
   const emojiCounts = {};
   (postReactions || []).forEach(r => { emojiCounts[r.emoji_text] = (emojiCounts[r.emoji_text] || 0) + 1; });
   const topEmojis = Object.entries(emojiCounts).sort((a, b) => b[1] - a[1]).slice(0, 4);
-  const locationTag = post.zip_code ? `📍 ${post.zip_code} · ${post.borough}`
+  const locationTagText = post.zip_code ? `📍 ${post.zip_code} · ${post.borough}`
     : post.borough ? `🏙 ${post.borough}`
     : post.scope === 'nyc' ? '🗽 NYC'
     : '💻 Digital';
   const [qepOpen, setQepOpen] = useState(false);
 
+  // image aspect handling
+  const [imgRatio, setImgRatio] = useState(1);
+  const [imgModalOpen, setImgModalOpen] = useState(false);
+
+  const hasCustomFill = !!post.post_fill;
+  const isLight = (hex) => {
+    if (!hex) return true;
+    const h = hex.replace('#','');
+    const r = parseInt(h.substring(0,2),16)/255;
+    const g = parseInt(h.substring(2,4),16)/255;
+    const b = parseInt(h.substring(4,6),16)/255;
+    const lum = 0.2126*r + 0.7152*g + 0.0722*b;
+    return lum > 0.5;
+  };
+  const fg = hasCustomFill ? (isLight(cardBg) ? '#000' : '#fff') : undefined;
+  const tagBg = hasCustomFill ? fg : null;
+  const tagText = hasCustomFill ? (isLight(tagBg) ? '#000' : '#fff') : null;
+
+  const locationTag = (
+    <span onClick={() => onSelectTag && onSelectTag(post)}
+      style={hasCustomFill ? { background: tagBg, color: tagText, borderColor: tagBg } : {}}
+      className={`ml-auto text-[9px] font-black px-1.5 py-0.5 rounded-full ${hasCustomFill ? 'border' : 'bg-gray-100 border border-gray-300 text-gray-600'}`}>
+      {locationTagText}
+    </span>
+  );
+
+  const statusPill = (
+    <span onClick={() => onSelectTag && onSelectTag({ status: post.user_id == null ? 'anonymous' : post.is_participant ? 'participant' : 'orbiter'})}
+      className="text-[9px] font-black px-1.5 py-0.5 rounded-full"
+      style={hasCustomFill ? { background: tagBg, color: tagText } : (post.is_participant ? { background: '#22c55e', color: '#fff' } : post.user_id == null ? { background: '#374151', color: '#f3f4f6' } : { background: '#ef4444', color: '#fff' })}>
+      ● {post.is_participant ? 'PARTICIPANT' : post.user_id == null ? 'ANON' : 'ORBITER'}
+    </span>
+  );
+
   return (
     <div className="rounded-2xl border-3 overflow-hidden shadow-[4px_4px_0px_black]"
       style={{ background: cardBg, borderColor: cardBdr }}>
+
       {post.image_url && (
-        <div className="w-full aspect-video overflow-hidden">
-          <img src={post.image_url} alt="post" className="w-full h-full object-cover" loading="lazy" />
+        // image container adapts to ratio: wide -> short banner, square -> square, tall -> square preview with modal
+        <div className={`w-full overflow-hidden ${imgRatio > 1.2 ? 'h-40' : 'aspect-square'}`}>
+          <img src={post.image_url} alt="post" className="w-full h-full object-cover" loading="lazy"
+            onLoad={e => { try { setImgRatio(e.target.naturalWidth / e.target.naturalHeight); } catch {} }}
+            onClick={() => { if (imgRatio < 0.9) setImgModalOpen(true); }} />
+          {imgRatio < 0.9 && (
+            <div className="absolute right-3 bottom-3">
+              <button className="w-8 h-8 rounded-full bg-white border-2 border-black flex items-center justify-center shadow-[2px_2px_0px_black] hover:scale-105 transition-transform"
+                onClick={() => setImgModalOpen(true)}>🔍</button>
+            </div>
+          )}
         </div>
       )}
+
       <div className="p-3">
         <div className="flex items-center gap-1.5 mb-2 flex-wrap">
           {post.user_id == null ? (
-            <span className="font-black text-xs flex items-center gap-1">
-              <svg width="13" height="13" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <rect x="2" y="9" width="16" height="2.5" rx="1.25" fill="#111"/>
-                <rect x="5" y="3" width="10" height="7" rx="1.5" fill="#111"/>
-                <rect x="5" y="7.5" width="10" height="1.5" fill="#000"/>
-                <circle cx="9.5" cy="15" r="3" stroke="#111" strokeWidth="1.5" fill="none"/>
-                <line x1="12" y1="17.5" x2="14" y2="19.5" stroke="#111" strokeWidth="1.5" strokeLinecap="round"/>
+            <span className="font-black text-xs flex items-center gap-1" style={hasCustomFill ? { color: fg } : {}}>
+              <svg width="13" height="13" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ color: 'currentColor' }}>
+                <rect x="2" y="9" width="16" height="2.5" rx="1.25" fill="currentColor"/>
+                <rect x="5" y="3" width="10" height="7" rx="1.5" fill="currentColor"/>
+                <circle cx="9.5" cy="15" r="3" stroke="currentColor" strokeWidth="1.5" fill="none"/>
               </svg>
               Anonymous
             </span>
           ) : (
-            <span className="font-black text-xs">{post.username || 'Orbiter'}</span>
+            <span className="font-black text-xs" style={hasCustomFill ? { color: fg } : {}}>{post.username || 'Orbiter'}</span>
           )}
-          <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full ${post.is_participant ? 'bg-green-500 text-white' : post.user_id == null ? 'bg-gray-700 text-gray-200' : 'bg-red-500 text-white'}`}>
-            ● {post.is_participant ? 'PARTICIPANT' : post.user_id == null ? 'ANON' : 'ORBITER'}
-          </span>
-          <span className="text-[9px] text-gray-400 ml-auto">{dateStr} · {timeStr}</span>
+
+          {statusPill}
+          <span className="text-[9px] text-gray-400 ml-auto" style={hasCustomFill ? { color: fg } : {}}>{dateStr} · {timeStr}</span>
         </div>
+
         <div className="text-sm leading-relaxed mb-3 break-words min-h-[1.5rem]"
           dangerouslySetInnerHTML={{ __html: post.content?.html || post.content || '' }} />
+
         <div className="flex items-center gap-1 flex-wrap">
           {topEmojis.map(([emoji, count]) => (
             <button key={emoji} onMouseDown={e => e.preventDefault()} onClick={() => onReact(post.id, emoji)}
@@ -304,8 +348,10 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor })
             <button onMouseDown={e => e.preventDefault()} onClick={() => onOpenReactors(post.id)}
               className="px-2 py-0.5 rounded-full border-2 border-black text-[10px] font-black bg-gray-50 hover:scale-105 transition-transform">…</button>
           )}
-          <span className="ml-auto text-[9px] font-black px-1.5 py-0.5 rounded-full bg-gray-100 border border-gray-300 text-gray-600">{locationTag}</span>
+
+          {locationTag}
         </div>
+
         {qepOpen && (
           <div className="mt-2">
             <EmojiPicker embedded={true} compact={true} value=""
@@ -313,6 +359,17 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor })
           </div>
         )}
       </div>
+
+      {imgModalOpen && (
+        <div className="fixed inset-0 z-[100000] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60" onClick={() => setImgModalOpen(false)} />
+          <div className="relative max-h-[90vh] overflow-auto">
+            <img src={post.image_url} alt="full" className="max-w-[90vw] max-h-[90vh] object-contain" />
+            <button onClick={() => setImgModalOpen(false)} className="absolute top-2 right-2 w-8 h-8 rounded-full bg-white border-2 border-black">✕</button>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
@@ -416,7 +473,8 @@ function filterSamplePosts(type, value, timeFilter, statusFilter, sortByTop) {
   if (type === 'borough' && value) posts = posts.filter(p => p.borough === value);
   else if (type === 'zip' && value) posts = posts.filter(p => p.zip_code === value);
   if (statusFilter === 'participant') posts = posts.filter(p => p.is_participant);
-  else if (statusFilter === 'orbiter') posts = posts.filter(p => !p.is_participant);
+  else if (statusFilter === 'orbiter') posts = posts.filter(p => !p.is_participant && p.user_id != null);
+  else if (statusFilter === 'anonymous') posts = posts.filter(p => p.user_id == null);
   if (sortByTop) posts.sort((a, b) => (b.total_reactions || 0) - (a.total_reactions || 0));
   return posts;
 }
@@ -436,6 +494,7 @@ export default function GeoPostView({ session }) {
   const [statusFilter,    setStatusFilter]    = useState('all');
   const [sortByTop,       setSortByTop]       = useState(false);
   const [openDropdown,    setOpenDropdown]    = useState(null);
+  const [searchQuery,     setSearchQuery]     = useState('');
 
   // ── feed state ────────────────────────────────────────────────────────────────
   const [posts,       setPosts]       = useState([]);
@@ -463,6 +522,7 @@ export default function GeoPostView({ session }) {
   const [postFill,    setPostFill]    = useState('');
   const [postOutline, setPostOutline] = useState('');
   const [textColor,   setTextColor]   = useState('#000000');
+  const [textColorManuallySet, setTextColorManuallySet] = useState(false);
 
   // ── toolbar fmt state ─────────────────────────────────────────────────────────
   const [fmtBold,      setFmtBold]      = useState(false);
@@ -492,10 +552,27 @@ export default function GeoPostView({ session }) {
       const data  = await fetchGeoPostFeed({ type, value, timeFilter, statusFilter, sortByTop });
       // Fall back to sample posts when feed is empty (for development / demo purposes)
       const finalData = (data && data.length > 0) ? data : filterSamplePosts(type, value, timeFilter, statusFilter, sortByTop);
-      setPosts(finalData);
+      // If using sample posts, synthesize additional demo posts so the feed is fuller for testing
+      let finalList = finalData;
+      if ((!data || data.length === 0) && finalData.length < 60) {
+        const extra = [];
+        const kinds = ['digital','nyc','borough','zip'];
+        const boroughs = BOROUGHS;
+        for (let i = 0; i < 50; i++) {
+          const id = 'gsp_' + Date.now().toString(36) + '_' + i;
+          const scope = kinds[Math.floor(Math.random() * kinds.length)];
+          const borough = scope === 'borough' || scope === 'zip' ? boroughs[Math.floor(Math.random() * boroughs.length)] : null;
+          const zip = scope === 'zip' ? (BOROUGH_ZIPS[borough] && BOROUGH_ZIPS[borough][Math.floor(Math.random() * (BOROUGH_ZIPS[borough].length || 1))]?.zip) : null;
+          const imgChoices = [null, null, null];
+          const created = new Date(Date.now() - Math.floor(Math.random() * 90 * 24 * 3600000));
+          extra.push({ id, user_id: Math.random() > 0.4 ? ('fake-' + Math.floor(Math.random()*1000)) : null, username: 'user_' + Math.floor(Math.random()*1000), is_participant: Math.random() > 0.5, scope, borough, zip_code: zip, content: { html: 'Sample generated post #' + i }, post_fill: Math.random() > 0.6 ? PRESET_COLORS[Math.floor(Math.random()*PRESET_COLORS.length)] : '', post_outline: Math.random() > 0.5 ? PRESET_COLORS[Math.floor(Math.random()*PRESET_COLORS.length)] : '', total_reactions: Math.floor(Math.random()*50), created_at: created.toISOString(), post_approved: true, image_url: Math.random() > 0.6 ? `https://picsum.photos/seed/${Math.floor(Math.random()*1000)}/800/600` : null });
+        }
+        finalList = finalData.concat(extra);
+      }
+      setPosts(finalList);
       setVisibleCount(PAGE_SIZE);
-      if (finalData.length > 0) {
-        const realIds = finalData.filter(p => !p.id.startsWith('sp')).map(p => p.id);
+      if (finalList.length > 0) {
+        const realIds = finalList.filter(p => !p.id.startsWith('sp')).map(p => p.id);
         if (realIds.length > 0) {
           const rxns = await fetchReactionsForPosts(realIds);
           const byPost = {};
@@ -503,7 +580,8 @@ export default function GeoPostView({ session }) {
           setReactions(byPost);
         }
       }
-    } catch {
+    } catch (err) {
+      console.error('loadFeed error', err);
       const type  = locTab === 'borough' ? 'borough' : locTab === 'zip' ? 'zip' : 'all';
       const value = locTab === 'borough' ? filterBorough : locTab === 'zip' ? filterZip : null;
       setPosts(filterSamplePosts(type, value, timeFilter, statusFilter, sortByTop));
@@ -545,10 +623,29 @@ export default function GeoPostView({ session }) {
     return () => editor.removeEventListener('keydown', handler);
   }, [activeCoolFont]);
 
-  // ── post fill live preview ────────────────────────────────────────────────────
+  // ── post fill live preview + auto text color ─────────────────────────────────
   useEffect(() => {
-    if (editorRef.current) editorRef.current.style.backgroundColor = postFill || '';
-  }, [postFill]);
+    if (!editorRef.current) return;
+    editorRef.current.style.backgroundColor = postFill || '';
+    // Auto-set text color to contrasting color unless the user manually picked one
+    if (postFill && !textColorManuallySet) {
+      const h = (postFill || '#ffffff').replace('#','');
+      const r = parseInt(h.substring(0,2),16)/255;
+      const g = parseInt(h.substring(2,4),16)/255;
+      const b = parseInt(h.substring(4,6),16)/255;
+      const lum = 0.2126*r + 0.7152*g + 0.0722*b;
+      const auto = lum > 0.5 ? '#000000' : '#ffffff';
+      setTextColor(auto);
+      // Apply to editor active typing color
+      editorRef.current.style.color = auto;
+    }
+  }, [postFill, textColorManuallySet]);
+
+  // apply textColor changes to editor immediately
+  useEffect(() => {
+    if (!editorRef.current) return;
+    editorRef.current.style.color = textColor || '#000000';
+  }, [textColor]);
 
   // ── helpers ───────────────────────────────────────────────────────────────────
   const saveRange = () => {
@@ -575,7 +672,7 @@ export default function GeoPostView({ session }) {
   // toolbar button factory
   const tbBtn = (active, onMD, children, title, ref = null) => (
     <button ref={ref} title={title} onMouseDown={onMD}
-      className="flex items-center justify-center w-6 h-6 rounded text-[11px] font-black transition-all hover:opacity-80 flex-shrink-0"
+      className="flex items-center justify-center w-8 h-8 md:w-10 md:h-10 rounded text-[11px] md:text-[13px] font-black transition-all hover:opacity-80 flex-shrink-0"
       style={{ background: active ? accentColor : 'transparent', color: active ? '#fff' : 'inherit' }}>
       {children}
     </button>
@@ -641,6 +738,7 @@ export default function GeoPostView({ session }) {
     focusEditor();
     document.execCommand('foreColor', false, color);
     setTextColor(color);
+    setTextColorManuallySet(true);
     setOpenToolbar(null);
   };
 
@@ -718,70 +816,62 @@ export default function GeoPostView({ session }) {
   // ── reactions ─────────────────────────────────────────────────────────────────
   const handleReact = async (postId, emoji) => {
     if (session?.user?.id) {
-      // ── Signed-in path (BOTH orbiter AND participant) ────────────────────────
-      // Write to DB immediately for all authenticated users.
-      // The DB trigger 'handle_post_reaction_clout' fires on INSERT when user_id IS NOT NULL,
-      // awarding 5pts to the post author. post_clout_given PK deduplicates (once per user per post).
-      const existing = (reactions[postId] || []).find(r => r.user_id === session.user.id && r.emoji_text === emoji);
+      // Signed-in user may only have one reaction per post. If they click a different emoji,
+      // remove previous reaction and add the new one.
+      const userReactions = (reactions[postId] || []).filter(r => r.user_id === session.user.id);
+      const existingSame = userReactions.find(r => r.emoji_text === emoji);
+      const existingOther = userReactions.find(r => r.emoji_text !== emoji);
       try {
-        if (existing) {
+        if (existingSame) {
           await removePostReaction(postId, emoji, session);
           setReactions(prev => ({ ...prev, [postId]: (prev[postId] || []).filter(r => !(r.user_id === session.user.id && r.emoji_text === emoji)) }));
         } else {
+          if (existingOther) {
+            // remove the old different emoji first
+            await removePostReaction(postId, existingOther.emoji_text, session);
+            setReactions(prev => ({ ...prev, [postId]: (prev[postId] || []).filter(r => !(r.user_id === session.user.id)) }));
+          }
           await addPostReaction(postId, emoji, session);
           setReactions(prev => ({ ...prev, [postId]: [...(prev[postId] || []), { post_id: postId, emoji_text: emoji, user_id: session.user.id, username: session.user.user_metadata?.username }] }));
         }
-      } catch {}
+      } catch (err) { console.warn('react err', err); }
     } else {
-      // ── Anonymous path — use device_id + increment_anon_count RPC for server-side gating
-      const key = `${postId}:${emoji}`;
+      // Anonymous: allow one anon reaction per post per device. Remove any prior anon reaction on that post.
       const anonSet = getAnonSet();
+      // find any existing anon keys for this post
+      const existingKeys = [...anonSet].filter(k => k.startsWith(postId + ':'));
+      // if the same key exists -> toggle off
+      const key = `${postId}:${emoji}`;
       if (anonSet.has(key)) {
-        // Toggle off: attempt server decrement, then update local state
-        anonSet.delete(key);
-        saveAnonSet(anonSet);
-        let deviceId = null;
-        try { const mod = await import('../lib/deviceId.js'); deviceId = await mod.getDeviceId(); } catch {}
-        try {
-          await removePostReaction(postId, emoji, null);
-        } catch (e) { /* ignore */ }
-
-        setReactions(prev => {
-          const list = [...(prev[postId] || [])];
-          const idx = list.findIndex(r => r.emoji_text === emoji && r.user_id == null);
-          if (idx !== -1) list.splice(idx, 1);
-          return { ...prev, [postId]: list };
-        });
-      } else {
-        // Toggle on: call increment_anon_count RPC which records device interaction and increments count
-        let deviceId = null;
-        try { const mod = await import('../lib/deviceId.js'); deviceId = await mod.getDeviceId(); } catch {}
-        try {
-          const res = await fetch('https://gazuabyyugbbthonqnsp.supabase.co/rpc/increment_anon_count', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ p_target_id: postId, p_target_table: 'geoposts', p_device_id: deviceId })
-          });
-          if (res.ok) {
-            // Success — update local cache and optimistic UI
-            anonSet.add(key); saveAnonSet(anonSet);
-            setReactions(prev => ({
-              ...prev,
-              [postId]: [...(prev[postId] || []), { post_id: postId, emoji_text: emoji, user_id: null }],
-            }));
-            return;
-          }
-          // If RPC returned non-ok, fall through to fallback
-        } catch (err) {
-          console.warn('increment_anon_count failed', err?.message || err);
-        }
-        // Fallback: best-effort local-only + insert null reaction row
-        const anonKey = key;
-        anonSet.add(anonKey); saveAnonSet(anonSet);
-        try { await addPostReaction(postId, emoji, null); } catch (e) { /* ignore */ }
-        setReactions(prev => ({
-          ...prev,
-          [postId]: [...(prev[postId] || []), { post_id: postId, emoji_text: emoji, user_id: null }],
-        }));
+        // remove it
+        anonSet.delete(key); saveAnonSet(anonSet);
+        try { await removePostReaction(postId, emoji, null); } catch (e) {}
+        setReactions(prev => ({ ...prev, [postId]: (prev[postId] || []).filter(r => !(r.user_id == null && r.emoji_text === emoji)) }));
+        return;
       }
+      // remove any other anon reactions for this post
+      for (const k of existingKeys) {
+        anonSet.delete(k);
+        const oldEmoji = k.split(':')[1];
+        try { await removePostReaction(postId, oldEmoji, null); } catch (e) {}
+        setReactions(prev => ({ ...prev, [postId]: (prev[postId] || []).filter(r => !(r.user_id == null && r.emoji_text === oldEmoji)) }));
+      }
+      // Now add the new anon reaction via RPC (best effort)
+      let deviceId = null;
+      try { const mod = await import('../lib/deviceId.js'); deviceId = await mod.getDeviceId(); } catch {}
+      try {
+        const res = await fetch('https://gazuabyyugbbthonqnsp.supabase.co/rpc/increment_anon_count', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ p_target_id: postId, p_target_table: 'geoposts', p_device_id: deviceId })
+        });
+        // optimistic local update
+        anonSet.add(key); saveAnonSet(anonSet);
+        setReactions(prev => ({ ...prev, [postId]: [...(prev[postId] || []), { post_id: postId, emoji_text: emoji, user_id: null }] }));
+        if (res.ok) return;
+      } catch (err) { console.warn('increment_anon_count failed', err); }
+      // fallback local-only
+      try { await addPostReaction(postId, emoji, null); } catch (e) {}
+      anonSet.add(key); saveAnonSet(anonSet);
+      setReactions(prev => ({ ...prev, [postId]: [...(prev[postId] || []), { post_id: postId, emoji_text: emoji, user_id: null }] }));
     }
   };
 
@@ -791,13 +881,115 @@ export default function GeoPostView({ session }) {
   const timeLabel = timeFilter === 'all' ? 'Time' : TIME_OPTIONS.find(t => t.key === timeFilter)?.label || 'Time';
   const zipList   = (locTab === 'borough' && filterBorough) ? (BOROUGH_ZIPS[filterBorough] || []) : (BOROUGH_ZIPS[filterZipBoro] || []);
   const visiblePosts = posts.slice(0, visibleCount);
+  const filteredVisiblePosts = visiblePosts.filter(p => {
+    if (!searchQuery) return true;
+    const q = searchQuery.toLowerCase();
+    const text = (p.content?.html || p.content || '') + ' ' + (p.username || '') + ' ' + (p.zip_code || '') + ' ' + (p.borough || '');
+    return text.toLowerCase().includes(q);
+  });
   const canShowMore  = visibleCount < posts.length;
   const canShowLess  = visibleCount > PAGE_SIZE;
 
   const Divider = () => <div className="w-px h-4 bg-gray-300 mx-0.5 flex-shrink-0" />;
 
+  // Handle tag clicks from posts: either location tags or status tags
+  const handleSelectTag = (payload) => {
+    if (!payload) return;
+    if (payload.status) {
+      // status filter
+      setStatusFilter(payload.status);
+      // If they clicked status, keep current locTab
+      return;
+    }
+    // payload is post object -> navigate to corresponding filter
+    const p = payload;
+    if (p.scope === 'digital') { setLocTab('all'); setFilterBorough(''); setFilterZip(''); }
+    else if (p.scope === 'nyc') { setLocTab('all'); }
+    else if (p.scope === 'borough') { setLocTab('borough'); setFilterBorough(p.borough || ''); }
+    else if (p.scope === 'zip') { setLocTab('zip'); setFilterZip(p.zip_code || ''); }
+  };
+
   return (
-    <div className="w-full max-w-7xl mx-auto px-3 pt-3 pb-8 flex flex-col gap-3">
+    <div className="w-full max-w-7xl mx-auto px-3 pt-3 pb-8">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {/* Left filter panel (web only) */}
+        <div className="hidden md:block md:col-span-1">
+          <div className="sticky top-20">
+            <div className="rounded-2xl border-3 border-black p-3 bg-white shadow-[4px_4px_0px_black]">
+              <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search posts, usernames, zips..."
+                className="w-full px-3 py-2 border-2 border-black rounded text-sm font-black mb-3" />
+              <div className="flex flex-col gap-2">
+                <button onMouseDown={e => e.preventDefault()} onClick={() => setSortByTop(v => !v)}
+                  className={baseFB} style={sortByTop ? activeFS : {}}>🔥 Top</button>
+                <button onMouseDown={e => e.preventDefault()} onClick={() => { setLocTab('all'); setFilterBorough(''); setFilterZip(''); setOpenDropdown(null); }}
+                  className={baseFB} style={locTab === 'all' ? activeFS : {}}>🌀 All</button>
+                <div className="relative">
+                  <button onMouseDown={e => e.preventDefault()} onClick={() => setOpenDropdown(p => p === 'borough' ? null : 'borough')}
+                    className={baseFB} style={locTab === 'borough' && filterBorough ? activeFS : {}}>🏙 {locTab === 'borough' && filterBorough ? filterBorough : 'Borough'} ▾</button>
+                  {!(locTab === 'borough' && filterBorough) && (
+                    <InlineDropdown open={openDropdown === 'borough'} onClose={() => setOpenDropdown(null)}>
+                      {BOROUGHS.map(b => (
+                        <button key={b} onMouseDown={e => e.preventDefault()} onClick={() => { setFilterBorough(b); setLocTab('borough'); setFilterZipBoro(b); setOpenDropdown(null); }}
+                          className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100"
+                          style={filterBorough === b ? { background: accentColor + '22', color: accentColor } : {}}>{b}</button>
+                      ))}
+                    </InlineDropdown>
+                  )}
+                </div>
+                <div className="relative">
+                  <button onMouseDown={e => e.preventDefault()} onClick={() => setOpenDropdown(p => p === 'zip' ? null : 'zip')}
+                    className={baseFB} style={locTab === 'zip' && filterZip ? activeFS : {}}>📍 {locTab === 'zip' && filterZip ? filterZip : 'Zip'} ▾</button>
+                  <InlineDropdown open={openDropdown === 'zip'} onClose={() => setOpenDropdown(null)} className="w-[220px] max-h-[280px]">
+                    {!(locTab === 'borough' && filterBorough) && (
+                      <div className="p-2 border-b border-gray-200">
+                        <div className="flex gap-1 flex-wrap">
+                          {BOROUGHS.map(b => (
+                            <button key={b} onMouseDown={e => e.preventDefault()} onClick={() => setFilterZipBoro(b)}
+                              className="px-1.5 py-0.5 rounded text-[10px] font-black border border-black"
+                              style={filterZipBoro === b ? { background: accentColor, color: '#fff' } : {}}>{b.split(' ')[0]}</button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {zipList.map(z => (
+                      <button key={z.zip} onMouseDown={e => e.preventDefault()} onClick={() => { setFilterZip(z.zip); setLocTab('zip'); setOpenDropdown(null); }}
+                        className="w-full text-left px-3 py-1 text-xs font-semibold hover:bg-gray-100"
+                        style={filterZip === z.zip ? { background: accentColor + '22', color: accentColor } : {}}>{z.zip} <span className="text-[10px] text-gray-400">{z.name}</span></button>
+                    ))}
+                  </InlineDropdown>
+                </div>
+                <div className="relative">
+                  <button onMouseDown={e => e.preventDefault()} onClick={() => setOpenDropdown(p => p === 'time' ? null : 'time')}
+                    className={baseFB} style={timeFilter !== 'all' ? activeFS : {}}>{timeLabel} ▾</button>
+                  <InlineDropdown open={openDropdown === 'time'} onClose={() => setOpenDropdown(null)}>
+                    {TIME_OPTIONS.map(t => (
+                      <button key={t.key} onMouseDown={e => e.preventDefault()} onClick={() => { setTimeFilter(t.key); setOpenDropdown(null); }}
+                        className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100"
+                        style={timeFilter === t.key ? { background: accentColor + '22', color: accentColor } : {}}>{t.label}</button>
+                    ))}
+                  </InlineDropdown>
+                </div>
+                <div className="relative">
+                  <button onMouseDown={e => e.preventDefault()} onClick={() => setOpenDropdown(p => p === 'status' ? null : 'status')}
+                    className={baseFB}
+                    style={statusFilter === 'participant' ? { background: '#22c55e', color: '#fff', borderColor: '#22c55e' }
+                         : statusFilter === 'orbiter'     ? { background: '#ef4444', color: '#fff', borderColor: '#ef4444' }
+                         : {}}>{statusFilter === 'participant' ? 'Participant' : statusFilter === 'orbiter' ? 'Orbiter' : 'Status'} ▾</button>
+                  <InlineDropdown open={openDropdown === 'status'} onClose={() => setOpenDropdown(null)} alignRight>
+                    {[['all','All'],['participant','Participant'],['orbiter','Orbiter'],['anonymous','Anonymous']].map(([k, l]) => (
+                      <button key={k} onMouseDown={e => e.preventDefault()} onClick={() => { setStatusFilter(k); setOpenDropdown(null); }}
+                        className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100"
+                        style={statusFilter === k ? { background: accentColor + '22', color: accentColor } : {}}>{l}</button>
+                    ))}
+                  </InlineDropdown>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Right column: create post + feed */}
+        <div className="md:col-span-2 flex flex-col gap-3">
 
       {/* ── Create Post ──────────────────────────────────────────────────────── */}
       <div className="rounded-2xl border-3 border-black shadow-[4px_4px_0px_black]"
@@ -821,7 +1013,7 @@ export default function GeoPostView({ session }) {
 
         {/* contenteditable editor — border shows postOutline simulation, expands with content */}
         <div ref={editorRef} contentEditable suppressContentEditableWarning
-          className="min-h-[80px] md:min-h-[104px] px-3 py-2 text-sm border-t border-gray-100"
+          className="min-h-[80px] md:min-h-[240px] px-3 py-4 text-sm border-t border-gray-100"
           style={{
             overflowWrap: 'break-word',
             backgroundColor: postFill || undefined,
@@ -840,7 +1032,7 @@ export default function GeoPostView({ session }) {
         />
 
         {/* ── Toolbar ──────────────────────────────────────────────────────── */}
-        <div className="border-t border-gray-200 px-2 py-1 flex items-center gap-0.5 flex-wrap bg-gray-50">
+        <div className="border-t border-gray-200 px-2 py-2 md:py-3 flex items-center gap-1 flex-wrap bg-gray-50">
 
           {/* Undo / Redo */}
           {tbBtn(false, e => { e.preventDefault(); execCmd('undo'); }, '↩', 'Undo')}
@@ -954,12 +1146,12 @@ export default function GeoPostView({ session }) {
         <div className="px-3 pb-3 pt-2 flex items-center gap-2">
           <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageChange} />
           <button onMouseDown={e => e.preventDefault()} onClick={() => fileInputRef.current?.click()}
-            className="px-2 py-1 border-2 border-black rounded-lg text-xs font-black bg-white hover:bg-gray-100 shadow-[2px_2px_0px_black]">
+            className="px-3 py-2 md:px-4 md:py-3 border-2 border-black rounded-lg text-sm md:text-base font-black bg-white hover:bg-gray-100 shadow-[2px_2px_0px_black]">
             📎 Image
           </button>
           {submitError && <p className="text-[10px] text-red-600 font-semibold flex-1 truncate">{submitError}</p>}
           <button onMouseDown={e => e.preventDefault()} onClick={handlePost} disabled={submitting}
-            className="ml-auto px-3 py-1.5 border-2 border-black rounded-lg text-xs font-black shadow-[2px_2px_0px_black]"
+            className="ml-auto px-4 py-2 md:px-5 md:py-3 border-2 border-black rounded-lg text-sm md:text-base font-black shadow-[2px_2px_0px_black]"
             style={{ background: accentColor, color: '#fff' }}>
             {submitting ? '...' : 'Post'}
           </button>
@@ -994,7 +1186,7 @@ export default function GeoPostView({ session }) {
       </div>
 
       {/* ── Filter Bar ──────────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-1 flex-wrap">
+      <div className="flex items-center gap-1 flex-wrap md:hidden">
         {/* 🔥 Top — leftmost */}
         <button onMouseDown={e => e.preventDefault()} onClick={() => setSortByTop(v => !v)}
           className={baseFB} style={sortByTop ? activeFS : {}}>
@@ -1094,7 +1286,7 @@ export default function GeoPostView({ session }) {
             {statusFilter === 'participant' ? 'Participant' : statusFilter === 'orbiter' ? 'Orbiter' : 'Status'} ▾
           </button>
           <InlineDropdown open={openDropdown === 'status'} onClose={() => setOpenDropdown(null)} alignRight>
-            {[['all','All'],['participant','Participant'],['orbiter','Orbiter']].map(([k, l]) => (
+            {[['all','All'],['participant','Participant'],['orbiter','Orbiter'],['anonymous','Anonymous']].map(([k, l]) => (
               <button key={k} onMouseDown={e => e.preventDefault()}
                 onClick={() => { setStatusFilter(k); setOpenDropdown(null); }}
                 className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100"
@@ -1116,9 +1308,9 @@ export default function GeoPostView({ session }) {
       )}
       {!loading && posts.length > 0 && (
         <div className="flex flex-col gap-3">
-          {visiblePosts.map(post => (
+          {filteredVisiblePosts.map(post => (
             <PostCard key={post.id} post={post} postReactions={reactions[post.id]}
-              onReact={handleReact} onOpenReactors={id => setReactorsModal(id)} accentColor={accentColor} />
+              onReact={handleReact} onOpenReactors={id => setReactorsModal(id)} accentColor={accentColor} onSelectTag={handleSelectTag} />
           ))}
           {(canShowMore || canShowLess) && (
             <div className="flex justify-center gap-3 pt-1">
@@ -1140,6 +1332,15 @@ export default function GeoPostView({ session }) {
       )}
 
       <ReactorListModal postId={reactorsModal} reactions={reactions} onClose={() => setReactorsModal(null)} />
+
+      {/* Back to top (web only) */}
+      <button onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+        className="hidden md:block fixed right-4 bottom-4 z-[200000] w-12 h-12 rounded-full bg-black text-white flex items-center justify-center shadow-[6px_6px_0px_black]">
+        ▲
+      </button>
+
+      </div>
+      </div>
     </div>
   );
 }
