@@ -1,11 +1,17 @@
 import { supabase } from './supabaseAuth';
 import { getDeviceId } from './deviceId';
 
+// Module-level lock to prevent multiple captures in a single session/tab life
+let hasCapturedPulse = false;
+
 /**
- * Captures the current session's IP and metadata.
+ * Captures the current session's IP and metadata once per session.
  * Can be called anonymously or with a userId.
  */
 export async function captureSessionIP(userId = null) {
+  // If the pulse has already been captured for this session, exit early
+  if (hasCapturedPulse) return;
+
   try {
     const deviceId = await getDeviceId();
     
@@ -30,8 +36,12 @@ export async function captureSessionIP(userId = null) {
       }]);
 
     if (error) throw error;
+
+    // Set lock to true only after a successful or attempted insert
+    hasCapturedPulse = true;
   } catch (err) {
     // Silent fail so site load is never blocked by tracking errors
     console.warn("[Security] IP capture bypassed.");
+    // We do not set the lock here to allow for a retry if the network was just blipping
   }
 }
