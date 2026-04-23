@@ -12,8 +12,12 @@ export const AuthProvider = ({ children }) => {
     const session = getSession();
     if (session) {
       setUser(session.user);
+      setLoading(false);
+    } else {
+      // No session: run the anonymous device handshake to sync/clean any stale anon contributions
+      setLoading(false);
+      import('./anonDevice').then(m => m.initAnonDeviceHandshake && m.initAnonDeviceHandshake()).catch(() => {});
     }
-    setLoading(false);
   }, []);
 
   const logout = async () => {

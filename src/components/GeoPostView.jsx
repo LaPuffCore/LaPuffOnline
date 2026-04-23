@@ -733,13 +733,19 @@ export default function GeoPostView({ session }) {
         }
       } catch {}
     } else {
-      // ── Anonymous path — localStorage dedup, no points awarded ─────────────
+      // ── Anonymous path — use device_id + increment_anon_count RPC for server-side gating
       const key = `${postId}:${emoji}`;
       const anonSet = getAnonSet();
       if (anonSet.has(key)) {
-        // Toggle off: remove from localStorage + local state (can't remove from DB for null user_id)
+        // Toggle off: attempt server decrement, then update local state
         anonSet.delete(key);
         saveAnonSet(anonSet);
+        let deviceId = null;
+        try { const mod = await import('../lib/deviceId.js'); deviceId = await mod.getDeviceId(); } catch {}
+        try {
+          await removePostReaction(postId, emoji, null);
+        } catch (e) { /* ignore */ }
+
         setReactions(prev => {
           const list = [...(prev[postId] || [])];
           const idx = list.findIndex(r => r.emoji_text === emoji && r.user_id == null);
@@ -747,10 +753,30 @@ export default function GeoPostView({ session }) {
           return { ...prev, [postId]: list };
         });
       } else {
-        // Toggle on: add to DB (null user_id = no points trigger) + localStorage + local state
-        anonSet.add(key);
-        saveAnonSet(anonSet);
-        try { await addPostReaction(postId, emoji, null); } catch {}
+        // Toggle on: call increment_anon_count RPC which records device interaction and increments count
+        let deviceId = null;
+        try { const mod = await import('../lib/deviceId.js'); deviceId = await mod.getDeviceId(); } catch {}
+        try {
+          const res = await fetch('https://gazuabyyugbbthonqnsp.supabase.co/rpc/increment_anon_count', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ p_target_id: postId, p_target_table: 'geoposts', p_device_id: deviceId })
+          });
+          if (res.ok) {
+            // Success — update local cache and optimistic UI
+            anonSet.add(key); saveAnonSet(anonSet);
+            setReactions(prev => ({
+              ...prev,
+              [postId]: [...(prev[postId] || []), { post_id: postId, emoji_text: emoji, user_id: null }],
+            }));
+            return;
+          }
+          // If RPC returned non-ok, fall through to fallback
+        } catch (err) {
+          console.warn('increment_anon_count failed', err?.message || err);
+        }
+        // Fallback: best-effort local-only + insert null reaction row
+        const anonKey = key;
+        anonSet.add(anonKey); saveAnonSet(anonSet);
+        try { await addPostReaction(postId, emoji, null); } catch (e) { /* ignore */ }
         setReactions(prev => ({
           ...prev,
           [postId]: [...(prev[postId] || []), { post_id: postId, emoji_text: emoji, user_id: null }],

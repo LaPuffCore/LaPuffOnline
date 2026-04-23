@@ -379,22 +379,53 @@ export async function toggleFavorite(eventId, eventSnapshot = null) {
       }
     } else {
       // ── ANONYMOUS ──────────────────────────────────────────────────────────
-      // Cannot write to event_favorites (user_id NOT NULL).
-      // Contribute to universal count via RPC only. No points.
-      // lapuff_sb_favs prevents double-counting on page refresh.
+      // Anonymous users: local-only enforcement + server-side device gate
+      // Use a device_id to avoid simple clear-cache spamming. The RPC
+      // increment_anon_count(p_target_id, p_target_table, p_device_id) returns
+      // true when the DB accepted the increment, false when this device already
+      // contributed.
       const sbFavs = getSbFavs();
       const alreadyContributed = sbFavs.has(id);
 
       if (adding && !alreadyContributed) {
-        const { error } = await supabase.rpc('update_event_fav_count', { p_event_id: id, p_delta: 1 });
-        if (error) throw error;
-        sbFavs.add(id);
-        saveSbFavs(sbFavs);
+        // Get or create a device id
+        let deviceId = null;
+        try { const mod = await import('./deviceId.js'); deviceId = await mod.getDeviceId(); } catch {}
+        try {
+          const res = await supabase.rpc('increment_anon_count', { p_target_id: id, p_target_table: 'events', p_device_id: deviceId });
+          // PostgREST returns [] for void/boolean sometimes — treat truthy as success
+          const ok = Array.isArray(res) ? (res[0] === true || res[0] === 't') : !!res;
+          if (!ok) {
+            // Device already spent — ensure local cache reflects DB
+            sbFavs.add(id); saveSbFavs(sbFavs); return adding;
+          }
+        } catch (err) {
+          // Fall back to previous RPC for older deployments
+          try {
+            const { error } = await supabase.rpc('update_event_fav_count', { p_event_id: id, p_delta: 1 });
+            if (error) throw error;
+          } catch (e) {
+            // If RPCs fail, keep local state updated for UX but don't crash
+            console.warn('Anon fav RPC failed', e?.message || e);
+          }
+        }
+        sbFavs.add(id); saveSbFavs(sbFavs);
       } else if (!adding && alreadyContributed) {
-        const { error } = await supabase.rpc('update_event_fav_count', { p_event_id: id, p_delta: -1 });
-        if (error) throw error;
-        sbFavs.delete(id);
-        saveSbFavs(sbFavs);
+        // Removing anon fav: call decrement RPC if available and remove from local cache
+        let deviceId = null;
+        try { const mod = await import('./deviceId.js'); deviceId = await mod.getDeviceId(); } catch {}
+        try {
+          const res = await supabase.rpc('decrement_anon_count', { p_target_id: id, p_target_table: 'events', p_device_id: deviceId });
+          const ok = Array.isArray(res) ? (res[0] === true || res[0] === 't') : !!res;
+          if (!ok) {
+            // nothing to do — ensure local cache reflects DB
+            sbFavs.delete(id); saveSbFavs(sbFavs); return adding;
+          }
+        } catch (err) {
+          // Fallback: call update_event_fav_count with -1
+          try { await supabase.rpc('update_event_fav_count', { p_event_id: id, p_delta: -1 }); } catch {}
+        }
+        sbFavs.delete(id); saveSbFavs(sbFavs);
       }
     }
   } catch (error) {
