@@ -3,6 +3,7 @@ import { getFavorites } from '../lib/favorites';
 import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabaseAuth';
 import { hexToRgba, useSiteTheme } from '../lib/theme';
+import { getDeviceId } from '../lib/deviceId';
 import ReferralModal from './ReferralModal';
 import ThemeCustomizerModal from './ThemeCustomizerModal';
 
@@ -10,8 +11,10 @@ export default function HamburgerMenu({ events, user, onAuthClick }) {
   const [open, setOpen] = useState(false);
   const [showReferral, setShowReferral] = useState(false);
   const [showCustomizer, setShowCustomizer] = useState(false);
+  const [showGMMessenger, setShowGMMessenger] = useState(false);
   const [favCount, setFavCount] = useState(0);
   const [cloutPoints, setCloutPoints] = useState(0);
+  const [isGMTimedOut, setIsGMTimedOut] = useState(false);
   const ref = useRef(null);
   const { resolvedTheme } = useSiteTheme();
 
@@ -58,6 +61,20 @@ export default function HamburgerMenu({ events, user, onAuthClick }) {
       mounted = false;
     };
   }, [user?.id]);
+
+  // Check 12-hour timeout for anonymous GM messaging
+  useEffect(() => {
+    const checkTimeout = async () => {
+      if (user) return; // Signed in users use different logic
+      const deviceId = await getDeviceId();
+      const lastSent = localStorage.getItem(`gm_msg_${deviceId}`);
+      if (lastSent) {
+        const hoursPassed = (Date.now() - parseInt(lastSent)) / (1000 * 60 * 60);
+        if (hoursPassed < 12) setIsGMTimedOut(true);
+      }
+    };
+    checkTimeout();
+  }, [user]);
 
   return (
     <div ref={ref} className="relative">
@@ -123,6 +140,33 @@ export default function HamburgerMenu({ events, user, onAuthClick }) {
               <span>Theme Customizer</span>
             </button>
 
+            {/* MESSAGE GAME MASTER (Anonymous Lockout) */}
+            {!user && (
+              <button
+                disabled={isGMTimedOut}
+                onClick={() => {
+                  setOpen(false);
+                  setShowGMMessenger(true);
+                }}
+                className={`w-full text-left px-4 py-3 rounded-2xl font-bold flex items-center gap-3 transition-all ${isGMTimedOut ? 'opacity-50 grayscale' : 'group'}`}
+                style={{ 
+                  color: resolvedTheme.buttonTextColor || resolvedTheme.bodyTextColor || resolvedTheme.microIconColor, 
+                  backgroundColor: hexToRgba(resolvedTheme.buttonFillColor || "#ffffff", 0.22),
+                  cursor: isGMTimedOut ? 'not-allowed' : 'pointer'
+                }}
+                onMouseEnter={(event) => { if(!isGMTimedOut) event.currentTarget.style.backgroundColor = resolvedTheme.accentColor + '14'; }}
+                onMouseLeave={(event) => { if(!isGMTimedOut) event.currentTarget.style.backgroundColor = 'transparent'; }}
+              >
+                <span className={`text-xl transition-transform lp-emoji ${!isGMTimedOut && 'group-hover:-rotate-12'}`}>📟</span>
+                <div className="flex flex-col">
+                  <span className="leading-none">{isGMTimedOut ? 'GM Busy' : 'Message GM'}</span>
+                  <span className="text-[9px] font-black mt-1 uppercase" style={{ color: resolvedTheme.accentColor }}>
+                    {isGMTimedOut ? 'Cooldown Active' : 'Report an Issue'}
+                  </span>
+                </div>
+              </button>
+            )}
+
             <button
               onClick={() => {
                 setOpen(false);
@@ -170,7 +214,12 @@ export default function HamburgerMenu({ events, user, onAuthClick }) {
         />
       )}
 
-      {showCustomizer && <ThemeCustomizerModal onClose={() => setShowCustomizer(false)} />}
+      showCustomizer && <ThemeCustomizerModal onClose={() => setShowCustomizer(false)} />}
+
+      {/* PHASE 4: Final GMMessenger Integration */}
+      {showGMMessenger && (
+        <GMMessengerModal onClose={() => setShowGMMessenger(false)} />
+      )}
     </div>
   );
 }
