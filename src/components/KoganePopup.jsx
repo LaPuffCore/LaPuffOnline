@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
+import { createPortal } from 'react-dom';
 
 export default function KoganePopup({ onClose }) {
   const [started, setStarted] = useState(false);
@@ -18,9 +19,25 @@ export default function KoganePopup({ onClose }) {
     const h = hdr ? hdr.getBoundingClientRect().height : 72;
     setTopOffset(Math.round(h));
 
+    // create an in-flow anchor right after header so this popup can push page content down universally
+    let inflowAnchor = document.getElementById('kogane-inflow');
+    if (!inflowAnchor) {
+      inflowAnchor = document.createElement('div');
+      inflowAnchor.id = 'kogane-inflow';
+      // place it right after the header so it affects all views consistently
+      if (hdr && hdr.parentNode) hdr.parentNode.insertBefore(inflowAnchor, hdr.nextSibling);
+      else document.body.insertBefore(inflowAnchor, document.body.firstChild);
+    }
+
     const handleKey = (e) => { if (e.key === 'Escape') handleClose(); };
     window.addEventListener('keydown', handleKey);
-    return () => window.removeEventListener('keydown', handleKey);
+
+    return () => {
+      window.removeEventListener('keydown', handleKey);
+      // cleanup inflow anchor when unmounting
+      const a = document.getElementById('kogane-inflow');
+      if (a && a.parentNode) a.parentNode.removeChild(a);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -54,84 +71,58 @@ export default function KoganePopup({ onClose }) {
 
   useEffect(() => {
     if (!started) return;
-    // Give a short delay then expand content to measured height and insert spacer to push page down
     const el = contentRef.current;
     if (!el) return;
 
-    // Measure after paint
+    // Measure after paint and animate the content height; because the container is rendered in-flow (inserted after the header)
+    // the page content will be pushed down naturally as the inner content height grows.
     requestAnimationFrame(() => {
-      const contentH = el.scrollHeight + 60; // include 30px top+bottom overlap
+      // include 60px padding top+bottom so images overlap by 60px each and text stays clear
+      const contentH = el.scrollHeight + 120; // 60px top + 60px bottom
 
-      // Create or update spacer element in document flow
-      let spacer = document.getElementById('kogane-spacer');
-      if (!spacer) {
-        spacer = document.createElement('div');
-        spacer.id = 'kogane-spacer';
-        // spacer sits where the expanding screen will be, so it pushes the page content down
-        spacer.style.width = '100%';
-        spacer.style.height = '0px';
-        spacer.style.transition = 'height 900ms ease';
-        // Insert spacer right before the main app container so it shifts everything below the topbar
-        const appRoot = document.querySelector('#root') || document.querySelector('body');
-        if (appRoot && appRoot.parentNode) {
-          appRoot.parentNode.insertBefore(spacer, appRoot);
-        } else {
-          // fallback: append to body
-          document.body.insertBefore(spacer, document.body.firstChild);
-        }
-      }
-
-      // Animate spacer height from 0 to target to push content down
-      requestAnimationFrame(() => {
-        spacer.style.height = contentH + 'px';
-      });
-
-      // Animate the visible content panel height & opacity in parallel (already absolute positioned inside container)
-      if (containerRef.current) {
-        const container = containerRef.current;
-        if (container) {
-          const inner = el;
-          inner.style.transition = 'height 900ms ease, opacity 700ms ease 200ms';
-          inner.style.height = '0px';
-          inner.style.opacity = '0';
-          void inner.offsetHeight;
-          inner.style.height = contentH + 'px';
-          inner.style.opacity = '0.95';
-          const done = setTimeout(() => setExpanded(true), 1000);
-          return () => clearTimeout(done);
-        }
-      }
+      const inner = el;
+      inner.style.transition = 'height 900ms ease, opacity 700ms ease 200ms';
+      inner.style.height = '0px';
+      inner.style.opacity = '0';
+      void inner.offsetHeight;
+      inner.style.height = contentH + 'px';
+      inner.style.opacity = '0.95';
+      const done = setTimeout(() => setExpanded(true), 1000);
+      return () => clearTimeout(done);
     });
   }, [started]);
 
   // click outside to close is handled by overlay div below
 
-  return (
-    <div className="fixed inset-0 pointer-events-none z-[1000001]">
-      {/* overlay clickable area to close (no blur) - covers entire viewport and above all layers */}
-      <div className="fixed inset-0" onClick={handleClose} style={{ backgroundColor: 'rgba(0,0,0,0.45)', pointerEvents: 'auto', zIndex: 1000002 }} />
+  // Render into the inflow anchor (inserted after header) so the popup lives in document flow and pushes content down
+  const portalRoot = document.getElementById('kogane-inflow') || document.body;
+  return createPortal(
+    <div style={{ position: 'relative', width: '100%' }}>
+      {/* overlay clickable area to close (no blur) - covers entire viewport but sits under the in-flow container so the images/screens remain visually above */}
+      <div onClick={handleClose} style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.45)', zIndex: 10 }} />
 
-      {/* container anchored below topbar */}
+      {/* container anchored below topbar inside the inflow anchor (in-flow) so it pushes page content down */}
       <div ref={containerRef}
-        className="mx-auto w-full max-w-3xl pointer-events-none"
-        style={{ position: 'fixed', left: '50%', transform: 'translateX(-50%)', top: `${topOffset}px`, zIndex: 1000003 }}>
+        className="mx-auto w-full max-w-3xl"
+        onClick={(e)=>e.stopPropagation()}
+        style={{ position: 'relative', left: '50%', transform: 'translateX(-50%)', top: 0, zIndex: 11 }}>
 
         {/* Top half image (anchored) */}
         <img src={topSrc} alt="kogane top"
           onError={(e)=>{ e.currentTarget.src = topSrc; }}
-          className="block w-full pointer-events-none"
-          style={{ display: 'block' }} />
+          className="block w-full"
+          style={{ display: 'block', marginBottom: '-30px' }} />
 
         {/* expanding screen area between halves */}
         <div ref={contentRef}
-          className="mx-auto w-full overflow-hidden pointer-events-auto"
+          className="mx-auto w-full overflow-hidden"
           style={{
             height: '0px',
             background: 'rgba(120,255,60,0.95)',
             borderTop: '1px solid rgba(0,200,80,0.9)',
             borderBottom: '1px solid rgba(0,200,80,0.9)',
             boxShadow: 'inset 0 0 40px rgba(0,255,100,0.18), 0 12px 50px rgba(0,255,100,0.25)',
-            padding: '30px',
+            padding: '60px 30px', // 60px padding top/bottom to keep text clear of overlapping images
             opacity: 0,
             transition: 'height 900ms ease, opacity 700ms ease',
             // glitchy pixel effect
@@ -175,10 +166,11 @@ export default function KoganePopup({ onClose }) {
         {/* Bottom half image - overlap top by ~30px via negative margin */}
         <img src={bottomSrc} alt="kogane bottom"
           onError={(e)=>{ e.currentTarget.src = bottomSrc; }}
-          className="block w-full pointer-events-none"
-          style={{ marginTop: '-90px', display: 'block' }} />
+          className="block w-full"
+          style={{ marginTop: '-30px', display: 'block' }} />
 
       </div>
-    </div>
+    </div>,
+    portalRoot
   );
 }
