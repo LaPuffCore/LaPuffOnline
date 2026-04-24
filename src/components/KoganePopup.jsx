@@ -21,50 +21,26 @@ export default function KoganePopup({ onClose }) {
     const h = hdr ? hdr.getBoundingClientRect().height : 72;
     setTopOffset(Math.round(h));
 
-    // ensure inflow spacer exists (will be sized when expansion runs)
-    let spacer = document.getElementById('kogane-spacer');
-    if (!spacer) {
-      spacer = document.createElement('div');
-      spacer.id = 'kogane-spacer';
-      spacer.style.width = '100%';
-      spacer.style.height = '0px';
-      spacer.style.transition = 'height 900ms ease';
-      // insert right after header so it affects all views consistently
-      if (hdr && hdr.parentNode) hdr.parentNode.insertBefore(spacer, hdr.nextSibling);
-      else document.body.insertBefore(spacer, document.body.firstChild);
-    }
-
+    // no spacer here; overlay will be full-screen and scrollable like EventDetailPopup
     const handleKey = (e) => { if (e.key === 'Escape') handleClose(); };
     window.addEventListener('keydown', handleKey);
 
     return () => {
       window.removeEventListener('keydown', handleKey);
-      const s = document.getElementById('kogane-spacer');
-      if (s && s.parentNode) s.parentNode.removeChild(s);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // internal close that will collapse spacer then call parent onClose
+  // internal close that will collapse content then call parent onClose
   const handleClose = () => {
-    // collapse visible content
     const el = contentRef.current;
     if (el) {
       el.style.height = '0px';
       el.style.opacity = '0';
     }
-    // collapse spacer
-    const spacer = document.getElementById('kogane-spacer');
-    if (spacer) {
-      spacer.style.height = '0px';
-      // remove after transition
-      setTimeout(() => {
-        if (spacer && spacer.parentNode) spacer.parentNode.removeChild(spacer);
-        onClose && onClose();
-      }, 950);
-    } else {
+    setTimeout(() => {
       onClose && onClose();
-    }
+    }, 500);
   };
 
   useEffect(() => {
@@ -90,7 +66,6 @@ export default function KoganePopup({ onClose }) {
     const topImg = topImgRef.current;
     if (!el) return;
 
-    // wait for bottom image to have measured height (if not loaded yet, attach onload)
     const computeAndAnimate = () => {
       // measured content height (text) + ensure 60px padding top/bottom so images overlap
       const textH = el.scrollHeight;
@@ -103,17 +78,12 @@ export default function KoganePopup({ onClose }) {
         bottomH = br.height || (bottomImg.naturalHeight || 0) * (Math.min(980, window.innerWidth * 0.9) / (bottomImg.naturalWidth || 1));
       }
 
-      // target spacer height should allow scrolling to bottomImg final position + 200px extra per request
-      const spacerTarget = Math.round(contentH + bottomH + 200);
-      const spacer = document.getElementById('kogane-spacer');
-      if (spacer) {
-        spacer.style.height = spacerTarget + 'px';
-      }
-
       // Animate the visible content panel height & opacity
-      el.style.transition = 'height 900ms ease, opacity 700ms ease 200ms';
+      el.style.transition = 'height 900ms ease, opacity 700ms ease 200ms, margin-top 700ms ease';
       el.style.height = '0px';
       el.style.opacity = '0';
+      // shift the screen up 60px so it sits under the top image
+      el.style.marginTop = '-60px';
       void el.offsetHeight;
       el.style.height = contentH + 'px';
       el.style.opacity = '0.95';
@@ -123,6 +93,12 @@ export default function KoganePopup({ onClose }) {
       if (bottomImg) bottomImg.style.zIndex = 100002;
       el.style.zIndex = 100001; // screen behind images
 
+      // animate bottom image starting position: when not started earlier it was higher by 60px; now bring it to overlap position
+      if (bottomImg) {
+        bottomImg.style.transition = 'transform 900ms ease';
+        bottomImg.style.transform = 'translateY(0)';
+      }
+
       const done = setTimeout(() => setExpanded(true), 1000);
       return () => clearTimeout(done);
     };
@@ -131,7 +107,6 @@ export default function KoganePopup({ onClose }) {
       computeAndAnimate();
     } else if (bottomImg) {
       bottomImg.onload = () => computeAndAnimate();
-      // safety: also run compute after a short delay
       setTimeout(() => computeAndAnimate(), 500);
     } else {
       computeAndAnimate();
@@ -236,7 +211,7 @@ export default function KoganePopup({ onClose }) {
         {/* Bottom half image - overlap into the screen area */}
         <img ref={bottomImgRef} src={bottomSrc} alt="kogane bottom"
           onError={(e)=>{ e.currentTarget.src = bottomSrc; }}
-          style={{ display: 'block', width: '100%', marginTop: '-60px', zIndex: 100002, position: 'relative' }} />
+          style={{ display: 'block', width: '100%', marginTop: '-60px', zIndex: 100002, position: 'relative', transform: started ? 'translateY(0)' : 'translateY(-60px)', transition: 'transform 700ms ease' }} />
 
       </div>
 
