@@ -736,3 +736,15 @@ TileView: live events are retained in the present event list even when they'd be
 
 #### Image compression:
 - `compressGeoImage(file)` in GeoPostView.jsx — max 500KB, max 1280px, JPEG quality ramp 0.82→0.3.
+
+### GeoPostView Fix Notes (2026-04)
+- Create-post container now renders as a dedicated full-width section above the Geo-Feed separator.
+- The two-column split (left filters, right feed) starts only below the Geo-Feed separator on desktop.
+- Filter controls were restored and re-wired for `all`, `borough`, `zip`, `time`, `status`, and top-sort across desktop/mobile.
+- Search now runs against the full filtered post set before pagination, not just currently visible cards.
+- Search normalization now strips HTML and converts cool-font Unicode text to plain searchable text.
+- Sample posts are merged into feed results for all location/status/time combinations using the same filter logic path as real posts.
+- Post card color logic now uses luminance inversion for feed UI chrome (username/status/date/tags/reaction chips), while preserving authored post text styling.
+- Zip-scope post cards now expose both borough and zip tags for drill-down parity.
+- Back-to-top chevron was simplified to a single-shadow button and now forcibly scrolls to top reliably.
+- Desktop topbar `+ Submit Event` button sizing was aligned to `Sign In / Up` dimensions.

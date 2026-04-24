@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { useState, useRef, useEffect, useCallback, useLayoutEffect } from 'react';
+import { useState, useRef, useEffect, useCallback, useLayoutEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useSiteTheme } from '../lib/theme';
 import { containsProfanity } from '../lib/profanityFilter';
@@ -34,6 +34,50 @@ const PRESET_COLORS = [
   '#000000','#ffffff','#ef4444','#f97316','#eab308','#22c55e',
   '#3b82f6','#8b5cf6','#ec4899','#06b6d4','#84cc16','#f43f5e',
 ];
+
+function stripHtmlTags(value = '') {
+  return String(value).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function normalizeHexColor(value, fallback = '#ffffff') {
+  if (!value) return fallback;
+  const v = String(value).trim();
+  if (/^#[0-9a-fA-F]{6}$/.test(v)) return v.toLowerCase();
+  if (/^#[0-9a-fA-F]{3}$/.test(v)) {
+    const h = v.slice(1);
+    return `#${h[0]}${h[0]}${h[1]}${h[1]}${h[2]}${h[2]}`.toLowerCase();
+  }
+  return fallback;
+}
+
+function luminanceFromHex(value) {
+  const hex = normalizeHexColor(value, '#ffffff').slice(1);
+  const r = parseInt(hex.slice(0, 2), 16) / 255;
+  const g = parseInt(hex.slice(2, 4), 16) / 255;
+  const b = parseInt(hex.slice(4, 6), 16) / 255;
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+function contrastTextColor(bgColor) {
+  return luminanceFromHex(bgColor) > 0.5 ? '#000000' : '#ffffff';
+}
+
+function getPostVisualTheme(post, resolvedTheme) {
+  const fill = normalizeHexColor(post?.post_fill || resolvedTheme?.surfaceBackgroundColor || '#ffffff', '#ffffff');
+  const outline = normalizeHexColor(post?.post_outline || '#000000', '#000000');
+  const text = contrastTextColor(fill);
+  const chipFill = text;
+  const chipText = contrastTextColor(chipFill);
+  return { fill, outline, text, chipFill, chipText };
+}
+
+function normalizeSearchText(value = '') {
+  return toPlainText(stripHtmlTags(value))
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
 // Sample posts shown in SAMPLE_MODE when feed is empty
 const SAMPLE_POSTS = [
@@ -246,126 +290,162 @@ const AlignRightIcon  = () => <svg width="13" height="13" viewBox="0 0 16 16" fi
 // ── PostCard ──────────────────────────────────────────────────────────────────
 function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, onSelectTag }) {
   const { resolvedTheme } = useSiteTheme();
-  const cardBg  = post.post_fill    || resolvedTheme?.surfaceBackgroundColor || '#fff';
-  const cardBdr = post.post_outline || '#000';
+  const theme = getPostVisualTheme(post, resolvedTheme);
   const date = new Date(post.created_at);
   const dateStr = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   const timeStr = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
   const emojiCounts = {};
-  (postReactions || []).forEach(r => { emojiCounts[r.emoji_text] = (emojiCounts[r.emoji_text] || 0) + 1; });
+  (postReactions || []).forEach((r) => { emojiCounts[r.emoji_text] = (emojiCounts[r.emoji_text] || 0) + 1; });
   const topEmojis = Object.entries(emojiCounts).sort((a, b) => b[1] - a[1]).slice(0, 4);
-  
-  // Calculate luminance-inverted color for text/icons
-  const getLuminanceInvertedColor = (bgColor) => {
-    if (!bgColor || bgColor === '') return '#000000';
-    const hex = bgColor.replace('#', '');
-    if (hex.length !== 6) return '#000000';
-    const r = parseInt(hex.substring(0, 2), 16) / 255;
-    const g = parseInt(hex.substring(2, 4), 16) / 255;
-    const b = parseInt(hex.substring(4, 6), 16) / 255;
-    const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-    return lum > 0.5 ? '#000000' : '#ffffff';
-  };
-  
-  const hasCustomFill = !!post.post_fill;
-  const invertedColor = hasCustomFill ? getLuminanceInvertedColor(cardBg) : '#000000';
-  const invertedBgColor = invertedColor === '#ffffff' ? '#000000' : '#ffffff';
-  
-  // Location tag with borough for zip-level posts
-  const locationTagText = post.zip_code && post.borough 
-    ? `📍 ${post.zip_code} · ${post.borough}`
-    : post.borough ? `🏙 ${post.borough}`
-    : post.scope === 'nyc' ? '🗽 NYC'
-    : '💻 Digital';
-  
   const [qepOpen, setQepOpen] = useState(false);
   const [imgRatio, setImgRatio] = useState(1);
   const [imgModalOpen, setImgModalOpen] = useState(false);
+  const postHtml = post.content?.html || post.content || '';
+  const postTextColor = normalizeHexColor(post.content?.textColor || '', theme.text);
 
-  const locationTag = (
-    <span onClick={() => onSelectTag && onSelectTag(post)}
-      style={hasCustomFill ? { background: invertedBgColor, color: invertedColor, borderColor: invertedColor } : {}}
-      className={`ml-auto text-[9px] font-black px-1.5 py-0.5 rounded-full cursor-pointer ${hasCustomFill ? 'border' : 'bg-gray-100 border border-gray-300 text-gray-600'}`}>
-      {locationTagText}
-    </span>
-  );
+  const statusStyle = post.is_participant
+    ? { background: '#22c55e', color: '#fff' }
+    : post.user_id == null
+      ? { background: '#374151', color: '#f3f4f6' }
+      : { background: '#ef4444', color: '#fff' };
 
-  const statusPill = (
-    <span onClick={() => onSelectTag && onSelectTag({ status: post.user_id == null ? 'anonymous' : post.is_participant ? 'participant' : 'orbiter'})}
-      className="text-[9px] font-black px-1.5 py-0.5 rounded-full cursor-pointer"
-      style={hasCustomFill 
-        ? { background: invertedBgColor, color: invertedColor, borderColor: invertedColor }
-        : (post.is_participant ? { background: '#22c55e', color: '#fff' } : post.user_id == null ? { background: '#374151', color: '#f3f4f6' } : { background: '#ef4444', color: '#fff' })}>
-      ● {post.is_participant ? 'PARTICIPANT' : post.user_id == null ? 'ANON' : 'ORBITER'}
-    </span>
-  );
+  const invertedChipStyle = {
+    background: theme.chipFill,
+    color: theme.chipText,
+    border: `1px solid ${theme.chipText}`,
+  };
+
+  const outlineButtonStyle = {
+    borderColor: theme.text,
+    backgroundColor: theme.fill,
+    color: theme.text,
+  };
 
   return (
-    <div className="rounded-2xl border-3 overflow-hidden shadow-[4px_4px_0px_black]"
-      style={{ background: cardBg, borderColor: cardBdr }}>
-
+    <div className="rounded-2xl border-3 overflow-hidden shadow-[4px_4px_0px_black]" style={{ borderColor: theme.outline }}>
       {post.image_url && (
         <div className={`w-full overflow-hidden ${imgRatio > 1.2 ? 'h-40' : 'aspect-square'}`}>
-          <img src={post.image_url} alt="post" className="w-full h-full object-cover" loading="lazy"
-            onLoad={e => { try { setImgRatio(e.target.naturalWidth / e.target.naturalHeight); } catch {} }}
-            onClick={() => { if (imgRatio < 0.9) setImgModalOpen(true); }} />
+          <img
+            src={post.image_url}
+            alt="post"
+            className="w-full h-full object-cover"
+            loading="lazy"
+            onLoad={(e) => { try { setImgRatio(e.target.naturalWidth / e.target.naturalHeight); } catch {} }}
+            onClick={() => { if (imgRatio < 0.9) setImgModalOpen(true); }}
+          />
           {imgRatio < 0.9 && (
             <div className="absolute right-3 bottom-3">
-              <button className="w-8 h-8 rounded-full bg-white border-2 border-black flex items-center justify-center shadow-[2px_2px_0px_black] hover:scale-105 transition-transform"
-                onClick={() => setImgModalOpen(true)}>🔍</button>
+              <button
+                className="w-8 h-8 rounded-full bg-white border-2 border-black flex items-center justify-center shadow-[2px_2px_0px_black] hover:scale-105 transition-transform"
+                onClick={() => setImgModalOpen(true)}
+              >
+                🔍
+              </button>
             </div>
           )}
         </div>
       )}
 
-      <div className="p-3">
+      <div className="p-3" style={{ background: theme.fill }}>
         <div className="flex items-center gap-1.5 mb-2 flex-wrap">
           {post.user_id == null ? (
-            <span className="font-black text-xs flex items-center gap-1" style={hasCustomFill ? { color: invertedColor } : {}}>
+            <span className="font-black text-xs flex items-center gap-1" style={{ color: theme.text }}>
               <svg width="13" height="13" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ color: 'currentColor' }}>
-                <rect x="2" y="9" width="16" height="2.5" rx="1.25" fill="currentColor"/>
-                <rect x="5" y="3" width="10" height="7" rx="1.5" fill="currentColor"/>
-                <circle cx="9.5" cy="15" r="3" stroke="currentColor" strokeWidth="1.5" fill="none"/>
+                <rect x="2" y="9" width="16" height="2.5" rx="1.25" fill="currentColor" />
+                <rect x="5" y="3" width="10" height="7" rx="1.5" fill="currentColor" />
+                <circle cx="9.5" cy="15" r="3" stroke="currentColor" strokeWidth="1.5" fill="none" />
               </svg>
               Anonymous
             </span>
           ) : (
-            <span className="font-black text-xs" style={hasCustomFill ? { color: invertedColor } : {}}>{post.username || 'Orbiter'}</span>
+            <span className="font-black text-xs" style={{ color: theme.text }}>{post.username || 'Orbiter'}</span>
           )}
 
-          {statusPill}
-          <span className="text-[9px] ml-auto" style={hasCustomFill ? { color: invertedColor } : { color: '#9ca3af' }}>{dateStr} · {timeStr}</span>
+          <span
+            onClick={() => onSelectTag && onSelectTag({ status: post.user_id == null ? 'anonymous' : post.is_participant ? 'participant' : 'orbiter' })}
+            className="text-[9px] font-black px-1.5 py-0.5 rounded-full cursor-pointer"
+            style={post.post_fill ? invertedChipStyle : statusStyle}
+          >
+            ● {post.is_participant ? 'PARTICIPANT' : post.user_id == null ? 'ANON' : 'ORBITER'}
+          </span>
+
+          <span className="text-[9px] ml-auto" style={{ color: theme.text }}>{dateStr} · {timeStr}</span>
         </div>
 
-        <div className="text-sm leading-relaxed mb-3 break-words min-h-[1.5rem]"
-          dangerouslySetInnerHTML={{ __html: post.content?.html || post.content || '' }} />
+        <div
+          className="text-sm leading-relaxed mb-3 break-words min-h-[1.5rem]"
+          style={{ color: postTextColor }}
+          dangerouslySetInnerHTML={{ __html: postHtml }}
+        />
 
         <div className="flex items-center gap-1 flex-wrap">
           {topEmojis.map(([emoji, count]) => (
-            <button key={emoji} onMouseDown={e => e.preventDefault()} onClick={() => onReact(post.id, emoji)}
+            <button
+              key={emoji}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => onReact(post.id, emoji)}
               className="flex items-center gap-0.5 px-2 py-0.5 rounded-full border-2 text-xs font-black hover:scale-105 transition-transform"
-              style={hasCustomFill 
-                ? { borderColor: invertedColor, backgroundColor: invertedBgColor, color: invertedColor }
-                : { borderColor: '#000', backgroundColor: '#f3f4f6', color: '#000' }}>
+              style={post.post_fill ? outlineButtonStyle : { borderColor: '#000', backgroundColor: '#f3f4f6', color: '#000' }}
+            >
               {emoji}<span className="text-[10px]">{count}</span>
             </button>
           ))}
-          <button onMouseDown={e => e.preventDefault()} onClick={() => setQepOpen(v => !v)}
-            className="px-2 py-0.5 rounded-full border-2 text-xs font-black bg-gray-50 hover:scale-105 transition-transform"
-            style={hasCustomFill ? { borderColor: invertedColor, color: invertedColor } : { borderColor: '#000' }}>+</button>
+
+          <button
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => setQepOpen((v) => !v)}
+            className="px-2 py-0.5 rounded-full border-2 text-xs font-black hover:scale-105 transition-transform"
+            style={post.post_fill ? outlineButtonStyle : { borderColor: '#000', backgroundColor: '#f3f4f6', color: '#000' }}
+          >
+            +
+          </button>
+
           {(postReactions?.length > 0) && (
-            <button onMouseDown={e => e.preventDefault()} onClick={() => onOpenReactors(post.id)}
-              className="px-2 py-0.5 rounded-full border-2 text-[10px] font-black bg-gray-50 hover:scale-105 transition-transform"
-              style={hasCustomFill ? { borderColor: invertedColor, color: invertedColor } : { borderColor: '#000' }}>…</button>
+            <button
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => onOpenReactors(post.id)}
+              className="px-2 py-0.5 rounded-full border-2 text-[10px] font-black hover:scale-105 transition-transform"
+              style={post.post_fill ? outlineButtonStyle : { borderColor: '#000', backgroundColor: '#f3f4f6', color: '#000' }}
+            >
+              …
+            </button>
           )}
 
-          {locationTag}
+          {post.scope === 'zip' && post.borough && (
+            <span
+              onClick={() => onSelectTag && onSelectTag({ ...post, scope: 'borough' })}
+              className="text-[9px] font-black px-1.5 py-0.5 rounded-full cursor-pointer"
+              style={post.post_fill ? invertedChipStyle : { background: '#f3f4f6', border: '1px solid #d1d5db', color: '#4b5563' }}
+            >
+              🏙 {post.borough}
+            </span>
+          )}
+
+          <span
+            onClick={() => onSelectTag && onSelectTag(post)}
+            className="ml-auto text-[9px] font-black px-1.5 py-0.5 rounded-full cursor-pointer"
+            style={post.post_fill
+              ? invertedChipStyle
+              : { background: '#f3f4f6', border: '1px solid #d1d5db', color: '#4b5563' }}
+          >
+            {post.scope === 'zip' && post.zip_code
+              ? `📍 ${post.zip_code}`
+              : post.borough
+                ? `🏙 ${post.borough}`
+                : post.scope === 'nyc'
+                  ? '🗽 NYC'
+                  : '💻 Digital'}
+          </span>
         </div>
 
         {qepOpen && (
           <div className="mt-2">
-            <EmojiPicker embedded={true} compact={true} value=""
-              onChange={e => { if (e) { onReact(post.id, e); setQepOpen(false); } }} />
+            <EmojiPicker
+              embedded={true}
+              compact={true}
+              value=""
+              onChange={(e) => { if (e) { onReact(post.id, e); setQepOpen(false); } }}
+            />
           </div>
         )}
       </div>
@@ -379,7 +459,6 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
           </div>
         </div>
       )}
-
     </div>
   );
 }
@@ -482,22 +561,39 @@ function filterSamplePosts(type, value, timeFilter, statusFilter, sortByTop) {
   let posts = [...SAMPLE_POSTS];
   if (type === 'borough' && value) posts = posts.filter(p => p.borough === value);
   else if (type === 'zip' && value) posts = posts.filter(p => p.zip_code === value);
+
+  const since = getTimeFilterSince(timeFilter);
+  if (since) {
+    const sinceMs = new Date(since).getTime();
+    posts = posts.filter((p) => new Date(p.created_at).getTime() >= sinceMs);
+  }
+
   if (statusFilter === 'participant') posts = posts.filter(p => p.is_participant);
   else if (statusFilter === 'orbiter') posts = posts.filter(p => !p.is_participant && p.user_id != null);
   else if (statusFilter === 'anonymous') posts = posts.filter(p => p.user_id == null);
+
   if (sortByTop) posts.sort((a, b) => (b.total_reactions || 0) - (a.total_reactions || 0));
   else posts.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
   return posts;
 }
 
-// Ensure samples also get borough tags for zip-level posts
-function enrichSamplePostsWithBoroughTags(posts) {
-  return posts.map(p => {
-    if (p.scope === 'zip' && p.zip_code && p.borough && !p._has_borough_tag) {
-      return { ...p, _has_borough_tag: true };
+function mergeFeedWithSamples(realPosts, samplePosts) {
+  const merged = [];
+  const data = realPosts || [];
+  let sampleIdx = 0;
+
+  if (data.length === 0) return [...samplePosts];
+
+  for (let i = 0; i < data.length; i += 1) {
+    merged.push(data[i]);
+    if ((i + 1) % 3 === 0 && sampleIdx < samplePosts.length) {
+      merged.push(samplePosts[sampleIdx++]);
     }
-    return p;
-  });
+  }
+  while (sampleIdx < samplePosts.length) merged.push(samplePosts[sampleIdx++]);
+
+  return merged;
 }
 
 // ── GeoPostView ───────────────────────────────────────────────────────────────
@@ -571,31 +667,10 @@ export default function GeoPostView({ session }) {
       const type  = locTab === 'borough' ? 'borough' : locTab === 'zip' ? 'zip' : 'all';
       const value = locTab === 'borough' ? filterBorough : locTab === 'zip' ? filterZip : null;
       const data  = await fetchGeoPostFeed({ type, value, timeFilter, statusFilter, sortByTop });
-      
-      // Always include sample posts mixed with real posts (during testing/SAMPLE_MODE)
+
       const samples = filterSamplePosts(type, value, timeFilter, statusFilter, sortByTop);
-      const enrichedSamples = enrichSamplePostsWithBoroughTags(samples);
-      
-      // Merge real posts and samples, with samples appearing throughout the list
-      let finalList = [];
-      if (data && data.length > 0) {
-        // Interleave samples with real posts (samples every ~3 real posts)
-        let sampleIdx = 0;
-        for (let i = 0; i < data.length; i++) {
-          finalList.push(data[i]);
-          if ((i + 1) % 3 === 0 && sampleIdx < enrichedSamples.length) {
-            finalList.push(enrichedSamples[sampleIdx++]);
-          }
-        }
-        // Add remaining samples
-        while (sampleIdx < enrichedSamples.length) {
-          finalList.push(enrichedSamples[sampleIdx++]);
-        }
-      } else {
-        // No real posts, just use samples
-        finalList = enrichedSamples;
-      }
-      
+      const finalList = mergeFeedWithSamples(data || [], samples);
+
       setPosts(finalList);
       setVisibleCount(PAGE_SIZE);
       if (finalList.length > 0) {
@@ -605,6 +680,8 @@ export default function GeoPostView({ session }) {
           const byPost = {};
           (rxns || []).forEach(r => { if (!byPost[r.post_id]) byPost[r.post_id] = []; byPost[r.post_id].push(r); });
           setReactions(byPost);
+        } else {
+          setReactions({});
         }
       }
     } catch (err) {
@@ -612,7 +689,8 @@ export default function GeoPostView({ session }) {
       const type  = locTab === 'borough' ? 'borough' : locTab === 'zip' ? 'zip' : 'all';
       const value = locTab === 'borough' ? filterBorough : locTab === 'zip' ? filterZip : null;
       const samples = filterSamplePosts(type, value, timeFilter, statusFilter, sortByTop);
-      setPosts(enrichSamplePostsWithBoroughTags(samples));
+      setPosts(samples);
+      setReactions({});
     }
     setLoading(false);
   }, [locTab, filterBorough, filterZip, timeFilter, statusFilter, sortByTop]);
@@ -908,51 +986,26 @@ export default function GeoPostView({ session }) {
   const baseFB   = 'relative px-2.5 py-1 rounded-lg border-2 border-black text-[10px] sm:text-xs font-black transition-all flex items-center gap-0.5';
   const timeLabel = timeFilter === 'all' ? 'Time' : TIME_OPTIONS.find(t => t.key === timeFilter)?.label || 'Time';
   const zipList   = (locTab === 'borough' && filterBorough) ? (BOROUGH_ZIPS[filterBorough] || []) : (BOROUGH_ZIPS[filterZipBoro] || []);
-  const visiblePosts = posts.slice(0, visibleCount);
-  const filteredVisiblePosts = visiblePosts.filter(p => {
-    if (!searchQuery) return true;
-    const q = searchQuery.toLowerCase();
-    // Convert all content from cool fonts to plain text for searching
-    const plainContent = toPlainText(p.content?.html || p.content || '');
-    const searchableText = (plainContent + ' ' + (p.username || '') + ' ' + (p.zip_code || '') + ' ' + (p.borough || '')).toLowerCase();
-    
-    // Check for direct text match
-    if (searchableText.includes(q)) return true;
-    
-    // Check for tag/type matches
-    const tagMatches = [
-      'anonymous', 'anon',
-      'orbiter', 'participant',
-      'digital', 'nyc',
-      'manhattan', 'brooklyn', 'queens', 'bronx', 'staten island'
-    ];
-    const matchedTags = tagMatches.filter(tag => tag.toLowerCase().startsWith(q) || q.startsWith(tag));
-    if (matchedTags.length > 0) {
-      for (const tag of matchedTags) {
-        if (tag === 'anonymous' || tag === 'anon') {
-          if (p.user_id == null) return true;
-        } else if (tag === 'orbiter') {
-          if (p.user_id != null && !p.is_participant) return true;
-        } else if (tag === 'participant') {
-          if (p.is_participant) return true;
-        } else if (tag === 'digital') {
-          if (p.scope === 'digital') return true;
-        } else if (tag === 'nyc') {
-          if (p.scope === 'nyc') return true;
-        } else if (tag === 'manhattan' || tag === 'brooklyn' || tag === 'queens' || tag === 'bronx' || tag === 'staten island') {
-          const searchBorough = tag === 'staten island' ? 'Staten Island' : tag.charAt(0).toUpperCase() + tag.slice(1);
-          if (p.borough === searchBorough) return true;
-        }
-      }
-    }
-    
-    // Check for zipcode matches
-    const isZipSearch = /^\d{5}$/.test(q);
-    if (isZipSearch && p.zip_code === q) return true;
-    
-    return false;
-  });
-  const canShowMore  = visibleCount < posts.length;
+  const normalizedQuery = normalizeSearchText(searchQuery);
+  const searchTokens = normalizedQuery ? normalizedQuery.split(' ') : [];
+
+  const filteredPosts = useMemo(() => {
+    if (!normalizedQuery) return posts;
+    return posts.filter((p) => {
+      const content = p.content?.html || p.content || '';
+      const contentText = normalizeSearchText(content);
+      const username = normalizeSearchText(p.username || 'orbiter');
+      const borough = normalizeSearchText(p.borough || '');
+      const zip = normalizeSearchText(p.zip_code || '');
+      const scope = normalizeSearchText(p.scope || '');
+      const status = p.user_id == null ? 'anonymous anon' : p.is_participant ? 'participant' : 'orbiter';
+      const haystack = `${contentText} ${username} ${borough} ${zip} ${scope} ${status} nyc digital`;
+      return searchTokens.every((token) => haystack.includes(token));
+    });
+  }, [posts, normalizedQuery, searchTokens]);
+
+  const visiblePosts = filteredPosts.slice(0, visibleCount);
+  const canShowMore  = visibleCount < filteredPosts.length;
   const canShowLess  = visibleCount > PAGE_SIZE;
 
   const Divider = () => <div className="w-px h-4 bg-gray-300 mx-0.5 flex-shrink-0" />;
@@ -961,23 +1014,38 @@ export default function GeoPostView({ session }) {
   const handleSelectTag = (payload) => {
     if (!payload) return;
     if (payload.status) {
-      // status filter
       setStatusFilter(payload.status);
-      // If they clicked status, keep current locTab
+      setOpenDropdown(null);
       return;
     }
-    // payload is post object -> navigate to corresponding filter
     const p = payload;
-    if (p.scope === 'digital') { setLocTab('all'); setFilterBorough(''); setFilterZip(''); }
-    else if (p.scope === 'nyc') { setLocTab('all'); }
-    else if (p.scope === 'borough') { setLocTab('borough'); setFilterBorough(p.borough || ''); }
-    else if (p.scope === 'zip') { setLocTab('zip'); setFilterZip(p.zip_code || ''); }
+    if (p.scope === 'digital' || p.scope === 'nyc') {
+      setLocTab('all');
+      setFilterBorough('');
+      setFilterZip('');
+    } else if (p.scope === 'borough') {
+      setLocTab('borough');
+      setFilterBorough(p.borough || '');
+      setFilterZipBoro(p.borough || 'Manhattan');
+      setFilterZip('');
+    } else if (p.scope === 'zip') {
+      setLocTab('zip');
+      setFilterZip(p.zip_code || '');
+      if (p.borough) setFilterZipBoro(p.borough);
+    }
+  };
+
+  const scrollToTop = () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    requestAnimationFrame(() => {
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
+    });
   };
 
   return (
     <div className="w-full">
-      {/* ── Full-width Create Post Container ──────────────────────────────────── */}
-      <div className="w-full max-w-7xl mx-auto px-3 pt-3 pb-1">
+      <div className="w-full max-w-7xl mx-auto px-3 pt-3">
         <div className="rounded-2xl border-3 border-black shadow-[4px_4px_0px_black]"
           style={{ background: surfaceBg, borderColor: postOutline || '#000' }}>
 
@@ -991,7 +1059,7 @@ export default function GeoPostView({ session }) {
           )}
 
           {/* location selector */}
-          <div className="px-3 pt-3 pb-4">
+          <div className="px-3 pt-3 pb-5">
             <LocationSelector scope={editorScope} setScope={setEditorScope}
               borough={editorBorough} setBorough={setEditorBorough}
               zip={editorZip} setZip={setEditorZip} accentColor={accentColor} />
@@ -1019,250 +1087,273 @@ export default function GeoPostView({ session }) {
 
           {/* ── Toolbar ──────────────────────────────────────────────────────── */}
           <div className="border-t border-gray-200 px-2 py-2 md:py-3 flex items-center gap-1 flex-wrap bg-gray-50">
+            {tbBtn(false, e => { e.preventDefault(); execCmd('undo'); }, '↩', 'Undo')}
+            {tbBtn(false, e => { e.preventDefault(); execCmd('redo'); }, '↪', 'Redo')}
+            <Divider />
+
+            {tbBtn(fmtBold, e => { e.preventDefault(); execCmd('bold'); }, <strong>B</strong>, 'Bold')}
+            {tbBtn(fmtItalic, e => { e.preventDefault(); execCmd('italic'); }, <em>I</em>, 'Italic')}
+            {tbBtn(fmtUnderline, e => { e.preventDefault(); execCmd('underline'); }, <u>U</u>, 'Underline')}
+            <Divider />
+
+            {tbBtn(fmtAlign === 'left', e => { e.preventDefault(); handleAlign('left'); }, <AlignLeftIcon />, 'Align Left')}
+            {tbBtn(fmtAlign === 'center', e => { e.preventDefault(); handleAlign('center'); }, <AlignCenterIcon />, 'Align Center')}
+            {tbBtn(fmtAlign === 'right', e => { e.preventDefault(); handleAlign('right'); }, <AlignRightIcon />, 'Align Right')}
+            <Divider />
+
+            {tbBtn(fmtSize < 3, e => { e.preventDefault(); handleFontSize(-1); }, <span className="text-[10px]">A↓</span>, 'Font Smaller')}
+            {tbBtn(fmtSize > 3, e => { e.preventDefault(); handleFontSize(+1); }, <span className="text-[10px]">A↑</span>, 'Font Larger')}
+            <Divider />
+
+            {tbBtn(false, e => { e.preventDefault(); openTb('list'); }, <span className="text-[10px]">☰▾</span>, 'Lists', listBtnRef)}
+            <PortalPopup btnRef={listBtnRef} open={openToolbar === 'list'} onClose={closeToolbar} minWidth={140}>
+              <div className="bg-white border-3 border-black rounded-xl shadow-[4px_4px_0px_black] overflow-hidden">
+                {[['bullet','• Bullets'],['number','1. Numbers'],['roman','I. Roman'],['remove','Remove']].map(([t, label]) => (
+                  <button key={t} onMouseDown={e => e.preventDefault()} onClick={() => handleList(t)} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100 whitespace-nowrap">{label}</button>
+                ))}
+              </div>
+            </PortalPopup>
+
+            {tbBtn(!!activeCoolFont, e => { e.preventDefault(); openTb('coolFont'); }, <span className="text-[10px]" style={activeCoolFont ? { color: '#fff' } : {}}>Ψ▾</span>, 'Cool Font', coolBtnRef)}
+            <PortalPopup btnRef={coolBtnRef} open={openToolbar === 'coolFont'} onClose={closeToolbar} minWidth={170}>
+              <div className="bg-white border-3 border-black rounded-xl shadow-[4px_4px_0px_black] overflow-hidden" style={{ maxHeight: 300, overflowY: 'auto' }}>
+                {activeCoolFont && (
+                  <button onMouseDown={e => e.preventDefault()} onClick={() => { setActiveCoolFont(null); setOpenToolbar(null); }} className="w-full text-left px-3 py-1.5 text-[10px] font-black bg-gray-100 border-b border-gray-200">✕ Off</button>
+                )}
+                {ALL_COOL_FONTS.map(f => (
+                  <button key={f.key} onMouseDown={e => e.preventDefault()} onClick={() => handleCoolFont(f.key)} className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 whitespace-nowrap flex items-center gap-2" style={activeCoolFont === f.key ? { background: accentColor + '22', color: accentColor } : {}}>
+                    <span className="font-black text-[10px] w-16 truncate">{f.label}</span>
+                    <span className="text-gray-500 text-[10px]">{f.name}</span>
+                  </button>
+                ))}
+              </div>
+            </PortalPopup>
+            <Divider />
+
+            {tbBtn(openToolbar === 'textColor', e => { e.preventDefault(); openTb('textColor'); }, <span style={{ borderBottom: `3px solid ${textColor}`, fontWeight: 900, fontSize: 11, lineHeight: 1.1, paddingBottom: 1 }}>A</span>, 'Text Color', txtColBtnRef)}
+            <PortalPopup btnRef={txtColBtnRef} open={openToolbar === 'textColor'} onClose={closeToolbar} minWidth={180}>
+              <HexColorPicker value={textColor} onChange={handleApplyTextColor} onClose={closeToolbar} />
+            </PortalPopup>
+
+            {tbBtn(!!postFill || openToolbar === 'postFill', e => { e.preventDefault(); openTb('postFill'); }, <span style={{ fontSize: 13 }}>🪣</span>, 'Post Fill Color', fillBtnRef)}
+            <PortalPopup btnRef={fillBtnRef} open={openToolbar === 'postFill'} onClose={closeToolbar} minWidth={180}>
+              <div className="bg-white border-3 border-black rounded-xl shadow-[4px_4px_0px_black] overflow-hidden">
+                {postFill && (
+                  <button onMouseDown={e => e.preventDefault()} onClick={() => { setPostFill(''); setOpenToolbar(null); }} className="w-full text-left px-3 py-1.5 text-[10px] font-black bg-gray-100 border-b border-gray-200 hover:bg-gray-200">✕ Clear fill</button>
+                )}
+                <div className="p-1">
+                  <HexColorPicker value={postFill || '#ffffff'} onChange={c => setPostFill(c)} onClose={closeToolbar} />
+                </div>
+              </div>
+            </PortalPopup>
+
+            {tbBtn(!!postOutline || openToolbar === 'postOutline', e => { e.preventDefault(); openTb('postOutline'); }, <span style={{ fontSize: 10, border: `2px solid ${postOutline || '#555'}`, padding: '0 2px', borderRadius: 2 }}>□</span>, 'Post Outline Color', outlineBtnRef)}
+            <PortalPopup btnRef={outlineBtnRef} open={openToolbar === 'postOutline'} onClose={closeToolbar} minWidth={180} alignRight>
+              <div className="bg-white border-3 border-black rounded-xl shadow-[4px_4px_0px_black] overflow-hidden">
+                {postOutline && (
+                  <button onMouseDown={e => e.preventDefault()} onClick={() => { setPostOutline(''); setOpenToolbar(null); }} className="w-full text-left px-3 py-1.5 text-[10px] font-black bg-gray-100 border-b border-gray-200 hover:bg-gray-200">✕ Clear outline</button>
+                )}
+                <div className="p-1">
+                  <HexColorPicker value={postOutline || '#000000'} onChange={c => setPostOutline(c)} onClose={closeToolbar} />
+                </div>
+              </div>
+            </PortalPopup>
+
+            {tbBtn(openToolbar === 'emoji', e => { e.preventDefault(); openTb('emoji'); }, <span style={{ fontSize: 13 }}>😀</span>, 'Emoji', emojiBtnRef)}
+            <PortalPopup btnRef={emojiBtnRef} open={openToolbar === 'emoji'} onClose={closeToolbar} minWidth={300} alignRight>
+              <EmojiPicker embedded={true} compact={true} value="" onChange={e => { if (e) handleInsertEmoji(e); }} />
+            </PortalPopup>
+
+            {tbBtn(false, e => { e.preventDefault(); handleClear(); }, '✕', 'Clear')}
+          </div>
+
+          <div className="px-3 pb-3 pt-2 flex items-center gap-2">
+            <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageChange} />
+            <button onMouseDown={e => e.preventDefault()} onClick={() => fileInputRef.current?.click()} className="px-3 py-2 md:px-4 md:py-3 border-2 border-black rounded-lg text-sm md:text-base font-black bg-white hover:bg-gray-100 shadow-[2px_2px_0px_black]">
+              📎 Image
+            </button>
+            {submitError && <p className="text-[10px] text-red-600 font-semibold flex-1 truncate">{submitError}</p>}
+            <button onMouseDown={e => e.preventDefault()} onClick={handlePost} disabled={submitting} className="ml-auto px-4 py-2 md:px-5 md:py-3 border-2 border-black rounded-lg text-sm md:text-base font-black shadow-[2px_2px_0px_black]" style={{ background: accentColor, color: '#fff' }}>
+              {submitting ? '...' : 'Post'}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="w-full max-w-7xl mx-auto px-3">
+        <div className="flex items-center gap-2 mt-2 mb-3">
+          <div className="flex-1 border-t-2 border-black" />
+          <span className="font-black text-xs text-black whitespace-nowrap px-1">- Geo-Feed -</span>
+          <div className="flex-1 border-t-2 border-black" />
+        </div>
+
+        <div className="md:grid md:grid-cols-3 md:gap-4">
+          <aside className="hidden md:block md:col-span-1 md:sticky md:top-24 self-start">
             <div className="rounded-2xl border-3 border-black p-3 bg-white shadow-[4px_4px_0px_black]">
-              <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search posts, usernames, zips..."
-                className="w-full px-3 py-2 border-2 border-black rounded text-sm font-black mb-3" />
+              <input
+                value={searchQuery}
+                onChange={(e) => { setSearchQuery(e.target.value); setVisibleCount(PAGE_SIZE); }}
+                placeholder="Search posts, usernames, zips..."
+                className="w-full px-3 py-2 border-2 border-black rounded text-sm font-black mb-3"
+              />
               <div className="flex flex-col gap-2">
-                <button onMouseDown={e => e.preventDefault()} onClick={() => setSortByTop(v => !v)}
-                  className={baseFB} style={sortByTop ? activeFS : {}}>🔥 Top</button>
-                <button onMouseDown={e => e.preventDefault()} onClick={() => { setLocTab('all'); setFilterBorough(''); setFilterZip(''); setOpenDropdown(null); }}
-                  className={baseFB} style={locTab === 'all' ? activeFS : {}}>🌀 All</button>
+                <button onMouseDown={e => e.preventDefault()} onClick={() => setSortByTop(v => !v)} className={baseFB} style={sortByTop ? activeFS : {}}>🔥 Top</button>
+                <button onMouseDown={e => e.preventDefault()} onClick={() => { setLocTab('all'); setFilterBorough(''); setFilterZip(''); setOpenDropdown(null); }} className={baseFB} style={locTab === 'all' ? activeFS : {}}>🌀 All</button>
+
                 <div className="relative">
-                  <button onMouseDown={e => e.preventDefault()} onClick={() => setOpenDropdown(p => p === 'borough' ? null : 'borough')}
-                    className={baseFB} style={locTab === 'borough' && filterBorough ? activeFS : {}}>🏙 {locTab === 'borough' && filterBorough ? filterBorough : 'Borough'} ▾</button>
+                  <button onMouseDown={e => e.preventDefault()} onClick={() => setOpenDropdown(p => p === 'borough' ? null : 'borough')} className={baseFB} style={locTab === 'borough' && filterBorough ? activeFS : {}}>🏙 {locTab === 'borough' && filterBorough ? filterBorough : 'Borough'} ▾</button>
                   {!(locTab === 'borough' && filterBorough) && (
                     <InlineDropdown open={openDropdown === 'borough'} onClose={() => setOpenDropdown(null)}>
                       {BOROUGHS.map(b => (
-                        <button key={b} onMouseDown={e => e.preventDefault()} onClick={() => { setFilterBorough(b); setLocTab('borough'); setFilterZipBoro(b); setOpenDropdown(null); }}
-                          className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100"
-                          style={filterBorough === b ? { background: accentColor + '22', color: accentColor } : {}}>{b}</button>
+                        <button key={b} onMouseDown={e => e.preventDefault()} onClick={() => { setFilterBorough(b); setLocTab('borough'); setFilterZipBoro(b); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100" style={filterBorough === b ? { background: accentColor + '22', color: accentColor } : {}}>{b}</button>
                       ))}
                     </InlineDropdown>
                   )}
                 </div>
+
                 <div className="relative">
-                  <button onMouseDown={e => e.preventDefault()} onClick={() => setOpenDropdown(p => p === 'zip' ? null : 'zip')}
-                    className={baseFB} style={locTab === 'zip' && filterZip ? activeFS : {}}>📍 {locTab === 'zip' && filterZip ? filterZip : 'Zip'} ▾</button>
+                  <button onMouseDown={e => e.preventDefault()} onClick={() => setOpenDropdown(p => p === 'zip' ? null : 'zip')} className={baseFB} style={locTab === 'zip' && filterZip ? activeFS : {}}>📍 {locTab === 'zip' && filterZip ? filterZip : 'Zip'} ▾</button>
                   <InlineDropdown open={openDropdown === 'zip'} onClose={() => setOpenDropdown(null)} className="w-[220px] max-h-[280px]">
                     {!(locTab === 'borough' && filterBorough) && (
                       <div className="p-2 border-b border-gray-200">
                         <div className="flex gap-1 flex-wrap">
                           {BOROUGHS.map(b => (
-                            <button key={b} onMouseDown={e => e.preventDefault()} onClick={() => setFilterZipBoro(b)}
-                              className="px-1.5 py-0.5 rounded text-[10px] font-black border border-black"
-                              style={filterZipBoro === b ? { background: accentColor, color: '#fff' } : {}}>{b.split(' ')[0]}</button>
+                            <button key={b} onMouseDown={e => e.preventDefault()} onClick={() => setFilterZipBoro(b)} className="px-1.5 py-0.5 rounded text-[10px] font-black border border-black" style={filterZipBoro === b ? { background: accentColor, color: '#fff' } : {}}>{b.split(' ')[0]}</button>
                           ))}
                         </div>
                       </div>
                     )}
                     {zipList.map(z => (
-                      <button key={z.zip} onMouseDown={e => e.preventDefault()} onClick={() => { setFilterZip(z.zip); setLocTab('zip'); setOpenDropdown(null); }}
-                        className="w-full text-left px-3 py-1 text-xs font-semibold hover:bg-gray-100"
-                        style={filterZip === z.zip ? { background: accentColor + '22', color: accentColor } : {}}>{z.zip} <span className="text-[10px] text-gray-400">{z.name}</span></button>
+                      <button key={z.zip} onMouseDown={e => e.preventDefault()} onClick={() => { setFilterZip(z.zip); setLocTab('zip'); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1 text-xs font-semibold hover:bg-gray-100" style={filterZip === z.zip ? { background: accentColor + '22', color: accentColor } : {}}>{z.zip} <span className="text-[10px] text-gray-400">{z.name}</span></button>
                     ))}
                   </InlineDropdown>
                 </div>
+
                 <div className="relative">
-                  <button onMouseDown={e => e.preventDefault()} onClick={() => setOpenDropdown(p => p === 'time' ? null : 'time')}
-                    className={baseFB} style={timeFilter !== 'all' ? activeFS : {}}>{timeLabel} ▾</button>
+                  <button onMouseDown={e => e.preventDefault()} onClick={() => setOpenDropdown(p => p === 'time' ? null : 'time')} className={baseFB} style={timeFilter !== 'all' ? activeFS : {}}>{timeLabel} ▾</button>
                   <InlineDropdown open={openDropdown === 'time'} onClose={() => setOpenDropdown(null)}>
                     {TIME_OPTIONS.map(t => (
-                      <button key={t.key} onMouseDown={e => e.preventDefault()} onClick={() => { setTimeFilter(t.key); setOpenDropdown(null); }}
-                        className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100"
-                        style={timeFilter === t.key ? { background: accentColor + '22', color: accentColor } : {}}>{t.label}</button>
+                      <button key={t.key} onMouseDown={e => e.preventDefault()} onClick={() => { setTimeFilter(t.key); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100" style={timeFilter === t.key ? { background: accentColor + '22', color: accentColor } : {}}>{t.label}</button>
                     ))}
                   </InlineDropdown>
                 </div>
+
                 <div className="relative">
-                  <button onMouseDown={e => e.preventDefault()} onClick={() => setOpenDropdown(p => p === 'status' ? null : 'status')}
-                    className={baseFB}
+                  <button onMouseDown={e => e.preventDefault()} onClick={() => setOpenDropdown(p => p === 'status' ? null : 'status')} className={baseFB}
                     style={statusFilter === 'participant' ? { background: '#22c55e', color: '#fff', borderColor: '#22c55e' }
-                         : statusFilter === 'orbiter'     ? { background: '#ef4444', color: '#fff', borderColor: '#ef4444' }
-                         : {}}>{statusFilter === 'participant' ? 'Participant' : statusFilter === 'orbiter' ? 'Orbiter' : 'Status'} ▾</button>
+                      : statusFilter === 'orbiter' ? { background: '#ef4444', color: '#fff', borderColor: '#ef4444' }
+                      : statusFilter === 'anonymous' ? { background: '#374151', color: '#fff', borderColor: '#374151' }
+                      : {}}>{statusFilter === 'participant' ? 'Participant' : statusFilter === 'orbiter' ? 'Orbiter' : statusFilter === 'anonymous' ? 'Anonymous' : 'Status'} ▾</button>
                   <InlineDropdown open={openDropdown === 'status'} onClose={() => setOpenDropdown(null)} alignRight>
                     {[['all','All'],['participant','Participant'],['orbiter','Orbiter'],['anonymous','Anonymous']].map(([k, l]) => (
-                      <button key={k} onMouseDown={e => e.preventDefault()} onClick={() => { setStatusFilter(k); setOpenDropdown(null); }}
-                        className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100"
-                        style={statusFilter === k ? { background: accentColor + '22', color: accentColor } : {}}>{l}</button>
+                      <button key={k} onMouseDown={e => e.preventDefault()} onClick={() => { setStatusFilter(k); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100" style={statusFilter === k ? { background: accentColor + '22', color: accentColor } : {}}>{l}</button>
                     ))}
                   </InlineDropdown>
                 </div>
               </div>
             </div>
-          </div>
-        </div>
+          </aside>
 
-        {/* Right column: create post + feed */}
-        <div className="md:col-span-2 flex flex-col gap-3">
+          <section className="md:col-span-2" data-geopost-feed-scroll>
+            <div className="md:hidden rounded-2xl border-3 border-black p-3 bg-white shadow-[4px_4px_0px_black] mb-3">
+              <input value={searchQuery} onChange={(e) => { setSearchQuery(e.target.value); setVisibleCount(PAGE_SIZE); }} placeholder="Search posts, usernames, zips..." className="w-full px-3 py-2 border-2 border-black rounded text-sm font-black mb-3" />
+              <div className="flex items-center gap-1 flex-wrap">
+                <button onMouseDown={e => e.preventDefault()} onClick={() => setSortByTop(v => !v)} className={baseFB} style={sortByTop ? activeFS : {}}>🔥 Top</button>
+                <button onMouseDown={e => e.preventDefault()} onClick={() => { setLocTab('all'); setFilterBorough(''); setFilterZip(''); setOpenDropdown(null); }} className={baseFB} style={locTab === 'all' ? activeFS : {}}>🌀 All</button>
 
-      {/* ── Create Post ──────────────────────────────────────────────────────── */}
-      <div className="rounded-2xl border-3 border-black shadow-[4px_4px_0px_black]"
-        style={{ background: surfaceBg, borderColor: postOutline || '#000' }}>
+                <div className="relative">
+                  <button onMouseDown={e => e.preventDefault()} onClick={() => setOpenDropdown(p => p === 'borough' ? null : 'borough')} className={baseFB} style={locTab === 'borough' && filterBorough ? activeFS : {}}>🏙 {locTab === 'borough' && filterBorough ? filterBorough : 'Borough'} ▾</button>
+                  {!(locTab === 'borough' && filterBorough) && (
+                    <InlineDropdown open={openDropdown === 'borough'} onClose={() => setOpenDropdown(null)}>
+                      {BOROUGHS.map(b => (
+                        <button key={b} onMouseDown={e => e.preventDefault()} onClick={() => { setFilterBorough(b); setLocTab('borough'); setFilterZipBoro(b); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100" style={filterBorough === b ? { background: accentColor + '22', color: accentColor } : {}}>{b}</button>
+                      ))}
+                    </InlineDropdown>
+                  )}
+                </div>
 
-        {/* image preview at top, rounded */}
-        {imagePreview && (
-          <div className="relative overflow-hidden rounded-t-2xl">
-            <img src={imagePreview} alt="preview" className="w-full max-h-44 object-cover" />
-            <button onMouseDown={e => e.preventDefault()} onClick={() => { setImageFile(null); setImagePreview(null); }}
-              className="absolute top-2 right-2 w-6 h-6 bg-black text-white rounded-full text-[11px] flex items-center justify-center font-black">✕</button>
-          </div>
-        )}
+                <div className="relative">
+                  <button onMouseDown={e => e.preventDefault()} onClick={() => setOpenDropdown(p => p === 'zip' ? null : 'zip')} className={baseFB} style={locTab === 'zip' && filterZip ? activeFS : {}}>📍 {locTab === 'zip' && filterZip ? filterZip : 'Zip'} ▾</button>
+                  <InlineDropdown open={openDropdown === 'zip'} onClose={() => setOpenDropdown(null)} className="w-[220px] max-h-[280px]">
+                    <div className="p-2 border-b border-gray-200">
+                      <div className="flex gap-1 flex-wrap">
+                        {BOROUGHS.map(b => (
+                          <button key={b} onMouseDown={e => e.preventDefault()} onClick={() => setFilterZipBoro(b)} className="px-1.5 py-0.5 rounded text-[10px] font-black border border-black" style={filterZipBoro === b ? { background: accentColor, color: '#fff' } : {}}>{b.split(' ')[0]}</button>
+                        ))}
+                      </div>
+                    </div>
+                    {zipList.map(z => (
+                      <button key={z.zip} onMouseDown={e => e.preventDefault()} onClick={() => { setFilterZip(z.zip); setLocTab('zip'); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1 text-xs font-semibold hover:bg-gray-100" style={filterZip === z.zip ? { background: accentColor + '22', color: accentColor } : {}}>{z.zip} <span className="text-[10px] text-gray-400">{z.name}</span></button>
+                    ))}
+                  </InlineDropdown>
+                </div>
 
-        {/* location selector */}
-        <div className="px-3 pt-3 pb-4">
-          <LocationSelector scope={editorScope} setScope={setEditorScope}
-            borough={editorBorough} setBorough={setEditorBorough}
-            zip={editorZip} setZip={setEditorZip} accentColor={accentColor} />
-        </div>
+                <div className="relative">
+                  <button onMouseDown={e => e.preventDefault()} onClick={() => setOpenDropdown(p => p === 'time' ? null : 'time')} className={baseFB} style={timeFilter !== 'all' ? activeFS : {}}>{timeLabel} ▾</button>
+                  <InlineDropdown open={openDropdown === 'time'} onClose={() => setOpenDropdown(null)}>
+                    {TIME_OPTIONS.map(t => (
+                      <button key={t.key} onMouseDown={e => e.preventDefault()} onClick={() => { setTimeFilter(t.key); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100" style={timeFilter === t.key ? { background: accentColor + '22', color: accentColor } : {}}>{t.label}</button>
+                    ))}
+                  </InlineDropdown>
+                </div>
 
-        {/* contenteditable editor — border shows postOutline simulation, expands with content */}
-        <div ref={editorRef} contentEditable suppressContentEditableWarning
-          className="min-h-[80px] md:min-h-[240px] px-3 py-4 text-sm border-t border-gray-100"
-          style={{
-            overflowWrap: 'break-word',
-            backgroundColor: postFill || undefined,
-            outline: postOutline ? `3px solid ${postOutline}` : 'none',
-          }}
-          onKeyDown={e => {
-            if (e.ctrlKey || e.metaKey) {
-              if (e.key === 'b') { e.preventDefault(); execCmd('bold'); }
-              else if (e.key === 'i') { e.preventDefault(); execCmd('italic'); }
-              else if (e.key === 'u') { e.preventDefault(); execCmd('underline'); }
-              else if (e.key === 'l') { e.preventDefault(); handleAlign('left'); }
-              else if (e.key === 'e') { e.preventDefault(); handleAlign('center'); }
-              else if (e.key === 'r') { e.preventDefault(); handleAlign('right'); }
-            }
-          }}
-        />
-
-        {/* ── Toolbar ──────────────────────────────────────────────────────── */}
-        <div className="border-t border-gray-200 px-2 py-2 md:py-3 flex items-center gap-1 flex-wrap bg-gray-50">
-
-          {/* Undo / Redo */}
-          {tbBtn(false, e => { e.preventDefault(); execCmd('undo'); }, '↩', 'Undo')}
-          {tbBtn(false, e => { e.preventDefault(); execCmd('redo'); }, '↪', 'Redo')}
-          <Divider />
-
-          {/* B / I / U */}
-          {tbBtn(fmtBold,      e => { e.preventDefault(); execCmd('bold');      }, <strong>B</strong>, 'Bold')}
-          {tbBtn(fmtItalic,    e => { e.preventDefault(); execCmd('italic');    }, <em>I</em>,         'Italic')}
-          {tbBtn(fmtUnderline, e => { e.preventDefault(); execCmd('underline'); }, <u>U</u>,           'Underline')}
-          <Divider />
-
-          {/* Alignment */}
-          {tbBtn(fmtAlign === 'left',   e => { e.preventDefault(); handleAlign('left');   }, <AlignLeftIcon />,   'Align Left')}
-          {tbBtn(fmtAlign === 'center', e => { e.preventDefault(); handleAlign('center'); }, <AlignCenterIcon />, 'Align Center')}
-          {tbBtn(fmtAlign === 'right',  e => { e.preventDefault(); handleAlign('right');  }, <AlignRightIcon />,  'Align Right')}
-          <Divider />
-
-          {/* Font size */}
-          {tbBtn(fmtSize < 3, e => { e.preventDefault(); handleFontSize(-1); }, <span className="text-[10px]">A↓</span>, 'Font Smaller')}
-          {tbBtn(fmtSize > 3, e => { e.preventDefault(); handleFontSize(+1); }, <span className="text-[10px]">A↑</span>, 'Font Larger')}
-          <Divider />
-
-          {/* Lists */}
-          {tbBtn(false, e => { e.preventDefault(); openTb('list'); }, <span className="text-[10px]">☰▾</span>, 'Lists', listBtnRef)}
-          <PortalPopup btnRef={listBtnRef} open={openToolbar === 'list'} onClose={closeToolbar} minWidth={140}>
-            <div className="bg-white border-3 border-black rounded-xl shadow-[4px_4px_0px_black] overflow-hidden">
-              {[['bullet','• Bullets'],['number','1. Numbers'],['roman','I. Roman'],['remove','Remove']].map(([t, label]) => (
-                <button key={t} onMouseDown={e => e.preventDefault()} onClick={() => handleList(t)}
-                  className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100 whitespace-nowrap">{label}</button>
-              ))}
-            </div>
-          </PortalPopup>
-
-          {/* Cool Font */}
-          {tbBtn(!!activeCoolFont, e => { e.preventDefault(); openTb('coolFont'); }, <span className="text-[10px]" style={activeCoolFont ? { color: '#fff' } : {}}>Ψ▾</span>, 'Cool Font', coolBtnRef)}
-          <PortalPopup btnRef={coolBtnRef} open={openToolbar === 'coolFont'} onClose={closeToolbar} minWidth={170}>
-            <div className="bg-white border-3 border-black rounded-xl shadow-[4px_4px_0px_black] overflow-hidden" style={{ maxHeight: 300, overflowY: 'auto' }}>
-              {activeCoolFont && (
-                <button onMouseDown={e => e.preventDefault()} onClick={() => { setActiveCoolFont(null); setOpenToolbar(null); }}
-                  className="w-full text-left px-3 py-1.5 text-[10px] font-black bg-gray-100 border-b border-gray-200">✕ Off</button>
-              )}
-              {ALL_COOL_FONTS.map(f => (
-                <button key={f.key} onMouseDown={e => e.preventDefault()} onClick={() => handleCoolFont(f.key)}
-                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 whitespace-nowrap flex items-center gap-2"
-                  style={activeCoolFont === f.key ? { background: accentColor + '22', color: accentColor } : {}}>
-                  <span className="font-black text-[10px] w-16 truncate">{f.label}</span>
-                  <span className="text-gray-500 text-[10px]">{f.name}</span>
-                </button>
-              ))}
-            </div>
-          </PortalPopup>
-          <Divider />
-
-          {/* Text Color */}
-          {tbBtn(openToolbar === 'textColor',
-            e => { e.preventDefault(); openTb('textColor'); },
-            <span style={{ borderBottom: `3px solid ${textColor}`, fontWeight: 900, fontSize: 11, lineHeight: 1.1, paddingBottom: 1 }}>A</span>,
-            'Text Color', txtColBtnRef)}
-          <PortalPopup btnRef={txtColBtnRef} open={openToolbar === 'textColor'} onClose={closeToolbar} minWidth={180}>
-            <HexColorPicker value={textColor} onChange={handleApplyTextColor} onClose={closeToolbar} />
-          </PortalPopup>
-
-          {/* Post Fill */}
-          {tbBtn(!!postFill || openToolbar === 'postFill',
-            e => { e.preventDefault(); openTb('postFill'); },
-            <span style={{ fontSize: 13 }}>🪣</span>, 'Post Fill Color', fillBtnRef)}
-          <PortalPopup btnRef={fillBtnRef} open={openToolbar === 'postFill'} onClose={closeToolbar} minWidth={180}>
-            <div className="bg-white border-3 border-black rounded-xl shadow-[4px_4px_0px_black] overflow-hidden">
-              {postFill && (
-                <button onMouseDown={e => e.preventDefault()} onClick={() => { setPostFill(''); setOpenToolbar(null); }}
-                  className="w-full text-left px-3 py-1.5 text-[10px] font-black bg-gray-100 border-b border-gray-200 hover:bg-gray-200">✕ Clear fill</button>
-              )}
-              <div className="p-1">
-                <HexColorPicker value={postFill || '#ffffff'} onChange={c => setPostFill(c)} onClose={closeToolbar} />
+                <div className="relative">
+                  <button onMouseDown={e => e.preventDefault()} onClick={() => setOpenDropdown(p => p === 'status' ? null : 'status')} className={baseFB}
+                    style={statusFilter === 'participant' ? { background: '#22c55e', color: '#fff', borderColor: '#22c55e' }
+                      : statusFilter === 'orbiter' ? { background: '#ef4444', color: '#fff', borderColor: '#ef4444' }
+                      : statusFilter === 'anonymous' ? { background: '#374151', color: '#fff', borderColor: '#374151' }
+                      : {}}>{statusFilter === 'participant' ? 'Participant' : statusFilter === 'orbiter' ? 'Orbiter' : statusFilter === 'anonymous' ? 'Anonymous' : 'Status'} ▾</button>
+                  <InlineDropdown open={openDropdown === 'status'} onClose={() => setOpenDropdown(null)} alignRight>
+                    {[['all','All'],['participant','Participant'],['orbiter','Orbiter'],['anonymous','Anonymous']].map(([k, l]) => (
+                      <button key={k} onMouseDown={e => e.preventDefault()} onClick={() => { setStatusFilter(k); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100" style={statusFilter === k ? { background: accentColor + '22', color: accentColor } : {}}>{l}</button>
+                    ))}
+                  </InlineDropdown>
+                </div>
               </div>
             </div>
-          </PortalPopup>
 
-          {/* Post Outline */}
-          {tbBtn(!!postOutline || openToolbar === 'postOutline',
-            e => { e.preventDefault(); openTb('postOutline'); },
-            <span style={{ fontSize: 10, border: `2px solid ${postOutline || '#555'}`, padding: '0 2px', borderRadius: 2 }}>□</span>,
-            'Post Outline Color', outlineBtnRef)}
-          <PortalPopup btnRef={outlineBtnRef} open={openToolbar === 'postOutline'} onClose={closeToolbar} minWidth={180} alignRight>
-            <div className="bg-white border-3 border-black rounded-xl shadow-[4px_4px_0px_black] overflow-hidden">
-              {postOutline && (
-                <button onMouseDown={e => e.preventDefault()} onClick={() => { setPostOutline(''); setOpenToolbar(null); }}
-                  className="w-full text-left px-3 py-1.5 text-[10px] font-black bg-gray-100 border-b border-gray-200 hover:bg-gray-200">✕ Clear outline</button>
-              )}
-              <div className="p-1">
-                <HexColorPicker value={postOutline || '#000000'} onChange={c => setPostOutline(c)} onClose={closeToolbar} />
+            {loading && <p className="text-center text-sm text-gray-400 font-semibold py-4">Loading...</p>}
+            {!loading && filteredPosts.length === 0 && (
+              <div className="text-center py-8">
+                <div className="text-4xl mb-2">🌀</div>
+                <p className="font-black text-gray-500">Nothing here yet! Be the first!</p>
               </div>
-            </div>
-          </PortalPopup>
-
-          {/* Emoji */}
-          {tbBtn(openToolbar === 'emoji',
-            e => { e.preventDefault(); openTb('emoji'); },
-            <span style={{ fontSize: 13 }}>😀</span>, 'Emoji', emojiBtnRef)}
-          <PortalPopup btnRef={emojiBtnRef} open={openToolbar === 'emoji'} onClose={closeToolbar} minWidth={300} alignRight>
-            <EmojiPicker embedded={true} compact={true} value=""
-              onChange={e => { if (e) handleInsertEmoji(e); }} />
-          </PortalPopup>
-
-          {/* Clear */}
-          {tbBtn(false, e => { e.preventDefault(); handleClear(); }, '✕', 'Clear')}
-        </div>
-
-        {/* submit row */}
-        <div className="px-3 pb-3 pt-2 flex items-center gap-2">
-          <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageChange} />
-          <button onMouseDown={e => e.preventDefault()} onClick={() => fileInputRef.current?.click()}
-            className="px-3 py-2 md:px-4 md:py-3 border-2 border-black rounded-lg text-sm md:text-base font-black bg-white hover:bg-gray-100 shadow-[2px_2px_0px_black]">
-            📎 Image
-          </button>
-          {submitError && <p className="text-[10px] text-red-600 font-semibold flex-1 truncate">{submitError}</p>}
-          <button onMouseDown={e => e.preventDefault()} onClick={handlePost} disabled={submitting}
-            className="ml-auto px-4 py-2 md:px-5 md:py-3 border-2 border-black rounded-lg text-sm md:text-base font-black shadow-[2px_2px_0px_black]"
-            style={{ background: accentColor, color: '#fff' }}>
-            {submitting ? '...' : 'Post'}
-          </button>
+            )}
+            {!loading && filteredPosts.length > 0 && (
+              <div className="flex flex-col gap-3">
+                {visiblePosts.map(post => (
+                  <PostCard key={post.id} post={post} postReactions={reactions[post.id]} onReact={handleReact} onOpenReactors={id => setReactorsModal(id)} accentColor={accentColor} onSelectTag={handleSelectTag} />
+                ))}
+                {(canShowMore || canShowLess) && (
+                  <div className="flex justify-center gap-3 pt-1">
+                    {canShowMore && (
+                      <button onMouseDown={e => e.preventDefault()} onClick={() => setVisibleCount(v => v + PAGE_SIZE)} className="px-4 py-1.5 border-2 border-black rounded-full text-xs font-black bg-white shadow-[2px_2px_0px_black] hover:scale-105 transition-transform">
+                        Show More ({filteredPosts.length - visibleCount} remaining)
+                      </button>
+                    )}
+                    {canShowLess && (
+                      <button onMouseDown={e => e.preventDefault()} onClick={() => setVisibleCount(PAGE_SIZE)} className="px-4 py-1.5 border-2 border-black rounded-full text-xs font-black bg-white shadow-[2px_2px_0px_black] hover:scale-105 transition-transform">
+                        Show Less
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </section>
         </div>
       </div>
 
-      {/* ── Check-In Popup ───────────────────────────────────────────────────── */}
+      <ReactorListModal postId={reactorsModal} reactions={reactions} onClose={() => setReactorsModal(null)} />
+
+      <button
+        onClick={scrollToTop}
+        className="hidden md:flex fixed right-4 bottom-4 z-[200000] w-12 h-12 rounded-full bg-black text-white items-center justify-center hover:scale-110 transition-transform shadow-[2px_2px_0px_rgba(0,0,0,0.35)]"
+        aria-label="Back to top"
+      >
+        ▲
+      </button>
+
       {showCheckin && (
         <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/50" onClick={() => setShowCheckin(false)} />
@@ -1281,170 +1372,6 @@ export default function GeoPostView({ session }) {
           </div>
         </div>
       )}
-
-      {/* ── Geo-Feed Separator ───────────────────────────────────────────────── */}
-      <div className="flex items-center gap-2 mt-1">
-        <div className="flex-1 border-t-2 border-black" />
-        <span className="font-black text-xs text-black whitespace-nowrap px-1">— Geo-Feed —</span>
-        <div className="flex-1 border-t-2 border-black" />
-      </div>
-
-      {/* ── Filter Bar ──────────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-1 flex-wrap md:hidden">
-        {/* 🔥 Top — leftmost */}
-        <button onMouseDown={e => e.preventDefault()} onClick={() => setSortByTop(v => !v)}
-          className={baseFB} style={sortByTop ? activeFS : {}}>
-          🔥 Top
-        </button>
-        {/* 🌀 All */}
-        <button onMouseDown={e => e.preventDefault()} onClick={() => { setLocTab('all'); setFilterBorough(''); setFilterZip(''); setOpenDropdown(null); }}
-          className={baseFB} style={locTab === 'all' ? activeFS : {}}>
-          🌀 All
-        </button>
-        {/* 🏙 Borough — shows X when active to clear selection */}
-        <div className="relative">
-          <button onMouseDown={e => e.preventDefault()}
-            onClick={() => {
-              if (locTab === 'borough' && filterBorough) {
-                // Clear borough selection and return to All
-                setFilterBorough(''); setLocTab('all'); setOpenDropdown(null);
-              } else {
-                setOpenDropdown(p => p === 'borough' ? null : 'borough');
-              }
-            }}
-            className={baseFB}
-            style={locTab === 'borough' && filterBorough ? activeFS : {}}>
-            🏙 {locTab === 'borough' && filterBorough ? filterBorough : 'Borough'}
-            {locTab === 'borough' && filterBorough
-              ? <span className="ml-0.5 text-[11px] font-black">✕</span>
-              : <span className="ml-0.5">▾</span>}
-          </button>
-          {!(locTab === 'borough' && filterBorough) && (
-            <InlineDropdown open={openDropdown === 'borough'} onClose={() => setOpenDropdown(null)}>
-              {BOROUGHS.map(b => (
-                <button key={b} onMouseDown={e => e.preventDefault()}
-                  onClick={() => { setFilterBorough(b); setLocTab('borough'); setFilterZipBoro(b); setOpenDropdown(null); }}
-                  className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100"
-                  style={filterBorough === b ? { background: accentColor + '22', color: accentColor } : {}}>
-                  {b}
-                </button>
-              ))}
-            </InlineDropdown>
-          )}
-        </div>
-        {/* 📍 Zip */}
-        <div className="relative">
-          <button onMouseDown={e => e.preventDefault()} onClick={() => setOpenDropdown(p => p === 'zip' ? null : 'zip')}
-            className={baseFB} style={locTab === 'zip' && filterZip ? activeFS : {}}>
-            📍 {locTab === 'zip' && filterZip ? filterZip : 'Zip'} ▾
-          </button>
-          <InlineDropdown open={openDropdown === 'zip'} onClose={() => setOpenDropdown(null)} className="w-[220px] max-h-[280px]">
-            {/* Borough row only when no borough filter active */}
-            {!(locTab === 'borough' && filterBorough) && (
-              <div className="p-2 border-b border-gray-200">
-                <div className="flex gap-1 flex-wrap">
-                  {BOROUGHS.map(b => (
-                    <button key={b} onMouseDown={e => e.preventDefault()} onClick={() => setFilterZipBoro(b)}
-                      className="px-1.5 py-0.5 rounded text-[10px] font-black border border-black"
-                      style={filterZipBoro === b ? { background: accentColor, color: '#fff' } : {}}>
-                      {b.split(' ')[0]}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-            {zipList.map(z => (
-              <button key={z.zip} onMouseDown={e => e.preventDefault()}
-                onClick={() => { setFilterZip(z.zip); setLocTab('zip'); setOpenDropdown(null); }}
-                className="w-full text-left px-3 py-1 text-xs font-semibold hover:bg-gray-100"
-                style={filterZip === z.zip ? { background: accentColor + '22', color: accentColor } : {}}>
-                {z.zip} <span className="text-[10px] text-gray-400">{z.name}</span>
-              </button>
-            ))}
-          </InlineDropdown>
-        </div>
-        {/* Time */}
-        <div className="relative">
-          <button onMouseDown={e => e.preventDefault()} onClick={() => setOpenDropdown(p => p === 'time' ? null : 'time')}
-            className={baseFB} style={timeFilter !== 'all' ? activeFS : {}}>
-            {timeLabel} ▾
-          </button>
-          <InlineDropdown open={openDropdown === 'time'} onClose={() => setOpenDropdown(null)}>
-            {TIME_OPTIONS.map(t => (
-              <button key={t.key} onMouseDown={e => e.preventDefault()}
-                onClick={() => { setTimeFilter(t.key); setOpenDropdown(null); }}
-                className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100"
-                style={timeFilter === t.key ? { background: accentColor + '22', color: accentColor } : {}}>
-                {t.label}
-              </button>
-            ))}
-          </InlineDropdown>
-        </div>
-        {/* Status */}
-        <div className="relative">
-          <button onMouseDown={e => e.preventDefault()} onClick={() => setOpenDropdown(p => p === 'status' ? null : 'status')}
-            className={baseFB}
-            style={statusFilter === 'participant' ? { background: '#22c55e', color: '#fff', borderColor: '#22c55e' }
-                 : statusFilter === 'orbiter'     ? { background: '#ef4444', color: '#fff', borderColor: '#ef4444' }
-                 : {}}>
-            {statusFilter === 'participant' ? 'Participant' : statusFilter === 'orbiter' ? 'Orbiter' : 'Status'} ▾
-          </button>
-          <InlineDropdown open={openDropdown === 'status'} onClose={() => setOpenDropdown(null)} alignRight>
-            {[['all','All'],['participant','Participant'],['orbiter','Orbiter'],['anonymous','Anonymous']].map(([k, l]) => (
-              <button key={k} onMouseDown={e => e.preventDefault()}
-                onClick={() => { setStatusFilter(k); setOpenDropdown(null); }}
-                className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100"
-                style={statusFilter === k ? { background: accentColor + '22', color: accentColor } : {}}>
-                {l}
-              </button>
-            ))}
-          </InlineDropdown>
-        </div>
-      </div>
-
-      {/* ── Feed ─────────────────────────────────────────────────────────────── */}
-      {loading && <p className="text-center text-sm text-gray-400 font-semibold py-4">Loading...</p>}
-      {!loading && posts.length === 0 && (
-        <div className="text-center py-8">
-          <div className="text-4xl mb-2">🌀</div>
-          <p className="font-black text-gray-500">Nothing here yet! Be the first!</p>
-        </div>
-      )}
-      {!loading && posts.length > 0 && (
-        <div className="flex flex-col gap-3">
-          {filteredVisiblePosts.map(post => (
-            <PostCard key={post.id} post={post} postReactions={reactions[post.id]}
-              onReact={handleReact} onOpenReactors={id => setReactorsModal(id)} accentColor={accentColor} onSelectTag={handleSelectTag} />
-          ))}
-          {(canShowMore || canShowLess) && (
-            <div className="flex justify-center gap-3 pt-1">
-              {canShowMore && (
-                <button onMouseDown={e => e.preventDefault()} onClick={() => setVisibleCount(v => v + PAGE_SIZE)}
-                  className="px-4 py-1.5 border-2 border-black rounded-full text-xs font-black bg-white shadow-[2px_2px_0px_black] hover:scale-105 transition-transform">
-                  Show More ({posts.length - visibleCount} remaining)
-                </button>
-              )}
-              {canShowLess && (
-                <button onMouseDown={e => e.preventDefault()} onClick={() => setVisibleCount(PAGE_SIZE)}
-                  className="px-4 py-1.5 border-2 border-black rounded-full text-xs font-black bg-white shadow-[2px_2px_0px_black] hover:scale-105 transition-transform">
-                  Show Less
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      <ReactorListModal postId={reactorsModal} reactions={reactions} onClose={() => setReactorsModal(null)} />
-
-      {/* Back to top (web only) */}
-      <button onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-        className="hidden md:block fixed right-4 bottom-4 z-[200000] w-12 h-12 rounded-full bg-black text-white flex items-center justify-center hover:scale-110 transition-transform shadow-[3px_3px_0px_rgba(0,0,0,0.3)]">
-        ▲
-      </button>
-
-      </div>
-      </div>
     </div>
   );
 }
