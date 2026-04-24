@@ -247,9 +247,8 @@ export default function KoganePopup({ onClose }) {
 
         </div>
 
-      </div>
 
     </>,
-    portalRoot
+    inflowRoot
   );
 }
