@@ -223,7 +223,8 @@ export async function fetchGeoPostFeed({
   if (since) url += `&created_at=gte.${encodeURIComponent(since)}`;
 
   if (statusFilter === 'participant') url += '&is_participant=eq.true';
-  else if (statusFilter === 'orbiter')   url += '&is_participant=eq.false';
+  else if (statusFilter === 'orbiter')   url += '&is_participant=eq.false&user_id=not.is.null';
+  else if (statusFilter === 'anonymous') url += '&user_id=is.null';
 
   const res = await fetch(url, { headers: baseHeaders });
   if (!res.ok) return [];
