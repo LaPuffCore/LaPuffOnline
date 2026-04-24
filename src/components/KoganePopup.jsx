@@ -132,53 +132,52 @@ export default function KoganePopup({ onClose }) {
   const portalRoot = document.body;
   return createPortal(
     <>
-      <div style={overlayStyle} onClick={handleClose} />
+      {/* Fullscreen modal overlay (like EventDetailPopup) */}
+      <div onClick={handleClose} className="fixed inset-0 z-[100000] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
 
-      <div ref={containerRef}
-        style={{ position: 'fixed', left: '50%', transform: 'translateX(-50%)', top: (hdrH) + 'px', width: 'min(980px, 90vw)', zIndex: 100001, pointerEvents: 'auto' }}
-        onClick={(e)=>e.stopPropagation()}>
+        <div ref={containerRef} onClick={(e)=>e.stopPropagation()} style={{ width: 'min(980px, 90vw)', maxHeight: 'calc(100vh - 80px)', overflowY: 'auto', position: 'relative', zIndex: 100001 }}>
 
-        {/* Top half image (anchored) */}
-        <img ref={topImgRef} src={topSrc} alt="kogane top"
-          onError={(e)=>{ e.currentTarget.src = topSrc; }}
-          style={{ display: 'block', width: '100%', zIndex: 100002, position: 'relative' }} />
+          {/* Top half image (anchored) */}
+          <img ref={topImgRef} src={topSrc} alt="kogane top"
+            onError={(e)=>{ e.currentTarget.src = topSrc; }}
+            style={{ display: 'block', width: '100%', zIndex: 100003, position: 'relative' }} />
 
-        {/* glitch layer behind the screen */}
-        <div style={{ position: 'relative', width: '100%' }}>
-          <div style={{
-            position: 'absolute',
-            left: 0,
-            right: 0,
-            top: '0',
-            height: '100%',
-            zIndex: 100000,
-            pointerEvents: 'none',
-            backgroundImage: 'repeating-linear-gradient(0deg, rgba(0,0,0,0.02) 0 1px, transparent 1px 3px), linear-gradient(90deg, rgba(0,255,120,0.03), rgba(0,255,100,0.02))',
-            backgroundSize: '100% 4px, 200% 100%',
-            animation: 'koganeShift 6s linear infinite'
-          }} />
+          {/* glitch layer behind the screen */}
+          <div style={{ position: 'relative', width: '100%' }}>
+            <div style={{
+              position: 'absolute',
+              left: 0,
+              right: 0,
+              top: '0',
+              height: '100%',
+              zIndex: 100000,
+              pointerEvents: 'none',
+              backgroundImage: 'repeating-linear-gradient(0deg, rgba(0,0,0,0.02) 0 1px, transparent 1px 3px), linear-gradient(90deg, rgba(0,255,120,0.03), rgba(0,255,100,0.02))',
+              backgroundSize: '100% 4px, 200% 100%',
+              animation: 'koganeShift 6s linear infinite'
+            }} />
 
-          {/* expanding screen area between halves */}
-          <div ref={contentRef}
-            style={{
-              height: '0px',
-              position: 'relative',
-              background: 'rgba(120,255,60,0.92)',
-              borderRadius: '10px',
-              borderTop: '1px solid rgba(0,200,80,0.9)',
-              borderBottom: '1px solid rgba(0,200,80,0.9)',
-              boxShadow: 'inset 0 0 40px rgba(0,255,100,0.18), 0 12px 50px rgba(0,255,100,0.25)',
-              padding: '60px 30px', // 60px padding top/bottom to keep text clear of overlapping images
-              opacity: 0,
-              transition: 'height 900ms ease, opacity 700ms ease',
-              overflow: 'hidden',
-              zIndex: 100001
-            }}>
+            {/* expanding screen area between halves */}
+            <div ref={contentRef}
+              style={{
+                height: '0px',
+                position: 'relative',
+                background: 'rgba(120,255,60,0.9)',
+                borderRadius: '10px',
+                borderTop: '1px solid rgba(0,200,80,0.9)',
+                borderBottom: '1px solid rgba(0,200,80,0.9)',
+                boxShadow: 'inset 0 0 40px rgba(0,255,100,0.18), 0 12px 50px rgba(0,255,100,0.25)',
+                padding: '60px 30px', // 60px padding top/bottom to keep text clear of overlapping images
+                opacity: 0,
+                transition: 'height 900ms ease, opacity 700ms ease',
+                overflow: 'visible',
+                zIndex: 100001
+              }}>
 
             <div style={{ position: 'relative', color: '#000', maxWidth: '980px', margin: '0 auto', fontFamily: 'Nunito, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial' }}>
               <h2 style={{ textAlign: 'center', fontWeight: 900, fontSize: '28px', marginBottom: '12px', color: '#8B0000' }}>CLOUT CULLING GAME RULES</h2>
 
-              <div style={{ fontSize: '15px', lineHeight: 1.6 }}>
+              <div style={{ fontSize: '16px', lineHeight: 1.8 }}>
                 <p style={{ marginBottom: '18px', fontWeight: 800 }}>I. Once a player has awakened their Clout Alias, they must declare their participation in the Clout Culling Games at a zip-colony of their choice within 28 days - these Players are the two types of either Orbiter or Participant.</p>
 
                 <p style={{ marginBottom: '18px', fontWeight: 800 }}>II. Any Players who break the previous rule will be subject to clout technique removal and coincidingly will be giga-mogged by other players.</p>
@@ -211,7 +210,9 @@ export default function KoganePopup({ onClose }) {
         {/* Bottom half image - overlap into the screen area */}
         <img ref={bottomImgRef} src={bottomSrc} alt="kogane bottom"
           onError={(e)=>{ e.currentTarget.src = bottomSrc; }}
-          style={{ display: 'block', width: '100%', marginTop: '-60px', zIndex: 100002, position: 'relative', transform: started ? 'translateY(0)' : 'translateY(-60px)', transition: 'transform 700ms ease' }} />
+          style={{ display: 'block', width: '100%', marginTop: '-60px', zIndex: 100003, position: 'relative', transform: started ? 'translateY(0)' : 'translateY(-60px)', transition: 'transform 700ms ease' }} />
+
+        </div>
 
       </div>
 
