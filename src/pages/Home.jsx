@@ -396,7 +396,7 @@ export default function Home({ events = [], eventsLoading = false }) {
                 </button>
               )}
               <button onClick={() => setShowForm(true)}
-                className="hidden md:block text-white font-black px-3.5 py-1.5 rounded-full text-xs transition-all shadow-[2px_2px_0px_#333] hover:scale-105 whitespace-nowrap"
+                className="hidden md:block text-white font-black px-3.5 py-1.5 rounded-full text-xs transition-all shadow-[2px_2px_0px_black] hover:scale-105 whitespace-nowrap"
                 style={{ backgroundColor: accentColor }}>
                 + Submit Event
               </button>
@@ -502,7 +502,7 @@ export default function Home({ events = [], eventsLoading = false }) {
                 </button>
              )}
              <button onClick={() => setShowForm(true)}
-                className="text-white font-black px-2.5 py-1.5 rounded-full text-[10px] shadow-[2px_2px_0px_#333] whitespace-nowrap flex-shrink-0"
+                className="text-white font-black px-3 py-1.5 rounded-full text-[11px] shadow-[2px_2px_0px_black] whitespace-nowrap flex-shrink-0"
                 style={{ backgroundColor: accentColor }}>
                 + Submit Event
              </button>

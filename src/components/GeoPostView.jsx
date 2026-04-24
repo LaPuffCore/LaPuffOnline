@@ -254,42 +254,48 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
   const emojiCounts = {};
   (postReactions || []).forEach(r => { emojiCounts[r.emoji_text] = (emojiCounts[r.emoji_text] || 0) + 1; });
   const topEmojis = Object.entries(emojiCounts).sort((a, b) => b[1] - a[1]).slice(0, 4);
-  const locationTagText = post.zip_code ? `📍 ${post.zip_code} · ${post.borough}`
+  
+  // Calculate luminance-inverted color for text/icons
+  const getLuminanceInvertedColor = (bgColor) => {
+    if (!bgColor || bgColor === '') return '#000000';
+    const hex = bgColor.replace('#', '');
+    if (hex.length !== 6) return '#000000';
+    const r = parseInt(hex.substring(0, 2), 16) / 255;
+    const g = parseInt(hex.substring(2, 4), 16) / 255;
+    const b = parseInt(hex.substring(4, 6), 16) / 255;
+    const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    return lum > 0.5 ? '#000000' : '#ffffff';
+  };
+  
+  const hasCustomFill = !!post.post_fill;
+  const invertedColor = hasCustomFill ? getLuminanceInvertedColor(cardBg) : '#000000';
+  const invertedBgColor = invertedColor === '#ffffff' ? '#000000' : '#ffffff';
+  
+  // Location tag with borough for zip-level posts
+  const locationTagText = post.zip_code && post.borough 
+    ? `📍 ${post.zip_code} · ${post.borough}`
     : post.borough ? `🏙 ${post.borough}`
     : post.scope === 'nyc' ? '🗽 NYC'
     : '💻 Digital';
+  
   const [qepOpen, setQepOpen] = useState(false);
-
-  // image aspect handling
   const [imgRatio, setImgRatio] = useState(1);
   const [imgModalOpen, setImgModalOpen] = useState(false);
 
-  const hasCustomFill = !!post.post_fill;
-  const isLight = (hex) => {
-    if (!hex) return true;
-    const h = hex.replace('#','');
-    const r = parseInt(h.substring(0,2),16)/255;
-    const g = parseInt(h.substring(2,4),16)/255;
-    const b = parseInt(h.substring(4,6),16)/255;
-    const lum = 0.2126*r + 0.7152*g + 0.0722*b;
-    return lum > 0.5;
-  };
-  const fg = hasCustomFill ? (isLight(cardBg) ? '#000' : '#fff') : undefined;
-  const tagBg = hasCustomFill ? fg : null;
-  const tagText = hasCustomFill ? (isLight(tagBg) ? '#000' : '#fff') : null;
-
   const locationTag = (
     <span onClick={() => onSelectTag && onSelectTag(post)}
-      style={hasCustomFill ? { background: tagBg, color: tagText, borderColor: tagBg } : {}}
-      className={`ml-auto text-[9px] font-black px-1.5 py-0.5 rounded-full ${hasCustomFill ? 'border' : 'bg-gray-100 border border-gray-300 text-gray-600'}`}>
+      style={hasCustomFill ? { background: invertedBgColor, color: invertedColor, borderColor: invertedColor } : {}}
+      className={`ml-auto text-[9px] font-black px-1.5 py-0.5 rounded-full cursor-pointer ${hasCustomFill ? 'border' : 'bg-gray-100 border border-gray-300 text-gray-600'}`}>
       {locationTagText}
     </span>
   );
 
   const statusPill = (
     <span onClick={() => onSelectTag && onSelectTag({ status: post.user_id == null ? 'anonymous' : post.is_participant ? 'participant' : 'orbiter'})}
-      className="text-[9px] font-black px-1.5 py-0.5 rounded-full"
-      style={hasCustomFill ? { background: tagBg, color: tagText } : (post.is_participant ? { background: '#22c55e', color: '#fff' } : post.user_id == null ? { background: '#374151', color: '#f3f4f6' } : { background: '#ef4444', color: '#fff' })}>
+      className="text-[9px] font-black px-1.5 py-0.5 rounded-full cursor-pointer"
+      style={hasCustomFill 
+        ? { background: invertedBgColor, color: invertedColor, borderColor: invertedColor }
+        : (post.is_participant ? { background: '#22c55e', color: '#fff' } : post.user_id == null ? { background: '#374151', color: '#f3f4f6' } : { background: '#ef4444', color: '#fff' })}>
       ● {post.is_participant ? 'PARTICIPANT' : post.user_id == null ? 'ANON' : 'ORBITER'}
     </span>
   );
@@ -299,7 +305,6 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
       style={{ background: cardBg, borderColor: cardBdr }}>
 
       {post.image_url && (
-        // image container adapts to ratio: wide -> short banner, square -> square, tall -> square preview with modal
         <div className={`w-full overflow-hidden ${imgRatio > 1.2 ? 'h-40' : 'aspect-square'}`}>
           <img src={post.image_url} alt="post" className="w-full h-full object-cover" loading="lazy"
             onLoad={e => { try { setImgRatio(e.target.naturalWidth / e.target.naturalHeight); } catch {} }}
@@ -316,7 +321,7 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
       <div className="p-3">
         <div className="flex items-center gap-1.5 mb-2 flex-wrap">
           {post.user_id == null ? (
-            <span className="font-black text-xs flex items-center gap-1" style={hasCustomFill ? { color: fg } : {}}>
+            <span className="font-black text-xs flex items-center gap-1" style={hasCustomFill ? { color: invertedColor } : {}}>
               <svg width="13" height="13" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ color: 'currentColor' }}>
                 <rect x="2" y="9" width="16" height="2.5" rx="1.25" fill="currentColor"/>
                 <rect x="5" y="3" width="10" height="7" rx="1.5" fill="currentColor"/>
@@ -325,11 +330,11 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
               Anonymous
             </span>
           ) : (
-            <span className="font-black text-xs" style={hasCustomFill ? { color: fg } : {}}>{post.username || 'Orbiter'}</span>
+            <span className="font-black text-xs" style={hasCustomFill ? { color: invertedColor } : {}}>{post.username || 'Orbiter'}</span>
           )}
 
           {statusPill}
-          <span className="text-[9px] text-gray-400 ml-auto" style={hasCustomFill ? { color: fg } : {}}>{dateStr} · {timeStr}</span>
+          <span className="text-[9px] ml-auto" style={hasCustomFill ? { color: invertedColor } : { color: '#9ca3af' }}>{dateStr} · {timeStr}</span>
         </div>
 
         <div className="text-sm leading-relaxed mb-3 break-words min-h-[1.5rem]"
@@ -338,15 +343,20 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
         <div className="flex items-center gap-1 flex-wrap">
           {topEmojis.map(([emoji, count]) => (
             <button key={emoji} onMouseDown={e => e.preventDefault()} onClick={() => onReact(post.id, emoji)}
-              className="flex items-center gap-0.5 px-2 py-0.5 rounded-full border-2 border-black text-xs font-black hover:scale-105 transition-transform bg-gray-50">
+              className="flex items-center gap-0.5 px-2 py-0.5 rounded-full border-2 text-xs font-black hover:scale-105 transition-transform"
+              style={hasCustomFill 
+                ? { borderColor: invertedColor, backgroundColor: invertedBgColor, color: invertedColor }
+                : { borderColor: '#000', backgroundColor: '#f3f4f6', color: '#000' }}>
               {emoji}<span className="text-[10px]">{count}</span>
             </button>
           ))}
           <button onMouseDown={e => e.preventDefault()} onClick={() => setQepOpen(v => !v)}
-            className="px-2 py-0.5 rounded-full border-2 border-black text-xs font-black bg-gray-50 hover:scale-105 transition-transform">+</button>
+            className="px-2 py-0.5 rounded-full border-2 text-xs font-black bg-gray-50 hover:scale-105 transition-transform"
+            style={hasCustomFill ? { borderColor: invertedColor, color: invertedColor } : { borderColor: '#000' }}>+</button>
           {(postReactions?.length > 0) && (
             <button onMouseDown={e => e.preventDefault()} onClick={() => onOpenReactors(post.id)}
-              className="px-2 py-0.5 rounded-full border-2 border-black text-[10px] font-black bg-gray-50 hover:scale-105 transition-transform">…</button>
+              className="px-2 py-0.5 rounded-full border-2 text-[10px] font-black bg-gray-50 hover:scale-105 transition-transform"
+              style={hasCustomFill ? { borderColor: invertedColor, color: invertedColor } : { borderColor: '#000' }}>…</button>
           )}
 
           {locationTag}
@@ -476,7 +486,18 @@ function filterSamplePosts(type, value, timeFilter, statusFilter, sortByTop) {
   else if (statusFilter === 'orbiter') posts = posts.filter(p => !p.is_participant && p.user_id != null);
   else if (statusFilter === 'anonymous') posts = posts.filter(p => p.user_id == null);
   if (sortByTop) posts.sort((a, b) => (b.total_reactions || 0) - (a.total_reactions || 0));
+  else posts.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
   return posts;
+}
+
+// Ensure samples also get borough tags for zip-level posts
+function enrichSamplePostsWithBoroughTags(posts) {
+  return posts.map(p => {
+    if (p.scope === 'zip' && p.zip_code && p.borough && !p._has_borough_tag) {
+      return { ...p, _has_borough_tag: true };
+    }
+    return p;
+  });
 }
 
 // ── GeoPostView ───────────────────────────────────────────────────────────────
@@ -550,29 +571,35 @@ export default function GeoPostView({ session }) {
       const type  = locTab === 'borough' ? 'borough' : locTab === 'zip' ? 'zip' : 'all';
       const value = locTab === 'borough' ? filterBorough : locTab === 'zip' ? filterZip : null;
       const data  = await fetchGeoPostFeed({ type, value, timeFilter, statusFilter, sortByTop });
-      // Fall back to sample posts when feed is empty (for development / demo purposes)
-      const finalData = (data && data.length > 0) ? data : filterSamplePosts(type, value, timeFilter, statusFilter, sortByTop);
-      // If using sample posts, synthesize additional demo posts so the feed is fuller for testing
-      let finalList = finalData;
-      if ((!data || data.length === 0) && finalData.length < 60) {
-        const extra = [];
-        const kinds = ['digital','nyc','borough','zip'];
-        const boroughs = BOROUGHS;
-        for (let i = 0; i < 50; i++) {
-          const id = 'gsp_' + Date.now().toString(36) + '_' + i;
-          const scope = kinds[Math.floor(Math.random() * kinds.length)];
-          const borough = scope === 'borough' || scope === 'zip' ? boroughs[Math.floor(Math.random() * boroughs.length)] : null;
-          const zip = scope === 'zip' ? (BOROUGH_ZIPS[borough] && BOROUGH_ZIPS[borough][Math.floor(Math.random() * (BOROUGH_ZIPS[borough].length || 1))]?.zip) : null;
-          const imgChoices = [null, null, null];
-          const created = new Date(Date.now() - Math.floor(Math.random() * 90 * 24 * 3600000));
-          extra.push({ id, user_id: Math.random() > 0.4 ? ('fake-' + Math.floor(Math.random()*1000)) : null, username: 'user_' + Math.floor(Math.random()*1000), is_participant: Math.random() > 0.5, scope, borough, zip_code: zip, content: { html: 'Sample generated post #' + i }, post_fill: Math.random() > 0.6 ? PRESET_COLORS[Math.floor(Math.random()*PRESET_COLORS.length)] : '', post_outline: Math.random() > 0.5 ? PRESET_COLORS[Math.floor(Math.random()*PRESET_COLORS.length)] : '', total_reactions: Math.floor(Math.random()*50), created_at: created.toISOString(), post_approved: true, image_url: Math.random() > 0.6 ? `https://picsum.photos/seed/${Math.floor(Math.random()*1000)}/800/600` : null });
+      
+      // Always include sample posts mixed with real posts (during testing/SAMPLE_MODE)
+      const samples = filterSamplePosts(type, value, timeFilter, statusFilter, sortByTop);
+      const enrichedSamples = enrichSamplePostsWithBoroughTags(samples);
+      
+      // Merge real posts and samples, with samples appearing throughout the list
+      let finalList = [];
+      if (data && data.length > 0) {
+        // Interleave samples with real posts (samples every ~3 real posts)
+        let sampleIdx = 0;
+        for (let i = 0; i < data.length; i++) {
+          finalList.push(data[i]);
+          if ((i + 1) % 3 === 0 && sampleIdx < enrichedSamples.length) {
+            finalList.push(enrichedSamples[sampleIdx++]);
+          }
         }
-        finalList = finalData.concat(extra);
+        // Add remaining samples
+        while (sampleIdx < enrichedSamples.length) {
+          finalList.push(enrichedSamples[sampleIdx++]);
+        }
+      } else {
+        // No real posts, just use samples
+        finalList = enrichedSamples;
       }
+      
       setPosts(finalList);
       setVisibleCount(PAGE_SIZE);
       if (finalList.length > 0) {
-        const realIds = finalList.filter(p => !p.id.startsWith('sp')).map(p => p.id);
+        const realIds = finalList.filter(p => !p.id.startsWith('sp') && !p.id.startsWith('gsp_')).map(p => p.id);
         if (realIds.length > 0) {
           const rxns = await fetchReactionsForPosts(realIds);
           const byPost = {};
@@ -584,7 +611,8 @@ export default function GeoPostView({ session }) {
       console.error('loadFeed error', err);
       const type  = locTab === 'borough' ? 'borough' : locTab === 'zip' ? 'zip' : 'all';
       const value = locTab === 'borough' ? filterBorough : locTab === 'zip' ? filterZip : null;
-      setPosts(filterSamplePosts(type, value, timeFilter, statusFilter, sortByTop));
+      const samples = filterSamplePosts(type, value, timeFilter, statusFilter, sortByTop);
+      setPosts(enrichSamplePostsWithBoroughTags(samples));
     }
     setLoading(false);
   }, [locTab, filterBorough, filterZip, timeFilter, statusFilter, sortByTop]);
@@ -884,8 +912,45 @@ export default function GeoPostView({ session }) {
   const filteredVisiblePosts = visiblePosts.filter(p => {
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
-    const text = (p.content?.html || p.content || '') + ' ' + (p.username || '') + ' ' + (p.zip_code || '') + ' ' + (p.borough || '');
-    return text.toLowerCase().includes(q);
+    // Convert all content from cool fonts to plain text for searching
+    const plainContent = toPlainText(p.content?.html || p.content || '');
+    const searchableText = (plainContent + ' ' + (p.username || '') + ' ' + (p.zip_code || '') + ' ' + (p.borough || '')).toLowerCase();
+    
+    // Check for direct text match
+    if (searchableText.includes(q)) return true;
+    
+    // Check for tag/type matches
+    const tagMatches = [
+      'anonymous', 'anon',
+      'orbiter', 'participant',
+      'digital', 'nyc',
+      'manhattan', 'brooklyn', 'queens', 'bronx', 'staten island'
+    ];
+    const matchedTags = tagMatches.filter(tag => tag.toLowerCase().startsWith(q) || q.startsWith(tag));
+    if (matchedTags.length > 0) {
+      for (const tag of matchedTags) {
+        if (tag === 'anonymous' || tag === 'anon') {
+          if (p.user_id == null) return true;
+        } else if (tag === 'orbiter') {
+          if (p.user_id != null && !p.is_participant) return true;
+        } else if (tag === 'participant') {
+          if (p.is_participant) return true;
+        } else if (tag === 'digital') {
+          if (p.scope === 'digital') return true;
+        } else if (tag === 'nyc') {
+          if (p.scope === 'nyc') return true;
+        } else if (tag === 'manhattan' || tag === 'brooklyn' || tag === 'queens' || tag === 'bronx' || tag === 'staten island') {
+          const searchBorough = tag === 'staten island' ? 'Staten Island' : tag.charAt(0).toUpperCase() + tag.slice(1);
+          if (p.borough === searchBorough) return true;
+        }
+      }
+    }
+    
+    // Check for zipcode matches
+    const isZipSearch = /^\d{5}$/.test(q);
+    if (isZipSearch && p.zip_code === q) return true;
+    
+    return false;
   });
   const canShowMore  = visibleCount < posts.length;
   const canShowLess  = visibleCount > PAGE_SIZE;
@@ -910,11 +975,50 @@ export default function GeoPostView({ session }) {
   };
 
   return (
-    <div className="w-full max-w-7xl mx-auto px-3 pt-3 pb-8">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {/* Left filter panel (web only) */}
-        <div className="hidden md:block md:col-span-1">
-          <div className="sticky top-20">
+    <div className="w-full">
+      {/* ── Full-width Create Post Container ──────────────────────────────────── */}
+      <div className="w-full max-w-7xl mx-auto px-3 pt-3 pb-1">
+        <div className="rounded-2xl border-3 border-black shadow-[4px_4px_0px_black]"
+          style={{ background: surfaceBg, borderColor: postOutline || '#000' }}>
+
+          {/* image preview at top, rounded */}
+          {imagePreview && (
+            <div className="relative overflow-hidden rounded-t-2xl">
+              <img src={imagePreview} alt="preview" className="w-full max-h-44 object-cover" />
+              <button onMouseDown={e => e.preventDefault()} onClick={() => { setImageFile(null); setImagePreview(null); }}
+                className="absolute top-2 right-2 w-6 h-6 bg-black text-white rounded-full text-[11px] flex items-center justify-center font-black">✕</button>
+            </div>
+          )}
+
+          {/* location selector */}
+          <div className="px-3 pt-3 pb-4">
+            <LocationSelector scope={editorScope} setScope={setEditorScope}
+              borough={editorBorough} setBorough={setEditorBorough}
+              zip={editorZip} setZip={setEditorZip} accentColor={accentColor} />
+          </div>
+
+          {/* contenteditable editor — border shows postOutline simulation, expands with content */}
+          <div ref={editorRef} contentEditable suppressContentEditableWarning
+            className="min-h-[80px] md:min-h-[240px] px-3 py-4 text-sm border-t border-gray-100"
+            style={{
+              overflowWrap: 'break-word',
+              backgroundColor: postFill || undefined,
+              outline: postOutline ? `3px solid ${postOutline}` : 'none',
+            }}
+            onKeyDown={e => {
+              if (e.ctrlKey || e.metaKey) {
+                if (e.key === 'b') { e.preventDefault(); execCmd('bold'); }
+                else if (e.key === 'i') { e.preventDefault(); execCmd('italic'); }
+                else if (e.key === 'u') { e.preventDefault(); execCmd('underline'); }
+                else if (e.key === 'l') { e.preventDefault(); handleAlign('left'); }
+                else if (e.key === 'e') { e.preventDefault(); handleAlign('center'); }
+                else if (e.key === 'r') { e.preventDefault(); handleAlign('right'); }
+              }
+            }}
+          />
+
+          {/* ── Toolbar ──────────────────────────────────────────────────────── */}
+          <div className="border-t border-gray-200 px-2 py-2 md:py-3 flex items-center gap-1 flex-wrap bg-gray-50">
             <div className="rounded-2xl border-3 border-black p-3 bg-white shadow-[4px_4px_0px_black]">
               <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search posts, usernames, zips..."
                 className="w-full px-3 py-2 border-2 border-black rounded text-sm font-black mb-3" />
@@ -1005,7 +1109,7 @@ export default function GeoPostView({ session }) {
         )}
 
         {/* location selector */}
-        <div className="px-3 pt-3 pb-1">
+        <div className="px-3 pt-3 pb-4">
           <LocationSelector scope={editorScope} setScope={setEditorScope}
             borough={editorBorough} setBorough={setEditorBorough}
             zip={editorZip} setZip={setEditorZip} accentColor={accentColor} />
@@ -1335,7 +1439,7 @@ export default function GeoPostView({ session }) {
 
       {/* Back to top (web only) */}
       <button onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-        className="hidden md:block fixed right-4 bottom-4 z-[200000] w-12 h-12 rounded-full bg-black text-white flex items-center justify-center shadow-[6px_6px_0px_black]">
+        className="hidden md:block fixed right-4 bottom-4 z-[200000] w-12 h-12 rounded-full bg-black text-white flex items-center justify-center hover:scale-110 transition-transform shadow-[3px_3px_0px_rgba(0,0,0,0.3)]">
         ▲
       </button>
 
