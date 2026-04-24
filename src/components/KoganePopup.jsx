@@ -44,6 +44,16 @@ export default function KoganePopup({ onClose }) {
   };
 
   useEffect(() => {
+    // ensure an inflow anchor exists directly after the header so popup content lives in-page (no inner scrollbar)
+    const hdr = document.querySelector('header');
+    let inflow = document.getElementById('kogane-inflow');
+    if (!inflow) {
+      inflow = document.createElement('div');
+      inflow.id = 'kogane-inflow';
+      if (hdr && hdr.parentNode) hdr.parentNode.insertBefore(inflow, hdr.nextSibling);
+      else document.body.insertBefore(inflow, document.body.firstChild);
+    }
+
     // add keyframe for glitch animation if not present
     if (!document.getElementById('kogane-glitch-styles')) {
       const s = document.createElement('style');
@@ -56,9 +66,16 @@ export default function KoganePopup({ onClose }) {
 
     // Start sequence after 2s
     const t = setTimeout(() => setStarted(true), 2000);
-    return () => clearTimeout(t);
+    return () => {
+      clearTimeout(t);
+      // cleanup inflow spacer on unmount
+      const inf = document.getElementById('kogane-inflow');
+      if (inf && inf.parentNode) {
+        // remove the inflow only if it's empty
+        if (inf.childElementCount === 0 && !document.getElementById('kogane-page-spacer')) inf.parentNode.removeChild(inf);
+      }
+    };
   }, []);
-
   useEffect(() => {
     if (!started) return;
     const el = contentRef.current;
@@ -78,7 +95,7 @@ export default function KoganePopup({ onClose }) {
         bottomH = br.height || (bottomImg.naturalHeight || 0) * (Math.min(980, window.innerWidth * 0.9) / (bottomImg.naturalWidth || 1));
       }
 
-      // Animate the visible content panel height & opacity
+      // Set content height so the page can grow and be scrolled (no inner scrollbar)
       el.style.transition = 'height 900ms ease, opacity 700ms ease 200ms, margin-top 700ms ease';
       el.style.height = '0px';
       el.style.opacity = '0';
@@ -86,18 +103,31 @@ export default function KoganePopup({ onClose }) {
       el.style.marginTop = '-60px';
       void el.offsetHeight;
       el.style.height = contentH + 'px';
-      el.style.opacity = '0.95';
+      el.style.opacity = '0.92';
 
       // ensure images sit above the screen
-      if (topImg) topImg.style.zIndex = 100002;
-      if (bottomImg) bottomImg.style.zIndex = 100002;
-      el.style.zIndex = 100001; // screen behind images
+      if (topImg) topImg.style.zIndex = 100003;
+      if (bottomImg) bottomImg.style.zIndex = 100003;
+      el.style.zIndex = 100002; // screen behind images
 
       // animate bottom image starting position: when not started earlier it was higher by 60px; now bring it to overlap position
       if (bottomImg) {
         bottomImg.style.transition = 'transform 900ms ease';
         bottomImg.style.transform = 'translateY(0)';
       }
+
+      // make page-long spacer to ensure full scrollable area equals top+screen+bottom+400px
+      const totalNeeded = Math.round((topImg ? topImg.getBoundingClientRect().height : 0) + contentH + bottomH + 400);
+      let pageSpacer = document.getElementById('kogane-page-spacer');
+      if (!pageSpacer) {
+        pageSpacer = document.createElement('div');
+        pageSpacer.id = 'kogane-page-spacer';
+        // insert after the inflow anchor container
+        const inflow = document.getElementById('kogane-inflow');
+        if (inflow && inflow.parentNode) inflow.parentNode.insertBefore(pageSpacer, inflow.nextSibling);
+        else document.body.appendChild(pageSpacer);
+      }
+      pageSpacer.style.height = totalNeeded + 'px';
 
       const done = setTimeout(() => setExpanded(true), 1000);
       return () => clearTimeout(done);
@@ -130,14 +160,17 @@ export default function KoganePopup({ onClose }) {
   };
 
   const portalRoot = document.body;
+  // Portal into the inflow anchor so popup contents live in the page flow (no inner scrollbar)
+  const inflowRoot = document.getElementById('kogane-inflow') || document.body;
   return createPortal(
     <>
-      {/* Fullscreen modal overlay (like EventDetailPopup) */}
-      <div onClick={handleClose} className="fixed inset-0 z-[100000] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
+      {/* Overlay covering viewport below header (header stays on top) */}
+      <div onClick={handleClose} className="fixed left-0 right-0" style={{ top: (document.querySelector('header')?.getBoundingClientRect().height || topOffset) + 'px', bottom: 0, backgroundColor: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', zIndex: 100000 }} />
 
-        <div ref={containerRef} onClick={(e)=>e.stopPropagation()} style={{ width: 'min(980px, 90vw)', maxHeight: 'calc(100vh - 80px)', overflowY: 'auto', position: 'relative', zIndex: 100001 }}>
+      {/* In-flow container appended to the inflow anchor; this sits in document flow so body scroll includes it */}
+      <div ref={containerRef} onClick={(e)=>e.stopPropagation()} style={{ width: 'min(980px, 90vw)', margin: '0 auto', position: 'relative', zIndex: 100001 }}>
 
-          {/* Top half image (anchored) */}
+        {/* Top half image (anchored) */}
           <img ref={topImgRef} src={topSrc} alt="kogane top"
             onError={(e)=>{ e.currentTarget.src = topSrc; }}
             style={{ display: 'block', width: '100%', zIndex: 100003, position: 'relative' }} />
