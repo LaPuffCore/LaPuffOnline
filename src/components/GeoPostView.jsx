@@ -7,6 +7,8 @@ import { isUserInZipCode } from '../lib/locationService';
 import {
   fetchGeoPostFeed, submitGeoPost, uploadGeoPostImage,
   addPostReaction, removePostReaction, fetchReactionsForPosts,
+  fetchCommentsForPost, submitPostComment, fetchCommentReactions,
+  upsertCommentReaction, removeCommentReaction, fetchProfileForGeoPost,
 } from '../lib/supabase';
 import { uploadToOracleCloud, isOciConfigured } from '../lib/oracleStorage';
 import { NYC_ZIP_FEATURES } from '../lib/nycZipGeoJSON';
@@ -127,6 +129,12 @@ function buildBoroughHeatMap(zipHeat) {
   return out;
 }
 
+function getBoroughForZip(zip) {
+  if (!zip) return null;
+  const match = NYC_ZIP_FEATURES.find((feature) => feature.zip === zip);
+  return match?.borough || null;
+}
+
 const SAMPLE_ZIP_CHOICES = [
   { borough: 'Manhattan', zip: '10002' },
   { borough: 'Manhattan', zip: '10027' },
@@ -142,6 +150,7 @@ const SAMPLE_ZIP_CHOICES = [
 
 const SAMPLE_FILL_COLORS = [
   '#ffffff', '#111827', '#fef3c7', '#ecfeff', '#dcfce7', '#fee2e2', '#ede9fe', '#fce7f3', '#e0f2fe', '#ecfccb',
+  '#0f172a', '#3f3f46', '#451a03', '#052e16', '#083344', '#4c1d95', '#831843', '#faf5ff', '#f8fafc', '#fff7ed',
 ];
 const SAMPLE_OUTLINE_COLORS = [
   '#111827', '#dc2626', '#f97316', '#eab308', '#16a34a', '#0891b2', '#2563eb', '#7c3aed', '#db2777', '#0f766e',
@@ -195,7 +204,7 @@ function buildSamplePosts() {
       image_url: imageUrl,
       content: {
         html: `<b>Sample GeoPost #${idx}</b><br/>Testing ${scope.toUpperCase()} scope in ${borough || 'NYC-wide'} ${zip ? `(${zip})` : ''} with mixed media + style colors.`,
-        textColor: i % 2 === 0 ? '#111827' : '#f9fafb',
+        textColor: contrastTextColor(fill),
       },
       post_fill: fill,
       post_outline: outline,
@@ -211,13 +220,93 @@ function buildSamplePosts() {
 
 const SAMPLE_POSTS = buildSamplePosts();
 
+function buildSampleComments() {
+  const base = [];
+  const commentSeeds = [
+    { postId: 'sp1', main: 3, replies: [2, 5, 1] },
+    { postId: 'sp2', main: 2, replies: [0, 4] },
+    { postId: 'sp3', main: 1, replies: [6] },
+    { postId: 'sp4', main: 4, replies: [1, 0, 2, 3] },
+    { postId: 'sp5', main: 2, replies: [3, 0] },
+    { postId: 'sp6', main: 1, replies: [2] },
+    { postId: 'sp7', main: 3, replies: [0, 0, 4] },
+    { postId: 'sp8', main: 2, replies: [1, 5] },
+  ];
+  let counter = 1;
+  commentSeeds.forEach((seed, seedIdx) => {
+    for (let i = 0; i < seed.main; i += 1) {
+      const id = `sc${counter++}`;
+      const mode = (seedIdx + i) % 3;
+      const isAnonymous = mode === 2;
+      const isParticipant = mode === 0;
+      const place = SAMPLE_ZIP_CHOICES[(seedIdx + i) % SAMPLE_ZIP_CHOICES.length];
+      base.push({
+        id,
+        post_id: seed.postId,
+        parent_id: null,
+        user_id: isAnonymous ? null : `comment-user-${id}`,
+        username: isAnonymous ? 'anonymous' : `commenter_${id}`,
+        content: `Sample comment ${i + 1} on ${seed.postId} with ${isParticipant ? 'participant' : isAnonymous ? 'anonymous' : 'orbiter'} context.`,
+        is_participant: isParticipant,
+        borough: isAnonymous ? null : place.borough,
+        zip_code: isAnonymous ? null : (i % 2 === 0 ? place.zip : null),
+        created_at: new Date(Date.now() - (seedIdx + i + 2) * 3600000).toISOString(),
+      });
+      const replyCount = seed.replies[i] || 0;
+      for (let r = 0; r < replyCount; r += 1) {
+        const rid = `sc${counter++}`;
+        const replyAnon = (r + i) % 4 === 3;
+        base.push({
+          id: rid,
+          post_id: seed.postId,
+          parent_id: id,
+          user_id: replyAnon ? null : `reply-user-${rid}`,
+          username: replyAnon ? 'anonymous' : `replier_${rid}`,
+          content: `Reply ${r + 1} in the subthread for ${id}.`,
+          is_participant: (r % 2) === 0,
+          borough: replyAnon ? null : place.borough,
+          zip_code: replyAnon ? null : (r % 2 === 0 ? place.zip : null),
+          created_at: new Date(Date.now() - (seedIdx + i + r + 3) * 1800000).toISOString(),
+        });
+      }
+    }
+  });
+  return base;
+}
+
+function buildSampleCommentReactions(comments) {
+  const emojis = ['😀', '🔥', '😮', '😭', '🤝', '💯'];
+  const reactions = [];
+  comments.forEach((comment, idx) => {
+    const count = idx % 3;
+    for (let i = 0; i <= count; i += 1) {
+      reactions.push({
+        comment_id: comment.id,
+        emoji: emojis[(idx + i) % emojis.length],
+        user_id: i === count && idx % 4 === 0 ? null : `sample-reactor-${idx}-${i}`,
+        profiles: i === count && idx % 4 === 0 ? null : { username: `reactor_${idx}_${i}` },
+      });
+    }
+  });
+  return reactions;
+}
+
+const SAMPLE_COMMENTS = buildSampleComments();
+const SAMPLE_COMMENT_REACTIONS = buildSampleCommentReactions(SAMPLE_COMMENTS);
+
 // Anonymous reaction dedup via localStorage (prevents refresh-spam without accounts)
 const ANON_REACTIONS_KEY = 'lapuff_geo_anon_reactions';
+const ANON_COMMENT_REACTIONS_KEY = 'lapuff_geo_anon_comment_reactions';
 function getAnonSet() {
   try { return new Set(JSON.parse(localStorage.getItem(ANON_REACTIONS_KEY) || '[]')); }
   catch { return new Set(); }
 }
 function saveAnonSet(s) { localStorage.setItem(ANON_REACTIONS_KEY, JSON.stringify([...s])); }
+function getAnonCommentSet() {
+  try { return new Set(JSON.parse(localStorage.getItem(ANON_COMMENT_REACTIONS_KEY) || '[]')); }
+  catch { return new Set(); }
+}
+function saveAnonCommentSet(s) { localStorage.setItem(ANON_COMMENT_REACTIONS_KEY, JSON.stringify([...s])); }
 
 // ── PortalPopup ───────────────────────────────────────────────────────────────
 // Renders children via createPortal, positioned near a trigger button.
@@ -406,7 +495,7 @@ const AlignCenterIcon = () => <svg width="13" height="13" viewBox="0 0 16 16" fi
 const AlignRightIcon  = () => <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><rect x="1" y="2" width="14" height="2" rx="1"/><rect x="5" y="7" width="10" height="2" rx="1"/><rect x="3" y="12" width="12" height="2" rx="1"/></svg>;
 
 // ── PostCard ──────────────────────────────────────────────────────────────────
-function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, onSelectTag, zipHeatMap, boroughHeatMap, textScale = 1 }) {
+function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, onSelectTag, zipHeatMap, boroughHeatMap, textScale = 1, commentCount = 0, commentsOpen = false, onToggleComments, commentsChildren }) {
   const { resolvedTheme } = useSiteTheme();
   const theme = getPostVisualTheme(post, resolvedTheme);
   const date = new Date(post.created_at);
@@ -418,6 +507,7 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
   const [qepOpen, setQepOpen] = useState(false);
   const [imgRatio, setImgRatio] = useState(1);
   const [imgModalOpen, setImgModalOpen] = useState(false);
+  const [imgLoaded, setImgLoaded] = useState(false);
   // content can be a JSONB object or, rarely, a double-encoded JSON string
   const parsedContent = (() => {
     const c = post.content;
@@ -445,6 +535,16 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
     backgroundColor: theme.fill,
     color: theme.text,
   };
+  const isNonStandardFrame = Math.abs(imgRatio - (16 / 9)) > 0.08;
+
+  useEffect(() => {
+    if (!imgModalOpen) return undefined;
+    const onKey = (event) => {
+      if (event.key === 'Escape') setImgModalOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [imgModalOpen]);
 
   return (
     <div
@@ -456,16 +556,20 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
       }}
     >
       {post.image_url && (
-        <div className={`w-full overflow-hidden ${imgRatio > 1.2 ? 'h-40' : 'aspect-square'}`}>
+        <div className="relative w-full overflow-hidden aspect-video bg-black/5">
           <img
             src={post.image_url}
             alt="post"
-            className="w-full h-full object-cover"
+            className={`w-full h-full object-cover transition-opacity duration-200 ${imgLoaded ? 'opacity-100' : 'opacity-0'}`}
             loading="lazy"
-            onLoad={(e) => { try { setImgRatio(e.target.naturalWidth / e.target.naturalHeight); } catch {} }}
-            onClick={() => { if (imgRatio < 0.9) setImgModalOpen(true); }}
+            onLoad={(e) => {
+              try { setImgRatio(e.target.naturalWidth / e.target.naturalHeight); } catch {}
+              setImgLoaded(true);
+            }}
+            onClick={() => { if (isNonStandardFrame) setImgModalOpen(true); }}
           />
-          {imgRatio < 0.9 && (
+          {!imgLoaded && <div className="absolute inset-0 animate-pulse bg-black/5" />}
+          {isNonStandardFrame && (
             <div className="absolute right-3 bottom-3">
               <button
                 className="w-8 h-8 rounded-full bg-white border-2 border-black flex items-center justify-center shadow-[2px_2px_0px_black] hover:scale-105 transition-transform"
@@ -543,6 +647,15 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
             </button>
           )}
 
+          <button
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => onToggleComments && onToggleComments(post.id)}
+            className="px-2 py-0.5 rounded-full border-2 text-[10px] font-black hover:scale-105 transition-transform"
+            style={post.post_fill ? outlineButtonStyle : { borderColor: '#000', backgroundColor: '#f3f4f6', color: '#000' }}
+          >
+            💬 {commentCount}
+          </button>
+
           <div className="ml-auto flex items-center gap-1">
             {post.scope === 'zip' && post.borough && (
               <span
@@ -584,12 +697,14 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
             />
           </div>
         )}
+
+        {commentsOpen && commentsChildren}
       </div>
 
       {imgModalOpen && (
         <div className="fixed inset-0 z-[100000] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/60" onClick={() => setImgModalOpen(false)} />
-          <div className="relative max-h-[90vh] overflow-auto">
+          <div className="relative max-h-[90vh] overflow-auto border-3 rounded-2xl bg-white" style={{ borderColor: theme.outline }}>
             <img src={post.image_url} alt="full" className="max-w-[90vw] max-h-[90vh] object-contain" />
             <button onClick={() => setImgModalOpen(false)} className="absolute top-2 right-2 w-8 h-8 rounded-full bg-white border-2 border-black">✕</button>
           </div>
@@ -599,10 +714,148 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
   );
 }
 
-// ── ReactorListModal ──────────────────────────────────────────────────────────
-function ReactorListModal({ postId, reactions, onClose }) {
-  if (!postId) return null;
-  const list = reactions[postId] || [];
+function CommentSection({
+  post,
+  comments,
+  reactionsByComment,
+  onSubmitComment,
+  onSubmitReply,
+  onToggleReaction,
+  onOpenReactors,
+  zipHeatMap,
+  boroughHeatMap,
+}) {
+  const [draft, setDraft] = useState('');
+  const [replyDrafts, setReplyDrafts] = useState({});
+  const [replyOpen, setReplyOpen] = useState({});
+  const [visibleReplies, setVisibleReplies] = useState({});
+  const [emojiOpen, setEmojiOpen] = useState(null);
+
+  const mains = comments.filter((c) => !c.parent_id);
+  const repliesFor = (commentId) => comments.filter((c) => c.parent_id === commentId);
+
+  const renderReactionBar = (comment) => {
+    const list = reactionsByComment[comment.id] || [];
+    const counts = {};
+    list.forEach((entry) => { counts[entry.emoji] = (counts[entry.emoji] || 0) + 1; });
+    const top = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 2);
+    return (
+      <div className="flex items-center gap-1 flex-wrap mt-2">
+        {top.map(([emoji, count]) => (
+          <button key={emoji} onMouseDown={(e) => e.preventDefault()} onClick={() => onToggleReaction(comment.id, emoji)} className="px-2 py-0.5 rounded-full border border-black text-[10px] font-black bg-white">
+            {emoji} <span className="text-[9px]">{count}</span>
+          </button>
+        ))}
+        <button onMouseDown={(e) => e.preventDefault()} onClick={() => setEmojiOpen((prev) => prev === comment.id ? null : comment.id)} className="px-2 py-0.5 rounded-full border border-black text-[10px] font-black bg-white">+</button>
+        {list.length > 0 && (
+          <button onMouseDown={(e) => e.preventDefault()} onClick={() => onOpenReactors(comment.id)} className="px-2 py-0.5 rounded-full border border-black text-[10px] font-black bg-white">…</button>
+        )}
+        {emojiOpen === comment.id && (
+          <div className="mt-1 w-full">
+            <EmojiPicker embedded={true} compact={true} value="" onChange={(emoji) => { if (emoji) { onToggleReaction(comment.id, emoji); setEmojiOpen(null); } }} />
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div className="mt-3 rounded-xl border-2 border-black/10 bg-white/60 p-3">
+      <div className="flex gap-2 mb-3">
+        <input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder="Add a comment..."
+          className="flex-1 border-2 border-black rounded px-3 py-2 text-xs font-semibold"
+        />
+        <button onMouseDown={(e) => e.preventDefault()} onClick={() => { if (draft.trim()) { onSubmitComment(post.id, draft.trim()); setDraft(''); } }} className="px-3 py-2 rounded-lg border-2 border-black text-xs font-black bg-white">Post</button>
+      </div>
+
+      <div className="space-y-3">
+        {mains.length === 0 && <p className="text-xs font-semibold text-gray-400">No comments yet.</p>}
+        {mains.map((comment) => {
+          const subReplies = repliesFor(comment.id);
+          const limit = visibleReplies[comment.id] || 3;
+          const shownReplies = subReplies.slice(0, limit);
+          const isAnon = comment.user_id == null || comment.username === 'anonymous';
+          return (
+            <div key={comment.id} className="rounded-xl border border-black/10 bg-white p-2.5">
+              <div className="flex items-start gap-2">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1 flex-wrap mb-1">
+                    <span className="text-xs font-black">{comment.username || 'anonymous'}</span>
+                    {!isAnon && (
+                      <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full" style={comment.is_participant ? { background: '#22c55e', color: '#fff' } : { background: '#ef4444', color: '#fff' }}>
+                        {comment.is_participant ? 'PARTICIPANT' : 'ORBITER'}
+                      </span>
+                    )}
+                    {!isAnon && comment.borough && (
+                      <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full" style={{ background: heatTagColor(boroughHeatMap?.[comment.borough] || 0), color: contrastTextColor(heatTagColor(boroughHeatMap?.[comment.borough] || 0)) }}>
+                        🏙 {comment.borough}
+                      </span>
+                    )}
+                    {!isAnon && comment.zip_code && (
+                      <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full" style={{ background: heatTagColor(zipHeatMap?.[comment.zip_code] || 0), color: contrastTextColor(heatTagColor(zipHeatMap?.[comment.zip_code] || 0)) }}>
+                        📍 {comment.zip_code}
+                      </span>
+                    )}
+                    <span className="ml-auto text-[10px] text-gray-400 font-semibold">{new Date(comment.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>
+                  </div>
+                  <p className="text-xs leading-relaxed break-words">{comment.content}</p>
+                  {renderReactionBar(comment)}
+                  <div className="mt-2">
+                    <button onMouseDown={(e) => e.preventDefault()} onClick={() => setReplyOpen((prev) => ({ ...prev, [comment.id]: !prev[comment.id] }))} className="text-[10px] font-black text-gray-500 hover:text-black">Reply</button>
+                  </div>
+                  {replyOpen[comment.id] && (
+                    <div className="mt-2 flex gap-2">
+                      <input
+                        value={replyDrafts[comment.id] || ''}
+                        onChange={(e) => setReplyDrafts((prev) => ({ ...prev, [comment.id]: e.target.value }))}
+                        placeholder="Add a reply..."
+                        className="flex-1 border border-black rounded px-2 py-1.5 text-[11px] font-semibold"
+                      />
+                      <button onMouseDown={(e) => e.preventDefault()} onClick={() => {
+                        const value = (replyDrafts[comment.id] || '').trim();
+                        if (!value) return;
+                        onSubmitReply(post.id, comment.id, value);
+                        setReplyDrafts((prev) => ({ ...prev, [comment.id]: '' }));
+                        setReplyOpen((prev) => ({ ...prev, [comment.id]: false }));
+                      }} className="px-2.5 py-1.5 rounded border border-black text-[10px] font-black bg-white">Send</button>
+                    </div>
+                  )}
+                  {shownReplies.length > 0 && (
+                    <div className="mt-3 pl-3 border-l-2 border-gray-200 space-y-2">
+                      {shownReplies.map((reply) => (
+                        <div key={reply.id} className="rounded-lg bg-gray-50 px-2.5 py-2 border border-gray-200">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="text-[11px] font-black">{reply.username || 'anonymous'}</span>
+                            <span className="ml-auto text-[9px] text-gray-400 font-semibold">{new Date(reply.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>
+                          </div>
+                          <p className="text-[11px] leading-relaxed break-words">{reply.content}</p>
+                          {renderReactionBar(reply)}
+                        </div>
+                      ))}
+                      {subReplies.length > 3 && subReplies.length > limit && (
+                        <button onMouseDown={(e) => e.preventDefault()} onClick={() => setVisibleReplies((prev) => ({ ...prev, [comment.id]: limit + 4 }))} className="text-[10px] font-black text-gray-500 hover:text-black">Show More</button>
+                      )}
+                      {subReplies.length > 3 && subReplies.length <= limit && (
+                        <button onMouseDown={(e) => e.preventDefault()} onClick={() => setVisibleReplies((prev) => ({ ...prev, [comment.id]: 3 }))} className="text-[10px] font-black text-gray-500 hover:text-black">Show Less</button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── ReactionListModal ─────────────────────────────────────────────────────────
+function ReactionListModal({ isOpen = false, title = 'Reactions', list = [], emojiField = 'emoji_text', onClose }) {
+  if (!isOpen) return null;
   const named = list.filter(r => r.user_id != null);
   const anon  = list.filter(r => r.user_id == null);
 
@@ -611,12 +864,12 @@ function ReactorListModal({ postId, reactions, onClose }) {
       <div className="absolute inset-0 bg-black/50" onClick={onClose} />
       <div className="relative bg-white border-3 border-black rounded-2xl shadow-[6px_6px_0px_black] p-4 w-full max-w-xs">
         <button onClick={onClose} className="absolute top-2 right-3 font-black text-lg">✕</button>
-        <h3 className="font-black mb-3">Reactions</h3>
+        <h3 className="font-black mb-3">{title}</h3>
         {list.length === 0 && <p className="text-sm text-gray-400">No reactions yet</p>}
         <div className="max-h-60 overflow-y-auto space-y-1">
           {named.map((r, i) => (
             <div key={i} className="flex items-center gap-2 text-sm">
-              <span className="text-lg">{r.emoji_text}</span>
+              <span className="text-lg">{r[emojiField]}</span>
               <span className="font-semibold">{r.profiles?.username || r.username || 'User'}</span>
               {r._pending && (
                 <span className="text-[9px] font-black px-1 py-0.5 rounded-full bg-yellow-100 text-yellow-700">
@@ -634,7 +887,7 @@ function ReactorListModal({ postId, reactions, onClose }) {
           )}
           {anon.map((r, i) => (
             <div key={`anon-${i}`} className="flex items-center gap-2 text-sm opacity-60">
-              <span className="text-lg">{r.emoji_text}</span>
+              <span className="text-lg">{r[emojiField]}</span>
               <span className="font-semibold text-gray-500 italic">Anonymous</span>
             </div>
           ))}
@@ -771,6 +1024,11 @@ export default function GeoPostView({ session }) {
   const [reactions,   setReactions]   = useState({});
   const [reactorsModal,setReactorsModal]=useState(null);
   const [zipHeatMap,  setZipHeatMap]  = useState({});
+  const [commentsByPost, setCommentsByPost] = useState({});
+  const [commentReactionsByComment, setCommentReactionsByComment] = useState({});
+  const [openCommentsByPost, setOpenCommentsByPost] = useState({});
+  const [commentReactorsModal, setCommentReactorsModal] = useState(null);
+  const [currentProfile, setCurrentProfile] = useState(null);
 
   // ── editor scope ──────────────────────────────────────────────────────────────
   const [editorScope,   setEditorScope]   = useState('digital');
@@ -780,6 +1038,7 @@ export default function GeoPostView({ session }) {
   // ── editor / image ────────────────────────────────────────────────────────────
   const editorRef    = useRef(null);
   const fileInputRef = useRef(null);
+  const topAnchorRef = useRef(null);
   const [imageFile,    setImageFile]    = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
   const [submitting,   setSubmitting]   = useState(false);
@@ -888,6 +1147,20 @@ export default function GeoPostView({ session }) {
       window.removeEventListener('focus', refreshHeat);
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadProfile = async () => {
+      if (!session?.user?.id) {
+        setCurrentProfile(null);
+        return;
+      }
+      const profile = await fetchProfileForGeoPost(session.user.id, session);
+      if (!cancelled) setCurrentProfile(profile);
+    };
+    loadProfile();
+    return () => { cancelled = true; };
+  }, [session]);
 
   // ── selectionchange: B/I/U/size only (alignment managed in state) ─────────────
   useEffect(() => {
@@ -1174,10 +1447,136 @@ export default function GeoPostView({ session }) {
     }
   };
 
+  const ensureCommentsLoaded = useCallback(async (postId) => {
+    if (!postId) return;
+    if (postId.startsWith('sp')) {
+      const sampleComments = SAMPLE_COMMENTS.filter((entry) => entry.post_id === postId);
+      setCommentsByPost((prev) => ({ ...prev, [postId]: sampleComments }));
+      const ids = sampleComments.map((entry) => entry.id);
+      const grouped = {};
+      SAMPLE_COMMENT_REACTIONS.filter((entry) => ids.includes(entry.comment_id)).forEach((entry) => {
+        if (!grouped[entry.comment_id]) grouped[entry.comment_id] = [];
+        grouped[entry.comment_id].push(entry);
+      });
+      setCommentReactionsByComment((prev) => ({ ...prev, ...grouped }));
+      return;
+    }
+    if (commentsByPost[postId]) return;
+    const comments = await fetchCommentsForPost(postId);
+    setCommentsByPost((prev) => ({ ...prev, [postId]: comments }));
+    if (comments.length > 0) {
+      const rxns = await fetchCommentReactions(comments.map((entry) => entry.id));
+      const grouped = {};
+      (rxns || []).forEach((entry) => {
+        if (!grouped[entry.comment_id]) grouped[entry.comment_id] = [];
+        grouped[entry.comment_id].push(entry);
+      });
+      setCommentReactionsByComment((prev) => ({ ...prev, ...grouped }));
+    }
+  }, [commentsByPost]);
+
+  const toggleComments = async (postId) => {
+    setOpenCommentsByPost((prev) => ({ ...prev, [postId]: !prev[postId] }));
+    if (!openCommentsByPost[postId]) {
+      await ensureCommentsLoaded(postId);
+    }
+  };
+
+  const buildCommentAuthor = async () => {
+    if (!session?.user?.id) {
+      return {
+        user_id: null,
+        username: 'anonymous',
+        is_participant: false,
+        borough: null,
+        zip_code: null,
+      };
+    }
+    const username = currentProfile?.username || session.user.user_metadata?.username || 'User';
+    const zipCode = currentProfile?.home_zip || null;
+    return {
+      user_id: session.user.id,
+      username,
+      is_participant: !!isLocalParticipant(),
+      borough: getBoroughForZip(zipCode),
+      zip_code: zipCode,
+    };
+  };
+
+  const submitCommentForPost = async (postId, content, parentId = null) => {
+    const author = await buildCommentAuthor();
+    const optimistic = {
+      id: `temp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      post_id: postId,
+      parent_id: parentId,
+      content,
+      created_at: new Date().toISOString(),
+      ...author,
+    };
+    setCommentsByPost((prev) => ({ ...prev, [postId]: [...(prev[postId] || []), optimistic] }));
+    if (postId.startsWith('sp')) return;
+    try {
+      const saved = await submitPostComment({ post_id: postId, parent_id: parentId, content, ...author }, session);
+      setCommentsByPost((prev) => ({
+        ...prev,
+        [postId]: (prev[postId] || []).map((entry) => entry.id === optimistic.id ? saved : entry),
+      }));
+    } catch (error) {
+      setCommentsByPost((prev) => ({
+        ...prev,
+        [postId]: (prev[postId] || []).filter((entry) => entry.id !== optimistic.id),
+      }));
+    }
+  };
+
+  const handleCommentReaction = async (commentId, emoji) => {
+    if (session?.user?.id) {
+      const current = (commentReactionsByComment[commentId] || []).find((entry) => entry.user_id === session.user.id);
+      try {
+        if (current?.emoji === emoji) {
+          await removeCommentReaction(commentId, session);
+          setCommentReactionsByComment((prev) => ({
+            ...prev,
+            [commentId]: (prev[commentId] || []).filter((entry) => entry.user_id !== session.user.id),
+          }));
+          return;
+        }
+        await upsertCommentReaction(commentId, emoji, session);
+        setCommentReactionsByComment((prev) => ({
+          ...prev,
+          [commentId]: [
+            ...(prev[commentId] || []).filter((entry) => entry.user_id !== session.user.id),
+            { comment_id: commentId, emoji, user_id: session.user.id, profiles: { username: currentProfile?.username || session.user.user_metadata?.username || 'User' } },
+          ],
+        }));
+      } catch {}
+      return;
+    }
+    const anonSet = getAnonCommentSet();
+    const key = `${commentId}:${emoji}`;
+    const existingKeys = [...anonSet].filter((entry) => entry.startsWith(`${commentId}:`));
+    if (anonSet.has(key)) {
+      anonSet.delete(key);
+      saveAnonCommentSet(anonSet);
+      setCommentReactionsByComment((prev) => ({ ...prev, [commentId]: (prev[commentId] || []).filter((entry) => !(entry.user_id == null && entry.emoji === emoji)) }));
+      return;
+    }
+    existingKeys.forEach((entry) => anonSet.delete(entry));
+    anonSet.add(key);
+    saveAnonCommentSet(anonSet);
+    setCommentReactionsByComment((prev) => ({
+      ...prev,
+      [commentId]: [
+        ...(prev[commentId] || []).filter((entry) => entry.user_id != null),
+        { comment_id: commentId, emoji, user_id: null },
+      ],
+    }));
+  };
+
   // ── filter helpers ────────────────────────────────────────────────────────────
   const activeFS = { background: accentColor, color: '#fff', borderColor: accentColor };
   const baseFB   = 'relative px-2.5 py-1 rounded-lg border-2 border-black text-[10px] sm:text-xs font-black transition-all flex items-center gap-0.5';
-  const timeLabel = timeFilter === 'all' ? 'Time' : TIME_OPTIONS.find(t => t.key === timeFilter)?.label || 'Time';
+  const timeLabel = TIME_OPTIONS.find(t => t.key === timeFilter)?.label || 'All Time';
   const zipList   = (locTab === 'borough' && filterBorough) ? (BOROUGH_ZIPS[filterBorough] || []) : (BOROUGH_ZIPS[filterZipBoro] || []);
   const boroughHeatMap = useMemo(() => buildBoroughHeatMap(zipHeatMap), [zipHeatMap]);
   const normalizedQuery = normalizeSearchText(searchQuery);
@@ -1235,15 +1634,12 @@ export default function GeoPostView({ session }) {
   };
 
   const scrollToTop = () => {
+    topAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     window.scrollTo({ top: 0, behavior: 'smooth' });
-    requestAnimationFrame(() => {
-      document.documentElement.scrollTop = 0;
-      document.body.scrollTop = 0;
-    });
   };
 
   return (
-    <div className="w-full">
+    <div className="w-full" ref={topAnchorRef}>
       <div className="w-full max-w-7xl mx-auto px-3 pt-3">
         <div className="rounded-2xl border-3 border-black shadow-[4px_4px_0px_black]"
           style={{ background: surfaceBg, borderColor: postOutline || '#000' }}>
@@ -1408,21 +1804,6 @@ export default function GeoPostView({ session }) {
                 placeholder="Search posts, usernames, zips..."
                 className="w-full px-3 py-2 border-2 border-black rounded text-sm font-black mb-3"
               />
-              <div className="mb-3 px-0.5">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-[10px] font-black">Text Size</span>
-                  <span className="text-[10px] font-black">{Math.round(feedTextScale * 100)}%</span>
-                </div>
-                <input
-                  type="range"
-                  min="0.9"
-                  max="1.4"
-                  step="0.05"
-                  value={feedTextScale}
-                  onChange={(e) => setFeedTextScale(Number(e.target.value))}
-                  className="w-full"
-                />
-              </div>
               <div className="flex flex-col gap-2">
                 <button onMouseDown={e => e.preventDefault()} onClick={() => setSortByTop(v => !v)} className={baseFB} style={sortByTop ? activeFS : {}}>🔥 Top</button>
                 <button onMouseDown={e => e.preventDefault()} onClick={() => { setLocTab('all'); setFilterBorough(''); setFilterZip(''); setOpenDropdown(null); }} className={baseFB} style={locTab === 'all' ? activeFS : {}}>🌀 All</button>
@@ -1479,6 +1860,16 @@ export default function GeoPostView({ session }) {
                     ))}
                   </InlineDropdown>
                 </div>
+                <div className="relative mt-1">
+                  <button onMouseDown={e => e.preventDefault()} onClick={() => setOpenDropdown(p => p === 'textScaleDesktop' ? null : 'textScaleDesktop')} className={baseFB}>Aa Text Size ▾</button>
+                  <InlineDropdown open={openDropdown === 'textScaleDesktop'} onClose={() => setOpenDropdown(null)} alignRight className="w-[220px] p-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-[10px] font-black">Text Size</span>
+                      <span className="text-[10px] font-black">{Math.round(feedTextScale * 100)}%</span>
+                    </div>
+                    <input type="range" min="0.5" max="2" step="0.05" value={feedTextScale} onChange={(e) => setFeedTextScale(Number(e.target.value))} className="w-full" />
+                  </InlineDropdown>
+                </div>
               </div>
             </div>
           </aside>
@@ -1486,21 +1877,6 @@ export default function GeoPostView({ session }) {
           <section className="md:col-span-2" data-geopost-feed-scroll>
             <div className="md:hidden rounded-2xl border-3 border-black p-3 bg-white shadow-[4px_4px_0px_black] mb-3">
               <input value={searchQuery} onChange={(e) => { setSearchQuery(e.target.value); setVisibleCount(PAGE_SIZE); }} placeholder="Search posts, usernames, zips..." className="w-full px-3 py-2 border-2 border-black rounded text-sm font-black mb-3" />
-              <div className="mb-3 px-0.5">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-[10px] font-black">Text Size</span>
-                  <span className="text-[10px] font-black">{Math.round(feedTextScale * 100)}%</span>
-                </div>
-                <input
-                  type="range"
-                  min="0.9"
-                  max="1.4"
-                  step="0.05"
-                  value={feedTextScale}
-                  onChange={(e) => setFeedTextScale(Number(e.target.value))}
-                  className="w-full"
-                />
-              </div>
               <div className="flex items-center gap-1 flex-wrap">
                 <button onMouseDown={e => e.preventDefault()} onClick={() => setSortByTop(v => !v)} className={baseFB} style={sortByTop ? activeFS : {}}>🔥 Top</button>
                 <button onMouseDown={e => e.preventDefault()} onClick={() => { setLocTab('all'); setFilterBorough(''); setFilterZip(''); setOpenDropdown(null); }} className={baseFB} style={locTab === 'all' ? activeFS : {}}>🌀 All</button>
@@ -1557,6 +1933,16 @@ export default function GeoPostView({ session }) {
                     ))}
                   </InlineDropdown>
                 </div>
+                <div className="relative w-full mt-1">
+                  <button onMouseDown={e => e.preventDefault()} onClick={() => setOpenDropdown(p => p === 'textScaleMobile' ? null : 'textScaleMobile')} className={baseFB}>Aa Text Size ▾</button>
+                  <InlineDropdown open={openDropdown === 'textScaleMobile'} onClose={() => setOpenDropdown(null)} className="w-[220px] p-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-[10px] font-black">Text Size</span>
+                      <span className="text-[10px] font-black">{Math.round(feedTextScale * 100)}%</span>
+                    </div>
+                    <input type="range" min="0.5" max="2" step="0.05" value={feedTextScale} onChange={(e) => setFeedTextScale(Number(e.target.value))} className="w-full" />
+                  </InlineDropdown>
+                </div>
               </div>
             </div>
 
@@ -1570,20 +1956,40 @@ export default function GeoPostView({ session }) {
 
               {filteredPosts.length > 0 && (
                 <div className="flex flex-col gap-3">
-                  {visiblePosts.map(post => (
-                    <PostCard
-                      key={post.id}
-                      post={post}
-                      postReactions={reactions[post.id]}
-                      onReact={handleReact}
-                      onOpenReactors={id => setReactorsModal(id)}
-                      accentColor={accentColor}
-                      onSelectTag={handleSelectTag}
-                      zipHeatMap={zipHeatMap}
-                      boroughHeatMap={boroughHeatMap}
-                      textScale={feedTextScale}
-                    />
-                  ))}
+                  {visiblePosts.map(post => {
+                    const postComments = commentsByPost[post.id] || (post.id.startsWith('sp') ? SAMPLE_COMMENTS.filter((entry) => entry.post_id === post.id) : []);
+                    const commentCount = postComments.length || Number(post.total_comments || 0);
+                    return (
+                      <PostCard
+                        key={post.id}
+                        post={post}
+                        postReactions={reactions[post.id]}
+                        onReact={handleReact}
+                        onOpenReactors={id => setReactorsModal(id)}
+                        accentColor={accentColor}
+                        onSelectTag={handleSelectTag}
+                        zipHeatMap={zipHeatMap}
+                        boroughHeatMap={boroughHeatMap}
+                        textScale={feedTextScale}
+                        commentCount={commentCount}
+                        commentsOpen={!!openCommentsByPost[post.id]}
+                        onToggleComments={toggleComments}
+                        commentsChildren={
+                          <CommentSection
+                            post={post}
+                            comments={postComments}
+                            reactionsByComment={commentReactionsByComment}
+                            onSubmitComment={(postId, content) => submitCommentForPost(postId, content, null)}
+                            onSubmitReply={(postId, parentId, content) => submitCommentForPost(postId, content, parentId)}
+                            onToggleReaction={handleCommentReaction}
+                            onOpenReactors={(commentId) => setCommentReactorsModal(commentId)}
+                            zipHeatMap={zipHeatMap}
+                            boroughHeatMap={boroughHeatMap}
+                          />
+                        }
+                      />
+                    );
+                  })}
                   {(canShowMore || canShowLess) && (
                     <div className="flex justify-center gap-3 pt-1">
                       {canShowMore && (
@@ -1609,7 +2015,8 @@ export default function GeoPostView({ session }) {
         </div>
       </div>
 
-      <ReactorListModal postId={reactorsModal} reactions={reactions} onClose={() => setReactorsModal(null)} />
+      <ReactionListModal isOpen={!!reactorsModal} list={reactorsModal ? (reactions[reactorsModal] || []) : []} onClose={() => setReactorsModal(null)} />
+      <ReactionListModal isOpen={!!commentReactorsModal} title="Comment Reactions" list={commentReactorsModal ? (commentReactionsByComment[commentReactorsModal] || []) : []} emojiField="emoji" onClose={() => setCommentReactorsModal(null)} />
 
       <button
         onClick={scrollToTop}

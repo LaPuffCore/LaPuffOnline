@@ -323,6 +323,94 @@ export async function fetchReactionsForPosts(postIds) {
   return res.json();
 }
 
+export async function fetchCommentsForPost(postId) {
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/post_comments?post_id=eq.${postId}&select=*&order=created_at.asc`,
+    { headers: baseHeaders }
+  );
+  if (!res.ok) return [];
+  return res.json();
+}
+
+export async function submitPostComment(payload, session = null) {
+  const headers = {
+    ...baseHeaders,
+    Prefer: 'return=representation',
+  };
+  if (session?.access_token) {
+    headers.Authorization = `Bearer ${session.access_token}`;
+  }
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/post_comments`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(err || 'Comment submission failed');
+  }
+  const rows = await res.json();
+  return rows[0];
+}
+
+export async function fetchCommentReactions(commentIds) {
+  if (!commentIds.length) return [];
+  const ids = commentIds.map(id => `"${id}"`).join(',');
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/comment_reactions?comment_id=in.(${ids})&select=comment_id,emoji,user_id,profiles(username)`,
+    { headers: baseHeaders }
+  );
+  if (!res.ok) return [];
+  return res.json();
+}
+
+export async function upsertCommentReaction(commentId, emoji, session = null) {
+  const headers = {
+    ...baseHeaders,
+    Prefer: 'resolution=merge-duplicates,return=minimal',
+  };
+  const userId = session?.user?.id ?? null;
+  if (session?.access_token) {
+    headers.Authorization = `Bearer ${session.access_token}`;
+  }
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/comment_reactions?on_conflict=comment_id,user_id`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify([{ comment_id: commentId, emoji, user_id: userId }]),
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(err || 'Comment reaction failed');
+  }
+}
+
+export async function removeCommentReaction(commentId, session = null) {
+  const headers = { ...baseHeaders };
+  const userId = session?.user?.id ?? null;
+  if (session?.access_token) {
+    headers.Authorization = `Bearer ${session.access_token}`;
+  }
+  await fetch(
+    `${SUPABASE_URL}/rest/v1/comment_reactions?comment_id=eq.${commentId}&user_id=eq.${userId}`,
+    { method: 'DELETE', headers }
+  );
+}
+
+export async function fetchProfileForGeoPost(userId, session = null) {
+  if (!userId) return null;
+  const headers = { ...baseHeaders };
+  if (session?.access_token) {
+    headers.Authorization = `Bearer ${session.access_token}`;
+  }
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/profiles?id=eq.${userId}&select=username,home_zip,last_participant_status&limit=1`,
+    { headers }
+  );
+  if (!res.ok) return null;
+  const rows = await res.json();
+  return rows[0] || null;
+}
+
 /**
  * Upload a geopost image to Supabase storage.
  * (Placeholder: uses same event-images bucket. Replace with Oracle Cloud when ready.)
