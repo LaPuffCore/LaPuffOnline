@@ -12,6 +12,7 @@ import { uploadToOracleCloud, isOciConfigured } from '../lib/oracleStorage';
 import { NYC_ZIP_FEATURES } from '../lib/nycZipGeoJSON';
 import { ALL_COOL_FONTS, convertFont, toPlainText } from '../lib/unicodeFonts';
 import { isLocalParticipant } from '../lib/pointsSystem';
+import { SAMPLE_MODE } from '../lib/sampleConfig';
 import EmojiPicker from './EmojiPicker';
 
 // ── constants ─────────────────────────────────────────────────────────────────
@@ -65,10 +66,11 @@ function contrastTextColor(bgColor) {
 function getPostVisualTheme(post, resolvedTheme) {
   const fill = normalizeHexColor(post?.post_fill || resolvedTheme?.surfaceBackgroundColor || '#ffffff', '#ffffff');
   const outline = normalizeHexColor(post?.post_outline || '#000000', '#000000');
+  const shadow = normalizeHexColor(post?.post_shadow || '#000000', '#000000');
   const text = contrastTextColor(fill);
   const chipFill = text;
   const chipText = contrastTextColor(chipFill);
-  return { fill, outline, text, chipFill, chipText };
+  return { fill, outline, shadow, text, chipFill, chipText };
 }
 
 function normalizeSearchText(value = '') {
@@ -79,19 +81,135 @@ function normalizeSearchText(value = '') {
     .trim();
 }
 
-// Sample posts shown in SAMPLE_MODE when feed is empty
-const SAMPLE_POSTS = [
-  { id: 'sp1', user_id: 'fake-user-1', username: 'xo_brooklynite', is_participant: true, scope: 'zip', borough: 'Brooklyn', zip_code: '11211', content: { html: '<b>Williamsburg block party this Saturday 🎉</b> — come thru Havemeyer St around 4pm, free food and live DJs. Bring the whole squad, all ages welcome!' }, post_fill: '#fff7ed', post_outline: '#f97316', total_reactions: 18, created_at: new Date(Date.now() - 2 * 3600000).toISOString(), post_approved: true },
-  { id: 'sp2', user_id: null, username: 'Anonymous', is_participant: false, scope: 'borough', borough: 'Manhattan', zip_code: null, content: { html: 'Anyone else notice how crowded the 1/2/3 trains are rn? Serious sardine energy 😩 why is the MTA like this' }, post_fill: '', post_outline: '', total_reactions: 9, created_at: new Date(Date.now() - 5 * 3600000).toISOString(), post_approved: true },
-  { id: 'sp3', user_id: 'fake-user-3', username: 'queensbridge_kev', is_participant: true, scope: 'zip', borough: 'Queens', zip_code: '11101', content: { html: '<i>Just found the most underrated bodega in LIC — iced coffee for $1.50 no cap 🧊</i><br/>It\'s on 21st St near the park. Go before they raise prices.' }, post_fill: '#f0fdf4', post_outline: '#22c55e', total_reactions: 24, created_at: new Date(Date.now() - 8 * 3600000).toISOString(), post_approved: true },
-  { id: 'sp4', user_id: 'fake-user-4', username: 'nyc_culture_vulture', is_participant: false, scope: 'nyc', borough: null, zip_code: null, content: { html: '🗽 <u>NYC wide art week incoming</u> — dozens of galleries opening simultaneously across all 5 boroughs. Check lapuff for all the events this weekend.' }, post_fill: '#fdf4ff', post_outline: '#8b5cf6', total_reactions: 31, created_at: new Date(Date.now() - 12 * 3600000).toISOString(), post_approved: true },
-  { id: 'sp5', user_id: 'fake-user-5', username: 'bronx_wave_rider', is_participant: true, scope: 'borough', borough: 'Bronx', zip_code: null, content: { html: 'Real talk the Bronx has the best food scene in the city rn 🔥 Grand Concourse hits different. Mofongo, birria, doubles — all within 2 blocks.' }, post_fill: '', post_outline: '#ef4444', total_reactions: 15, created_at: new Date(Date.now() - 15 * 3600000).toISOString(), post_approved: true },
-  { id: 'sp6', user_id: null, username: 'Anonymous', is_participant: false, scope: 'digital', borough: null, zip_code: null, content: { html: 'Anyone know if the red line on NYC MTA has delays tonight? Can\'t find real info anywhere 🤔' }, post_fill: '', post_outline: '', total_reactions: 4, created_at: new Date(Date.now() - 18 * 3600000).toISOString(), post_approved: true },
-  { id: 'sp7', user_id: 'fake-user-7', username: 'staten_island_sal', is_participant: true, scope: 'zip', borough: 'Staten Island', zip_code: '10301', content: { html: '<span style="font-weight:900">Ferry vibes are unmatched fr ⛴️</span><br/>Caught the sunset from the deck tonight. Free trip, best view in the city. Tourists don\'t even know.' }, post_fill: '#eff6ff', post_outline: '#3b82f6', total_reactions: 22, created_at: new Date(Date.now() - 22 * 3600000).toISOString(), post_approved: true },
-  { id: 'sp8', user_id: 'fake-user-8', username: 'harlem_renaissance_gal', is_participant: true, scope: 'zip', borough: 'Manhattan', zip_code: '10027', content: { html: 'Sunday service brunch in Harlem hits different when the choir starts 🙏 Marcus Garvey Park after = perfect day. Who\'s linking?' }, post_fill: '#fff1f2', post_outline: '#f43f5e', total_reactions: 37, created_at: new Date(Date.now() - 26 * 3600000).toISOString(), post_approved: true },
-  { id: 'sp9', user_id: 'fake-user-9', username: 'dumbo_design_kid', is_participant: false, scope: 'borough', borough: 'Brooklyn', zip_code: null, content: { html: 'DUMBO art walk tonight was insane 🎨 found 3 new artists I want to commission. Brooklyn keeps winning with the creative energy.' }, post_fill: '', post_outline: '#ec4899', total_reactions: 12, created_at: new Date(Date.now() - 30 * 3600000).toISOString(), post_approved: true },
-  { id: 'sp10', user_id: 'fake-user-10', username: 'flushing_local', is_participant: true, scope: 'zip', borough: 'Queens', zip_code: '11354', content: { html: 'Flushing night market season is BACK 🥟🍜 New vendors this year and the soup dumpling spot from last year expanded. Bring cash and an appetite.' }, post_fill: '#fefce8', post_outline: '#eab308', total_reactions: 45, created_at: new Date(Date.now() - 36 * 3600000).toISOString(), post_approved: true },
+function isNearColor(hex, target, tolerance = 55) {
+  const h1 = normalizeHexColor(hex, '#000000').slice(1);
+  const h2 = normalizeHexColor(target, '#000000').slice(1);
+  const r1 = parseInt(h1.slice(0, 2), 16);
+  const g1 = parseInt(h1.slice(2, 4), 16);
+  const b1 = parseInt(h1.slice(4, 6), 16);
+  const r2 = parseInt(h2.slice(0, 2), 16);
+  const g2 = parseInt(h2.slice(2, 4), 16);
+  const b2 = parseInt(h2.slice(4, 6), 16);
+  const dist = Math.sqrt(((r1 - r2) ** 2) + ((g1 - g2) ** 2) + ((b1 - b2) ** 2));
+  return dist <= tolerance;
+}
+
+function getZipHeatSnapshot() {
+  try {
+    const raw = localStorage.getItem('lapuff_zip_heat');
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return (parsed && typeof parsed === 'object') ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function heatTagColor(value) {
+  const v = Number(value || 0);
+  if (v >= 0.8) return '#fecaca';
+  if (v >= 0.55) return '#fed7aa';
+  if (v >= 0.3) return '#fef08a';
+  if (v >= 0.12) return '#bbf7d0';
+  return '#a5f3fc';
+}
+
+function buildBoroughHeatMap(zipHeat) {
+  const out = {};
+  BOROUGHS.forEach((borough) => {
+    const zips = BOROUGH_ZIPS[borough] || [];
+    const vals = zips
+      .map((z) => Number(zipHeat?.[z.zip]))
+      .filter((n) => Number.isFinite(n));
+    const avg = vals.length ? (vals.reduce((a, b) => a + b, 0) / vals.length) : 0;
+    out[borough] = avg;
+  });
+  return out;
+}
+
+const SAMPLE_ZIP_CHOICES = [
+  { borough: 'Manhattan', zip: '10002' },
+  { borough: 'Manhattan', zip: '10027' },
+  { borough: 'Brooklyn', zip: '11211' },
+  { borough: 'Brooklyn', zip: '11201' },
+  { borough: 'Queens', zip: '11101' },
+  { borough: 'Queens', zip: '11354' },
+  { borough: 'Bronx', zip: '10453' },
+  { borough: 'Bronx', zip: '10463' },
+  { borough: 'Staten Island', zip: '10301' },
+  { borough: 'Staten Island', zip: '10314' },
 ];
+
+const SAMPLE_FILL_COLORS = [
+  '#ffffff', '#111827', '#fef3c7', '#ecfeff', '#dcfce7', '#fee2e2', '#ede9fe', '#fce7f3', '#e0f2fe', '#ecfccb',
+];
+const SAMPLE_OUTLINE_COLORS = [
+  '#111827', '#dc2626', '#f97316', '#eab308', '#16a34a', '#0891b2', '#2563eb', '#7c3aed', '#db2777', '#0f766e',
+];
+const SAMPLE_SHADOW_COLORS = [
+  '#000000', '#1f2937', '#7f1d1d', '#78350f', '#166534', '#155e75', '#1d4ed8', '#6d28d9', '#9d174d', '#334155',
+];
+
+function buildSamplePosts() {
+  const now = Date.now();
+  const scopes = ['digital', 'nyc', 'borough', 'zip'];
+  const posts = [];
+
+  for (let i = 0; i < 50; i += 1) {
+    const idx = i + 1;
+    const scope = scopes[i % scopes.length];
+    const place = SAMPLE_ZIP_CHOICES[i % SAMPLE_ZIP_CHOICES.length];
+    const statusMode = i % 3; // 0=participant, 1=orbiter, 2=anonymous
+
+    const isParticipant = statusMode === 0;
+    const isAnonymous = statusMode === 2;
+    const userId = isAnonymous ? null : `sample-user-${idx}`;
+    const username = isAnonymous ? 'Anonymous' : `sample_user_${idx}`;
+
+    const fill = SAMPLE_FILL_COLORS[i % SAMPLE_FILL_COLORS.length];
+    const outline = SAMPLE_OUTLINE_COLORS[i % SAMPLE_OUTLINE_COLORS.length];
+    const shadow = SAMPLE_SHADOW_COLORS[i % SAMPLE_SHADOW_COLORS.length];
+
+    const borough = scope === 'borough' || scope === 'zip' ? place.borough : null;
+    const zip = scope === 'zip' ? place.zip : null;
+
+    let imageUrl = null;
+    if (i % 4 !== 0) {
+      if (i % 3 === 0) imageUrl = `https://picsum.photos/seed/lapuff-v-${idx}/640/960`; // vertical
+      else if (i % 3 === 1) imageUrl = `https://picsum.photos/seed/lapuff-h-${idx}/960/540`; // horizontal
+      else imageUrl = `https://picsum.photos/seed/lapuff-s-${idx}/700/700`; // square
+    }
+
+    // Yesterday -> ~5 months ago (about 150 days)
+    const daysAgo = 1 + (i * 3);
+    const createdAt = new Date(now - daysAgo * 86400000 - (i % 6) * 3600000).toISOString();
+
+    posts.push({
+      id: `sp${idx}`,
+      user_id: userId,
+      username,
+      is_participant: isParticipant,
+      scope,
+      borough,
+      zip_code: zip,
+      image_url: imageUrl,
+      content: {
+        html: `<b>Sample GeoPost #${idx}</b><br/>Testing ${scope.toUpperCase()} scope in ${borough || 'NYC-wide'} ${zip ? `(${zip})` : ''} with mixed media + style colors.`,
+        textColor: i % 2 === 0 ? '#111827' : '#f9fafb',
+      },
+      post_fill: fill,
+      post_outline: outline,
+      post_shadow: shadow,
+      total_reactions: (idx * 7) % 53,
+      created_at: createdAt,
+      post_approved: true,
+    });
+  }
+
+  return posts;
+}
+
+const SAMPLE_POSTS = buildSamplePosts();
 
 // Anonymous reaction dedup via localStorage (prevents refresh-spam without accounts)
 const ANON_REACTIONS_KEY = 'lapuff_geo_anon_reactions';
@@ -288,7 +406,7 @@ const AlignCenterIcon = () => <svg width="13" height="13" viewBox="0 0 16 16" fi
 const AlignRightIcon  = () => <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><rect x="1" y="2" width="14" height="2" rx="1"/><rect x="5" y="7" width="10" height="2" rx="1"/><rect x="3" y="12" width="12" height="2" rx="1"/></svg>;
 
 // ── PostCard ──────────────────────────────────────────────────────────────────
-function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, onSelectTag }) {
+function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, onSelectTag, zipHeatMap, boroughHeatMap, textScale = 1 }) {
   const { resolvedTheme } = useSiteTheme();
   const theme = getPostVisualTheme(post, resolvedTheme);
   const date = new Date(post.created_at);
@@ -309,17 +427,18 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
   const postHtml = parsedContent.html || (typeof post.content === 'string' ? post.content : '') || '';
   const postTextColor = normalizeHexColor(parsedContent.textColor || '', theme.text);
 
-  const statusStyle = post.is_participant
-    ? { background: '#22c55e', color: '#fff' }
-    : post.user_id == null
-      ? { background: '#374151', color: '#f3f4f6' }
-      : { background: '#ef4444', color: '#fff' };
+  const fillIsNearRedOrGreen = isNearColor(theme.fill, '#ef4444') || isNearColor(theme.fill, '#22c55e');
 
-  const invertedChipStyle = {
-    background: theme.chipFill,
-    color: theme.chipText,
-    border: `1px solid ${theme.chipText}`,
-  };
+  const statusStyle = post.is_participant
+    ? { background: '#22c55e', color: '#fff', border: fillIsNearRedOrGreen ? '1px solid #000' : '1px solid transparent' }
+    : post.user_id == null
+      ? { background: '#374151', color: '#f3f4f6', border: '1px solid transparent' }
+      : { background: '#ef4444', color: '#fff', border: fillIsNearRedOrGreen ? '1px solid #000' : '1px solid transparent' };
+
+  const boroughTagBg = post.borough ? heatTagColor(boroughHeatMap?.[post.borough] || 0) : '#f3f4f6';
+  const zipTagBg = post.zip_code ? heatTagColor(zipHeatMap?.[post.zip_code] || 0) : '#f3f4f6';
+  const boroughTagText = contrastTextColor(boroughTagBg);
+  const zipTagText = contrastTextColor(zipTagBg);
 
   const outlineButtonStyle = {
     borderColor: theme.text,
@@ -328,7 +447,14 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
   };
 
   return (
-    <div className="rounded-2xl border-3 overflow-hidden shadow-[4px_4px_0px_black]" style={{ borderColor: theme.outline }}>
+    <div
+      className="rounded-2xl border-3 overflow-hidden"
+      style={{
+        borderColor: theme.outline,
+        boxShadow: `4px 4px 0px ${theme.shadow}`,
+        zoom: textScale,
+      }}
+    >
       {post.image_url && (
         <div className={`w-full overflow-hidden ${imgRatio > 1.2 ? 'h-40' : 'aspect-square'}`}>
           <img
@@ -370,7 +496,7 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
           <span
             onClick={() => onSelectTag && onSelectTag({ status: post.user_id == null ? 'anonymous' : post.is_participant ? 'participant' : 'orbiter' })}
             className="text-[9px] font-black px-1.5 py-0.5 rounded-full cursor-pointer"
-            style={post.post_fill ? invertedChipStyle : statusStyle}
+            style={statusStyle}
           >
             ● {post.is_participant ? 'PARTICIPANT' : post.user_id == null ? 'ANON' : 'ORBITER'}
           </span>
@@ -417,31 +543,35 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
             </button>
           )}
 
-          {post.scope === 'zip' && post.borough && (
-            <span
-              onClick={() => onSelectTag && onSelectTag({ ...post, scope: 'borough' })}
-              className="text-[9px] font-black px-1.5 py-0.5 rounded-full cursor-pointer"
-              style={post.post_fill ? invertedChipStyle : { background: '#f3f4f6', border: '1px solid #d1d5db', color: '#4b5563' }}
-            >
-              🏙 {post.borough}
-            </span>
-          )}
+          <div className="ml-auto flex items-center gap-1">
+            {post.scope === 'zip' && post.borough && (
+              <span
+                onClick={() => onSelectTag && onSelectTag({ ...post, scope: 'borough' })}
+                className="text-[9px] font-black px-1.5 py-0.5 rounded-full cursor-pointer"
+                style={{ background: boroughTagBg, color: boroughTagText, border: `1px solid ${boroughTagText}` }}
+              >
+                🏙 {post.borough}
+              </span>
+            )}
 
-          <span
-            onClick={() => onSelectTag && onSelectTag(post)}
-            className="ml-auto text-[9px] font-black px-1.5 py-0.5 rounded-full cursor-pointer"
-            style={post.post_fill
-              ? invertedChipStyle
-              : { background: '#f3f4f6', border: '1px solid #d1d5db', color: '#4b5563' }}
-          >
-            {post.scope === 'zip' && post.zip_code
-              ? `📍 ${post.zip_code}`
-              : post.borough
-                ? `🏙 ${post.borough}`
-                : post.scope === 'nyc'
-                  ? '🗽 NYC'
-                  : '💻 Digital'}
-          </span>
+            <span
+              onClick={() => onSelectTag && onSelectTag(post)}
+              className="text-[9px] font-black px-1.5 py-0.5 rounded-full cursor-pointer"
+              style={post.scope === 'zip' && post.zip_code
+                ? { background: zipTagBg, color: zipTagText, border: `1px solid ${zipTagText}` }
+                : post.borough
+                  ? { background: boroughTagBg, color: boroughTagText, border: `1px solid ${boroughTagText}` }
+                  : { background: '#f3f4f6', border: '1px solid #d1d5db', color: '#4b5563' }}
+            >
+              {post.scope === 'zip' && post.zip_code
+                ? `📍 ${post.zip_code}`
+                : post.borough
+                  ? `🏙 ${post.borough}`
+                  : post.scope === 'nyc'
+                    ? '🗽 NYC'
+                    : '💻 Digital'}
+            </span>
+          </div>
         </div>
 
         {qepOpen && (
@@ -562,28 +692,6 @@ function InlineDropdown({ open, onClose, children, alignRight = false, className
   );
 }
 
-// Filter SAMPLE_POSTS by type/value/etc. for demo mode
-function filterSamplePosts(type, value, timeFilter, statusFilter, sortByTop) {
-  let posts = [...SAMPLE_POSTS];
-  if (type === 'borough' && value) posts = posts.filter(p => p.borough === value);
-  else if (type === 'zip' && value) posts = posts.filter(p => p.zip_code === value);
-
-  const since = getTimeFilterSince(timeFilter);
-  if (since) {
-    const sinceMs = new Date(since).getTime();
-    posts = posts.filter((p) => new Date(p.created_at).getTime() >= sinceMs);
-  }
-
-  if (statusFilter === 'participant') posts = posts.filter(p => p.is_participant);
-  else if (statusFilter === 'orbiter') posts = posts.filter(p => !p.is_participant && p.user_id != null);
-  else if (statusFilter === 'anonymous') posts = posts.filter(p => p.user_id == null);
-
-  if (sortByTop) posts.sort((a, b) => (b.total_reactions || 0) - (a.total_reactions || 0));
-  else posts.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-
-  return posts;
-}
-
 // Local time filter helper (mirrors supabase.getTimeFilterSince)
 function getTimeFilterSince(tf) {
   if (!tf || tf === 'all') return null;
@@ -595,22 +703,47 @@ function getTimeFilterSince(tf) {
   return since.toISOString();
 }
 
-function mergeFeedWithSamples(realPosts, samplePosts) {
-  const merged = [];
-  const data = realPosts || [];
-  let sampleIdx = 0;
+function applyFeedFilters(posts, {
+  locTab,
+  filterBorough,
+  filterZip,
+  timeFilter,
+  statusFilter,
+  sortByTop,
+}) {
+  let out = [...(posts || [])];
 
-  if (data.length === 0) return [...samplePosts];
-
-  for (let i = 0; i < data.length; i += 1) {
-    merged.push(data[i]);
-    if ((i + 1) % 3 === 0 && sampleIdx < samplePosts.length) {
-      merged.push(samplePosts[sampleIdx++]);
-    }
+  if (locTab === 'borough' && filterBorough) {
+    out = out.filter((p) => {
+      if (p.borough !== filterBorough) return false;
+      const scope = p.scope || null;
+      return scope === 'borough' || scope === 'zip' || scope == null;
+    });
+  } else if (locTab === 'zip' && filterZip) {
+    out = out.filter((p) => p.zip_code === filterZip);
   }
-  while (sampleIdx < samplePosts.length) merged.push(samplePosts[sampleIdx++]);
 
-  return merged;
+  const since = getTimeFilterSince(timeFilter);
+  if (since) {
+    const sinceMs = new Date(since).getTime();
+    out = out.filter((p) => new Date(p.created_at).getTime() >= sinceMs);
+  }
+
+  if (statusFilter === 'participant') out = out.filter((p) => !!p.is_participant);
+  else if (statusFilter === 'orbiter') out = out.filter((p) => !p.is_participant && p.user_id != null);
+  else if (statusFilter === 'anonymous') out = out.filter((p) => p.user_id == null);
+
+  if (sortByTop) {
+    out.sort((a, b) => {
+      const byReactions = (Number(b.total_reactions || 0) - Number(a.total_reactions || 0));
+      if (byReactions !== 0) return byReactions;
+      return new Date(b.created_at) - new Date(a.created_at);
+    });
+  } else {
+    out.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  }
+
+  return out;
 }
 
 // ── GeoPostView ───────────────────────────────────────────────────────────────
@@ -629,6 +762,7 @@ export default function GeoPostView({ session }) {
   const [sortByTop,       setSortByTop]       = useState(false);
   const [openDropdown,    setOpenDropdown]    = useState(null);
   const [searchQuery,     setSearchQuery]     = useState('');
+  const [feedTextScale,   setFeedTextScale]   = useState(1);
 
   // ── feed state ────────────────────────────────────────────────────────────────
   const [posts,       setPosts]       = useState([]);
@@ -636,6 +770,7 @@ export default function GeoPostView({ session }) {
   const [loading,     setLoading]     = useState(false);
   const [reactions,   setReactions]   = useState({});
   const [reactorsModal,setReactorsModal]=useState(null);
+  const [zipHeatMap,  setZipHeatMap]  = useState({});
 
   // ── editor scope ──────────────────────────────────────────────────────────────
   const [editorScope,   setEditorScope]   = useState('digital');
@@ -655,6 +790,7 @@ export default function GeoPostView({ session }) {
   // ── post styling ──────────────────────────────────────────────────────────────
   const [postFill,    setPostFill]    = useState('');
   const [postOutline, setPostOutline] = useState('');
+  const [postShadow,  setPostShadow]  = useState('');
   const [textColor,   setTextColor]   = useState('#000000');
   const [textColorManuallySet, setTextColorManuallySet] = useState(false);
 
@@ -674,21 +810,35 @@ export default function GeoPostView({ session }) {
   const txtColBtnRef   = useRef(null);
   const fillBtnRef     = useRef(null);
   const outlineBtnRef  = useRef(null);
+  const shadowBtnRef   = useRef(null);
   const savedRangeRef  = useRef(null);
   const coolHandlerRef = useRef(null);
 
   // ── load feed ─────────────────────────────────────────────────────────────────
   const loadFeed = useCallback(async () => {
+    const startedAt = Date.now();
     setLoading(true);
     try {
-      const type  = locTab === 'borough' ? 'borough' : locTab === 'zip' ? 'zip' : 'all';
-      const value = locTab === 'borough' ? filterBorough : locTab === 'zip' ? filterZip : null;
-      const data  = await fetchGeoPostFeed({ type, value, timeFilter, statusFilter, sortByTop });
-
-      const samples = filterSamplePosts(type, value, timeFilter, statusFilter, sortByTop);
-      const finalList = mergeFeedWithSamples(data || [], samples);
+      const data = await fetchGeoPostFeed({
+        type: 'all',
+        value: null,
+        timeFilter: 'all',
+        statusFilter: 'all',
+        sortByTop: false,
+      });
+      const samples = SAMPLE_MODE ? SAMPLE_POSTS : [];
+      const combined = [...(data || []), ...samples];
+      const finalList = applyFeedFilters(combined, {
+        locTab,
+        filterBorough,
+        filterZip,
+        timeFilter,
+        statusFilter,
+        sortByTop,
+      });
 
       setPosts(finalList);
+      setZipHeatMap(getZipHeatSnapshot());
       setVisibleCount(PAGE_SIZE);
       if (finalList.length > 0) {
         const realIds = finalList.filter(p => !p.id.startsWith('sp') && !p.id.startsWith('gsp_')).map(p => p.id);
@@ -703,11 +853,23 @@ export default function GeoPostView({ session }) {
       }
     } catch (err) {
       console.error('loadFeed error', err);
-      const type  = locTab === 'borough' ? 'borough' : locTab === 'zip' ? 'zip' : 'all';
-      const value = locTab === 'borough' ? filterBorough : locTab === 'zip' ? filterZip : null;
-      const samples = filterSamplePosts(type, value, timeFilter, statusFilter, sortByTop);
-      setPosts(samples);
+      const fallback = SAMPLE_MODE
+        ? applyFeedFilters(SAMPLE_POSTS, {
+          locTab,
+          filterBorough,
+          filterZip,
+          timeFilter,
+          statusFilter,
+          sortByTop,
+        })
+        : [];
+      setPosts(fallback);
       setReactions({});
+      setZipHeatMap(getZipHeatSnapshot());
+    }
+    const elapsed = Date.now() - startedAt;
+    if (elapsed < 220) {
+      await new Promise((resolve) => setTimeout(resolve, 220 - elapsed));
     }
     setLoading(false);
   }, [locTab, filterBorough, filterZip, timeFilter, statusFilter, sortByTop]);
@@ -716,6 +878,16 @@ export default function GeoPostView({ session }) {
     const t = setTimeout(() => { loadFeed(); }, 100);
     return () => clearTimeout(t);
   }, [loadFeed]);
+
+  useEffect(() => {
+    const refreshHeat = () => setZipHeatMap(getZipHeatSnapshot());
+    window.addEventListener('storage', refreshHeat);
+    window.addEventListener('focus', refreshHeat);
+    return () => {
+      window.removeEventListener('storage', refreshHeat);
+      window.removeEventListener('focus', refreshHeat);
+    };
+  }, []);
 
   // ── selectionchange: B/I/U/size only (alignment managed in state) ─────────────
   useEffect(() => {
@@ -917,6 +1089,7 @@ export default function GeoPostView({ session }) {
         zip_code: editorScope === 'zip' ? editorZip : null,
         post_fill:    postFill    || null,
         post_outline: postOutline || null,
+        post_shadow:  postShadow  || null,
         is_participant: isParticipant,
         post_approved,
         user_id: session?.user?.id || null,
@@ -1006,13 +1179,19 @@ export default function GeoPostView({ session }) {
   const baseFB   = 'relative px-2.5 py-1 rounded-lg border-2 border-black text-[10px] sm:text-xs font-black transition-all flex items-center gap-0.5';
   const timeLabel = timeFilter === 'all' ? 'Time' : TIME_OPTIONS.find(t => t.key === timeFilter)?.label || 'Time';
   const zipList   = (locTab === 'borough' && filterBorough) ? (BOROUGH_ZIPS[filterBorough] || []) : (BOROUGH_ZIPS[filterZipBoro] || []);
+  const boroughHeatMap = useMemo(() => buildBoroughHeatMap(zipHeatMap), [zipHeatMap]);
   const normalizedQuery = normalizeSearchText(searchQuery);
   const searchTokens = normalizedQuery ? normalizedQuery.split(' ') : [];
 
   const filteredPosts = useMemo(() => {
     if (!normalizedQuery) return posts;
     return posts.filter((p) => {
-      const content = p.content?.html || p.content || '';
+      let parsedContent = {};
+      if (p.content && typeof p.content === 'object') parsedContent = p.content;
+      else if (typeof p.content === 'string') {
+        try { parsedContent = JSON.parse(p.content); } catch { parsedContent = {}; }
+      }
+      const content = parsedContent.html || p.content || '';
       const contentText = normalizeSearchText(content);
       const username = normalizeSearchText(p.username || 'orbiter');
       const borough = normalizeSearchText(p.borough || '');
@@ -1092,6 +1271,7 @@ export default function GeoPostView({ session }) {
               overflowWrap: 'break-word',
               backgroundColor: postFill || undefined,
               outline: postOutline ? `3px solid ${postOutline}` : 'none',
+              boxShadow: postShadow ? `5px 5px 0px ${postShadow}` : 'none',
             }}
             onKeyDown={e => {
               if (e.ctrlKey || e.metaKey) {
@@ -1179,6 +1359,18 @@ export default function GeoPostView({ session }) {
               </div>
             </PortalPopup>
 
+            {tbBtn(!!postShadow || openToolbar === 'postShadow', e => { e.preventDefault(); openTb('postShadow'); }, <span style={{ fontSize: 10, textShadow: `2px 2px 0 ${postShadow || '#555'}` }}>▦</span>, 'Post Shadow Color', shadowBtnRef)}
+            <PortalPopup btnRef={shadowBtnRef} open={openToolbar === 'postShadow'} onClose={closeToolbar} minWidth={180} alignRight>
+              <div className="bg-white border-3 border-black rounded-xl shadow-[4px_4px_0px_black] overflow-hidden">
+                {postShadow && (
+                  <button onMouseDown={e => e.preventDefault()} onClick={() => { setPostShadow(''); setOpenToolbar(null); }} className="w-full text-left px-3 py-1.5 text-[10px] font-black bg-gray-100 border-b border-gray-200 hover:bg-gray-200">✕ Clear shadow</button>
+                )}
+                <div className="p-1">
+                  <HexColorPicker value={postShadow || '#000000'} onChange={c => setPostShadow(c)} onClose={closeToolbar} />
+                </div>
+              </div>
+            </PortalPopup>
+
             {tbBtn(openToolbar === 'emoji', e => { e.preventDefault(); openTb('emoji'); }, <span style={{ fontSize: 13 }}>😀</span>, 'Emoji', emojiBtnRef)}
             <PortalPopup btnRef={emojiBtnRef} open={openToolbar === 'emoji'} onClose={closeToolbar} minWidth={300} alignRight>
               <EmojiPicker embedded={true} compact={true} value="" onChange={e => { if (e) handleInsertEmoji(e); }} />
@@ -1216,6 +1408,21 @@ export default function GeoPostView({ session }) {
                 placeholder="Search posts, usernames, zips..."
                 className="w-full px-3 py-2 border-2 border-black rounded text-sm font-black mb-3"
               />
+              <div className="mb-3 px-0.5">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[10px] font-black">Text Size</span>
+                  <span className="text-[10px] font-black">{Math.round(feedTextScale * 100)}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="0.9"
+                  max="1.4"
+                  step="0.05"
+                  value={feedTextScale}
+                  onChange={(e) => setFeedTextScale(Number(e.target.value))}
+                  className="w-full"
+                />
+              </div>
               <div className="flex flex-col gap-2">
                 <button onMouseDown={e => e.preventDefault()} onClick={() => setSortByTop(v => !v)} className={baseFB} style={sortByTop ? activeFS : {}}>🔥 Top</button>
                 <button onMouseDown={e => e.preventDefault()} onClick={() => { setLocTab('all'); setFilterBorough(''); setFilterZip(''); setOpenDropdown(null); }} className={baseFB} style={locTab === 'all' ? activeFS : {}}>🌀 All</button>
@@ -1279,6 +1486,21 @@ export default function GeoPostView({ session }) {
           <section className="md:col-span-2" data-geopost-feed-scroll>
             <div className="md:hidden rounded-2xl border-3 border-black p-3 bg-white shadow-[4px_4px_0px_black] mb-3">
               <input value={searchQuery} onChange={(e) => { setSearchQuery(e.target.value); setVisibleCount(PAGE_SIZE); }} placeholder="Search posts, usernames, zips..." className="w-full px-3 py-2 border-2 border-black rounded text-sm font-black mb-3" />
+              <div className="mb-3 px-0.5">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[10px] font-black">Text Size</span>
+                  <span className="text-[10px] font-black">{Math.round(feedTextScale * 100)}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="0.9"
+                  max="1.4"
+                  step="0.05"
+                  value={feedTextScale}
+                  onChange={(e) => setFeedTextScale(Number(e.target.value))}
+                  className="w-full"
+                />
+              </div>
               <div className="flex items-center gap-1 flex-wrap">
                 <button onMouseDown={e => e.preventDefault()} onClick={() => setSortByTop(v => !v)} className={baseFB} style={sortByTop ? activeFS : {}}>🔥 Top</button>
                 <button onMouseDown={e => e.preventDefault()} onClick={() => { setLocTab('all'); setFilterBorough(''); setFilterZip(''); setOpenDropdown(null); }} className={baseFB} style={locTab === 'all' ? activeFS : {}}>🌀 All</button>
@@ -1338,34 +1560,51 @@ export default function GeoPostView({ session }) {
               </div>
             </div>
 
-            {loading && <p className="text-center text-sm text-gray-400 font-semibold py-4">Loading...</p>}
-            {!loading && filteredPosts.length === 0 && (
-              <div className="text-center py-8">
-                <div className="text-4xl mb-2">🌀</div>
-                <p className="font-black text-gray-500">Nothing here yet! Be the first!</p>
-              </div>
-            )}
-            {!loading && filteredPosts.length > 0 && (
-              <div className="flex flex-col gap-3">
-                {visiblePosts.map(post => (
-                  <PostCard key={post.id} post={post} postReactions={reactions[post.id]} onReact={handleReact} onOpenReactors={id => setReactorsModal(id)} accentColor={accentColor} onSelectTag={handleSelectTag} />
-                ))}
-                {(canShowMore || canShowLess) && (
-                  <div className="flex justify-center gap-3 pt-1">
-                    {canShowMore && (
-                      <button onMouseDown={e => e.preventDefault()} onClick={() => setVisibleCount(v => v + PAGE_SIZE)} className="px-4 py-1.5 border-2 border-black rounded-full text-xs font-black bg-white shadow-[2px_2px_0px_black] hover:scale-105 transition-transform">
-                        Show More ({filteredPosts.length - visibleCount} remaining)
-                      </button>
-                    )}
-                    {canShowLess && (
-                      <button onMouseDown={e => e.preventDefault()} onClick={() => setVisibleCount(PAGE_SIZE)} className="px-4 py-1.5 border-2 border-black rounded-full text-xs font-black bg-white shadow-[2px_2px_0px_black] hover:scale-105 transition-transform">
-                        Show Less
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
+            <div className={`transition-opacity duration-200 ${loading ? 'opacity-35' : 'opacity-100'}`}>
+              {filteredPosts.length === 0 && !loading && (
+                <div className="text-center py-8">
+                  <div className="text-4xl mb-2">🌀</div>
+                  <p className="font-black text-gray-500">Nothing here yet! Be the first!</p>
+                </div>
+              )}
+
+              {filteredPosts.length > 0 && (
+                <div className="flex flex-col gap-3">
+                  {visiblePosts.map(post => (
+                    <PostCard
+                      key={post.id}
+                      post={post}
+                      postReactions={reactions[post.id]}
+                      onReact={handleReact}
+                      onOpenReactors={id => setReactorsModal(id)}
+                      accentColor={accentColor}
+                      onSelectTag={handleSelectTag}
+                      zipHeatMap={zipHeatMap}
+                      boroughHeatMap={boroughHeatMap}
+                      textScale={feedTextScale}
+                    />
+                  ))}
+                  {(canShowMore || canShowLess) && (
+                    <div className="flex justify-center gap-3 pt-1">
+                      {canShowMore && (
+                        <button onMouseDown={e => e.preventDefault()} onClick={() => setVisibleCount(v => v + PAGE_SIZE)} className="px-4 py-1.5 border-2 border-black rounded-full text-xs font-black bg-white shadow-[2px_2px_0px_black] hover:scale-105 transition-transform">
+                          Show More ({filteredPosts.length - visibleCount} remaining)
+                        </button>
+                      )}
+                      {canShowLess && (
+                        <button onMouseDown={e => e.preventDefault()} onClick={() => setVisibleCount(PAGE_SIZE)} className="px-4 py-1.5 border-2 border-black rounded-full text-xs font-black bg-white shadow-[2px_2px_0px_black] hover:scale-105 transition-transform">
+                          Show Less
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className={`transition-opacity duration-200 ${loading ? 'opacity-100' : 'opacity-0 pointer-events-none h-0 overflow-hidden'}`}>
+              <p className="text-center text-sm text-gray-400 font-semibold py-4">Loading...</p>
+            </div>
           </section>
         </div>
       </div>
