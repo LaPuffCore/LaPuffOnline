@@ -578,6 +578,17 @@ function filterSamplePosts(type, value, timeFilter, statusFilter, sortByTop) {
   return posts;
 }
 
+// Local time filter helper (mirrors supabase.getTimeFilterSince)
+function getTimeFilterSince(tf) {
+  if (!tf || tf === 'all') return null;
+  const now = new Date();
+  const map = { '1d': 1, '7d': 7, '1mo': 30, '3mo': 90, '6mo': 180 };
+  const days = map[tf];
+  if (!days) return null;
+  const since = new Date(now.getTime() - days * 86400000);
+  return since.toISOString();
+}
+
 function mergeFeedWithSamples(realPosts, samplePosts) {
   const merged = [];
   const data = realPosts || [];
@@ -1170,7 +1181,7 @@ export default function GeoPostView({ session }) {
           <div className="px-3 pb-3 pt-2 flex items-center gap-2">
             <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageChange} />
             <button onMouseDown={e => e.preventDefault()} onClick={() => fileInputRef.current?.click()} className="px-3 py-2 md:px-4 md:py-3 border-2 border-black rounded-lg text-sm md:text-base font-black bg-white hover:bg-gray-100 shadow-[2px_2px_0px_black]">
-              📎 Image
+              <span className="text-xl leading-none">📎</span> Image
             </button>
             {submitError && <p className="text-[10px] text-red-600 font-semibold flex-1 truncate">{submitError}</p>}
             <button onMouseDown={e => e.preventDefault()} onClick={handlePost} disabled={submitting} className="ml-auto px-4 py-2 md:px-5 md:py-3 border-2 border-black rounded-lg text-sm md:text-base font-black shadow-[2px_2px_0px_black]" style={{ background: accentColor, color: '#fff' }}>
@@ -1202,27 +1213,29 @@ export default function GeoPostView({ session }) {
 
                 <div className="relative">
                   <button onMouseDown={e => e.preventDefault()} onClick={() => setOpenDropdown(p => p === 'borough' ? null : 'borough')} className={baseFB} style={locTab === 'borough' && filterBorough ? activeFS : {}}>🏙 {locTab === 'borough' && filterBorough ? filterBorough : 'Borough'} ▾</button>
-                  {!(locTab === 'borough' && filterBorough) && (
-                    <InlineDropdown open={openDropdown === 'borough'} onClose={() => setOpenDropdown(null)}>
-                      {BOROUGHS.map(b => (
-                        <button key={b} onMouseDown={e => e.preventDefault()} onClick={() => { setFilterBorough(b); setLocTab('borough'); setFilterZipBoro(b); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100" style={filterBorough === b ? { background: accentColor + '22', color: accentColor } : {}}>{b}</button>
-                      ))}
-                    </InlineDropdown>
-                  )}
+                  <InlineDropdown open={openDropdown === 'borough'} onClose={() => setOpenDropdown(null)}>
+                    {(locTab === 'borough' && filterBorough) && (
+                      <button onMouseDown={e => e.preventDefault()} onClick={() => { setLocTab('all'); setFilterBorough(''); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100 border-b border-gray-200 text-red-500">× Clear</button>
+                    )}
+                    {BOROUGHS.map(b => (
+                      <button key={b} onMouseDown={e => e.preventDefault()} onClick={() => { setFilterBorough(b); setLocTab('borough'); setFilterZipBoro(b); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100" style={filterBorough === b ? { background: accentColor + '22', color: accentColor } : {}}>{b}</button>
+                    ))}
+                  </InlineDropdown>
                 </div>
 
                 <div className="relative">
                   <button onMouseDown={e => e.preventDefault()} onClick={() => setOpenDropdown(p => p === 'zip' ? null : 'zip')} className={baseFB} style={locTab === 'zip' && filterZip ? activeFS : {}}>📍 {locTab === 'zip' && filterZip ? filterZip : 'Zip'} ▾</button>
                   <InlineDropdown open={openDropdown === 'zip'} onClose={() => setOpenDropdown(null)} className="w-[220px] max-h-[280px]">
-                    {!(locTab === 'borough' && filterBorough) && (
-                      <div className="p-2 border-b border-gray-200">
-                        <div className="flex gap-1 flex-wrap">
-                          {BOROUGHS.map(b => (
-                            <button key={b} onMouseDown={e => e.preventDefault()} onClick={() => setFilterZipBoro(b)} className="px-1.5 py-0.5 rounded text-[10px] font-black border border-black" style={filterZipBoro === b ? { background: accentColor, color: '#fff' } : {}}>{b.split(' ')[0]}</button>
-                          ))}
-                        </div>
-                      </div>
+                    {(locTab === 'zip' && filterZip) && (
+                      <button onMouseDown={e => e.preventDefault()} onClick={() => { setLocTab('all'); setFilterZip(''); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100 border-b border-gray-200 text-red-500">× Clear</button>
                     )}
+                    <div className="p-2 border-b border-gray-200">
+                      <div className="flex gap-1 flex-wrap">
+                        {BOROUGHS.map(b => (
+                          <button key={b} onMouseDown={e => e.preventDefault()} onClick={() => setFilterZipBoro(b)} className="px-1.5 py-0.5 rounded text-[10px] font-black border border-black" style={filterZipBoro === b ? { background: accentColor, color: '#fff' } : {}}>{b.split(' ')[0]}</button>
+                        ))}
+                      </div>
+                    </div>
                     {zipList.map(z => (
                       <button key={z.zip} onMouseDown={e => e.preventDefault()} onClick={() => { setFilterZip(z.zip); setLocTab('zip'); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1 text-xs font-semibold hover:bg-gray-100" style={filterZip === z.zip ? { background: accentColor + '22', color: accentColor } : {}}>{z.zip} <span className="text-[10px] text-gray-400">{z.name}</span></button>
                     ))}
@@ -1263,18 +1276,22 @@ export default function GeoPostView({ session }) {
 
                 <div className="relative">
                   <button onMouseDown={e => e.preventDefault()} onClick={() => setOpenDropdown(p => p === 'borough' ? null : 'borough')} className={baseFB} style={locTab === 'borough' && filterBorough ? activeFS : {}}>🏙 {locTab === 'borough' && filterBorough ? filterBorough : 'Borough'} ▾</button>
-                  {!(locTab === 'borough' && filterBorough) && (
-                    <InlineDropdown open={openDropdown === 'borough'} onClose={() => setOpenDropdown(null)}>
-                      {BOROUGHS.map(b => (
-                        <button key={b} onMouseDown={e => e.preventDefault()} onClick={() => { setFilterBorough(b); setLocTab('borough'); setFilterZipBoro(b); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100" style={filterBorough === b ? { background: accentColor + '22', color: accentColor } : {}}>{b}</button>
-                      ))}
-                    </InlineDropdown>
-                  )}
+                  <InlineDropdown open={openDropdown === 'borough'} onClose={() => setOpenDropdown(null)}>
+                    {(locTab === 'borough' && filterBorough) && (
+                      <button onMouseDown={e => e.preventDefault()} onClick={() => { setLocTab('all'); setFilterBorough(''); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100 border-b border-gray-200 text-red-500">× Clear</button>
+                    )}
+                    {BOROUGHS.map(b => (
+                      <button key={b} onMouseDown={e => e.preventDefault()} onClick={() => { setFilterBorough(b); setLocTab('borough'); setFilterZipBoro(b); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100" style={filterBorough === b ? { background: accentColor + '22', color: accentColor } : {}}>{b}</button>
+                    ))}
+                  </InlineDropdown>
                 </div>
 
                 <div className="relative">
                   <button onMouseDown={e => e.preventDefault()} onClick={() => setOpenDropdown(p => p === 'zip' ? null : 'zip')} className={baseFB} style={locTab === 'zip' && filterZip ? activeFS : {}}>📍 {locTab === 'zip' && filterZip ? filterZip : 'Zip'} ▾</button>
                   <InlineDropdown open={openDropdown === 'zip'} onClose={() => setOpenDropdown(null)} className="w-[220px] max-h-[280px]">
+                    {(locTab === 'zip' && filterZip) && (
+                      <button onMouseDown={e => e.preventDefault()} onClick={() => { setLocTab('all'); setFilterZip(''); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100 border-b border-gray-200 text-red-500">× Clear</button>
+                    )}
                     <div className="p-2 border-b border-gray-200">
                       <div className="flex gap-1 flex-wrap">
                         {BOROUGHS.map(b => (
