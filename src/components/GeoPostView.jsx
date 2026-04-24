@@ -300,8 +300,14 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
   const [qepOpen, setQepOpen] = useState(false);
   const [imgRatio, setImgRatio] = useState(1);
   const [imgModalOpen, setImgModalOpen] = useState(false);
-  const postHtml = post.content?.html || post.content || '';
-  const postTextColor = normalizeHexColor(post.content?.textColor || '', theme.text);
+  // content can be a JSONB object or, rarely, a double-encoded JSON string
+  const parsedContent = (() => {
+    const c = post.content;
+    if (c && typeof c === 'object') return c;
+    try { return JSON.parse(c); } catch { return {}; }
+  })();
+  const postHtml = parsedContent.html || (typeof post.content === 'string' ? post.content : '') || '';
+  const postTextColor = normalizeHexColor(parsedContent.textColor || '', theme.text);
 
   const statusStyle = post.is_participant
     ? { background: '#22c55e', color: '#fff' }
@@ -706,7 +712,10 @@ export default function GeoPostView({ session }) {
     setLoading(false);
   }, [locTab, filterBorough, filterZip, timeFilter, statusFilter, sortByTop]);
 
-  useEffect(() => { loadFeed(); }, [loadFeed]);
+  useEffect(() => {
+    const t = setTimeout(() => { loadFeed(); }, 100);
+    return () => clearTimeout(t);
+  }, [loadFeed]);
 
   // ── selectionchange: B/I/U/size only (alignment managed in state) ─────────────
   useEffect(() => {
