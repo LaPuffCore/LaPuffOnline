@@ -142,7 +142,11 @@ function makeStableSampleUuid(index, variant = '8') {
 }
 
 function isAnonymousAuthor(entity) {
-  return String(entity?.username || '').trim().toLowerCase() === 'anonymous';
+  const username = String(entity?.username || '').trim().toLowerCase();
+  if (username === 'anonymous') return true;
+  if (entity?.user_id) return false;
+  // Unsigned rows often come through with null user_id + empty username.
+  return username.length === 0;
 }
 
 const SAMPLE_ZIP_CHOICES = [
@@ -943,14 +947,17 @@ async function compressGeoImage(file) {
 }
 
 // ── InlineDropdown (for filter bar — not portaled, fine outside overflow:hidden) ─
-function InlineDropdown({ open, onClose, children, alignRight = false, className = '' }) {
+function InlineDropdown({ open, onClose, children, alignRight = false, className = '', triggerRef = null }) {
   const ref = useRef(null);
   useEffect(() => {
     if (!open) return;
-    const h = e => { if (ref.current && !ref.current.contains(e.target)) onClose(); };
+    const h = e => {
+      if (triggerRef?.current?.contains(e.target)) return;
+      if (ref.current && !ref.current.contains(e.target)) onClose();
+    };
     const t = setTimeout(() => document.addEventListener('mousedown', h), 50);
     return () => { clearTimeout(t); document.removeEventListener('mousedown', h); };
-  }, [open, onClose]);
+  }, [open, onClose, triggerRef]);
   if (!open) return null;
   return (
     <div ref={ref}
@@ -1088,6 +1095,14 @@ export default function GeoPostView({ session }) {
   const fillBtnRef     = useRef(null);
   const outlineBtnRef  = useRef(null);
   const shadowBtnRef   = useRef(null);
+  const boroughTriggerDesktopRef = useRef(null);
+  const zipTriggerDesktopRef = useRef(null);
+  const timeTriggerDesktopRef = useRef(null);
+  const statusTriggerDesktopRef = useRef(null);
+  const boroughTriggerMobileRef = useRef(null);
+  const zipTriggerMobileRef = useRef(null);
+  const timeTriggerMobileRef = useRef(null);
+  const statusTriggerMobileRef = useRef(null);
   const savedRangeRef  = useRef(null);
   const coolHandlerRef = useRef(null);
 
@@ -1557,13 +1572,29 @@ export default function GeoPostView({ session }) {
       ...author,
     };
     setCommentsByPost((prev) => ({ ...prev, [postId]: [...(prev[postId] || []), optimistic] }));
+    const payload = { post_id: postId, parent_id: parentId, content, ...author };
     try {
-      const saved = await submitPostComment({ post_id: postId, parent_id: parentId, content, ...author }, session);
+      const saved = await submitPostComment(payload, session);
       setCommentsByPost((prev) => ({
         ...prev,
         [postId]: (prev[postId] || []).map((entry) => entry.id === optimistic.id ? saved : entry),
       }));
     } catch (error) {
+      console.error('submitCommentForPost failed:', error);
+      if (SAMPLE_POST_IDS.has(postId)) {
+        try {
+          const sourcePost = SAMPLE_POSTS.find((entry) => entry.id === postId);
+          if (sourcePost) await syncSampleGeoPostsToSupabase([sourcePost], session);
+          const savedRetry = await submitPostComment(payload, session);
+          setCommentsByPost((prev) => ({
+            ...prev,
+            [postId]: (prev[postId] || []).map((entry) => entry.id === optimistic.id ? savedRetry : entry),
+          }));
+          return;
+        } catch (retryError) {
+          console.error('submitCommentForPost retry failed:', retryError);
+        }
+      }
       setCommentsByPost((prev) => ({
         ...prev,
         [postId]: (prev[postId] || []).filter((entry) => entry.id !== optimistic.id),
@@ -1852,6 +1883,7 @@ export default function GeoPostView({ session }) {
 
                 <div className="relative">
                   <button
+                    ref={boroughTriggerDesktopRef}
                     onMouseDown={e => e.preventDefault()}
                     onClick={() => {
                       if (locTab === 'borough' && filterBorough) {
@@ -1868,18 +1900,19 @@ export default function GeoPostView({ session }) {
                   >
                     🏙 {locTab === 'borough' && filterBorough ? `${filterBorough} ×` : 'Borough ▾'}
                   </button>
-                  <InlineDropdown open={openDropdown === 'borough'} onClose={() => setOpenDropdown(null)}>
+                  <InlineDropdown open={openDropdown === 'borough'} onClose={() => setOpenDropdown(null)} triggerRef={boroughTriggerDesktopRef}>
                     {(locTab === 'borough' && filterBorough) && (
                       <button onMouseDown={e => e.preventDefault()} onClick={() => { setLocTab('all'); setFilterBorough(''); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100 border-b border-gray-200 text-red-500">× Clear</button>
                     )}
                     {BOROUGHS.map(b => (
-                      <button key={b} onMouseDown={e => e.preventDefault()} onClick={() => { setFilterBorough(b); setLocTab('borough'); setFilterZipBoro(b); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100" style={filterBorough === b ? { background: accentColor + '22', color: accentColor } : {}}>{b}</button>
+                      <button key={b} onMouseDown={e => e.preventDefault()} onClick={() => { setFilterBorough(b); setFilterZip(''); setLocTab('borough'); setFilterZipBoro(b); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100" style={filterBorough === b ? { background: accentColor + '22', color: accentColor } : {}}>{b}</button>
                     ))}
                   </InlineDropdown>
                 </div>
 
                 <div className="relative">
                   <button
+                    ref={zipTriggerDesktopRef}
                     onMouseDown={e => e.preventDefault()}
                     onClick={() => {
                       if (locTab === 'zip' && filterZip) {
@@ -1896,7 +1929,7 @@ export default function GeoPostView({ session }) {
                   >
                     📍 {locTab === 'zip' && filterZip ? `${filterZip} ×` : 'Zip ▾'}
                   </button>
-                  <InlineDropdown open={openDropdown === 'zip'} onClose={() => setOpenDropdown(null)} className="w-[220px] max-h-[280px]">
+                  <InlineDropdown open={openDropdown === 'zip'} onClose={() => setOpenDropdown(null)} className="w-[220px] max-h-[280px]" triggerRef={zipTriggerDesktopRef}>
                     {(locTab === 'zip' && filterZip) && (
                       <button onMouseDown={e => e.preventDefault()} onClick={() => { setLocTab('all'); setFilterZip(''); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100 border-b border-gray-200 text-red-500">× Clear</button>
                     )}
@@ -1908,13 +1941,14 @@ export default function GeoPostView({ session }) {
                       </div>
                     </div>
                     {zipList.map(z => (
-                      <button key={z.zip} onMouseDown={e => e.preventDefault()} onClick={() => { setFilterZip(z.zip); setLocTab('zip'); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1 text-xs font-semibold hover:bg-gray-100" style={filterZip === z.zip ? { background: accentColor + '22', color: accentColor } : {}}>{z.zip} <span className="text-[10px] text-gray-400">{z.name}</span></button>
+                      <button key={z.zip} onMouseDown={e => e.preventDefault()} onClick={() => { setFilterZip(z.zip); setFilterBorough(''); setLocTab('zip'); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1 text-xs font-semibold hover:bg-gray-100" style={filterZip === z.zip ? { background: accentColor + '22', color: accentColor } : {}}>{z.zip} <span className="text-[10px] text-gray-400">{z.name}</span></button>
                     ))}
                   </InlineDropdown>
                 </div>
 
                 <div className="relative">
                   <button
+                    ref={timeTriggerDesktopRef}
                     onMouseDown={e => e.preventDefault()}
                     onClick={() => {
                       if (timeFilter !== 'all') {
@@ -1930,7 +1964,7 @@ export default function GeoPostView({ session }) {
                   >
                     {timeFilter !== 'all' ? `${timeLabel} ×` : `${timeLabel} ▾`}
                   </button>
-                  <InlineDropdown open={openDropdown === 'time'} onClose={() => setOpenDropdown(null)}>
+                  <InlineDropdown open={openDropdown === 'time'} onClose={() => setOpenDropdown(null)} triggerRef={timeTriggerDesktopRef}>
                     {TIME_OPTIONS.map(t => (
                       <button key={t.key} onMouseDown={e => e.preventDefault()} onClick={() => { setTimeFilter(t.key); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100" style={timeFilter === t.key ? { background: accentColor + '22', color: accentColor } : {}}>{t.label}</button>
                     ))}
@@ -1938,7 +1972,7 @@ export default function GeoPostView({ session }) {
                 </div>
 
                 <div className="relative">
-                  <button onMouseDown={e => e.preventDefault()} onClick={() => {
+                  <button ref={statusTriggerDesktopRef} onMouseDown={e => e.preventDefault()} onClick={() => {
                     if (statusFilter !== 'all') {
                       setStatusFilter('all');
                       setOpenDropdown(null);
@@ -1951,7 +1985,7 @@ export default function GeoPostView({ session }) {
                       : statusFilter === 'orbiter' ? { background: '#ef4444', color: '#fff', borderColor: '#ef4444' }
                       : statusFilter === 'anonymous' ? { background: '#374151', color: '#fff', borderColor: '#374151' }
                       : {}}>{statusFilter === 'participant' ? 'Participant ×' : statusFilter === 'orbiter' ? 'Orbiter ×' : statusFilter === 'anonymous' ? 'Anonymous ×' : 'Status ▾'}</button>
-                  <InlineDropdown open={openDropdown === 'status'} onClose={() => setOpenDropdown(null)} alignRight>
+                  <InlineDropdown open={openDropdown === 'status'} onClose={() => setOpenDropdown(null)} alignRight triggerRef={statusTriggerDesktopRef}>
                     {[['all','All'],['participant','Participant'],['orbiter','Orbiter'],['anonymous','Anonymous']].map(([k, l]) => (
                       <button key={k} onMouseDown={e => e.preventDefault()} onClick={() => { setStatusFilter(k); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100" style={statusFilter === k ? { background: accentColor + '22', color: accentColor } : {}}>{l}</button>
                     ))}
@@ -1988,6 +2022,7 @@ export default function GeoPostView({ session }) {
 
                 <div className="relative">
                   <button
+                    ref={boroughTriggerMobileRef}
                     onMouseDown={e => e.preventDefault()}
                     onClick={() => {
                       if (locTab === 'borough' && filterBorough) {
@@ -2004,18 +2039,19 @@ export default function GeoPostView({ session }) {
                   >
                     🏙 {locTab === 'borough' && filterBorough ? `${filterBorough} ×` : 'Borough ▾'}
                   </button>
-                  <InlineDropdown open={openDropdown === 'borough'} onClose={() => setOpenDropdown(null)}>
+                  <InlineDropdown open={openDropdown === 'borough'} onClose={() => setOpenDropdown(null)} triggerRef={boroughTriggerMobileRef}>
                     {(locTab === 'borough' && filterBorough) && (
                       <button onMouseDown={e => e.preventDefault()} onClick={() => { setLocTab('all'); setFilterBorough(''); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100 border-b border-gray-200 text-red-500">× Clear</button>
                     )}
                     {BOROUGHS.map(b => (
-                      <button key={b} onMouseDown={e => e.preventDefault()} onClick={() => { setFilterBorough(b); setLocTab('borough'); setFilterZipBoro(b); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100" style={filterBorough === b ? { background: accentColor + '22', color: accentColor } : {}}>{b}</button>
+                      <button key={b} onMouseDown={e => e.preventDefault()} onClick={() => { setFilterBorough(b); setFilterZip(''); setLocTab('borough'); setFilterZipBoro(b); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100" style={filterBorough === b ? { background: accentColor + '22', color: accentColor } : {}}>{b}</button>
                     ))}
                   </InlineDropdown>
                 </div>
 
                 <div className="relative">
                   <button
+                    ref={zipTriggerMobileRef}
                     onMouseDown={e => e.preventDefault()}
                     onClick={() => {
                       if (locTab === 'zip' && filterZip) {
@@ -2032,7 +2068,7 @@ export default function GeoPostView({ session }) {
                   >
                     📍 {locTab === 'zip' && filterZip ? `${filterZip} ×` : 'Zip ▾'}
                   </button>
-                  <InlineDropdown open={openDropdown === 'zip'} onClose={() => setOpenDropdown(null)} className="w-[220px] max-h-[280px]">
+                  <InlineDropdown open={openDropdown === 'zip'} onClose={() => setOpenDropdown(null)} className="w-[220px] max-h-[280px]" triggerRef={zipTriggerMobileRef}>
                     {(locTab === 'zip' && filterZip) && (
                       <button onMouseDown={e => e.preventDefault()} onClick={() => { setLocTab('all'); setFilterZip(''); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100 border-b border-gray-200 text-red-500">× Clear</button>
                     )}
@@ -2044,13 +2080,14 @@ export default function GeoPostView({ session }) {
                       </div>
                     </div>
                     {zipList.map(z => (
-                      <button key={z.zip} onMouseDown={e => e.preventDefault()} onClick={() => { setFilterZip(z.zip); setLocTab('zip'); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1 text-xs font-semibold hover:bg-gray-100" style={filterZip === z.zip ? { background: accentColor + '22', color: accentColor } : {}}>{z.zip} <span className="text-[10px] text-gray-400">{z.name}</span></button>
+                      <button key={z.zip} onMouseDown={e => e.preventDefault()} onClick={() => { setFilterZip(z.zip); setFilterBorough(''); setLocTab('zip'); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1 text-xs font-semibold hover:bg-gray-100" style={filterZip === z.zip ? { background: accentColor + '22', color: accentColor } : {}}>{z.zip} <span className="text-[10px] text-gray-400">{z.name}</span></button>
                     ))}
                   </InlineDropdown>
                 </div>
 
                 <div className="relative">
                   <button
+                    ref={timeTriggerMobileRef}
                     onMouseDown={e => e.preventDefault()}
                     onClick={() => {
                       if (timeFilter !== 'all') {
@@ -2066,7 +2103,7 @@ export default function GeoPostView({ session }) {
                   >
                     {timeFilter !== 'all' ? `${timeLabel} ×` : `${timeLabel} ▾`}
                   </button>
-                  <InlineDropdown open={openDropdown === 'time'} onClose={() => setOpenDropdown(null)}>
+                  <InlineDropdown open={openDropdown === 'time'} onClose={() => setOpenDropdown(null)} triggerRef={timeTriggerMobileRef}>
                     {TIME_OPTIONS.map(t => (
                       <button key={t.key} onMouseDown={e => e.preventDefault()} onClick={() => { setTimeFilter(t.key); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100" style={timeFilter === t.key ? { background: accentColor + '22', color: accentColor } : {}}>{t.label}</button>
                     ))}
@@ -2074,7 +2111,7 @@ export default function GeoPostView({ session }) {
                 </div>
 
                 <div className="relative">
-                  <button onMouseDown={e => e.preventDefault()} onClick={() => {
+                  <button ref={statusTriggerMobileRef} onMouseDown={e => e.preventDefault()} onClick={() => {
                     if (statusFilter !== 'all') {
                       setStatusFilter('all');
                       setOpenDropdown(null);
@@ -2087,7 +2124,7 @@ export default function GeoPostView({ session }) {
                       : statusFilter === 'orbiter' ? { background: '#ef4444', color: '#fff', borderColor: '#ef4444' }
                       : statusFilter === 'anonymous' ? { background: '#374151', color: '#fff', borderColor: '#374151' }
                       : {}}>{statusFilter === 'participant' ? 'Participant ×' : statusFilter === 'orbiter' ? 'Orbiter ×' : statusFilter === 'anonymous' ? 'Anonymous ×' : 'Status ▾'}</button>
-                  <InlineDropdown open={openDropdown === 'status'} onClose={() => setOpenDropdown(null)} alignRight>
+                  <InlineDropdown open={openDropdown === 'status'} onClose={() => setOpenDropdown(null)} alignRight triggerRef={statusTriggerMobileRef}>
                     {[['all','All'],['participant','Participant'],['orbiter','Orbiter'],['anonymous','Anonymous']].map(([k, l]) => (
                       <button key={k} onMouseDown={e => e.preventDefault()} onClick={() => { setStatusFilter(k); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100" style={statusFilter === k ? { background: accentColor + '22', color: accentColor } : {}}>{l}</button>
                     ))}

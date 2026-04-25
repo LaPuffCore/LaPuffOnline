@@ -328,7 +328,11 @@ export async function fetchCommentsForPost(postId) {
     `${SUPABASE_URL}/rest/v1/post_comments?post_id=eq.${postId}&select=*&order=created_at.asc`,
     { headers: baseHeaders }
   );
-  if (!res.ok) return [];
+  if (!res.ok) {
+    const err = await res.text().catch(() => 'unknown fetchCommentsForPost error');
+    console.error('fetchCommentsForPost failed:', err);
+    return [];
+  }
   return res.json();
 }
 
@@ -440,6 +444,10 @@ export async function syncSampleGeoPostsToSupabase(samplePosts = [], session = n
     headers,
     body: JSON.stringify(payload),
   });
+  if (!res.ok) {
+    const err = await res.text().catch(() => 'unknown syncSampleGeoPostsToSupabase error');
+    console.error('Failed to sync sample posts:', err);
+  }
   return res.ok;
 }
 
@@ -469,6 +477,10 @@ export async function syncSampleGeoCommentsToSupabase(sampleComments = [], sessi
     headers,
     body: JSON.stringify(payload),
   });
+  if (!res.ok) {
+    const err = await res.text().catch(() => 'unknown syncSampleGeoCommentsToSupabase error');
+    console.error('Failed to sync sample comments:', err);
+  }
   return res.ok;
 }
 
