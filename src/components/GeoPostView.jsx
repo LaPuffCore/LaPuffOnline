@@ -234,6 +234,7 @@ function buildSamplePosts() {
 
 const SAMPLE_POSTS = buildSamplePosts();
 const SAMPLE_POST_IDS = new Set(SAMPLE_POSTS.map((post) => post.id));
+const SAMPLE_POSTS_BY_ID = new Map(SAMPLE_POSTS.map((post) => [post.id, post]));
 
 function buildSampleComments(samplePosts) {
   const base = [];
@@ -511,7 +512,7 @@ const AlignCenterIcon = () => <svg width="13" height="13" viewBox="0 0 16 16" fi
 const AlignRightIcon  = () => <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><rect x="1" y="2" width="14" height="2" rx="1"/><rect x="5" y="7" width="10" height="2" rx="1"/><rect x="3" y="12" width="12" height="2" rx="1"/></svg>;
 
 // ── PostCard ──────────────────────────────────────────────────────────────────
-function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, onSelectTag, zipHeatMap, boroughHeatMap, textScale = 1, imageScale = 1, commentCount = 0, commentsOpen = false, onToggleComments, commentsChildren }) {
+function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, onSelectTag, zipHeatMap, boroughHeatMap, textScale = 1, imageScale = 1, imagePriority = false, commentCount = 0, commentsOpen = false, onToggleComments, commentsChildren }) {
   const { resolvedTheme } = useSiteTheme();
   const theme = getPostVisualTheme(post, resolvedTheme);
   const date = new Date(post.created_at);
@@ -571,7 +572,6 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
       style={{
         borderColor: theme.outline,
         boxShadow: `4px 4px 0px ${theme.shadow}`,
-        zoom: textScale,
       }}
     >
       {post.image_url && (
@@ -579,8 +579,9 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
           <img
             src={post.image_url}
             alt="post"
-            className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-200 ${imgLoaded ? 'opacity-100' : 'opacity-0'}`}
-            loading="lazy"
+            className={`absolute inset-0 block w-full h-full object-cover transition-opacity duration-200 ${imgLoaded ? 'opacity-100' : 'opacity-0'}`}
+            loading={imagePriority ? 'eager' : 'lazy'}
+            decoding="async"
             onLoad={(e) => {
               try { setImgRatio(e.target.naturalWidth / e.target.naturalHeight); } catch {}
               setImgLoaded(true);
@@ -601,7 +602,7 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
         </div>
       )}
 
-      <div className="p-3" style={{ background: theme.fill }}>
+      <div className="p-3" style={{ background: theme.fill, fontSize: `${Math.max(0.5, Number(textScale || 1))}em` }}>
         <div className="flex items-center gap-1.5 mb-2 flex-wrap">
           {postIsAnonymous ? (
             <span className="font-black text-xs flex items-center gap-1" style={{ color: theme.text }}>
@@ -1124,7 +1125,17 @@ export default function GeoPostView({ session }) {
         const prev = combinedMap.get(post.id);
         combinedMap.set(post.id, prev ? { ...post, ...prev } : post);
       });
-      const combined = Array.from(combinedMap.values());
+      const combined = Array.from(combinedMap.values()).map((post) => {
+        const sampleSource = SAMPLE_POSTS_BY_ID.get(post.id);
+        if (sampleSource && !post.username && !isAnonymousAuthor(sampleSource)) {
+          return { ...post, username: sampleSource.username };
+        }
+        if (!post.username && post.user_id && session?.user?.id && post.user_id === session.user.id) {
+          const selfUsername = currentProfile?.username || session.user.user_metadata?.username || '';
+          if (selfUsername) return { ...post, username: selfUsername };
+        }
+        return post;
+      });
       const finalList = applyFeedFilters(combined, {
         locTab,
         filterBorough,
@@ -1169,7 +1180,7 @@ export default function GeoPostView({ session }) {
       await new Promise((resolve) => setTimeout(resolve, 220 - elapsed));
     }
     setLoading(false);
-  }, [locTab, filterBorough, filterZip, timeFilter, statusFilter, sortByTop]);
+  }, [locTab, filterBorough, filterZip, timeFilter, statusFilter, sortByTop, currentProfile, session]);
 
   useEffect(() => {
     const t = setTimeout(() => { loadFeed(); }, 100);
@@ -1885,16 +1896,7 @@ export default function GeoPostView({ session }) {
                   <button
                     ref={boroughTriggerDesktopRef}
                     onMouseDown={e => e.preventDefault()}
-                    onClick={() => {
-                      if (locTab === 'borough' && filterBorough) {
-                        setLocTab('all');
-                        setFilterBorough('');
-                        setOpenDropdown(null);
-                        setVisibleCount(PAGE_SIZE);
-                        return;
-                      }
-                      setOpenDropdown(p => p === 'borough' ? null : 'borough');
-                    }}
+                    onClick={() => setOpenDropdown(p => p === 'borough' ? null : 'borough')}
                     className={baseFB}
                     style={locTab === 'borough' && filterBorough ? activeFS : {}}
                   >
@@ -1902,10 +1904,10 @@ export default function GeoPostView({ session }) {
                   </button>
                   <InlineDropdown open={openDropdown === 'borough'} onClose={() => setOpenDropdown(null)} triggerRef={boroughTriggerDesktopRef}>
                     {(locTab === 'borough' && filterBorough) && (
-                      <button onMouseDown={e => e.preventDefault()} onClick={() => { setLocTab('all'); setFilterBorough(''); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100 border-b border-gray-200 text-red-500">× Clear</button>
+                      <button onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setLocTab('all'); setFilterBorough(''); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100 border-b border-gray-200 text-red-500">× Clear</button>
                     )}
                     {BOROUGHS.map(b => (
-                      <button key={b} onMouseDown={e => e.preventDefault()} onClick={() => { setFilterBorough(b); setFilterZip(''); setLocTab('borough'); setFilterZipBoro(b); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100" style={filterBorough === b ? { background: accentColor + '22', color: accentColor } : {}}>{b}</button>
+                      <button key={b} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setFilterBorough(b); setFilterZip(''); setLocTab('borough'); setFilterZipBoro(b); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100" style={filterBorough === b ? { background: accentColor + '22', color: accentColor } : {}}>{b}</button>
                     ))}
                   </InlineDropdown>
                 </div>
@@ -1914,16 +1916,7 @@ export default function GeoPostView({ session }) {
                   <button
                     ref={zipTriggerDesktopRef}
                     onMouseDown={e => e.preventDefault()}
-                    onClick={() => {
-                      if (locTab === 'zip' && filterZip) {
-                        setLocTab('all');
-                        setFilterZip('');
-                        setOpenDropdown(null);
-                        setVisibleCount(PAGE_SIZE);
-                        return;
-                      }
-                      setOpenDropdown(p => p === 'zip' ? null : 'zip');
-                    }}
+                    onClick={() => setOpenDropdown(p => p === 'zip' ? null : 'zip')}
                     className={baseFB}
                     style={locTab === 'zip' && filterZip ? activeFS : {}}
                   >
@@ -1931,17 +1924,17 @@ export default function GeoPostView({ session }) {
                   </button>
                   <InlineDropdown open={openDropdown === 'zip'} onClose={() => setOpenDropdown(null)} className="w-[220px] max-h-[280px]" triggerRef={zipTriggerDesktopRef}>
                     {(locTab === 'zip' && filterZip) && (
-                      <button onMouseDown={e => e.preventDefault()} onClick={() => { setLocTab('all'); setFilterZip(''); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100 border-b border-gray-200 text-red-500">× Clear</button>
+                      <button onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setLocTab('all'); setFilterZip(''); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100 border-b border-gray-200 text-red-500">× Clear</button>
                     )}
                     <div className="p-2 border-b border-gray-200">
                       <div className="flex gap-1 flex-wrap">
                         {BOROUGHS.map(b => (
-                          <button key={b} onMouseDown={e => e.preventDefault()} onClick={() => setFilterZipBoro(b)} className="px-1.5 py-0.5 rounded text-[10px] font-black border border-black" style={filterZipBoro === b ? { background: accentColor, color: '#fff' } : {}}>{b.split(' ')[0]}</button>
+                          <button key={b} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setFilterZipBoro(b); }} className="px-1.5 py-0.5 rounded text-[10px] font-black border border-black" style={filterZipBoro === b ? { background: accentColor, color: '#fff' } : {}}>{b.split(' ')[0]}</button>
                         ))}
                       </div>
                     </div>
                     {zipList.map(z => (
-                      <button key={z.zip} onMouseDown={e => e.preventDefault()} onClick={() => { setFilterZip(z.zip); setFilterBorough(''); setLocTab('zip'); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1 text-xs font-semibold hover:bg-gray-100" style={filterZip === z.zip ? { background: accentColor + '22', color: accentColor } : {}}>{z.zip} <span className="text-[10px] text-gray-400">{z.name}</span></button>
+                      <button key={z.zip} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setFilterZip(z.zip); setFilterBorough(''); setLocTab('zip'); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1 text-xs font-semibold hover:bg-gray-100" style={filterZip === z.zip ? { background: accentColor + '22', color: accentColor } : {}}>{z.zip} <span className="text-[10px] text-gray-400">{z.name}</span></button>
                     ))}
                   </InlineDropdown>
                 </div>
@@ -1950,44 +1943,34 @@ export default function GeoPostView({ session }) {
                   <button
                     ref={timeTriggerDesktopRef}
                     onMouseDown={e => e.preventDefault()}
-                    onClick={() => {
-                      if (timeFilter !== 'all') {
-                        setTimeFilter('all');
-                        setOpenDropdown(null);
-                        setVisibleCount(PAGE_SIZE);
-                        return;
-                      }
-                      setOpenDropdown(p => p === 'time' ? null : 'time');
-                    }}
+                    onClick={() => setOpenDropdown(p => p === 'time' ? null : 'time')}
                     className={baseFB}
                     style={timeFilter !== 'all' ? activeFS : {}}
                   >
                     {timeFilter !== 'all' ? `${timeLabel} ×` : `${timeLabel} ▾`}
                   </button>
                   <InlineDropdown open={openDropdown === 'time'} onClose={() => setOpenDropdown(null)} triggerRef={timeTriggerDesktopRef}>
+                    {timeFilter !== 'all' && (
+                      <button onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setTimeFilter('all'); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100 border-b border-gray-200 text-red-500">× Clear</button>
+                    )}
                     {TIME_OPTIONS.map(t => (
-                      <button key={t.key} onMouseDown={e => e.preventDefault()} onClick={() => { setTimeFilter(t.key); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100" style={timeFilter === t.key ? { background: accentColor + '22', color: accentColor } : {}}>{t.label}</button>
+                      <button key={t.key} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setTimeFilter(t.key); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100" style={timeFilter === t.key ? { background: accentColor + '22', color: accentColor } : {}}>{t.label}</button>
                     ))}
                   </InlineDropdown>
                 </div>
 
                 <div className="relative">
-                  <button ref={statusTriggerDesktopRef} onMouseDown={e => e.preventDefault()} onClick={() => {
-                    if (statusFilter !== 'all') {
-                      setStatusFilter('all');
-                      setOpenDropdown(null);
-                      setVisibleCount(PAGE_SIZE);
-                      return;
-                    }
-                    setOpenDropdown(p => p === 'status' ? null : 'status');
-                  }} className={baseFB}
+                  <button ref={statusTriggerDesktopRef} onMouseDown={e => e.preventDefault()} onClick={() => setOpenDropdown(p => p === 'status' ? null : 'status')} className={baseFB}
                     style={statusFilter === 'participant' ? { background: '#22c55e', color: '#fff', borderColor: '#22c55e' }
                       : statusFilter === 'orbiter' ? { background: '#ef4444', color: '#fff', borderColor: '#ef4444' }
                       : statusFilter === 'anonymous' ? { background: '#374151', color: '#fff', borderColor: '#374151' }
                       : {}}>{statusFilter === 'participant' ? 'Participant ×' : statusFilter === 'orbiter' ? 'Orbiter ×' : statusFilter === 'anonymous' ? 'Anonymous ×' : 'Status ▾'}</button>
                   <InlineDropdown open={openDropdown === 'status'} onClose={() => setOpenDropdown(null)} alignRight triggerRef={statusTriggerDesktopRef}>
+                    {statusFilter !== 'all' && (
+                      <button onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setStatusFilter('all'); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100 border-b border-gray-200 text-red-500">× Clear</button>
+                    )}
                     {[['all','All'],['participant','Participant'],['orbiter','Orbiter'],['anonymous','Anonymous']].map(([k, l]) => (
-                      <button key={k} onMouseDown={e => e.preventDefault()} onClick={() => { setStatusFilter(k); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100" style={statusFilter === k ? { background: accentColor + '22', color: accentColor } : {}}>{l}</button>
+                      <button key={k} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setStatusFilter(k); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100" style={statusFilter === k ? { background: accentColor + '22', color: accentColor } : {}}>{l}</button>
                     ))}
                   </InlineDropdown>
                 </div>
@@ -2024,16 +2007,7 @@ export default function GeoPostView({ session }) {
                   <button
                     ref={boroughTriggerMobileRef}
                     onMouseDown={e => e.preventDefault()}
-                    onClick={() => {
-                      if (locTab === 'borough' && filterBorough) {
-                        setLocTab('all');
-                        setFilterBorough('');
-                        setOpenDropdown(null);
-                        setVisibleCount(PAGE_SIZE);
-                        return;
-                      }
-                      setOpenDropdown(p => p === 'borough' ? null : 'borough');
-                    }}
+                    onClick={() => setOpenDropdown(p => p === 'borough' ? null : 'borough')}
                     className={baseFB}
                     style={locTab === 'borough' && filterBorough ? activeFS : {}}
                   >
@@ -2041,10 +2015,10 @@ export default function GeoPostView({ session }) {
                   </button>
                   <InlineDropdown open={openDropdown === 'borough'} onClose={() => setOpenDropdown(null)} triggerRef={boroughTriggerMobileRef}>
                     {(locTab === 'borough' && filterBorough) && (
-                      <button onMouseDown={e => e.preventDefault()} onClick={() => { setLocTab('all'); setFilterBorough(''); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100 border-b border-gray-200 text-red-500">× Clear</button>
+                      <button onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setLocTab('all'); setFilterBorough(''); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100 border-b border-gray-200 text-red-500">× Clear</button>
                     )}
                     {BOROUGHS.map(b => (
-                      <button key={b} onMouseDown={e => e.preventDefault()} onClick={() => { setFilterBorough(b); setFilterZip(''); setLocTab('borough'); setFilterZipBoro(b); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100" style={filterBorough === b ? { background: accentColor + '22', color: accentColor } : {}}>{b}</button>
+                      <button key={b} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setFilterBorough(b); setFilterZip(''); setLocTab('borough'); setFilterZipBoro(b); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100" style={filterBorough === b ? { background: accentColor + '22', color: accentColor } : {}}>{b}</button>
                     ))}
                   </InlineDropdown>
                 </div>
@@ -2053,16 +2027,7 @@ export default function GeoPostView({ session }) {
                   <button
                     ref={zipTriggerMobileRef}
                     onMouseDown={e => e.preventDefault()}
-                    onClick={() => {
-                      if (locTab === 'zip' && filterZip) {
-                        setLocTab('all');
-                        setFilterZip('');
-                        setOpenDropdown(null);
-                        setVisibleCount(PAGE_SIZE);
-                        return;
-                      }
-                      setOpenDropdown(p => p === 'zip' ? null : 'zip');
-                    }}
+                    onClick={() => setOpenDropdown(p => p === 'zip' ? null : 'zip')}
                     className={baseFB}
                     style={locTab === 'zip' && filterZip ? activeFS : {}}
                   >
@@ -2070,17 +2035,17 @@ export default function GeoPostView({ session }) {
                   </button>
                   <InlineDropdown open={openDropdown === 'zip'} onClose={() => setOpenDropdown(null)} className="w-[220px] max-h-[280px]" triggerRef={zipTriggerMobileRef}>
                     {(locTab === 'zip' && filterZip) && (
-                      <button onMouseDown={e => e.preventDefault()} onClick={() => { setLocTab('all'); setFilterZip(''); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100 border-b border-gray-200 text-red-500">× Clear</button>
+                      <button onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setLocTab('all'); setFilterZip(''); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100 border-b border-gray-200 text-red-500">× Clear</button>
                     )}
                     <div className="p-2 border-b border-gray-200">
                       <div className="flex gap-1 flex-wrap">
                         {BOROUGHS.map(b => (
-                          <button key={b} onMouseDown={e => e.preventDefault()} onClick={() => setFilterZipBoro(b)} className="px-1.5 py-0.5 rounded text-[10px] font-black border border-black" style={filterZipBoro === b ? { background: accentColor, color: '#fff' } : {}}>{b.split(' ')[0]}</button>
+                          <button key={b} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setFilterZipBoro(b); }} className="px-1.5 py-0.5 rounded text-[10px] font-black border border-black" style={filterZipBoro === b ? { background: accentColor, color: '#fff' } : {}}>{b.split(' ')[0]}</button>
                         ))}
                       </div>
                     </div>
                     {zipList.map(z => (
-                      <button key={z.zip} onMouseDown={e => e.preventDefault()} onClick={() => { setFilterZip(z.zip); setFilterBorough(''); setLocTab('zip'); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1 text-xs font-semibold hover:bg-gray-100" style={filterZip === z.zip ? { background: accentColor + '22', color: accentColor } : {}}>{z.zip} <span className="text-[10px] text-gray-400">{z.name}</span></button>
+                      <button key={z.zip} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setFilterZip(z.zip); setFilterBorough(''); setLocTab('zip'); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1 text-xs font-semibold hover:bg-gray-100" style={filterZip === z.zip ? { background: accentColor + '22', color: accentColor } : {}}>{z.zip} <span className="text-[10px] text-gray-400">{z.name}</span></button>
                     ))}
                   </InlineDropdown>
                 </div>
@@ -2089,44 +2054,34 @@ export default function GeoPostView({ session }) {
                   <button
                     ref={timeTriggerMobileRef}
                     onMouseDown={e => e.preventDefault()}
-                    onClick={() => {
-                      if (timeFilter !== 'all') {
-                        setTimeFilter('all');
-                        setOpenDropdown(null);
-                        setVisibleCount(PAGE_SIZE);
-                        return;
-                      }
-                      setOpenDropdown(p => p === 'time' ? null : 'time');
-                    }}
+                    onClick={() => setOpenDropdown(p => p === 'time' ? null : 'time')}
                     className={baseFB}
                     style={timeFilter !== 'all' ? activeFS : {}}
                   >
                     {timeFilter !== 'all' ? `${timeLabel} ×` : `${timeLabel} ▾`}
                   </button>
                   <InlineDropdown open={openDropdown === 'time'} onClose={() => setOpenDropdown(null)} triggerRef={timeTriggerMobileRef}>
+                    {timeFilter !== 'all' && (
+                      <button onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setTimeFilter('all'); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100 border-b border-gray-200 text-red-500">× Clear</button>
+                    )}
                     {TIME_OPTIONS.map(t => (
-                      <button key={t.key} onMouseDown={e => e.preventDefault()} onClick={() => { setTimeFilter(t.key); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100" style={timeFilter === t.key ? { background: accentColor + '22', color: accentColor } : {}}>{t.label}</button>
+                      <button key={t.key} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setTimeFilter(t.key); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100" style={timeFilter === t.key ? { background: accentColor + '22', color: accentColor } : {}}>{t.label}</button>
                     ))}
                   </InlineDropdown>
                 </div>
 
                 <div className="relative">
-                  <button ref={statusTriggerMobileRef} onMouseDown={e => e.preventDefault()} onClick={() => {
-                    if (statusFilter !== 'all') {
-                      setStatusFilter('all');
-                      setOpenDropdown(null);
-                      setVisibleCount(PAGE_SIZE);
-                      return;
-                    }
-                    setOpenDropdown(p => p === 'status' ? null : 'status');
-                  }} className={baseFB}
+                  <button ref={statusTriggerMobileRef} onMouseDown={e => e.preventDefault()} onClick={() => setOpenDropdown(p => p === 'status' ? null : 'status')} className={baseFB}
                     style={statusFilter === 'participant' ? { background: '#22c55e', color: '#fff', borderColor: '#22c55e' }
                       : statusFilter === 'orbiter' ? { background: '#ef4444', color: '#fff', borderColor: '#ef4444' }
                       : statusFilter === 'anonymous' ? { background: '#374151', color: '#fff', borderColor: '#374151' }
                       : {}}>{statusFilter === 'participant' ? 'Participant ×' : statusFilter === 'orbiter' ? 'Orbiter ×' : statusFilter === 'anonymous' ? 'Anonymous ×' : 'Status ▾'}</button>
                   <InlineDropdown open={openDropdown === 'status'} onClose={() => setOpenDropdown(null)} alignRight triggerRef={statusTriggerMobileRef}>
+                    {statusFilter !== 'all' && (
+                      <button onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setStatusFilter('all'); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100 border-b border-gray-200 text-red-500">× Clear</button>
+                    )}
                     {[['all','All'],['participant','Participant'],['orbiter','Orbiter'],['anonymous','Anonymous']].map(([k, l]) => (
-                      <button key={k} onMouseDown={e => e.preventDefault()} onClick={() => { setStatusFilter(k); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100" style={statusFilter === k ? { background: accentColor + '22', color: accentColor } : {}}>{l}</button>
+                      <button key={k} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setStatusFilter(k); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100" style={statusFilter === k ? { background: accentColor + '22', color: accentColor } : {}}>{l}</button>
                     ))}
                   </InlineDropdown>
                 </div>
@@ -2161,7 +2116,7 @@ export default function GeoPostView({ session }) {
 
               {filteredPosts.length > 0 && (
                 <div className="flex flex-col gap-3">
-                  {visiblePosts.map(post => {
+                  {visiblePosts.map((post, index) => {
                     const loadedComments = commentsByPost[post.id];
                     const fallbackSampleComments = SAMPLE_POST_IDS.has(post.id) ? SAMPLE_COMMENTS.filter((entry) => entry.post_id === post.id) : [];
                     const postComments = loadedComments ?? [];
@@ -2179,6 +2134,7 @@ export default function GeoPostView({ session }) {
                         boroughHeatMap={boroughHeatMap}
                         textScale={feedTextScale}
                         imageScale={feedImageScale}
+                        imagePriority={index < 8}
                         commentCount={commentCount}
                         commentsOpen={!!openCommentsByPost[post.id]}
                         onToggleComments={toggleComments}
