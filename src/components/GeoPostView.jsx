@@ -573,7 +573,7 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
   const scale = Math.max(0.6, Math.min(2, Number(textScale || 1)));
   // Unitless line-height scales with font-size — webkit-line-clamp alone controls how many lines show
   const textLineHeight = 1.5;
-  const textFontSizeRem = 0.875 * scale;           // 14px base * scale
+  const textFontSizeRem = 0.875 * scale;           // 14px base * scale (for UI chrome only)
   const hasImage = Boolean(post.image_url);
   const shape = hasImage
     ? (imgRatio < 0.85 ? 'portrait' : imgRatio > 1.25 ? 'landscape' : 'square')
@@ -583,7 +583,9 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
   const columnSpan = isLongTile ? 4 : 2;
   const rowSpan = (isTallTile ? 2 : 1) + (commentsOpen && isDesktopMasonry ? 1 : 0);
   const maxTextLines = isTallTile ? 9 : hasImage ? 3 : 9;
-  const standardLineHeightPx = Math.floor(0.875 * scale * 16 * textLineHeight);
+  // Use 16px as the base — browser renders <font size="3"> (our "normal") at 16px regardless
+  // of the 0.875rem CSS font-size on the container. Math.floor ensures we never show a partial line.
+  const standardLineHeightPx = Math.floor(16 * scale * textLineHeight);
   const maxHeightPx = maxTextLines * standardLineHeightPx;
   const tileGridStyle = {
     gridColumn: `span ${columnSpan}`,
@@ -696,19 +698,19 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
           dangerouslySetInnerHTML={{ __html: postHtml }}
         />
 
+        {/* spacer pushes reaction/tag row to bottom of the tile */}
+        <div style={{ flex: 1 }} />
+
         {isTextOverflowing && (
           <button
             type="button"
             onMouseDown={(e) => e.preventDefault()}
-            className="self-start mb-3 text-[11px] font-black underline decoration-2"
+            className="self-start mb-1 text-[11px] font-black underline decoration-2"
             style={{ color: theme.text }}
           >
             Show more
           </button>
         )}
-
-        {/* spacer pushes reaction/tag row to bottom of the tile */}
-        <div style={{ flex: 1 }} />
 
         <div className="flex items-center gap-1 flex-wrap">
           {topEmojis.map(([emoji, count]) => (
