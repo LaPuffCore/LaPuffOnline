@@ -533,7 +533,8 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
   const emojiCounts = {};
   (postReactions || []).forEach((r) => { emojiCounts[r.emoji_text] = (emojiCounts[r.emoji_text] || 0) + 1; });
   const topEmojis = Object.entries(emojiCounts).sort((a, b) => b[1] - a[1]).slice(0, 4);
-  const [qepOpen, setQepOpen] = useState(false);
+  const [qepAnchorRect, setQepAnchorRect] = useState(null);
+  const qepBtnRef = useRef(null);
   const [imgRatio, setImgRatio] = useState(1);
   const [imgModalOpen, setImgModalOpen] = useState(false);
   const [imgLoaded, setImgLoaded] = useState(false);
@@ -582,6 +583,8 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
   const columnSpan = isLongTile ? 4 : 2;
   const rowSpan = (isTallTile ? 2 : 1) + (commentsOpen && isDesktopMasonry ? 1 : 0);
   const maxTextLines = isTallTile ? 9 : hasImage ? 3 : 9;
+  const standardLineHeightPx = Math.floor(0.875 * scale * 16 * textLineHeight);
+  const maxHeightPx = maxTextLines * standardLineHeightPx;
   const tileGridStyle = {
     gridColumn: `span ${columnSpan}`,
     gridRow: `span ${rowSpan}`,
@@ -661,7 +664,7 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
       )}
 
       {/* footer: flex-1 on no-image tiles so reactions can pin to bottom; flex-shrink-0 when image is present */}
-      <div className="p-3" style={{ background: theme.fill, flex: hasImage ? '0 0 auto' : '1 1 auto', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      <div className="p-3" style={{ background: theme.fill, flex: hasImage ? '0 0 auto' : '1 1 auto', display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
         <div className="flex items-center gap-1.5 mb-2 flex-wrap">
           {postIsAnonymous ? (
             <span className="font-black text-xs flex items-center gap-1" style={{ color: theme.text, fontSize: `${12 * scale}px` }}>
@@ -694,12 +697,10 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
             color: postTextColor,
             fontSize: `${textFontSizeRem}rem`,
             lineHeight: textLineHeight,
-            // webkit-box-clamp is the ONLY truncation — never pair with maxHeight which would pixel-clip mid-line
             overflow: 'hidden',
-            display: '-webkit-box',
-            WebkitBoxOrient: 'vertical',
-            WebkitLineClamp: maxTextLines,
+            maxHeight: `${maxHeightPx}px`,
             wordBreak: 'break-word',
+            flexShrink: 0,
           }}
           dangerouslySetInnerHTML={{ __html: postHtml }}
         />
@@ -732,8 +733,13 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
           ))}
 
           <button
+            ref={qepBtnRef}
             onMouseDown={(e) => e.preventDefault()}
-            onClick={() => setQepOpen((v) => !v)}
+            onClick={() => {
+              if (qepAnchorRect) { setQepAnchorRect(null); return; }
+              const rect = qepBtnRef.current.getBoundingClientRect();
+              setQepAnchorRect({ top: rect.top, left: rect.left, bottom: rect.bottom });
+            }}
             className="px-2 py-0.5 rounded-full border-2 text-xs font-black hover:scale-105 transition-transform"
             style={post.post_fill ? { ...outlineButtonStyle, fontSize: `${11 * scale}px` } : { borderColor: '#000', backgroundColor: '#f3f4f6', color: '#000', fontSize: `${11 * scale}px` }}
           >
@@ -791,21 +797,32 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
           </div>
         </div>
 
-        {qepOpen && (
-          <div className="mt-2">
-            <EmojiPicker
-              embedded={true}
-              compact={true}
-              value=""
-              onChange={(e) => { if (e) { onReact(post.id, e); setQepOpen(false); } }}
-            />
+        {commentsOpen && (
+          <div className="mt-2 max-h-72 overflow-y-auto overflow-x-hidden overscroll-contain rounded-lg" style={{ scrollbarWidth: 'thin' }}>
+            {commentsChildren}
           </div>
         )}
 
-        {commentsOpen && (
-          <div className="mt-2 max-h-72 overflow-y-auto overscroll-contain rounded-lg" style={{ scrollbarWidth: 'thin' }}>
-            {commentsChildren}
-          </div>
+        {qepAnchorRect && createPortal(
+          <>
+            <div className="fixed inset-0 z-[99990]" onClick={() => setQepAnchorRect(null)} />
+            <div
+              className="fixed z-[99991]"
+              style={{
+                top: qepAnchorRect.bottom + 4,
+                left: Math.max(4, qepAnchorRect.left - 80),
+              }}
+              onMouseDown={e => e.stopPropagation()}
+            >
+              <EmojiPicker
+                embedded={true}
+                compact={true}
+                value=""
+                onChange={(e) => { if (e) { onReact(post.id, e); setQepAnchorRect(null); } }}
+              />
+            </div>
+          </>,
+          document.body
         )}
       </div>
 
@@ -869,14 +886,14 @@ function CommentSection({
 
   return (
     <div className="mt-3 rounded-xl border-2 border-black/10 bg-white/60 p-3">
-      <div className="flex gap-2 mb-3">
+      <div className="flex gap-2 mb-3" style={{ minWidth: 0 }}>
         <input
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           placeholder="Add a comment..."
-          className="flex-1 border-2 border-black rounded px-3 py-2 text-xs font-semibold"
+          className="flex-1 min-w-0 border-2 border-black rounded px-2 py-1.5 text-xs font-semibold"
         />
-        <button onMouseDown={(e) => e.preventDefault()} onClick={() => { if (draft.trim()) { onSubmitComment(post.id, draft.trim()); setDraft(''); } }} className="px-3 py-2 rounded-lg border-2 border-black text-xs font-black bg-white">Post</button>
+        <button onMouseDown={(e) => e.preventDefault()} onClick={() => { if (draft.trim()) { onSubmitComment(post.id, draft.trim()); setDraft(''); } }} className="flex-shrink-0 px-2 py-1.5 rounded-lg border-2 border-black text-xs font-black bg-white">Post</button>
       </div>
 
       <div className="space-y-3">
@@ -1128,7 +1145,7 @@ export default function GeoPostView({ session }) {
   const [searchQuery,     setSearchQuery]     = useState('');
   const [feedTextScale,   setFeedTextScale]   = useState(1);
   const [feedImageScale,  setFeedImageScale]  = useState(1);
-  const [desktopScaleOpen, setDesktopScaleOpen] = useState(false);
+  const [scalePopupPos,   setScalePopupPos]   = useState(null);
   const [mobileScaleOpen, setMobileScaleOpen] = useState(false);
 
   // ── feed state ────────────────────────────────────────────────────────────────
@@ -1157,6 +1174,12 @@ export default function GeoPostView({ session }) {
   const topAnchorRef = useRef(null);
   const desktopGridRef = useRef(null);
   const desktopFilterRef = useRef(null);
+  const filterPanelInnerRef = useRef(null);
+  const panelRowRef = useRef(1);
+  const pendingRowRef = useRef(1);
+  const debounceTimerRef = useRef(null);
+  const rowStepRef = useRef(432);
+  const scaleButtonRef = useRef(null);
   // Cached distance from scroll-container top to grid top — computed once on mount / resize,
   // NOT on every scroll event. Recalculating on scroll is wrong because the grid reflowing
   // (when panel row changes) alters getBoundingClientRect().top, creating a feedback loop.
@@ -1755,7 +1778,7 @@ export default function GeoPostView({ session }) {
 
   // ── filter helpers ────────────────────────────────────────────────────────────
   const activeFS = { background: accentColor, color: '#fff', borderColor: accentColor };
-  const baseFB   = 'relative px-2.5 py-1 rounded-lg border-2 border-black text-[10px] sm:text-xs font-black transition-all flex items-center gap-0.5';
+  const baseFB   = 'relative px-2 py-1 rounded-lg border-2 border-black text-[11px] font-black transition-all flex items-center gap-0.5';
   const timeLabel = TIME_OPTIONS.find(t => t.key === timeFilter)?.label || 'All Time';
   const zipList   = (locTab === 'borough' && filterBorough) ? (BOROUGH_ZIPS[filterBorough] || []) : (BOROUGH_ZIPS[filterZipBoro] || []);
   const boroughHeatMap = useMemo(() => buildBoroughHeatMap(zipHeatMap), [zipHeatMap]);
@@ -1807,6 +1830,33 @@ export default function GeoPostView({ session }) {
     return () => observer.disconnect();
   }, []);
 
+  const applyPanelRow = useCallback((newRow) => {
+    const prevRow = panelRowRef.current;
+    if (newRow === prevRow) return;
+    const el = filterPanelInnerRef.current;
+    if (!el) {
+      panelRowRef.current = newRow;
+      setDesktopPanelRow(newRow);
+      return;
+    }
+    const matrix = window.getComputedStyle(el).transform;
+    let currentTranslateY = 0;
+    if (matrix && matrix !== 'none') {
+      const vals = matrix.replace('matrix(', '').replace(')', '').split(',');
+      if (vals.length >= 6) currentTranslateY = parseFloat(vals[5]) || 0;
+    }
+    const delta = (prevRow - newRow) * rowStepRef.current;
+    const startTranslate = currentTranslateY + delta;
+    panelRowRef.current = newRow;
+    setDesktopPanelRow(newRow);
+    el.style.transition = 'none';
+    el.style.transform = `translateY(${startTranslate}px)`;
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      el.style.transition = 'transform 700ms cubic-bezier(0.22,1,0.36,1)';
+      el.style.transform = 'translateY(0px)';
+    }));
+  }, []);
+
   useEffect(() => {
     const grid = desktopGridRef.current;
     // Find the real scroll container (GeoPostView lives inside an overflow-y:auto div in Home.jsx,
@@ -1839,7 +1889,12 @@ export default function GeoPostView({ session }) {
       const targetRow = Math.floor((relativeScroll + rowStep * 0.5) / rowStep) + 1;
       const maxRow = Math.max(1, Math.ceil(desktopGridRef.current.scrollHeight / rowStep));
       const boundedRow = Math.max(1, Math.min(maxRow, targetRow));
-      setDesktopPanelRow((prev) => (prev === boundedRow ? prev : boundedRow));
+      pendingRowRef.current = boundedRow;
+      rowStepRef.current = rowStep;
+      clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = setTimeout(() => {
+        applyPanelRow(pendingRowRef.current);
+      }, 300);
     };
 
     // Recompute grid offset on resize (layout may shift), then re-evaluate row.
@@ -2098,13 +2153,14 @@ export default function GeoPostView({ session }) {
             overflowAnchor: 'none',
           }}
         >
-          <aside style={{ gridColumn: '1 / span 2', gridRow: `${desktopPanelRow} / span 1`, position: 'relative', zIndex: 20 }}>
-            <div ref={desktopFilterRef} className="rounded-2xl border-3 border-black p-3 bg-white shadow-[4px_4px_0px_black]">
+          <aside ref={filterPanelInnerRef} style={{ gridColumn: '1 / span 2', gridRow: `${desktopPanelRow} / span 1`, position: 'relative', zIndex: 20 }}>
+            <div ref={desktopFilterRef} className="rounded-2xl bg-white p-2" style={{ border: '3px dashed #000', boxShadow: '8px 8px 0px #000' }}>
+              <div className="text-[10px] font-black text-center tracking-widest uppercase mb-1.5 opacity-60">Filter Panel</div>
               <input
                 value={searchQuery}
                 onChange={(e) => { setSearchQuery(e.target.value); setVisibleCount(PAGE_SIZE); }}
                 placeholder="Search posts, usernames, zips..."
-                className="w-full px-3 py-2 border-2 border-black rounded text-sm font-black mb-3"
+                className="w-full px-2 py-1.5 border-2 border-black rounded text-[11px] font-black mb-3"
               />
               <div className="flex flex-col gap-2">
                 <button onMouseDown={e => e.preventDefault()} onClick={() => setSortByTop(v => !v)} className={baseFB} style={sortByTop ? activeFS : {}}>🔥 Top</button>
@@ -2194,22 +2250,20 @@ export default function GeoPostView({ session }) {
                 </div>
 
                 <div className="relative mt-1">
-                  <button onMouseDown={e => e.preventDefault()} onClick={() => setDesktopScaleOpen((v) => !v)} className={baseFB}>Aa / Image Scale {desktopScaleOpen ? '▴' : '▾'}</button>
-                  {desktopScaleOpen && (
-                    <div className="mt-2 border-2 border-black rounded-lg p-2 bg-white">
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-[10px] font-black">Text Scale</span>
-                        <span className="text-[10px] font-black">{Math.round(feedTextScale * 100)}%</span>
-                      </div>
-                      <input type="range" min="0.5" max="2" step="0.05" value={feedTextScale} onChange={(e) => setFeedTextScale(Number(e.target.value))} className="w-full mb-2" />
-
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-[10px] font-black">Image Scale</span>
-                        <span className="text-[10px] font-black">{Math.round(feedImageScale * 100)}%</span>
-                      </div>
-                      <input type="range" min="0.5" max="2" step="0.05" value={feedImageScale} onChange={(e) => setFeedImageScale(Number(e.target.value))} className="w-full" />
-                    </div>
-                  )}
+                  <button
+                    ref={scaleButtonRef}
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={() => {
+                      if (scalePopupPos) { setScalePopupPos(null); return; }
+                      const rect = scaleButtonRef.current.getBoundingClientRect();
+                      const scrollEl = findScrollParent(scaleButtonRef.current);
+                      const scrollTop = scrollEl === window ? window.scrollY : scrollEl.scrollTop;
+                      setScalePopupPos({ top: rect.top + scrollTop - 8, left: rect.left, width: rect.width });
+                    }}
+                    className={baseFB}
+                  >
+                    Aa {scalePopupPos ? '▴' : '▾'}
+                  </button>
                 </div>
               </div>
             </div>
@@ -2394,6 +2448,28 @@ export default function GeoPostView({ session }) {
           </section>
         </div>
       </div>
+
+      {scalePopupPos && createPortal(
+        <>
+          <div className="fixed inset-0 z-[99998]" onClick={() => setScalePopupPos(null)} />
+          <div
+            className="fixed z-[99999] rounded-xl border-2 border-black bg-white p-3 shadow-[4px_4px_0px_black] min-w-[180px]"
+            style={{ top: scalePopupPos.top, left: scalePopupPos.left, width: Math.max(scalePopupPos.width, 180), transform: 'translateY(-100%)' }}
+          >
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[10px] font-black">Text Scale</span>
+              <span className="text-[10px] font-black">{Math.round(feedTextScale * 100)}%</span>
+            </div>
+            <input type="range" min="0.5" max="2" step="0.05" value={feedTextScale} onChange={(e) => setFeedTextScale(Number(e.target.value))} className="w-full mb-2" />
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[10px] font-black">Image Scale</span>
+              <span className="text-[10px] font-black">{Math.round(feedImageScale * 100)}%</span>
+            </div>
+            <input type="range" min="0.5" max="2" step="0.05" value={feedImageScale} onChange={(e) => setFeedImageScale(Number(e.target.value))} className="w-full" />
+          </div>
+        </>,
+        document.body
+      )}
 
       <ReactionListModal isOpen={!!reactorsModal} list={reactorsModal ? (reactions[reactorsModal] || []) : []} onClose={() => setReactorsModal(null)} />
       <ReactionListModal isOpen={!!commentReactorsModal} title="Comment Reactions" list={commentReactorsModal ? (commentReactionsByComment[commentReactorsModal] || []) : []} emojiField="emoji" onClose={() => setCommentReactorsModal(null)} />
