@@ -748,3 +748,5 @@ TileView: live events are retained in the present event list even when they'd be
 - Zip-scope post cards now expose both borough and zip tags for drill-down parity.
 - Back-to-top chevron was simplified to a single-shadow button and now forcibly scrolls to top reliably.
 - Desktop topbar `+ Submit Event` button sizing was aligned to `Sign In / Up` dimensions.
+- Desktop tile text clamp rules are now shape-specific: image long/square tiles clamp to 5 lines, image tall tiles clamp to 9 lines, and all no-image tiles clamp to 9 lines before showing a `Show more` affordance.
+- Desktop filter panel row movement now uses viewport-anchor row stepping (one grid row at a time) and is bounded by current grid height so it remains visible while displacing only the active row.

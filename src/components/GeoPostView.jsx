@@ -558,18 +558,22 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
   const frameRatio = (16 / 9) / Math.max(0.5, Number(imageScale || 1));
   const isNonStandardFrame = Math.abs(imgRatio - frameRatio) > 0.08;
   const scale = Math.max(0.6, Math.min(2, Number(textScale || 1)));
-  const shape = post.image_url
+  const hasImage = Boolean(post.image_url);
+  const shape = hasImage
     ? (imgRatio < 0.85 ? 'portrait' : imgRatio > 1.25 ? 'landscape' : 'square')
     : 'square';
+  const isTallTile = hasImage && shape === 'portrait';
+  const isLongTile = hasImage && shape === 'landscape';
+  const isSquareImageTile = hasImage && shape === 'square';
   const imageHeight = isDesktopMasonry
     ? Math.max(96, Math.min(
-      shape === 'portrait' ? gridUnitHeight * 0.42 : shape === 'landscape' ? gridUnitHeight * 0.22 : gridUnitHeight * 0.28,
-      shape === 'portrait' ? 220 : shape === 'landscape' ? 130 : 160,
+      isTallTile ? gridUnitHeight * 0.72 : isLongTile ? gridUnitHeight * 0.22 : isSquareImageTile ? gridUnitHeight * 0.28 : gridUnitHeight * 0.26,
+      isTallTile ? 520 : isLongTile ? 140 : isSquareImageTile ? 170 : 160,
     ))
     : undefined;
-  const columnSpan = shape === 'landscape' ? 4 : 2;
-  const rowSpan = (shape === 'portrait' ? 2 : 1) + (commentsOpen && isDesktopMasonry ? 1 : 0);
-  const maxTextLines = shape === 'portrait' ? 18 : 9;
+  const columnSpan = isLongTile ? 4 : 2;
+  const rowSpan = (isTallTile ? 2 : 1) + (commentsOpen && isDesktopMasonry ? 1 : 0);
+  const maxTextLines = isTallTile ? 9 : hasImage ? 5 : 9;
   const tileGridStyle = {
     gridColumn: `span ${columnSpan}`,
     gridRow: `span ${rowSpan}`,
@@ -646,8 +650,8 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
         </div>
       )}
 
-      <div className="p-3" style={{ background: theme.fill, flex: 1 }}>
-        <div className="flex flex-col h-full">
+      <div className="p-3 min-h-0" style={{ background: theme.fill, flex: 1 }}>
+        <div className="flex flex-col h-full min-h-0">
         <div className="flex items-center gap-1.5 mb-2 flex-wrap">
           {postIsAnonymous ? (
             <span className="font-black text-xs flex items-center gap-1" style={{ color: theme.text, fontSize: `${12 * scale}px` }}>
@@ -675,7 +679,7 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
 
         <div
           ref={textBlockRef}
-          className="text-sm leading-relaxed mb-3 break-words min-h-[1.5rem]"
+          className="text-sm leading-relaxed mb-3 break-words min-h-[1.5rem] min-h-0"
           style={{
             color: postTextColor,
             fontSize: `${14 * scale}px`,
@@ -1790,20 +1794,33 @@ export default function GeoPostView({ session }) {
       const grid = desktopGridRef.current;
       if (!grid) return;
       const rect = grid.getBoundingClientRect();
-      const passed = Math.max(0, 80 - rect.top);
-      const step = Math.max(1, desktopUnitHeight + 12);
-      const row = 1 + Math.ceil(passed / step);
-      setDesktopPanelRow(Math.max(1, Math.min(300, row)));
+      const rowStep = Math.max(1, desktopUnitHeight + 12);
+      const anchorY = 116;
+      const relativeY = anchorY - rect.top;
+      const nextRow = relativeY <= 0 ? 1 : 1 + Math.floor(relativeY / rowStep);
+      const maxRow = Math.max(1, Math.floor((grid.scrollHeight - 1) / rowStep));
+      const boundedRow = Math.max(1, Math.min(maxRow, nextRow));
+      setDesktopPanelRow((prev) => (prev === boundedRow ? prev : boundedRow));
+    };
+
+    let rafId = 0;
+    const scheduleUpdate = () => {
+      if (rafId) return;
+      rafId = window.requestAnimationFrame(() => {
+        rafId = 0;
+        updatePanelRow();
+      });
     };
 
     updatePanelRow();
-    window.addEventListener('scroll', updatePanelRow, { passive: true });
-    window.addEventListener('resize', updatePanelRow);
+    window.addEventListener('scroll', scheduleUpdate, { passive: true });
+    window.addEventListener('resize', scheduleUpdate);
     return () => {
-      window.removeEventListener('scroll', updatePanelRow);
-      window.removeEventListener('resize', updatePanelRow);
+      if (rafId) window.cancelAnimationFrame(rafId);
+      window.removeEventListener('scroll', scheduleUpdate);
+      window.removeEventListener('resize', scheduleUpdate);
     };
-  }, [desktopUnitHeight]);
+  }, [desktopUnitHeight, visiblePosts.length, canShowMore, canShowLess]);
 
   const Divider = () => <div className="w-px h-4 bg-gray-300 mx-0.5 flex-shrink-0" />;
 
