@@ -624,6 +624,7 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
         height: '100%',
         display: 'flex',
         flexDirection: 'column',
+        transition: 'transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1)',
         ...tileGridStyle,
       }}
     >
@@ -647,19 +648,9 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
               try { setImgRatio(e.target.naturalWidth / e.target.naturalHeight); } catch {}
               setImgLoaded(true);
             }}
-            onClick={() => { if (isNonStandardFrame) setImgModalOpen(true); }}
+            onClick={() => {}}
           />
           {!imgLoaded && <div className="absolute inset-0 animate-pulse bg-black/5" />}
-          {isNonStandardFrame && (
-            <div className="absolute right-3 bottom-3">
-              <button
-                className="w-8 h-8 rounded-full bg-white border-2 border-black flex items-center justify-center shadow-[2px_2px_0px_black] hover:scale-105 transition-transform"
-                onClick={() => setImgModalOpen(true)}
-              >
-                🔍
-              </button>
-            </div>
-          )}
         </div>
       )}
 
@@ -808,10 +799,16 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
             <div className="fixed inset-0 z-[99990]" onClick={() => setQepAnchorRect(null)} />
             <div
               className="fixed z-[99991]"
-              style={{
-                top: qepAnchorRect.bottom + 4,
-                left: Math.max(4, qepAnchorRect.left - 80),
-              }}
+              style={qepAnchorRect.top > window.innerHeight * 0.5
+                ? {
+                    bottom: window.innerHeight - qepAnchorRect.top + 4,
+                    left: Math.max(4, qepAnchorRect.left - 80),
+                  }
+                : {
+                    top: qepAnchorRect.bottom + 4,
+                    left: Math.max(4, qepAnchorRect.left - 80),
+                  }
+              }
               onMouseDown={e => e.stopPropagation()}
             >
               <EmojiPicker
@@ -1160,8 +1157,13 @@ export default function GeoPostView({ session }) {
   const [openCommentsByPost, setOpenCommentsByPost] = useState({});
   const [commentReactorsModal, setCommentReactorsModal] = useState(null);
   const [currentProfile, setCurrentProfile] = useState(null);
-  const [desktopPanelRow, setDesktopPanelRow] = useState(1);
+  const [desktopPanelRow, setDesktopPanelRow] = useState(2);
   const [desktopUnitHeight, setDesktopUnitHeight] = useState(420);
+  const createPostAreaRef = useRef(null);
+  const [fabOpacity, setFabOpacity] = useState(0);
+  const [fabVisible, setFabVisible] = useState(false);
+  const [quickPostOpen, setQuickPostOpen] = useState(false);
+  const miniEditorRef = useRef(null);
 
   // ── editor scope ──────────────────────────────────────────────────────────────
   const [editorScope,   setEditorScope]   = useState('digital');
@@ -1175,9 +1177,7 @@ export default function GeoPostView({ session }) {
   const desktopGridRef = useRef(null);
   const desktopFilterRef = useRef(null);
   const filterPanelInnerRef = useRef(null);
-  const panelRowRef = useRef(1);
-  const pendingRowRef = useRef(1);
-  const debounceTimerRef = useRef(null);
+  const panelRowRef = useRef(2);
   const rowStepRef = useRef(432);
   const scaleButtonRef = useRef(null);
   // Cached distance from scroll-container top to grid top — computed once on mount / resize,
@@ -1859,13 +1859,8 @@ export default function GeoPostView({ session }) {
 
   useEffect(() => {
     const grid = desktopGridRef.current;
-    // Find the real scroll container (GeoPostView lives inside an overflow-y:auto div in Home.jsx,
-    // so window.scrollY is always 0 — we must listen on that container instead).
     const scrollEl = grid ? findScrollParent(grid) : window;
 
-    // Compute the stable distance from the scroll container's content-top to the grid's top.
-    // Must be done ONCE here (not inside the scroll handler) — getBoundingClientRect().top
-    // shifts every time the panel moves and the grid reflowed, causing a feedback loop.
     const computeGridOffset = () => {
       if (!desktopGridRef.current) return;
       const scrollTop = scrollEl === window ? window.scrollY : scrollEl.scrollTop;
@@ -1884,20 +1879,15 @@ export default function GeoPostView({ session }) {
 
       const scrollTop = scrollEl === window ? window.scrollY : scrollEl.scrollTop;
       const rowStep = Math.max(1, desktopUnitHeight + 12);
-      const relativeScroll = Math.max(0, scrollTop - gridOffsetCacheRef.current);
-      // Advance half a row early so the panel jumps before the current row is fully obscured.
-      const targetRow = Math.floor((relativeScroll + rowStep * 0.5) / rowStep) + 1;
-      const maxRow = Math.max(1, Math.ceil(desktopGridRef.current.scrollHeight / rowStep));
-      const boundedRow = Math.max(1, Math.min(maxRow, targetRow));
-      pendingRowRef.current = boundedRow;
       rowStepRef.current = rowStep;
-      clearTimeout(debounceTimerRef.current);
-      debounceTimerRef.current = setTimeout(() => {
-        applyPanelRow(pendingRowRef.current);
-      }, 300);
+      const relativeScroll = Math.max(0, scrollTop - gridOffsetCacheRef.current);
+      // Advance half a row early. minRow=2 so panel never sits in the topmost grid row.
+      const targetRow = Math.max(2, Math.floor((relativeScroll + rowStep * 0.5) / rowStep) + 1);
+      const maxRow = Math.max(2, Math.ceil(desktopGridRef.current.scrollHeight / rowStep));
+      const boundedRow = Math.min(maxRow, targetRow);
+      applyPanelRow(boundedRow);
     };
 
-    // Recompute grid offset on resize (layout may shift), then re-evaluate row.
     const onResize = () => { computeGridOffset(); updatePanelRow(); };
 
     updatePanelRow();
@@ -1907,7 +1897,24 @@ export default function GeoPostView({ session }) {
       scrollEl.removeEventListener('scroll', updatePanelRow);
       window.removeEventListener('resize', onResize);
     };
-  }, [desktopUnitHeight, visiblePosts.length, canShowMore, canShowLess]);
+  }, [desktopUnitHeight, visiblePosts.length, canShowMore, canShowLess, applyPanelRow]);
+
+  // FAB visibility: fade in as create-post area scrolls away
+  useEffect(() => {
+    const scrollEl = desktopGridRef.current ? findScrollParent(desktopGridRef.current) : window;
+    const handleFabScroll = () => {
+      if (!createPostAreaRef.current) return;
+      const rect = createPostAreaRef.current.getBoundingClientRect();
+      const containerTop = scrollEl === window ? 0 : scrollEl.getBoundingClientRect().top;
+      // How far the bottom of create-post has gone above the container viewport top
+      const disappearProgress = Math.max(0, Math.min(1, (containerTop - rect.bottom) / Math.max(1, rect.height)));
+      setFabOpacity(disappearProgress);
+      setFabVisible(disappearProgress > 0);
+    };
+    handleFabScroll();
+    scrollEl.addEventListener('scroll', handleFabScroll, { passive: true });
+    return () => scrollEl.removeEventListener('scroll', handleFabScroll);
+  }, [visiblePosts.length]);
 
   const Divider = () => <div className="w-px h-4 bg-gray-300 mx-0.5 flex-shrink-0" />;
 
@@ -1986,7 +1993,7 @@ export default function GeoPostView({ session }) {
   return (
     <div className="w-full" ref={topAnchorRef}>
       <div className="w-full max-w-7xl mx-auto px-3 pt-3">
-        <div className="rounded-2xl border-3 border-black shadow-[4px_4px_0px_black]"
+        <div ref={createPostAreaRef} className="rounded-2xl border-3 border-black shadow-[4px_4px_0px_black]"
           style={{ background: surfaceBg, borderColor: postOutline || '#000' }}>
 
           {/* image preview at top, rounded */}
@@ -2153,8 +2160,8 @@ export default function GeoPostView({ session }) {
             overflowAnchor: 'none',
           }}
         >
-          <aside ref={filterPanelInnerRef} style={{ gridColumn: '1 / span 2', gridRow: `${desktopPanelRow} / span 1`, position: 'relative', zIndex: 20 }}>
-            <div ref={desktopFilterRef} className="rounded-2xl bg-white p-2" style={{ border: '3px dashed #000', boxShadow: '8px 8px 0px #000' }}>
+          <aside ref={filterPanelInnerRef} style={{ gridColumn: '1 / span 2', gridRow: `${desktopPanelRow} / span 1`, position: 'relative', zIndex: 20, willChange: 'transform' }}>
+            <div ref={desktopFilterRef} className="rounded-2xl bg-white p-2" style={{ border: '5px dotted #000', boxShadow: 'none' }}>
               <div className="text-[10px] font-black text-center tracking-widest uppercase mb-1.5 opacity-60">Filter Panel</div>
               <input
                 value={searchQuery}
@@ -2473,6 +2480,85 @@ export default function GeoPostView({ session }) {
 
       <ReactionListModal isOpen={!!reactorsModal} list={reactorsModal ? (reactions[reactorsModal] || []) : []} onClose={() => setReactorsModal(null)} />
       <ReactionListModal isOpen={!!commentReactorsModal} title="Comment Reactions" list={commentReactorsModal ? (commentReactionsByComment[commentReactorsModal] || []) : []} emojiField="emoji" onClose={() => setCommentReactorsModal(null)} />
+
+      {/* Quick Post FAB */}
+      {fabVisible && createPortal(
+        <>
+          <button
+            onMouseDown={e => e.preventDefault()}
+            onClick={() => setQuickPostOpen(v => !v)}
+            className="fixed bottom-6 left-6 z-[99970] w-12 h-12 rounded-full bg-white border-3 border-black flex items-center justify-center text-2xl font-black shadow-[3px_3px_0px_black] hover:scale-110 transition-transform"
+            style={{ opacity: fabOpacity, transition: 'opacity 200ms ease, transform 150ms ease' }}
+            aria-label="Quick post"
+          >
+            +
+          </button>
+          {quickPostOpen && (
+            <div
+              className="fixed bottom-24 left-6 z-[99971] bg-white rounded-2xl border-3 border-black shadow-[6px_6px_0px_black] p-3 flex flex-col gap-2"
+              style={{ width: 340, maxHeight: '60vh', overflowY: 'auto', opacity: fabOpacity }}
+            >
+              <div className="flex items-center justify-between mb-1">
+                <span className="font-black text-xs">Quick Post</span>
+                <button
+                  onMouseDown={e => e.preventDefault()}
+                  onClick={() => {
+                    if (miniEditorRef.current && editorRef.current) {
+                      editorRef.current.innerHTML = miniEditorRef.current.innerHTML;
+                    }
+                    setQuickPostOpen(false);
+                    topAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
+                  className="px-2 py-0.5 border-2 border-black rounded-lg text-[10px] font-black bg-yellow-100 hover:bg-yellow-200"
+                >
+                  ✏️ Edit Above
+                </button>
+              </div>
+              <div
+                ref={miniEditorRef}
+                contentEditable
+                suppressContentEditableWarning
+                className="min-h-[80px] px-2 py-2 text-xs border-2 border-black rounded-lg"
+                style={{ overflowWrap: 'break-word' }}
+                placeholder="Write something..."
+              />
+              <div className="flex gap-2 items-center">
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  id="fab-file-input"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    const evt = new Event('change', { bubbles: true });
+                    Object.defineProperty(evt, 'target', { value: e.target });
+                    handleImageChange(evt);
+                  }}
+                />
+                <label htmlFor="fab-file-input" className="px-2 py-1 border-2 border-black rounded-lg text-[11px] font-black bg-white cursor-pointer hover:bg-gray-100">📎</label>
+                <button
+                  onMouseDown={e => e.preventDefault()}
+                  onClick={async () => {
+                    if (miniEditorRef.current && editorRef.current) {
+                      editorRef.current.innerHTML = miniEditorRef.current.innerHTML;
+                    }
+                    await handlePost();
+                    setQuickPostOpen(false);
+                    if (miniEditorRef.current) miniEditorRef.current.innerHTML = '';
+                  }}
+                  className="ml-auto px-3 py-1 border-2 border-black rounded-lg text-[11px] font-black text-white"
+                  style={{ background: accentColor }}
+                >
+                  Post
+                </button>
+              </div>
+            </div>
+          )}
+        </>,
+        document.body
+      )}
 
       <button
         onClick={scrollToTop}
