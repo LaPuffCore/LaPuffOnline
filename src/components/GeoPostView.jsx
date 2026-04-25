@@ -512,7 +512,7 @@ const AlignCenterIcon = () => <svg width="13" height="13" viewBox="0 0 16 16" fi
 const AlignRightIcon  = () => <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><rect x="1" y="2" width="14" height="2" rx="1"/><rect x="5" y="7" width="10" height="2" rx="1"/><rect x="3" y="12" width="12" height="2" rx="1"/></svg>;
 
 // ── PostCard ──────────────────────────────────────────────────────────────────
-function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, onSelectTag, zipHeatMap, boroughHeatMap, textScale = 1, imageScale = 1, imagePriority = false, commentCount = 0, commentsOpen = false, onToggleComments, commentsChildren }) {
+function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, onSelectTag, zipHeatMap, boroughHeatMap, textScale = 1, imageScale = 1, imagePriority = false, isDesktopMasonry = false, gridUnitHeight = 0, commentCount = 0, commentsOpen = false, onToggleComments, commentsChildren }) {
   const { resolvedTheme } = useSiteTheme();
   const theme = getPostVisualTheme(post, resolvedTheme);
   const date = new Date(post.created_at);
@@ -554,15 +554,19 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
     color: theme.text,
   };
   const frameRatio = (16 / 9) / Math.max(0.5, Number(imageScale || 1));
-  const framePadding = `${56.25 * Math.max(0.5, Number(imageScale || 1))}%`;
   const isNonStandardFrame = Math.abs(imgRatio - frameRatio) > 0.08;
   const scale = Math.max(0.6, Math.min(2, Number(textScale || 1)));
   const shape = post.image_url
     ? (imgRatio < 0.85 ? 'portrait' : imgRatio > 1.25 ? 'landscape' : 'square')
     : 'square';
-  const imagePadding = shape === 'portrait' ? '140%' : shape === 'landscape' ? '58%' : '100%';
+  const imageHeight = isDesktopMasonry
+    ? Math.max(96, Math.min(
+      shape === 'portrait' ? gridUnitHeight * 0.58 : shape === 'landscape' ? gridUnitHeight * 0.28 : gridUnitHeight * 0.34,
+      shape === 'portrait' ? 260 : shape === 'landscape' ? 160 : 190,
+    ))
+    : undefined;
   const columnSpan = shape === 'landscape' ? 4 : 2;
-  const rowSpan = shape === 'portrait' ? 2 : 1;
+  const rowSpan = (shape === 'portrait' ? 2 : 1) + (commentsOpen && isDesktopMasonry ? 1 : 0);
   const tileGridStyle = {
     gridColumn: `span ${columnSpan}`,
     gridRow: `span ${rowSpan}`,
@@ -591,7 +595,7 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
       }}
     >
       {post.image_url && (
-        <div className="relative w-full overflow-hidden bg-black/5" style={{ height: 0, paddingBottom: imagePadding }}>
+        <div className="relative w-full overflow-hidden bg-black/5 flex-shrink-0" style={isDesktopMasonry ? { height: imageHeight } : { height: 0, paddingBottom: shape === 'portrait' ? '110%' : shape === 'landscape' ? '48%' : '72%' }}>
           <img
             src={post.image_url}
             alt="post"
@@ -1742,7 +1746,7 @@ export default function GeoPostView({ session }) {
       const rect = grid.getBoundingClientRect();
       const passed = Math.max(0, 80 - rect.top);
       const step = Math.max(1, desktopUnitHeight + 12);
-      const row = 1 + Math.floor(passed / step);
+      const row = 1 + Math.ceil(passed / step);
       setDesktopPanelRow(Math.max(1, Math.min(300, row)));
     };
 
@@ -1787,7 +1791,8 @@ export default function GeoPostView({ session }) {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const renderFeedPostCard = (post, index) => {
+  const renderFeedPostCard = (post, index, options = {}) => {
+    const { desktop = false } = options;
     const loadedComments = commentsByPost[post.id];
     const fallbackSampleComments = SAMPLE_POST_IDS.has(post.id) ? SAMPLE_COMMENTS.filter((entry) => entry.post_id === post.id) : [];
     const postComments = loadedComments ?? [];
@@ -1806,6 +1811,8 @@ export default function GeoPostView({ session }) {
         textScale={feedTextScale}
         imageScale={feedImageScale}
         imagePriority={index < 10}
+        isDesktopMasonry={desktop}
+        gridUnitHeight={desktop ? desktopUnitHeight : 0}
         commentCount={commentCount}
         commentsOpen={!!openCommentsByPost[post.id]}
         onToggleComments={toggleComments}
@@ -2119,7 +2126,7 @@ export default function GeoPostView({ session }) {
             </div>
           )}
 
-          {!loading && visiblePosts.map((post, index) => renderFeedPostCard(post, index))}
+          {!loading && visiblePosts.map((post, index) => renderFeedPostCard(post, index, { desktop: true }))}
 
           {loading && (
             <div className="rounded-2xl border-3 border-black bg-white shadow-[4px_4px_0px_black] flex items-center justify-center" style={{ gridColumn: '3 / -1', gridRow: 'span 1' }}>
@@ -2128,14 +2135,14 @@ export default function GeoPostView({ session }) {
           )}
 
           {(canShowMore || canShowLess) && (
-            <div className="flex justify-center gap-3 pt-2 pb-6" style={{ gridColumn: '1 / -1' }}>
+            <div className="flex justify-center gap-3 pt-2 pb-4" style={{ gridColumn: '1 / -1', alignSelf: 'start' }}>
               {canShowMore && (
-                <button onMouseDown={e => e.preventDefault()} onClick={() => setVisibleCount(v => v + PAGE_SIZE)} className="min-h-[44px] px-4 py-2 border-2 border-black rounded-full text-xs font-black bg-white shadow-[2px_2px_0px_black] hover:scale-105 transition-transform leading-tight text-center flex items-center justify-center">
+                <button onMouseDown={e => e.preventDefault()} onClick={() => setVisibleCount(v => v + PAGE_SIZE)} className="min-h-[32px] px-4 py-1.5 border-2 border-black rounded-full text-xs font-black bg-white shadow-[2px_2px_0px_black] hover:scale-105 transition-transform leading-tight text-center inline-flex items-center justify-center whitespace-nowrap">
                   Show More ({filteredPosts.length - visibleCount} remaining)
                 </button>
               )}
               {canShowLess && (
-                <button onMouseDown={e => e.preventDefault()} onClick={() => setVisibleCount(PAGE_SIZE)} className="min-h-[44px] px-4 py-2 border-2 border-black rounded-full text-xs font-black bg-white shadow-[2px_2px_0px_black] hover:scale-105 transition-transform leading-tight text-center flex items-center justify-center">
+                <button onMouseDown={e => e.preventDefault()} onClick={() => setVisibleCount(PAGE_SIZE)} className="min-h-[32px] px-4 py-1.5 border-2 border-black rounded-full text-xs font-black bg-white shadow-[2px_2px_0px_black] hover:scale-105 transition-transform leading-tight text-center inline-flex items-center justify-center whitespace-nowrap">
                   Show Less
                 </button>
               )}
@@ -2268,12 +2275,12 @@ export default function GeoPostView({ session }) {
                   {(canShowMore || canShowLess) && (
                     <div className="flex justify-center gap-3 pt-2 pb-2">
                       {canShowMore && (
-                        <button onMouseDown={e => e.preventDefault()} onClick={() => setVisibleCount(v => v + PAGE_SIZE)} className="min-h-[44px] px-4 py-2 border-2 border-black rounded-full text-xs font-black bg-white shadow-[2px_2px_0px_black] hover:scale-105 transition-transform leading-tight text-center flex items-center justify-center">
+                        <button onMouseDown={e => e.preventDefault()} onClick={() => setVisibleCount(v => v + PAGE_SIZE)} className="min-h-[32px] px-4 py-1.5 border-2 border-black rounded-full text-xs font-black bg-white shadow-[2px_2px_0px_black] hover:scale-105 transition-transform leading-tight text-center inline-flex items-center justify-center whitespace-nowrap">
                           Show More ({filteredPosts.length - visibleCount} remaining)
                         </button>
                       )}
                       {canShowLess && (
-                        <button onMouseDown={e => e.preventDefault()} onClick={() => setVisibleCount(PAGE_SIZE)} className="min-h-[44px] px-4 py-2 border-2 border-black rounded-full text-xs font-black bg-white shadow-[2px_2px_0px_black] hover:scale-105 transition-transform leading-tight text-center flex items-center justify-center">
+                        <button onMouseDown={e => e.preventDefault()} onClick={() => setVisibleCount(PAGE_SIZE)} className="min-h-[32px] px-4 py-1.5 border-2 border-black rounded-full text-xs font-black bg-white shadow-[2px_2px_0px_black] hover:scale-105 transition-transform leading-tight text-center inline-flex items-center justify-center whitespace-nowrap">
                           Show Less
                         </button>
                       )}
