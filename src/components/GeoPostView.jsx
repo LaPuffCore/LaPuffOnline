@@ -558,8 +558,8 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
   const frameRatio = (16 / 9) / Math.max(0.5, Number(imageScale || 1));
   const isNonStandardFrame = Math.abs(imgRatio - frameRatio) > 0.08;
   const scale = Math.max(0.6, Math.min(2, Number(textScale || 1)));
-  // Exact rem values so maxHeight = lineHeight × lines with no fractional remainder → no half-line clips
-  const textLineHeightRem = 1.25;
+  // Unitless line-height scales with font-size — webkit-line-clamp alone controls how many lines show
+  const textLineHeight = 1.5;
   const textFontSizeRem = 0.875 * scale;           // 14px base * scale
   const hasImage = Boolean(post.image_url);
   const shape = hasImage
@@ -587,25 +587,17 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
   useEffect(() => {
     const el = textBlockRef.current;
     if (!el) return undefined;
-
-    const updateOverflow = () => {
-      // Measure against computed maxHeight (rem converted to px) to avoid fractional rounding drift
-      const rootFontSize = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
-      const maxHeightPx = textLineHeightRem * maxTextLines * rootFontSize;
-      setIsTextOverflowing(el.scrollHeight > maxHeightPx + 2);
-    };
-
-    updateOverflow();
-
+    // scrollHeight > clientHeight means webkit-box-clamp is active i.e. text was truncated
+    const check = () => setIsTextOverflowing(el.scrollHeight > el.clientHeight + 2);
+    check();
     if (typeof ResizeObserver === 'undefined') {
-      window.addEventListener('resize', updateOverflow);
-      return () => window.removeEventListener('resize', updateOverflow);
+      window.addEventListener('resize', check);
+      return () => window.removeEventListener('resize', check);
     }
-
-    const observer = new ResizeObserver(() => updateOverflow());
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [postHtml, maxTextLines, textLineHeightRem, isDesktopMasonry, commentsOpen]);
+    const ro = new ResizeObserver(check);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [postHtml, maxTextLines, isDesktopMasonry, commentsOpen]);
 
   return (
     <div
@@ -621,12 +613,11 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
       }}
     >
       {post.image_url && (
-        // flex: 1 + min-h-0 = image fills all space the fixed footer doesn't need
-        // desktop masonry: image expands dynamically. mobile: use padding-bottom aspect trick
+        // flex: 1 — image grows to fill all remaining tile space the footer doesn't claim
         <div
           className="relative w-full overflow-hidden bg-black/5"
           style={isDesktopMasonry
-            ? { flex: 1, minHeight: 80, maxHeight: isTallTile ? 600 : 240, position: 'relative' }
+            ? { flex: 1, minHeight: 80, maxHeight: isTallTile ? 540 : 240, position: 'relative' }
             : { height: 0, paddingBottom: shape === 'portrait' ? '110%' : shape === 'landscape' ? '48%' : '72%' }
           }
         >
@@ -656,9 +647,8 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
         </div>
       )}
 
-      {/* footer: shrinks to content, never grows — lets image take remaining space */}
-      <div className="p-3 flex-shrink-0" style={{ background: theme.fill }}>
-        <div className="flex flex-col">
+      {/* footer: flex-1 on no-image tiles so reactions can pin to bottom; flex-shrink-0 when image is present */}
+      <div className="p-3" style={{ background: theme.fill, flex: hasImage ? '0 0 auto' : '1 1 auto', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         <div className="flex items-center gap-1.5 mb-2 flex-wrap">
           {postIsAnonymous ? (
             <span className="font-black text-xs flex items-center gap-1" style={{ color: theme.text, fontSize: `${12 * scale}px` }}>
@@ -686,13 +676,12 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
 
         <div
           ref={textBlockRef}
-          className="mb-3 break-words [&>*]:m-0 [&>*]:p-0"
+          className="mb-2 break-words [&>*]:m-0 [&>*]:p-0"
           style={{
             color: postTextColor,
             fontSize: `${textFontSizeRem}rem`,
-            lineHeight: `${textLineHeightRem}rem`,
-            // Exact integer multiples prevent any fractional half-line bleeding
-            maxHeight: `${textLineHeightRem * maxTextLines}rem`,
+            lineHeight: textLineHeight,
+            // webkit-box-clamp is the ONLY truncation — never pair with maxHeight which would pixel-clip mid-line
             overflow: 'hidden',
             display: '-webkit-box',
             WebkitBoxOrient: 'vertical',
@@ -712,6 +701,9 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
             Show more
           </button>
         )}
+
+        {/* spacer pushes reaction/tag row to bottom of the tile */}
+        <div style={{ flex: 1 }} />
 
         <div className="flex items-center gap-1 flex-wrap">
           {topEmojis.map(([emoji, count]) => (
@@ -797,10 +789,12 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
           </div>
         )}
 
-        {commentsOpen && commentsChildren}
-        </div>
+        {commentsOpen && (
+          <div className="mt-2 max-h-72 overflow-y-auto overscroll-contain rounded-lg" style={{ scrollbarWidth: 'thin' }}>
+            {commentsChildren}
+          </div>
+        )}
       </div>
-      {/* end footer */}
 
       {imgModalOpen && (
         <div className="fixed inset-x-0 top-[72px] bottom-0 z-[100000] overflow-y-auto">
@@ -1805,10 +1799,9 @@ export default function GeoPostView({ session }) {
       const grid = desktopGridRef.current;
       if (!grid) return;
 
-      // offsetTop is the absolute document position — does NOT change as user scrolls
-      const gridTopAbs = grid.offsetTop;
+      // getBoundingClientRect().top + scrollY = stable absolute document position regardless of scroll containers
+      const gridTopAbs = grid.getBoundingClientRect().top + window.scrollY;
       const rowStep = Math.max(1, desktopUnitHeight + 12);
-      // How far the user has scrolled past the grid's document top
       const relativeScroll = Math.max(0, window.scrollY - gridTopAbs);
       const targetRow = Math.floor(relativeScroll / rowStep) + 1;
       const maxRow = Math.max(1, Math.floor(grid.scrollHeight / rowStep));
@@ -1816,22 +1809,13 @@ export default function GeoPostView({ session }) {
       setDesktopPanelRow((prev) => (prev === boundedRow ? prev : boundedRow));
     };
 
-    let rafId = 0;
-    const scheduleUpdate = () => {
-      if (rafId) return;
-      rafId = window.requestAnimationFrame(() => {
-        rafId = 0;
-        updatePanelRow();
-      });
-    };
-
+    // Direct scroll handler — no RAF so row jumps fire in the same frame as the scroll event
     updatePanelRow();
-    window.addEventListener('scroll', scheduleUpdate, { passive: true });
-    window.addEventListener('resize', scheduleUpdate);
+    window.addEventListener('scroll', updatePanelRow, { passive: true });
+    window.addEventListener('resize', updatePanelRow);
     return () => {
-      if (rafId) window.cancelAnimationFrame(rafId);
-      window.removeEventListener('scroll', scheduleUpdate);
-      window.removeEventListener('resize', scheduleUpdate);
+      window.removeEventListener('scroll', updatePanelRow);
+      window.removeEventListener('resize', updatePanelRow);
     };
   }, [desktopUnitHeight, visiblePosts.length, canShowMore, canShowLess]);
 
