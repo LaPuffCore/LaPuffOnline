@@ -526,7 +526,6 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
   const [imgModalOpen, setImgModalOpen] = useState(false);
   const [imgLoaded, setImgLoaded] = useState(false);
   const [isTextOverflowing, setIsTextOverflowing] = useState(false);
-  const [visibleStdLineCount, setVisibleStdLineCount] = useState(0);
   const textBlockRef = useRef(null);
   // content can be a JSONB object or, rarely, a double-encoded JSON string
   const parsedContent = (() => {
@@ -559,28 +558,18 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
   const frameRatio = (16 / 9) / Math.max(0.5, Number(imageScale || 1));
   const isNonStandardFrame = Math.abs(imgRatio - frameRatio) > 0.08;
   const scale = Math.max(0.6, Math.min(2, Number(textScale || 1)));
-  const standardLineHeightPx = 14 * 1.45;
-  const lineHeightPx = 14 * scale * 1.45;
+  // Exact rem values so maxHeight = lineHeight × lines with no fractional remainder → no half-line clips
+  const textLineHeightRem = 1.25;
+  const textFontSizeRem = 0.875 * scale;           // 14px base * scale
   const hasImage = Boolean(post.image_url);
   const shape = hasImage
     ? (imgRatio < 0.85 ? 'portrait' : imgRatio > 1.25 ? 'landscape' : 'square')
     : 'square';
   const isTallTile = hasImage && shape === 'portrait';
   const isLongTile = hasImage && shape === 'landscape';
-  const isSquareImageTile = hasImage && shape === 'square';
   const columnSpan = isLongTile ? 4 : 2;
   const rowSpan = (isTallTile ? 2 : 1) + (commentsOpen && isDesktopMasonry ? 1 : 0);
   const maxTextLines = isTallTile ? 9 : hasImage ? 3 : 9;
-  const shortTextStdDeficit = hasImage && !isTallTile && !isTextOverflowing
-    ? Math.max(0, 3 - Math.min(3, visibleStdLineCount || 0))
-    : 0;
-  const shortTextImageBoost = isDesktopMasonry ? shortTextStdDeficit * standardLineHeightPx : 0;
-  const imageHeight = isDesktopMasonry
-    ? Math.max(96, Math.min(
-      (isTallTile ? gridUnitHeight * 0.6 : isLongTile ? gridUnitHeight * 0.34 : isSquareImageTile ? gridUnitHeight * 0.4 : gridUnitHeight * 0.34) + shortTextImageBoost,
-      isTallTile ? 560 : isLongTile ? 220 : isSquareImageTile ? 260 : 220,
-    ))
-    : undefined;
   const tileGridStyle = {
     gridColumn: `span ${columnSpan}`,
     gridRow: `span ${rowSpan}`,
@@ -600,12 +589,10 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
     if (!el) return undefined;
 
     const updateOverflow = () => {
-      const maxAllowedHeight = lineHeightPx * maxTextLines;
-      const contentHeight = el.scrollHeight;
-      const overflow = contentHeight > maxAllowedHeight + 1;
-      const visibleHeight = overflow ? maxAllowedHeight : contentHeight;
-      setIsTextOverflowing(overflow);
-      setVisibleStdLineCount(Math.max(0, visibleHeight / standardLineHeightPx));
+      // Measure against computed maxHeight (rem converted to px) to avoid fractional rounding drift
+      const rootFontSize = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+      const maxHeightPx = textLineHeightRem * maxTextLines * rootFontSize;
+      setIsTextOverflowing(el.scrollHeight > maxHeightPx + 2);
     };
 
     updateOverflow();
@@ -618,7 +605,7 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
     const observer = new ResizeObserver(() => updateOverflow());
     observer.observe(el);
     return () => observer.disconnect();
-  }, [postHtml, lineHeightPx, maxTextLines, isDesktopMasonry, commentsOpen, standardLineHeightPx]);
+  }, [postHtml, maxTextLines, textLineHeightRem, isDesktopMasonry, commentsOpen]);
 
   return (
     <div
@@ -634,7 +621,15 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
       }}
     >
       {post.image_url && (
-        <div className="relative w-full overflow-hidden bg-black/5 flex-shrink-0" style={isDesktopMasonry ? { height: imageHeight } : { height: 0, paddingBottom: shape === 'portrait' ? '110%' : shape === 'landscape' ? '48%' : '72%' }}>
+        // flex: 1 + min-h-0 = image fills all space the fixed footer doesn't need
+        // desktop masonry: image expands dynamically. mobile: use padding-bottom aspect trick
+        <div
+          className="relative w-full overflow-hidden bg-black/5"
+          style={isDesktopMasonry
+            ? { flex: 1, minHeight: 80, maxHeight: isTallTile ? 600 : 240, position: 'relative' }
+            : { height: 0, paddingBottom: shape === 'portrait' ? '110%' : shape === 'landscape' ? '48%' : '72%' }
+          }
+        >
           <img
             src={post.image_url}
             alt="post"
@@ -661,8 +656,9 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
         </div>
       )}
 
-      <div className="p-3 min-h-0" style={{ background: theme.fill, flex: 1 }}>
-        <div className="flex flex-col h-full min-h-0">
+      {/* footer: shrinks to content, never grows — lets image take remaining space */}
+      <div className="p-3 flex-shrink-0" style={{ background: theme.fill }}>
+        <div className="flex flex-col">
         <div className="flex items-center gap-1.5 mb-2 flex-wrap">
           {postIsAnonymous ? (
             <span className="font-black text-xs flex items-center gap-1" style={{ color: theme.text, fontSize: `${12 * scale}px` }}>
@@ -690,15 +686,18 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
 
         <div
           ref={textBlockRef}
-          className="text-sm leading-relaxed mb-3 break-words min-h-[1.5rem] min-h-0 [&>*]:m-0"
+          className="mb-3 break-words [&>*]:m-0 [&>*]:p-0"
           style={{
             color: postTextColor,
-            fontSize: `${14 * scale}px`,
-            lineHeight: `${lineHeightPx}px`,
-            maxHeight: `${lineHeightPx * maxTextLines}px`,
+            fontSize: `${textFontSizeRem}rem`,
+            lineHeight: `${textLineHeightRem}rem`,
+            // Exact integer multiples prevent any fractional half-line bleeding
+            maxHeight: `${textLineHeightRem * maxTextLines}rem`,
             overflow: 'hidden',
-            display: 'block',
-            flexShrink: 0,
+            display: '-webkit-box',
+            WebkitBoxOrient: 'vertical',
+            WebkitLineClamp: maxTextLines,
+            wordBreak: 'break-word',
           }}
           dangerouslySetInnerHTML={{ __html: postHtml }}
         />
@@ -714,7 +713,7 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
           </button>
         )}
 
-        <div className="flex items-center gap-1 flex-wrap mt-auto">
+        <div className="flex items-center gap-1 flex-wrap">
           {topEmojis.map(([emoji, count]) => (
             <button
               key={emoji}
@@ -801,6 +800,7 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
         {commentsOpen && commentsChildren}
         </div>
       </div>
+      {/* end footer */}
 
       {imgModalOpen && (
         <div className="fixed inset-x-0 top-[72px] bottom-0 z-[100000] overflow-y-auto">
@@ -1805,13 +1805,13 @@ export default function GeoPostView({ session }) {
       const grid = desktopGridRef.current;
       if (!grid) return;
 
-      const rect = grid.getBoundingClientRect();
-      const gridTopAbs = window.scrollY + rect.top;
+      // offsetTop is the absolute document position — does NOT change as user scrolls
+      const gridTopAbs = grid.offsetTop;
       const rowStep = Math.max(1, desktopUnitHeight + 12);
-      const viewportAnchor = 108;
-      const relativeScroll = (window.scrollY + viewportAnchor) - gridTopAbs;
-      const targetRow = relativeScroll <= 0 ? 1 : 1 + Math.floor(relativeScroll / rowStep);
-      const maxRow = Math.max(1, Math.ceil((grid.scrollHeight - desktopUnitHeight) / rowStep) + 1);
+      // How far the user has scrolled past the grid's document top
+      const relativeScroll = Math.max(0, window.scrollY - gridTopAbs);
+      const targetRow = Math.floor(relativeScroll / rowStep) + 1;
+      const maxRow = Math.max(1, Math.floor(grid.scrollHeight / rowStep));
       const boundedRow = Math.max(1, Math.min(maxRow, targetRow));
       setDesktopPanelRow((prev) => (prev === boundedRow ? prev : boundedRow));
     };
