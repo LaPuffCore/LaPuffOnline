@@ -1,0 +1,1719 @@
+Entity_Name,Entity_Type,Variable_Name,Type,Nullable,Default_Value,Security_Policies,Full_View_Definition
+events_with_counts,VIEW (Virtual),id,uuid,YES,null,NO RLS / PUBLIC OR VIEW," SELECT id,
+    created_at,
+    name,
+    event_name,
+    price_category,
+    location_data,
+    event_date,
+    event_time_utc,
+    relevant_links,
+    description,
+    photos,
+    representative_emoji,
+    hex_color,
+    is_approved,
+    user_id,
+    zip_code,
+    fav_count,
+    trend_threshold_count,
+    trend_window_peak_count,
+    trend_window_started_at,
+    lat,
+    lng,
+    event_time_utc_end,
+    afters_address,
+    afters_lat,
+    afters_lng,
+    ( SELECT count(*) AS count
+           FROM event_attendance
+          WHERE (event_attendance.event_id = events.id)) AS attendance_count
+   FROM events;"
+events_with_counts,VIEW (Virtual),created_at,timestamp with time zone,YES,null,NO RLS / PUBLIC OR VIEW," SELECT id,
+    created_at,
+    name,
+    event_name,
+    price_category,
+    location_data,
+    event_date,
+    event_time_utc,
+    relevant_links,
+    description,
+    photos,
+    representative_emoji,
+    hex_color,
+    is_approved,
+    user_id,
+    zip_code,
+    fav_count,
+    trend_threshold_count,
+    trend_window_peak_count,
+    trend_window_started_at,
+    lat,
+    lng,
+    event_time_utc_end,
+    afters_address,
+    afters_lat,
+    afters_lng,
+    ( SELECT count(*) AS count
+           FROM event_attendance
+          WHERE (event_attendance.event_id = events.id)) AS attendance_count
+   FROM events;"
+events_with_counts,VIEW (Virtual),name,text,YES,null,NO RLS / PUBLIC OR VIEW," SELECT id,
+    created_at,
+    name,
+    event_name,
+    price_category,
+    location_data,
+    event_date,
+    event_time_utc,
+    relevant_links,
+    description,
+    photos,
+    representative_emoji,
+    hex_color,
+    is_approved,
+    user_id,
+    zip_code,
+    fav_count,
+    trend_threshold_count,
+    trend_window_peak_count,
+    trend_window_started_at,
+    lat,
+    lng,
+    event_time_utc_end,
+    afters_address,
+    afters_lat,
+    afters_lng,
+    ( SELECT count(*) AS count
+           FROM event_attendance
+          WHERE (event_attendance.event_id = events.id)) AS attendance_count
+   FROM events;"
+events_with_counts,VIEW (Virtual),event_name,text,YES,null,NO RLS / PUBLIC OR VIEW," SELECT id,
+    created_at,
+    name,
+    event_name,
+    price_category,
+    location_data,
+    event_date,
+    event_time_utc,
+    relevant_links,
+    description,
+    photos,
+    representative_emoji,
+    hex_color,
+    is_approved,
+    user_id,
+    zip_code,
+    fav_count,
+    trend_threshold_count,
+    trend_window_peak_count,
+    trend_window_started_at,
+    lat,
+    lng,
+    event_time_utc_end,
+    afters_address,
+    afters_lat,
+    afters_lng,
+    ( SELECT count(*) AS count
+           FROM event_attendance
+          WHERE (event_attendance.event_id = events.id)) AS attendance_count
+   FROM events;"
+events_with_counts,VIEW (Virtual),price_category,text,YES,null,NO RLS / PUBLIC OR VIEW," SELECT id,
+    created_at,
+    name,
+    event_name,
+    price_category,
+    location_data,
+    event_date,
+    event_time_utc,
+    relevant_links,
+    description,
+    photos,
+    representative_emoji,
+    hex_color,
+    is_approved,
+    user_id,
+    zip_code,
+    fav_count,
+    trend_threshold_count,
+    trend_window_peak_count,
+    trend_window_started_at,
+    lat,
+    lng,
+    event_time_utc_end,
+    afters_address,
+    afters_lat,
+    afters_lng,
+    ( SELECT count(*) AS count
+           FROM event_attendance
+          WHERE (event_attendance.event_id = events.id)) AS attendance_count
+   FROM events;"
+events_with_counts,VIEW (Virtual),location_data,jsonb,YES,null,NO RLS / PUBLIC OR VIEW," SELECT id,
+    created_at,
+    name,
+    event_name,
+    price_category,
+    location_data,
+    event_date,
+    event_time_utc,
+    relevant_links,
+    description,
+    photos,
+    representative_emoji,
+    hex_color,
+    is_approved,
+    user_id,
+    zip_code,
+    fav_count,
+    trend_threshold_count,
+    trend_window_peak_count,
+    trend_window_started_at,
+    lat,
+    lng,
+    event_time_utc_end,
+    afters_address,
+    afters_lat,
+    afters_lng,
+    ( SELECT count(*) AS count
+           FROM event_attendance
+          WHERE (event_attendance.event_id = events.id)) AS attendance_count
+   FROM events;"
+events_with_counts,VIEW (Virtual),event_date,date,YES,null,NO RLS / PUBLIC OR VIEW," SELECT id,
+    created_at,
+    name,
+    event_name,
+    price_category,
+    location_data,
+    event_date,
+    event_time_utc,
+    relevant_links,
+    description,
+    photos,
+    representative_emoji,
+    hex_color,
+    is_approved,
+    user_id,
+    zip_code,
+    fav_count,
+    trend_threshold_count,
+    trend_window_peak_count,
+    trend_window_started_at,
+    lat,
+    lng,
+    event_time_utc_end,
+    afters_address,
+    afters_lat,
+    afters_lng,
+    ( SELECT count(*) AS count
+           FROM event_attendance
+          WHERE (event_attendance.event_id = events.id)) AS attendance_count
+   FROM events;"
+events_with_counts,VIEW (Virtual),event_time_utc,timestamp with time zone,YES,null,NO RLS / PUBLIC OR VIEW," SELECT id,
+    created_at,
+    name,
+    event_name,
+    price_category,
+    location_data,
+    event_date,
+    event_time_utc,
+    relevant_links,
+    description,
+    photos,
+    representative_emoji,
+    hex_color,
+    is_approved,
+    user_id,
+    zip_code,
+    fav_count,
+    trend_threshold_count,
+    trend_window_peak_count,
+    trend_window_started_at,
+    lat,
+    lng,
+    event_time_utc_end,
+    afters_address,
+    afters_lat,
+    afters_lng,
+    ( SELECT count(*) AS count
+           FROM event_attendance
+          WHERE (event_attendance.event_id = events.id)) AS attendance_count
+   FROM events;"
+events_with_counts,VIEW (Virtual),relevant_links,ARRAY,YES,null,NO RLS / PUBLIC OR VIEW," SELECT id,
+    created_at,
+    name,
+    event_name,
+    price_category,
+    location_data,
+    event_date,
+    event_time_utc,
+    relevant_links,
+    description,
+    photos,
+    representative_emoji,
+    hex_color,
+    is_approved,
+    user_id,
+    zip_code,
+    fav_count,
+    trend_threshold_count,
+    trend_window_peak_count,
+    trend_window_started_at,
+    lat,
+    lng,
+    event_time_utc_end,
+    afters_address,
+    afters_lat,
+    afters_lng,
+    ( SELECT count(*) AS count
+           FROM event_attendance
+          WHERE (event_attendance.event_id = events.id)) AS attendance_count
+   FROM events;"
+events_with_counts,VIEW (Virtual),description,character varying,YES,null,NO RLS / PUBLIC OR VIEW," SELECT id,
+    created_at,
+    name,
+    event_name,
+    price_category,
+    location_data,
+    event_date,
+    event_time_utc,
+    relevant_links,
+    description,
+    photos,
+    representative_emoji,
+    hex_color,
+    is_approved,
+    user_id,
+    zip_code,
+    fav_count,
+    trend_threshold_count,
+    trend_window_peak_count,
+    trend_window_started_at,
+    lat,
+    lng,
+    event_time_utc_end,
+    afters_address,
+    afters_lat,
+    afters_lng,
+    ( SELECT count(*) AS count
+           FROM event_attendance
+          WHERE (event_attendance.event_id = events.id)) AS attendance_count
+   FROM events;"
+events_with_counts,VIEW (Virtual),photos,ARRAY,YES,null,NO RLS / PUBLIC OR VIEW," SELECT id,
+    created_at,
+    name,
+    event_name,
+    price_category,
+    location_data,
+    event_date,
+    event_time_utc,
+    relevant_links,
+    description,
+    photos,
+    representative_emoji,
+    hex_color,
+    is_approved,
+    user_id,
+    zip_code,
+    fav_count,
+    trend_threshold_count,
+    trend_window_peak_count,
+    trend_window_started_at,
+    lat,
+    lng,
+    event_time_utc_end,
+    afters_address,
+    afters_lat,
+    afters_lng,
+    ( SELECT count(*) AS count
+           FROM event_attendance
+          WHERE (event_attendance.event_id = events.id)) AS attendance_count
+   FROM events;"
+events_with_counts,VIEW (Virtual),representative_emoji,character varying,YES,null,NO RLS / PUBLIC OR VIEW," SELECT id,
+    created_at,
+    name,
+    event_name,
+    price_category,
+    location_data,
+    event_date,
+    event_time_utc,
+    relevant_links,
+    description,
+    photos,
+    representative_emoji,
+    hex_color,
+    is_approved,
+    user_id,
+    zip_code,
+    fav_count,
+    trend_threshold_count,
+    trend_window_peak_count,
+    trend_window_started_at,
+    lat,
+    lng,
+    event_time_utc_end,
+    afters_address,
+    afters_lat,
+    afters_lng,
+    ( SELECT count(*) AS count
+           FROM event_attendance
+          WHERE (event_attendance.event_id = events.id)) AS attendance_count
+   FROM events;"
+events_with_counts,VIEW (Virtual),hex_color,character varying,YES,null,NO RLS / PUBLIC OR VIEW," SELECT id,
+    created_at,
+    name,
+    event_name,
+    price_category,
+    location_data,
+    event_date,
+    event_time_utc,
+    relevant_links,
+    description,
+    photos,
+    representative_emoji,
+    hex_color,
+    is_approved,
+    user_id,
+    zip_code,
+    fav_count,
+    trend_threshold_count,
+    trend_window_peak_count,
+    trend_window_started_at,
+    lat,
+    lng,
+    event_time_utc_end,
+    afters_address,
+    afters_lat,
+    afters_lng,
+    ( SELECT count(*) AS count
+           FROM event_attendance
+          WHERE (event_attendance.event_id = events.id)) AS attendance_count
+   FROM events;"
+events_with_counts,VIEW (Virtual),is_approved,boolean,YES,null,NO RLS / PUBLIC OR VIEW," SELECT id,
+    created_at,
+    name,
+    event_name,
+    price_category,
+    location_data,
+    event_date,
+    event_time_utc,
+    relevant_links,
+    description,
+    photos,
+    representative_emoji,
+    hex_color,
+    is_approved,
+    user_id,
+    zip_code,
+    fav_count,
+    trend_threshold_count,
+    trend_window_peak_count,
+    trend_window_started_at,
+    lat,
+    lng,
+    event_time_utc_end,
+    afters_address,
+    afters_lat,
+    afters_lng,
+    ( SELECT count(*) AS count
+           FROM event_attendance
+          WHERE (event_attendance.event_id = events.id)) AS attendance_count
+   FROM events;"
+events_with_counts,VIEW (Virtual),user_id,uuid,YES,null,NO RLS / PUBLIC OR VIEW," SELECT id,
+    created_at,
+    name,
+    event_name,
+    price_category,
+    location_data,
+    event_date,
+    event_time_utc,
+    relevant_links,
+    description,
+    photos,
+    representative_emoji,
+    hex_color,
+    is_approved,
+    user_id,
+    zip_code,
+    fav_count,
+    trend_threshold_count,
+    trend_window_peak_count,
+    trend_window_started_at,
+    lat,
+    lng,
+    event_time_utc_end,
+    afters_address,
+    afters_lat,
+    afters_lng,
+    ( SELECT count(*) AS count
+           FROM event_attendance
+          WHERE (event_attendance.event_id = events.id)) AS attendance_count
+   FROM events;"
+events_with_counts,VIEW (Virtual),zip_code,text,YES,null,NO RLS / PUBLIC OR VIEW," SELECT id,
+    created_at,
+    name,
+    event_name,
+    price_category,
+    location_data,
+    event_date,
+    event_time_utc,
+    relevant_links,
+    description,
+    photos,
+    representative_emoji,
+    hex_color,
+    is_approved,
+    user_id,
+    zip_code,
+    fav_count,
+    trend_threshold_count,
+    trend_window_peak_count,
+    trend_window_started_at,
+    lat,
+    lng,
+    event_time_utc_end,
+    afters_address,
+    afters_lat,
+    afters_lng,
+    ( SELECT count(*) AS count
+           FROM event_attendance
+          WHERE (event_attendance.event_id = events.id)) AS attendance_count
+   FROM events;"
+events_with_counts,VIEW (Virtual),fav_count,integer,YES,null,NO RLS / PUBLIC OR VIEW," SELECT id,
+    created_at,
+    name,
+    event_name,
+    price_category,
+    location_data,
+    event_date,
+    event_time_utc,
+    relevant_links,
+    description,
+    photos,
+    representative_emoji,
+    hex_color,
+    is_approved,
+    user_id,
+    zip_code,
+    fav_count,
+    trend_threshold_count,
+    trend_window_peak_count,
+    trend_window_started_at,
+    lat,
+    lng,
+    event_time_utc_end,
+    afters_address,
+    afters_lat,
+    afters_lng,
+    ( SELECT count(*) AS count
+           FROM event_attendance
+          WHERE (event_attendance.event_id = events.id)) AS attendance_count
+   FROM events;"
+events_with_counts,VIEW (Virtual),trend_threshold_count,integer,YES,null,NO RLS / PUBLIC OR VIEW," SELECT id,
+    created_at,
+    name,
+    event_name,
+    price_category,
+    location_data,
+    event_date,
+    event_time_utc,
+    relevant_links,
+    description,
+    photos,
+    representative_emoji,
+    hex_color,
+    is_approved,
+    user_id,
+    zip_code,
+    fav_count,
+    trend_threshold_count,
+    trend_window_peak_count,
+    trend_window_started_at,
+    lat,
+    lng,
+    event_time_utc_end,
+    afters_address,
+    afters_lat,
+    afters_lng,
+    ( SELECT count(*) AS count
+           FROM event_attendance
+          WHERE (event_attendance.event_id = events.id)) AS attendance_count
+   FROM events;"
+events_with_counts,VIEW (Virtual),trend_window_peak_count,integer,YES,null,NO RLS / PUBLIC OR VIEW," SELECT id,
+    created_at,
+    name,
+    event_name,
+    price_category,
+    location_data,
+    event_date,
+    event_time_utc,
+    relevant_links,
+    description,
+    photos,
+    representative_emoji,
+    hex_color,
+    is_approved,
+    user_id,
+    zip_code,
+    fav_count,
+    trend_threshold_count,
+    trend_window_peak_count,
+    trend_window_started_at,
+    lat,
+    lng,
+    event_time_utc_end,
+    afters_address,
+    afters_lat,
+    afters_lng,
+    ( SELECT count(*) AS count
+           FROM event_attendance
+          WHERE (event_attendance.event_id = events.id)) AS attendance_count
+   FROM events;"
+events_with_counts,VIEW (Virtual),trend_window_started_at,timestamp with time zone,YES,null,NO RLS / PUBLIC OR VIEW," SELECT id,
+    created_at,
+    name,
+    event_name,
+    price_category,
+    location_data,
+    event_date,
+    event_time_utc,
+    relevant_links,
+    description,
+    photos,
+    representative_emoji,
+    hex_color,
+    is_approved,
+    user_id,
+    zip_code,
+    fav_count,
+    trend_threshold_count,
+    trend_window_peak_count,
+    trend_window_started_at,
+    lat,
+    lng,
+    event_time_utc_end,
+    afters_address,
+    afters_lat,
+    afters_lng,
+    ( SELECT count(*) AS count
+           FROM event_attendance
+          WHERE (event_attendance.event_id = events.id)) AS attendance_count
+   FROM events;"
+events_with_counts,VIEW (Virtual),lat,double precision,YES,null,NO RLS / PUBLIC OR VIEW," SELECT id,
+    created_at,
+    name,
+    event_name,
+    price_category,
+    location_data,
+    event_date,
+    event_time_utc,
+    relevant_links,
+    description,
+    photos,
+    representative_emoji,
+    hex_color,
+    is_approved,
+    user_id,
+    zip_code,
+    fav_count,
+    trend_threshold_count,
+    trend_window_peak_count,
+    trend_window_started_at,
+    lat,
+    lng,
+    event_time_utc_end,
+    afters_address,
+    afters_lat,
+    afters_lng,
+    ( SELECT count(*) AS count
+           FROM event_attendance
+          WHERE (event_attendance.event_id = events.id)) AS attendance_count
+   FROM events;"
+events_with_counts,VIEW (Virtual),lng,double precision,YES,null,NO RLS / PUBLIC OR VIEW," SELECT id,
+    created_at,
+    name,
+    event_name,
+    price_category,
+    location_data,
+    event_date,
+    event_time_utc,
+    relevant_links,
+    description,
+    photos,
+    representative_emoji,
+    hex_color,
+    is_approved,
+    user_id,
+    zip_code,
+    fav_count,
+    trend_threshold_count,
+    trend_window_peak_count,
+    trend_window_started_at,
+    lat,
+    lng,
+    event_time_utc_end,
+    afters_address,
+    afters_lat,
+    afters_lng,
+    ( SELECT count(*) AS count
+           FROM event_attendance
+          WHERE (event_attendance.event_id = events.id)) AS attendance_count
+   FROM events;"
+events_with_counts,VIEW (Virtual),event_time_utc_end,timestamp with time zone,YES,null,NO RLS / PUBLIC OR VIEW," SELECT id,
+    created_at,
+    name,
+    event_name,
+    price_category,
+    location_data,
+    event_date,
+    event_time_utc,
+    relevant_links,
+    description,
+    photos,
+    representative_emoji,
+    hex_color,
+    is_approved,
+    user_id,
+    zip_code,
+    fav_count,
+    trend_threshold_count,
+    trend_window_peak_count,
+    trend_window_started_at,
+    lat,
+    lng,
+    event_time_utc_end,
+    afters_address,
+    afters_lat,
+    afters_lng,
+    ( SELECT count(*) AS count
+           FROM event_attendance
+          WHERE (event_attendance.event_id = events.id)) AS attendance_count
+   FROM events;"
+events_with_counts,VIEW (Virtual),afters_address,text,YES,null,NO RLS / PUBLIC OR VIEW," SELECT id,
+    created_at,
+    name,
+    event_name,
+    price_category,
+    location_data,
+    event_date,
+    event_time_utc,
+    relevant_links,
+    description,
+    photos,
+    representative_emoji,
+    hex_color,
+    is_approved,
+    user_id,
+    zip_code,
+    fav_count,
+    trend_threshold_count,
+    trend_window_peak_count,
+    trend_window_started_at,
+    lat,
+    lng,
+    event_time_utc_end,
+    afters_address,
+    afters_lat,
+    afters_lng,
+    ( SELECT count(*) AS count
+           FROM event_attendance
+          WHERE (event_attendance.event_id = events.id)) AS attendance_count
+   FROM events;"
+events_with_counts,VIEW (Virtual),afters_lat,double precision,YES,null,NO RLS / PUBLIC OR VIEW," SELECT id,
+    created_at,
+    name,
+    event_name,
+    price_category,
+    location_data,
+    event_date,
+    event_time_utc,
+    relevant_links,
+    description,
+    photos,
+    representative_emoji,
+    hex_color,
+    is_approved,
+    user_id,
+    zip_code,
+    fav_count,
+    trend_threshold_count,
+    trend_window_peak_count,
+    trend_window_started_at,
+    lat,
+    lng,
+    event_time_utc_end,
+    afters_address,
+    afters_lat,
+    afters_lng,
+    ( SELECT count(*) AS count
+           FROM event_attendance
+          WHERE (event_attendance.event_id = events.id)) AS attendance_count
+   FROM events;"
+events_with_counts,VIEW (Virtual),afters_lng,double precision,YES,null,NO RLS / PUBLIC OR VIEW," SELECT id,
+    created_at,
+    name,
+    event_name,
+    price_category,
+    location_data,
+    event_date,
+    event_time_utc,
+    relevant_links,
+    description,
+    photos,
+    representative_emoji,
+    hex_color,
+    is_approved,
+    user_id,
+    zip_code,
+    fav_count,
+    trend_threshold_count,
+    trend_window_peak_count,
+    trend_window_started_at,
+    lat,
+    lng,
+    event_time_utc_end,
+    afters_address,
+    afters_lat,
+    afters_lng,
+    ( SELECT count(*) AS count
+           FROM event_attendance
+          WHERE (event_attendance.event_id = events.id)) AS attendance_count
+   FROM events;"
+events_with_counts,VIEW (Virtual),attendance_count,bigint,YES,null,NO RLS / PUBLIC OR VIEW," SELECT id,
+    created_at,
+    name,
+    event_name,
+    price_category,
+    location_data,
+    event_date,
+    event_time_utc,
+    relevant_links,
+    description,
+    photos,
+    representative_emoji,
+    hex_color,
+    is_approved,
+    user_id,
+    zip_code,
+    fav_count,
+    trend_threshold_count,
+    trend_window_peak_count,
+    trend_window_started_at,
+    lat,
+    lng,
+    event_time_utc_end,
+    afters_address,
+    afters_lat,
+    afters_lng,
+    ( SELECT count(*) AS count
+           FROM event_attendance
+          WHERE (event_attendance.event_id = events.id)) AS attendance_count
+   FROM events;"
+geopost_feed,VIEW (Virtual),id,uuid,YES,null,NO RLS / PUBLIC OR VIEW," SELECT p.id,
+    p.user_id,
+    p.content,
+    p.image_url,
+    p.zip_code,
+    p.borough,
+    p.is_participant,
+    p.post_approved,
+    p.created_at,
+    p.post_fill,
+    p.post_outline,
+    p.scope,
+    p.post_shadow,
+    pr.username,
+    COALESCE(rx.total_reactions, (0)::bigint) AS total_reactions,
+    COALESCE(cm.total_comments, (0)::bigint) AS total_comments
+   FROM (((geoposts p
+     LEFT JOIN profiles pr ON ((p.user_id = pr.id)))
+     LEFT JOIN ( SELECT post_reactions.post_id,
+            count(*) AS total_reactions
+           FROM post_reactions
+          GROUP BY post_reactions.post_id) rx ON ((p.id = rx.post_id)))
+     LEFT JOIN ( SELECT post_comments.post_id,
+            count(*) AS total_comments
+           FROM post_comments
+          GROUP BY post_comments.post_id) cm ON ((p.id = cm.post_id)));"
+geopost_feed,VIEW (Virtual),user_id,uuid,YES,null,NO RLS / PUBLIC OR VIEW," SELECT p.id,
+    p.user_id,
+    p.content,
+    p.image_url,
+    p.zip_code,
+    p.borough,
+    p.is_participant,
+    p.post_approved,
+    p.created_at,
+    p.post_fill,
+    p.post_outline,
+    p.scope,
+    p.post_shadow,
+    pr.username,
+    COALESCE(rx.total_reactions, (0)::bigint) AS total_reactions,
+    COALESCE(cm.total_comments, (0)::bigint) AS total_comments
+   FROM (((geoposts p
+     LEFT JOIN profiles pr ON ((p.user_id = pr.id)))
+     LEFT JOIN ( SELECT post_reactions.post_id,
+            count(*) AS total_reactions
+           FROM post_reactions
+          GROUP BY post_reactions.post_id) rx ON ((p.id = rx.post_id)))
+     LEFT JOIN ( SELECT post_comments.post_id,
+            count(*) AS total_comments
+           FROM post_comments
+          GROUP BY post_comments.post_id) cm ON ((p.id = cm.post_id)));"
+geopost_feed,VIEW (Virtual),content,jsonb,YES,null,NO RLS / PUBLIC OR VIEW," SELECT p.id,
+    p.user_id,
+    p.content,
+    p.image_url,
+    p.zip_code,
+    p.borough,
+    p.is_participant,
+    p.post_approved,
+    p.created_at,
+    p.post_fill,
+    p.post_outline,
+    p.scope,
+    p.post_shadow,
+    pr.username,
+    COALESCE(rx.total_reactions, (0)::bigint) AS total_reactions,
+    COALESCE(cm.total_comments, (0)::bigint) AS total_comments
+   FROM (((geoposts p
+     LEFT JOIN profiles pr ON ((p.user_id = pr.id)))
+     LEFT JOIN ( SELECT post_reactions.post_id,
+            count(*) AS total_reactions
+           FROM post_reactions
+          GROUP BY post_reactions.post_id) rx ON ((p.id = rx.post_id)))
+     LEFT JOIN ( SELECT post_comments.post_id,
+            count(*) AS total_comments
+           FROM post_comments
+          GROUP BY post_comments.post_id) cm ON ((p.id = cm.post_id)));"
+geopost_feed,VIEW (Virtual),image_url,text,YES,null,NO RLS / PUBLIC OR VIEW," SELECT p.id,
+    p.user_id,
+    p.content,
+    p.image_url,
+    p.zip_code,
+    p.borough,
+    p.is_participant,
+    p.post_approved,
+    p.created_at,
+    p.post_fill,
+    p.post_outline,
+    p.scope,
+    p.post_shadow,
+    pr.username,
+    COALESCE(rx.total_reactions, (0)::bigint) AS total_reactions,
+    COALESCE(cm.total_comments, (0)::bigint) AS total_comments
+   FROM (((geoposts p
+     LEFT JOIN profiles pr ON ((p.user_id = pr.id)))
+     LEFT JOIN ( SELECT post_reactions.post_id,
+            count(*) AS total_reactions
+           FROM post_reactions
+          GROUP BY post_reactions.post_id) rx ON ((p.id = rx.post_id)))
+     LEFT JOIN ( SELECT post_comments.post_id,
+            count(*) AS total_comments
+           FROM post_comments
+          GROUP BY post_comments.post_id) cm ON ((p.id = cm.post_id)));"
+geopost_feed,VIEW (Virtual),zip_code,text,YES,null,NO RLS / PUBLIC OR VIEW," SELECT p.id,
+    p.user_id,
+    p.content,
+    p.image_url,
+    p.zip_code,
+    p.borough,
+    p.is_participant,
+    p.post_approved,
+    p.created_at,
+    p.post_fill,
+    p.post_outline,
+    p.scope,
+    p.post_shadow,
+    pr.username,
+    COALESCE(rx.total_reactions, (0)::bigint) AS total_reactions,
+    COALESCE(cm.total_comments, (0)::bigint) AS total_comments
+   FROM (((geoposts p
+     LEFT JOIN profiles pr ON ((p.user_id = pr.id)))
+     LEFT JOIN ( SELECT post_reactions.post_id,
+            count(*) AS total_reactions
+           FROM post_reactions
+          GROUP BY post_reactions.post_id) rx ON ((p.id = rx.post_id)))
+     LEFT JOIN ( SELECT post_comments.post_id,
+            count(*) AS total_comments
+           FROM post_comments
+          GROUP BY post_comments.post_id) cm ON ((p.id = cm.post_id)));"
+geopost_feed,VIEW (Virtual),borough,text,YES,null,NO RLS / PUBLIC OR VIEW," SELECT p.id,
+    p.user_id,
+    p.content,
+    p.image_url,
+    p.zip_code,
+    p.borough,
+    p.is_participant,
+    p.post_approved,
+    p.created_at,
+    p.post_fill,
+    p.post_outline,
+    p.scope,
+    p.post_shadow,
+    pr.username,
+    COALESCE(rx.total_reactions, (0)::bigint) AS total_reactions,
+    COALESCE(cm.total_comments, (0)::bigint) AS total_comments
+   FROM (((geoposts p
+     LEFT JOIN profiles pr ON ((p.user_id = pr.id)))
+     LEFT JOIN ( SELECT post_reactions.post_id,
+            count(*) AS total_reactions
+           FROM post_reactions
+          GROUP BY post_reactions.post_id) rx ON ((p.id = rx.post_id)))
+     LEFT JOIN ( SELECT post_comments.post_id,
+            count(*) AS total_comments
+           FROM post_comments
+          GROUP BY post_comments.post_id) cm ON ((p.id = cm.post_id)));"
+geopost_feed,VIEW (Virtual),is_participant,boolean,YES,null,NO RLS / PUBLIC OR VIEW," SELECT p.id,
+    p.user_id,
+    p.content,
+    p.image_url,
+    p.zip_code,
+    p.borough,
+    p.is_participant,
+    p.post_approved,
+    p.created_at,
+    p.post_fill,
+    p.post_outline,
+    p.scope,
+    p.post_shadow,
+    pr.username,
+    COALESCE(rx.total_reactions, (0)::bigint) AS total_reactions,
+    COALESCE(cm.total_comments, (0)::bigint) AS total_comments
+   FROM (((geoposts p
+     LEFT JOIN profiles pr ON ((p.user_id = pr.id)))
+     LEFT JOIN ( SELECT post_reactions.post_id,
+            count(*) AS total_reactions
+           FROM post_reactions
+          GROUP BY post_reactions.post_id) rx ON ((p.id = rx.post_id)))
+     LEFT JOIN ( SELECT post_comments.post_id,
+            count(*) AS total_comments
+           FROM post_comments
+          GROUP BY post_comments.post_id) cm ON ((p.id = cm.post_id)));"
+geopost_feed,VIEW (Virtual),post_approved,boolean,YES,null,NO RLS / PUBLIC OR VIEW," SELECT p.id,
+    p.user_id,
+    p.content,
+    p.image_url,
+    p.zip_code,
+    p.borough,
+    p.is_participant,
+    p.post_approved,
+    p.created_at,
+    p.post_fill,
+    p.post_outline,
+    p.scope,
+    p.post_shadow,
+    pr.username,
+    COALESCE(rx.total_reactions, (0)::bigint) AS total_reactions,
+    COALESCE(cm.total_comments, (0)::bigint) AS total_comments
+   FROM (((geoposts p
+     LEFT JOIN profiles pr ON ((p.user_id = pr.id)))
+     LEFT JOIN ( SELECT post_reactions.post_id,
+            count(*) AS total_reactions
+           FROM post_reactions
+          GROUP BY post_reactions.post_id) rx ON ((p.id = rx.post_id)))
+     LEFT JOIN ( SELECT post_comments.post_id,
+            count(*) AS total_comments
+           FROM post_comments
+          GROUP BY post_comments.post_id) cm ON ((p.id = cm.post_id)));"
+geopost_feed,VIEW (Virtual),created_at,timestamp with time zone,YES,null,NO RLS / PUBLIC OR VIEW," SELECT p.id,
+    p.user_id,
+    p.content,
+    p.image_url,
+    p.zip_code,
+    p.borough,
+    p.is_participant,
+    p.post_approved,
+    p.created_at,
+    p.post_fill,
+    p.post_outline,
+    p.scope,
+    p.post_shadow,
+    pr.username,
+    COALESCE(rx.total_reactions, (0)::bigint) AS total_reactions,
+    COALESCE(cm.total_comments, (0)::bigint) AS total_comments
+   FROM (((geoposts p
+     LEFT JOIN profiles pr ON ((p.user_id = pr.id)))
+     LEFT JOIN ( SELECT post_reactions.post_id,
+            count(*) AS total_reactions
+           FROM post_reactions
+          GROUP BY post_reactions.post_id) rx ON ((p.id = rx.post_id)))
+     LEFT JOIN ( SELECT post_comments.post_id,
+            count(*) AS total_comments
+           FROM post_comments
+          GROUP BY post_comments.post_id) cm ON ((p.id = cm.post_id)));"
+geopost_feed,VIEW (Virtual),post_fill,text,YES,null,NO RLS / PUBLIC OR VIEW," SELECT p.id,
+    p.user_id,
+    p.content,
+    p.image_url,
+    p.zip_code,
+    p.borough,
+    p.is_participant,
+    p.post_approved,
+    p.created_at,
+    p.post_fill,
+    p.post_outline,
+    p.scope,
+    p.post_shadow,
+    pr.username,
+    COALESCE(rx.total_reactions, (0)::bigint) AS total_reactions,
+    COALESCE(cm.total_comments, (0)::bigint) AS total_comments
+   FROM (((geoposts p
+     LEFT JOIN profiles pr ON ((p.user_id = pr.id)))
+     LEFT JOIN ( SELECT post_reactions.post_id,
+            count(*) AS total_reactions
+           FROM post_reactions
+          GROUP BY post_reactions.post_id) rx ON ((p.id = rx.post_id)))
+     LEFT JOIN ( SELECT post_comments.post_id,
+            count(*) AS total_comments
+           FROM post_comments
+          GROUP BY post_comments.post_id) cm ON ((p.id = cm.post_id)));"
+geopost_feed,VIEW (Virtual),post_outline,text,YES,null,NO RLS / PUBLIC OR VIEW," SELECT p.id,
+    p.user_id,
+    p.content,
+    p.image_url,
+    p.zip_code,
+    p.borough,
+    p.is_participant,
+    p.post_approved,
+    p.created_at,
+    p.post_fill,
+    p.post_outline,
+    p.scope,
+    p.post_shadow,
+    pr.username,
+    COALESCE(rx.total_reactions, (0)::bigint) AS total_reactions,
+    COALESCE(cm.total_comments, (0)::bigint) AS total_comments
+   FROM (((geoposts p
+     LEFT JOIN profiles pr ON ((p.user_id = pr.id)))
+     LEFT JOIN ( SELECT post_reactions.post_id,
+            count(*) AS total_reactions
+           FROM post_reactions
+          GROUP BY post_reactions.post_id) rx ON ((p.id = rx.post_id)))
+     LEFT JOIN ( SELECT post_comments.post_id,
+            count(*) AS total_comments
+           FROM post_comments
+          GROUP BY post_comments.post_id) cm ON ((p.id = cm.post_id)));"
+geopost_feed,VIEW (Virtual),scope,text,YES,null,NO RLS / PUBLIC OR VIEW," SELECT p.id,
+    p.user_id,
+    p.content,
+    p.image_url,
+    p.zip_code,
+    p.borough,
+    p.is_participant,
+    p.post_approved,
+    p.created_at,
+    p.post_fill,
+    p.post_outline,
+    p.scope,
+    p.post_shadow,
+    pr.username,
+    COALESCE(rx.total_reactions, (0)::bigint) AS total_reactions,
+    COALESCE(cm.total_comments, (0)::bigint) AS total_comments
+   FROM (((geoposts p
+     LEFT JOIN profiles pr ON ((p.user_id = pr.id)))
+     LEFT JOIN ( SELECT post_reactions.post_id,
+            count(*) AS total_reactions
+           FROM post_reactions
+          GROUP BY post_reactions.post_id) rx ON ((p.id = rx.post_id)))
+     LEFT JOIN ( SELECT post_comments.post_id,
+            count(*) AS total_comments
+           FROM post_comments
+          GROUP BY post_comments.post_id) cm ON ((p.id = cm.post_id)));"
+geopost_feed,VIEW (Virtual),post_shadow,text,YES,null,NO RLS / PUBLIC OR VIEW," SELECT p.id,
+    p.user_id,
+    p.content,
+    p.image_url,
+    p.zip_code,
+    p.borough,
+    p.is_participant,
+    p.post_approved,
+    p.created_at,
+    p.post_fill,
+    p.post_outline,
+    p.scope,
+    p.post_shadow,
+    pr.username,
+    COALESCE(rx.total_reactions, (0)::bigint) AS total_reactions,
+    COALESCE(cm.total_comments, (0)::bigint) AS total_comments
+   FROM (((geoposts p
+     LEFT JOIN profiles pr ON ((p.user_id = pr.id)))
+     LEFT JOIN ( SELECT post_reactions.post_id,
+            count(*) AS total_reactions
+           FROM post_reactions
+          GROUP BY post_reactions.post_id) rx ON ((p.id = rx.post_id)))
+     LEFT JOIN ( SELECT post_comments.post_id,
+            count(*) AS total_comments
+           FROM post_comments
+          GROUP BY post_comments.post_id) cm ON ((p.id = cm.post_id)));"
+geopost_feed,VIEW (Virtual),username,text,YES,null,NO RLS / PUBLIC OR VIEW," SELECT p.id,
+    p.user_id,
+    p.content,
+    p.image_url,
+    p.zip_code,
+    p.borough,
+    p.is_participant,
+    p.post_approved,
+    p.created_at,
+    p.post_fill,
+    p.post_outline,
+    p.scope,
+    p.post_shadow,
+    pr.username,
+    COALESCE(rx.total_reactions, (0)::bigint) AS total_reactions,
+    COALESCE(cm.total_comments, (0)::bigint) AS total_comments
+   FROM (((geoposts p
+     LEFT JOIN profiles pr ON ((p.user_id = pr.id)))
+     LEFT JOIN ( SELECT post_reactions.post_id,
+            count(*) AS total_reactions
+           FROM post_reactions
+          GROUP BY post_reactions.post_id) rx ON ((p.id = rx.post_id)))
+     LEFT JOIN ( SELECT post_comments.post_id,
+            count(*) AS total_comments
+           FROM post_comments
+          GROUP BY post_comments.post_id) cm ON ((p.id = cm.post_id)));"
+geopost_feed,VIEW (Virtual),total_reactions,bigint,YES,null,NO RLS / PUBLIC OR VIEW," SELECT p.id,
+    p.user_id,
+    p.content,
+    p.image_url,
+    p.zip_code,
+    p.borough,
+    p.is_participant,
+    p.post_approved,
+    p.created_at,
+    p.post_fill,
+    p.post_outline,
+    p.scope,
+    p.post_shadow,
+    pr.username,
+    COALESCE(rx.total_reactions, (0)::bigint) AS total_reactions,
+    COALESCE(cm.total_comments, (0)::bigint) AS total_comments
+   FROM (((geoposts p
+     LEFT JOIN profiles pr ON ((p.user_id = pr.id)))
+     LEFT JOIN ( SELECT post_reactions.post_id,
+            count(*) AS total_reactions
+           FROM post_reactions
+          GROUP BY post_reactions.post_id) rx ON ((p.id = rx.post_id)))
+     LEFT JOIN ( SELECT post_comments.post_id,
+            count(*) AS total_comments
+           FROM post_comments
+          GROUP BY post_comments.post_id) cm ON ((p.id = cm.post_id)));"
+geopost_feed,VIEW (Virtual),total_comments,bigint,YES,null,NO RLS / PUBLIC OR VIEW," SELECT p.id,
+    p.user_id,
+    p.content,
+    p.image_url,
+    p.zip_code,
+    p.borough,
+    p.is_participant,
+    p.post_approved,
+    p.created_at,
+    p.post_fill,
+    p.post_outline,
+    p.scope,
+    p.post_shadow,
+    pr.username,
+    COALESCE(rx.total_reactions, (0)::bigint) AS total_reactions,
+    COALESCE(cm.total_comments, (0)::bigint) AS total_comments
+   FROM (((geoposts p
+     LEFT JOIN profiles pr ON ((p.user_id = pr.id)))
+     LEFT JOIN ( SELECT post_reactions.post_id,
+            count(*) AS total_reactions
+           FROM post_reactions
+          GROUP BY post_reactions.post_id) rx ON ((p.id = rx.post_id)))
+     LEFT JOIN ( SELECT post_comments.post_id,
+            count(*) AS total_comments
+           FROM post_comments
+          GROUP BY post_comments.post_id) cm ON ((p.id = cm.post_id)));"
+anon_device_interactions,BASE TABLE (Physical),device_id,text,NO,null,NO RLS / PUBLIC OR VIEW,null
+anon_device_interactions,BASE TABLE (Physical),target_id,uuid,NO,null,NO RLS / PUBLIC OR VIEW,null
+anon_device_interactions,BASE TABLE (Physical),interaction_type,text,NO,null,NO RLS / PUBLIC OR VIEW,null
+anon_device_interactions,BASE TABLE (Physical),created_at,timestamp with time zone,YES,now(),NO RLS / PUBLIC OR VIEW,null
+auto_events,BASE TABLE (Physical),id,uuid,NO,gen_random_uuid(),"COMMAND: SELECT | POLICY: Anyone can read approved auto events | USING: (is_approved = true) | CHECK: ",null
+auto_events,BASE TABLE (Physical),event_name,text,NO,null,"COMMAND: SELECT | POLICY: Anyone can read approved auto events | USING: (is_approved = true) | CHECK: ",null
+auto_events,BASE TABLE (Physical),description,text,YES,null,"COMMAND: SELECT | POLICY: Anyone can read approved auto events | USING: (is_approved = true) | CHECK: ",null
+auto_events,BASE TABLE (Physical),price_category,text,YES,'$'::text,"COMMAND: SELECT | POLICY: Anyone can read approved auto events | USING: (is_approved = true) | CHECK: ",null
+auto_events,BASE TABLE (Physical),location_data,jsonb,NO,'{}'::jsonb,"COMMAND: SELECT | POLICY: Anyone can read approved auto events | USING: (is_approved = true) | CHECK: ",null
+auto_events,BASE TABLE (Physical),event_date,date,NO,null,"COMMAND: SELECT | POLICY: Anyone can read approved auto events | USING: (is_approved = true) | CHECK: ",null
+auto_events,BASE TABLE (Physical),event_time_utc,timestamp with time zone,YES,null,"COMMAND: SELECT | POLICY: Anyone can read approved auto events | USING: (is_approved = true) | CHECK: ",null
+auto_events,BASE TABLE (Physical),representative_emoji,text,YES,'🎉'::text,"COMMAND: SELECT | POLICY: Anyone can read approved auto events | USING: (is_approved = true) | CHECK: ",null
+auto_events,BASE TABLE (Physical),hex_color,text,YES,'#7C3AED'::text,"COMMAND: SELECT | POLICY: Anyone can read approved auto events | USING: (is_approved = true) | CHECK: ",null
+auto_events,BASE TABLE (Physical),photos,ARRAY,YES,ARRAY[]::text[],"COMMAND: SELECT | POLICY: Anyone can read approved auto events | USING: (is_approved = true) | CHECK: ",null
+auto_events,BASE TABLE (Physical),relevant_links,ARRAY,YES,ARRAY[]::text[],"COMMAND: SELECT | POLICY: Anyone can read approved auto events | USING: (is_approved = true) | CHECK: ",null
+auto_events,BASE TABLE (Physical),borough,text,YES,null,"COMMAND: SELECT | POLICY: Anyone can read approved auto events | USING: (is_approved = true) | CHECK: ",null
+auto_events,BASE TABLE (Physical),is_approved,boolean,YES,true,"COMMAND: SELECT | POLICY: Anyone can read approved auto events | USING: (is_approved = true) | CHECK: ",null
+auto_events,BASE TABLE (Physical),fav_count,integer,YES,0,"COMMAND: SELECT | POLICY: Anyone can read approved auto events | USING: (is_approved = true) | CHECK: ",null
+auto_events,BASE TABLE (Physical),source_site,text,NO,null,"COMMAND: SELECT | POLICY: Anyone can read approved auto events | USING: (is_approved = true) | CHECK: ",null
+auto_events,BASE TABLE (Physical),source_url,text,NO,null,"COMMAND: SELECT | POLICY: Anyone can read approved auto events | USING: (is_approved = true) | CHECK: ",null
+auto_events,BASE TABLE (Physical),external_id,text,YES,null,"COMMAND: SELECT | POLICY: Anyone can read approved auto events | USING: (is_approved = true) | CHECK: ",null
+auto_events,BASE TABLE (Physical),name,text,YES,null,"COMMAND: SELECT | POLICY: Anyone can read approved auto events | USING: (is_approved = true) | CHECK: ",null
+auto_events,BASE TABLE (Physical),created_at,timestamp with time zone,YES,now(),"COMMAND: SELECT | POLICY: Anyone can read approved auto events | USING: (is_approved = true) | CHECK: ",null
+auto_events,BASE TABLE (Physical),updated_at,timestamp with time zone,YES,now(),"COMMAND: SELECT | POLICY: Anyone can read approved auto events | USING: (is_approved = true) | CHECK: ",null
+clout_ledger,BASE TABLE (Physical),id,uuid,NO,gen_random_uuid(),"COMMAND: SELECT | POLICY: Users can view own ledger | USING: (auth.uid() = user_id) | CHECK: ",null
+clout_ledger,BASE TABLE (Physical),user_id,uuid,NO,null,"COMMAND: SELECT | POLICY: Users can view own ledger | USING: (auth.uid() = user_id) | CHECK: ",null
+clout_ledger,BASE TABLE (Physical),amount,integer,NO,null,"COMMAND: SELECT | POLICY: Users can view own ledger | USING: (auth.uid() = user_id) | CHECK: ",null
+clout_ledger,BASE TABLE (Physical),reason,text,NO,null,"COMMAND: SELECT | POLICY: Users can view own ledger | USING: (auth.uid() = user_id) | CHECK: ",null
+clout_ledger,BASE TABLE (Physical),created_at,timestamp with time zone,YES,now(),"COMMAND: SELECT | POLICY: Users can view own ledger | USING: (auth.uid() = user_id) | CHECK: ",null
+clout_ledger,BASE TABLE (Physical),event_id,uuid,YES,null,"COMMAND: SELECT | POLICY: Users can view own ledger | USING: (auth.uid() = user_id) | CHECK: ",null
+clout_ledger,BASE TABLE (Physical),checkin_type,text,YES,null,"COMMAND: SELECT | POLICY: Users can view own ledger | USING: (auth.uid() = user_id) | CHECK: ",null
+clout_ledger,BASE TABLE (Physical),geopost_id,uuid,YES,null,"COMMAND: SELECT | POLICY: Users can view own ledger | USING: (auth.uid() = user_id) | CHECK: ",null
+comment_reactions,BASE TABLE (Physical),id,uuid,NO,gen_random_uuid(),NO RLS / PUBLIC OR VIEW,null
+comment_reactions,BASE TABLE (Physical),comment_id,uuid,NO,null,NO RLS / PUBLIC OR VIEW,null
+comment_reactions,BASE TABLE (Physical),user_id,uuid,YES,null,NO RLS / PUBLIC OR VIEW,null
+comment_reactions,BASE TABLE (Physical),emoji,text,NO,null,NO RLS / PUBLIC OR VIEW,null
+comment_reactions,BASE TABLE (Physical),created_at,timestamp with time zone,NO,"timezone('utc'::text, now())",NO RLS / PUBLIC OR VIEW,null
+event_attendance,BASE TABLE (Physical),id,uuid,NO,gen_random_uuid(),COMMAND: INSERT | POLICY: Only signed-in users can check in | USING:  | CHECK: (auth.uid() = user_id),null
+event_attendance,BASE TABLE (Physical),user_id,uuid,NO,null,COMMAND: INSERT | POLICY: Only signed-in users can check in | USING:  | CHECK: (auth.uid() = user_id),null
+event_attendance,BASE TABLE (Physical),event_id,uuid,NO,null,COMMAND: INSERT | POLICY: Only signed-in users can check in | USING:  | CHECK: (auth.uid() = user_id),null
+event_attendance,BASE TABLE (Physical),status,text,YES,'pending'::text,COMMAND: INSERT | POLICY: Only signed-in users can check in | USING:  | CHECK: (auth.uid() = user_id),null
+event_attendance,BASE TABLE (Physical),verified_at,timestamp with time zone,YES,null,COMMAND: INSERT | POLICY: Only signed-in users can check in | USING:  | CHECK: (auth.uid() = user_id),null
+event_attendance,BASE TABLE (Physical),created_at,timestamp with time zone,YES,now(),COMMAND: INSERT | POLICY: Only signed-in users can check in | USING:  | CHECK: (auth.uid() = user_id),null
+event_attendance,BASE TABLE (Physical),checkin_type,text,YES,'main'::text,COMMAND: INSERT | POLICY: Only signed-in users can check in | USING:  | CHECK: (auth.uid() = user_id),null
+event_favorites,BASE TABLE (Physical),user_id,uuid,NO,null,"COMMAND: SELECT | POLICY: Anyone can read event_favorites | USING: true | CHECK: 
+---
+COMMAND: ALL | POLICY: favorites_own_all | USING: (auth.uid() = user_id) | CHECK: 
+---
+COMMAND: INSERT | POLICY: Authenticated users can insert own favorites | USING:  | CHECK: (auth.uid() = user_id)
+---
+COMMAND: DELETE | POLICY: Authenticated users can delete own favorites | USING: (auth.uid() = user_id) | CHECK: ",null
+event_favorites,BASE TABLE (Physical),event_id,uuid,NO,null,"COMMAND: SELECT | POLICY: Anyone can read event_favorites | USING: true | CHECK: 
+---
+COMMAND: ALL | POLICY: favorites_own_all | USING: (auth.uid() = user_id) | CHECK: 
+---
+COMMAND: INSERT | POLICY: Authenticated users can insert own favorites | USING:  | CHECK: (auth.uid() = user_id)
+---
+COMMAND: DELETE | POLICY: Authenticated users can delete own favorites | USING: (auth.uid() = user_id) | CHECK: ",null
+events,BASE TABLE (Physical),id,uuid,NO,gen_random_uuid(),"COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: 
+---
+COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: ",null
+events,BASE TABLE (Physical),created_at,timestamp with time zone,YES,now(),"COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: 
+---
+COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: ",null
+events,BASE TABLE (Physical),name,text,NO,null,"COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: 
+---
+COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: ",null
+events,BASE TABLE (Physical),event_name,text,NO,null,"COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: 
+---
+COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: ",null
+events,BASE TABLE (Physical),price_category,text,YES,null,"COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: 
+---
+COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: ",null
+events,BASE TABLE (Physical),location_data,jsonb,NO,null,"COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: 
+---
+COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: ",null
+events,BASE TABLE (Physical),event_date,date,NO,null,"COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: 
+---
+COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: ",null
+events,BASE TABLE (Physical),event_time_utc,timestamp with time zone,NO,null,"COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: 
+---
+COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: ",null
+events,BASE TABLE (Physical),relevant_links,ARRAY,YES,null,"COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: 
+---
+COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: ",null
+events,BASE TABLE (Physical),description,character varying,YES,null,"COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: 
+---
+COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: ",null
+events,BASE TABLE (Physical),photos,ARRAY,YES,null,"COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: 
+---
+COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: ",null
+events,BASE TABLE (Physical),representative_emoji,character varying,YES,null,"COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: 
+---
+COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: ",null
+events,BASE TABLE (Physical),hex_color,character varying,YES,null,"COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: 
+---
+COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: ",null
+events,BASE TABLE (Physical),is_approved,boolean,YES,false,"COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: 
+---
+COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: ",null
+events,BASE TABLE (Physical),user_id,uuid,YES,auth.uid(),"COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: 
+---
+COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: ",null
+events,BASE TABLE (Physical),zip_code,text,YES,null,"COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: 
+---
+COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: ",null
+events,BASE TABLE (Physical),fav_count,integer,YES,0,"COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: 
+---
+COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: ",null
+events,BASE TABLE (Physical),trend_threshold_count,integer,NO,0,"COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: 
+---
+COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: ",null
+events,BASE TABLE (Physical),trend_window_peak_count,integer,NO,0,"COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: 
+---
+COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: ",null
+events,BASE TABLE (Physical),trend_window_started_at,timestamp with time zone,NO,now(),"COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: 
+---
+COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: ",null
+events,BASE TABLE (Physical),lat,double precision,YES,null,"COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: 
+---
+COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: ",null
+events,BASE TABLE (Physical),lng,double precision,YES,null,"COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: 
+---
+COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: ",null
+events,BASE TABLE (Physical),event_time_utc_end,timestamp with time zone,YES,null,"COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: 
+---
+COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: ",null
+events,BASE TABLE (Physical),afters_address,text,YES,null,"COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: 
+---
+COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: ",null
+events,BASE TABLE (Physical),afters_lat,double precision,YES,null,"COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: 
+---
+COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: ",null
+events,BASE TABLE (Physical),afters_lng,double precision,YES,null,"COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: 
+---
+COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: ",null
+favorite_point_contributions,BASE TABLE (Physical),id,uuid,NO,gen_random_uuid(),"COMMAND: SELECT | POLICY: Users can read own contributions | USING: (auth.uid() = user_id) | CHECK: 
+---
+COMMAND: INSERT | POLICY: Service role can insert contributions | USING:  | CHECK: true",null
+favorite_point_contributions,BASE TABLE (Physical),user_id,uuid,NO,null,"COMMAND: SELECT | POLICY: Users can read own contributions | USING: (auth.uid() = user_id) | CHECK: 
+---
+COMMAND: INSERT | POLICY: Service role can insert contributions | USING:  | CHECK: true",null
+favorite_point_contributions,BASE TABLE (Physical),event_id,uuid,NO,null,"COMMAND: SELECT | POLICY: Users can read own contributions | USING: (auth.uid() = user_id) | CHECK: 
+---
+COMMAND: INSERT | POLICY: Service role can insert contributions | USING:  | CHECK: true",null
+favorite_point_contributions,BASE TABLE (Physical),contributed_at,timestamp without time zone,YES,now(),"COMMAND: SELECT | POLICY: Users can read own contributions | USING: (auth.uid() = user_id) | CHECK: 
+---
+COMMAND: INSERT | POLICY: Service role can insert contributions | USING:  | CHECK: true",null
+geoposts,BASE TABLE (Physical),id,uuid,NO,uuid_generate_v4(),"COMMAND: INSERT | POLICY: Allow public insert access | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: Allow public select access | USING: true | CHECK: ",null
+geoposts,BASE TABLE (Physical),user_id,uuid,YES,auth.uid(),"COMMAND: INSERT | POLICY: Allow public insert access | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: Allow public select access | USING: true | CHECK: ",null
+geoposts,BASE TABLE (Physical),content,jsonb,NO,null,"COMMAND: INSERT | POLICY: Allow public insert access | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: Allow public select access | USING: true | CHECK: ",null
+geoposts,BASE TABLE (Physical),image_url,text,YES,null,"COMMAND: INSERT | POLICY: Allow public insert access | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: Allow public select access | USING: true | CHECK: ",null
+geoposts,BASE TABLE (Physical),zip_code,text,YES,null,"COMMAND: INSERT | POLICY: Allow public insert access | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: Allow public select access | USING: true | CHECK: ",null
+geoposts,BASE TABLE (Physical),borough,text,YES,null,"COMMAND: INSERT | POLICY: Allow public insert access | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: Allow public select access | USING: true | CHECK: ",null
+geoposts,BASE TABLE (Physical),is_participant,boolean,YES,false,"COMMAND: INSERT | POLICY: Allow public insert access | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: Allow public select access | USING: true | CHECK: ",null
+geoposts,BASE TABLE (Physical),post_approved,boolean,YES,true,"COMMAND: INSERT | POLICY: Allow public insert access | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: Allow public select access | USING: true | CHECK: ",null
+geoposts,BASE TABLE (Physical),created_at,timestamp with time zone,YES,now(),"COMMAND: INSERT | POLICY: Allow public insert access | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: Allow public select access | USING: true | CHECK: ",null
+geoposts,BASE TABLE (Physical),scope,text,NO,'digital'::text,"COMMAND: INSERT | POLICY: Allow public insert access | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: Allow public select access | USING: true | CHECK: ",null
+geoposts,BASE TABLE (Physical),post_fill,text,YES,null,"COMMAND: INSERT | POLICY: Allow public insert access | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: Allow public select access | USING: true | CHECK: ",null
+geoposts,BASE TABLE (Physical),post_outline,text,YES,null,"COMMAND: INSERT | POLICY: Allow public insert access | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: Allow public select access | USING: true | CHECK: ",null
+geoposts,BASE TABLE (Physical),post_shadow,text,YES,null,"COMMAND: INSERT | POLICY: Allow public insert access | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: Allow public select access | USING: true | CHECK: ",null
+gm_messages,BASE TABLE (Physical),id,uuid,NO,gen_random_uuid(),"COMMAND: SELECT | POLICY: GM: Read System Messages | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
+---
+COMMAND: INSERT | POLICY: Enable insert for all users | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: Enable select for admins | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: ",null
+gm_messages,BASE TABLE (Physical),created_at,timestamp with time zone,YES,now(),"COMMAND: SELECT | POLICY: GM: Read System Messages | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
+---
+COMMAND: INSERT | POLICY: Enable insert for all users | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: Enable select for admins | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: ",null
+gm_messages,BASE TABLE (Physical),user_id,uuid,YES,null,"COMMAND: SELECT | POLICY: GM: Read System Messages | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
+---
+COMMAND: INSERT | POLICY: Enable insert for all users | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: Enable select for admins | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: ",null
+gm_messages,BASE TABLE (Physical),device_id,text,NO,null,"COMMAND: SELECT | POLICY: GM: Read System Messages | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
+---
+COMMAND: INSERT | POLICY: Enable insert for all users | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: Enable select for admins | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: ",null
+gm_messages,BASE TABLE (Physical),sender_name,text,YES,null,"COMMAND: SELECT | POLICY: GM: Read System Messages | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
+---
+COMMAND: INSERT | POLICY: Enable insert for all users | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: Enable select for admins | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: ",null
+gm_messages,BASE TABLE (Physical),subject_title,text,YES,null,"COMMAND: SELECT | POLICY: GM: Read System Messages | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
+---
+COMMAND: INSERT | POLICY: Enable insert for all users | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: Enable select for admins | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: ",null
+gm_messages,BASE TABLE (Physical),content,text,NO,null,"COMMAND: SELECT | POLICY: GM: Read System Messages | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
+---
+COMMAND: INSERT | POLICY: Enable insert for all users | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: Enable select for admins | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: ",null
+gm_messages,BASE TABLE (Physical),metadata,jsonb,YES,'{}'::jsonb,"COMMAND: SELECT | POLICY: GM: Read System Messages | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
+---
+COMMAND: INSERT | POLICY: Enable insert for all users | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: Enable select for admins | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: ",null
+gm_messages,BASE TABLE (Physical),is_read,boolean,YES,false,"COMMAND: SELECT | POLICY: GM: Read System Messages | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
+---
+COMMAND: INSERT | POLICY: Enable insert for all users | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: Enable select for admins | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: ",null
+gm_messages,BASE TABLE (Physical),archived,boolean,YES,false,"COMMAND: SELECT | POLICY: GM: Read System Messages | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
+---
+COMMAND: INSERT | POLICY: Enable insert for all users | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: Enable select for admins | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: ",null
+point_contributions,BASE TABLE (Physical),id,uuid,NO,gen_random_uuid(),NO RLS / PUBLIC OR VIEW,null
+point_contributions,BASE TABLE (Physical),user_id,uuid,NO,null,NO RLS / PUBLIC OR VIEW,null
+point_contributions,BASE TABLE (Physical),entity_id,uuid,NO,null,NO RLS / PUBLIC OR VIEW,null
+point_contributions,BASE TABLE (Physical),contribution_type,text,NO,null,NO RLS / PUBLIC OR VIEW,null
+point_contributions,BASE TABLE (Physical),created_at,timestamp with time zone,YES,now(),NO RLS / PUBLIC OR VIEW,null
+post_clout_given,BASE TABLE (Physical),user_id,uuid,NO,null,"COMMAND: ALL | POLICY: System can manage post clout tracking | USING: (auth.uid() = user_id) | CHECK: 
+---
+COMMAND: SELECT | POLICY: Users can view own given clout | USING: (auth.uid() = user_id) | CHECK: ",null
+post_clout_given,BASE TABLE (Physical),post_id,uuid,NO,null,"COMMAND: ALL | POLICY: System can manage post clout tracking | USING: (auth.uid() = user_id) | CHECK: 
+---
+COMMAND: SELECT | POLICY: Users can view own given clout | USING: (auth.uid() = user_id) | CHECK: ",null
+post_comments,BASE TABLE (Physical),id,uuid,NO,gen_random_uuid(),NO RLS / PUBLIC OR VIEW,null
+post_comments,BASE TABLE (Physical),post_id,uuid,NO,null,NO RLS / PUBLIC OR VIEW,null
+post_comments,BASE TABLE (Physical),parent_id,uuid,YES,null,NO RLS / PUBLIC OR VIEW,null
+post_comments,BASE TABLE (Physical),user_id,uuid,YES,null,NO RLS / PUBLIC OR VIEW,null
+post_comments,BASE TABLE (Physical),username,text,YES,'anonymous'::text,NO RLS / PUBLIC OR VIEW,null
+post_comments,BASE TABLE (Physical),content,text,NO,null,NO RLS / PUBLIC OR VIEW,null
+post_comments,BASE TABLE (Physical),is_participant,boolean,YES,false,NO RLS / PUBLIC OR VIEW,null
+post_comments,BASE TABLE (Physical),borough,text,YES,null,NO RLS / PUBLIC OR VIEW,null
+post_comments,BASE TABLE (Physical),zip_code,text,YES,null,NO RLS / PUBLIC OR VIEW,null
+post_comments,BASE TABLE (Physical),created_at,timestamp with time zone,NO,"timezone('utc'::text, now())",NO RLS / PUBLIC OR VIEW,null
+post_reactions,BASE TABLE (Physical),id,uuid,NO,uuid_generate_v4(),"COMMAND: INSERT | POLICY: Allow public reactions insert | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: Allow public reactions select | USING: true | CHECK: 
+---
+COMMAND: DELETE | POLICY: Allow public reactions delete | USING: true | CHECK: ",null
+post_reactions,BASE TABLE (Physical),post_id,uuid,YES,null,"COMMAND: INSERT | POLICY: Allow public reactions insert | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: Allow public reactions select | USING: true | CHECK: 
+---
+COMMAND: DELETE | POLICY: Allow public reactions delete | USING: true | CHECK: ",null
+post_reactions,BASE TABLE (Physical),user_id,uuid,YES,null,"COMMAND: INSERT | POLICY: Allow public reactions insert | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: Allow public reactions select | USING: true | CHECK: 
+---
+COMMAND: DELETE | POLICY: Allow public reactions delete | USING: true | CHECK: ",null
+post_reactions,BASE TABLE (Physical),emoji_text,text,NO,null,"COMMAND: INSERT | POLICY: Allow public reactions insert | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: Allow public reactions select | USING: true | CHECK: 
+---
+COMMAND: DELETE | POLICY: Allow public reactions delete | USING: true | CHECK: ",null
+post_reactions,BASE TABLE (Physical),created_at,timestamp with time zone,YES,now(),"COMMAND: INSERT | POLICY: Allow public reactions insert | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: Allow public reactions select | USING: true | CHECK: 
+---
+COMMAND: DELETE | POLICY: Allow public reactions delete | USING: true | CHECK: ",null
+profiles,BASE TABLE (Physical),id,uuid,NO,null,"COMMAND: UPDATE | POLICY: Profiles: Limited Update Ownership | USING: (auth.uid() = id) | CHECK: ((auth.uid() = id) AND (NOT (clout_points IS DISTINCT FROM clout_points)))
+---
+COMMAND: SELECT | POLICY: Profiles: Public Identification | USING: true | CHECK: 
+---
+COMMAND: SELECT | POLICY: Public profiles are viewable by everyone. | USING: true | CHECK: 
+---
+COMMAND: UPDATE | POLICY: Users can update limited profile fields. | USING: (auth.uid() = id) | CHECK: ((auth.uid() = id) AND (NOT (clout_points IS DISTINCT FROM clout_points)))
+---
+COMMAND: UPDATE | POLICY: Users can update own bio and username | USING: (auth.uid() = id) | CHECK: (auth.uid() = id)",null
+profiles,BASE TABLE (Physical),username,text,NO,null,"COMMAND: UPDATE | POLICY: Profiles: Limited Update Ownership | USING: (auth.uid() = id) | CHECK: ((auth.uid() = id) AND (NOT (clout_points IS DISTINCT FROM clout_points)))
+---
+COMMAND: SELECT | POLICY: Profiles: Public Identification | USING: true | CHECK: 
+---
+COMMAND: SELECT | POLICY: Public profiles are viewable by everyone. | USING: true | CHECK: 
+---
+COMMAND: UPDATE | POLICY: Users can update limited profile fields. | USING: (auth.uid() = id) | CHECK: ((auth.uid() = id) AND (NOT (clout_points IS DISTINCT FROM clout_points)))
+---
+COMMAND: UPDATE | POLICY: Users can update own bio and username | USING: (auth.uid() = id) | CHECK: (auth.uid() = id)",null
+profiles,BASE TABLE (Physical),bio,character varying,YES,null,"COMMAND: UPDATE | POLICY: Profiles: Limited Update Ownership | USING: (auth.uid() = id) | CHECK: ((auth.uid() = id) AND (NOT (clout_points IS DISTINCT FROM clout_points)))
+---
+COMMAND: SELECT | POLICY: Profiles: Public Identification | USING: true | CHECK: 
+---
+COMMAND: SELECT | POLICY: Public profiles are viewable by everyone. | USING: true | CHECK: 
+---
+COMMAND: UPDATE | POLICY: Users can update limited profile fields. | USING: (auth.uid() = id) | CHECK: ((auth.uid() = id) AND (NOT (clout_points IS DISTINCT FROM clout_points)))
+---
+COMMAND: UPDATE | POLICY: Users can update own bio and username | USING: (auth.uid() = id) | CHECK: (auth.uid() = id)",null
+profiles,BASE TABLE (Physical),home_zip,text,NO,null,"COMMAND: UPDATE | POLICY: Profiles: Limited Update Ownership | USING: (auth.uid() = id) | CHECK: ((auth.uid() = id) AND (NOT (clout_points IS DISTINCT FROM clout_points)))
+---
+COMMAND: SELECT | POLICY: Profiles: Public Identification | USING: true | CHECK: 
+---
+COMMAND: SELECT | POLICY: Public profiles are viewable by everyone. | USING: true | CHECK: 
+---
+COMMAND: UPDATE | POLICY: Users can update limited profile fields. | USING: (auth.uid() = id) | CHECK: ((auth.uid() = id) AND (NOT (clout_points IS DISTINCT FROM clout_points)))
+---
+COMMAND: UPDATE | POLICY: Users can update own bio and username | USING: (auth.uid() = id) | CHECK: (auth.uid() = id)",null
+profiles,BASE TABLE (Physical),clout_points,integer,YES,0,"COMMAND: UPDATE | POLICY: Profiles: Limited Update Ownership | USING: (auth.uid() = id) | CHECK: ((auth.uid() = id) AND (NOT (clout_points IS DISTINCT FROM clout_points)))
+---
+COMMAND: SELECT | POLICY: Profiles: Public Identification | USING: true | CHECK: 
+---
+COMMAND: SELECT | POLICY: Public profiles are viewable by everyone. | USING: true | CHECK: 
+---
+COMMAND: UPDATE | POLICY: Users can update limited profile fields. | USING: (auth.uid() = id) | CHECK: ((auth.uid() = id) AND (NOT (clout_points IS DISTINCT FROM clout_points)))
+---
+COMMAND: UPDATE | POLICY: Users can update own bio and username | USING: (auth.uid() = id) | CHECK: (auth.uid() = id)",null
+profiles,BASE TABLE (Physical),updated_at,timestamp with time zone,YES,now(),"COMMAND: UPDATE | POLICY: Profiles: Limited Update Ownership | USING: (auth.uid() = id) | CHECK: ((auth.uid() = id) AND (NOT (clout_points IS DISTINCT FROM clout_points)))
+---
+COMMAND: SELECT | POLICY: Profiles: Public Identification | USING: true | CHECK: 
+---
+COMMAND: SELECT | POLICY: Public profiles are viewable by everyone. | USING: true | CHECK: 
+---
+COMMAND: UPDATE | POLICY: Users can update limited profile fields. | USING: (auth.uid() = id) | CHECK: ((auth.uid() = id) AND (NOT (clout_points IS DISTINCT FROM clout_points)))
+---
+COMMAND: UPDATE | POLICY: Users can update own bio and username | USING: (auth.uid() = id) | CHECK: (auth.uid() = id)",null
+profiles,BASE TABLE (Physical),referral_code,text,YES,"SUBSTRING(replace((gen_random_uuid())::text, '-'::text, ''::text) FROM 1 FOR 8)","COMMAND: UPDATE | POLICY: Profiles: Limited Update Ownership | USING: (auth.uid() = id) | CHECK: ((auth.uid() = id) AND (NOT (clout_points IS DISTINCT FROM clout_points)))
+---
+COMMAND: SELECT | POLICY: Profiles: Public Identification | USING: true | CHECK: 
+---
+COMMAND: SELECT | POLICY: Public profiles are viewable by everyone. | USING: true | CHECK: 
+---
+COMMAND: UPDATE | POLICY: Users can update limited profile fields. | USING: (auth.uid() = id) | CHECK: ((auth.uid() = id) AND (NOT (clout_points IS DISTINCT FROM clout_points)))
+---
+COMMAND: UPDATE | POLICY: Users can update own bio and username | USING: (auth.uid() = id) | CHECK: (auth.uid() = id)",null
+profiles,BASE TABLE (Physical),referred_by_code,text,YES,null,"COMMAND: UPDATE | POLICY: Profiles: Limited Update Ownership | USING: (auth.uid() = id) | CHECK: ((auth.uid() = id) AND (NOT (clout_points IS DISTINCT FROM clout_points)))
+---
+COMMAND: SELECT | POLICY: Profiles: Public Identification | USING: true | CHECK: 
+---
+COMMAND: SELECT | POLICY: Public profiles are viewable by everyone. | USING: true | CHECK: 
+---
+COMMAND: UPDATE | POLICY: Users can update limited profile fields. | USING: (auth.uid() = id) | CHECK: ((auth.uid() = id) AND (NOT (clout_points IS DISTINCT FROM clout_points)))
+---
+COMMAND: UPDATE | POLICY: Users can update own bio and username | USING: (auth.uid() = id) | CHECK: (auth.uid() = id)",null
+profiles,BASE TABLE (Physical),last_nyc_ping_at,timestamp without time zone,YES,null,"COMMAND: UPDATE | POLICY: Profiles: Limited Update Ownership | USING: (auth.uid() = id) | CHECK: ((auth.uid() = id) AND (NOT (clout_points IS DISTINCT FROM clout_points)))
+---
+COMMAND: SELECT | POLICY: Profiles: Public Identification | USING: true | CHECK: 
+---
+COMMAND: SELECT | POLICY: Public profiles are viewable by everyone. | USING: true | CHECK: 
+---
+COMMAND: UPDATE | POLICY: Users can update limited profile fields. | USING: (auth.uid() = id) | CHECK: ((auth.uid() = id) AND (NOT (clout_points IS DISTINCT FROM clout_points)))
+---
+COMMAND: UPDATE | POLICY: Users can update own bio and username | USING: (auth.uid() = id) | CHECK: (auth.uid() = id)",null
+profiles,BASE TABLE (Physical),last_participant_status,text,YES,'orbiter'::text,"COMMAND: UPDATE | POLICY: Profiles: Limited Update Ownership | USING: (auth.uid() = id) | CHECK: ((auth.uid() = id) AND (NOT (clout_points IS DISTINCT FROM clout_points)))
+---
+COMMAND: SELECT | POLICY: Profiles: Public Identification | USING: true | CHECK: 
+---
+COMMAND: SELECT | POLICY: Public profiles are viewable by everyone. | USING: true | CHECK: 
+---
+COMMAND: UPDATE | POLICY: Users can update limited profile fields. | USING: (auth.uid() = id) | CHECK: ((auth.uid() = id) AND (NOT (clout_points IS DISTINCT FROM clout_points)))
+---
+COMMAND: UPDATE | POLICY: Users can update own bio and username | USING: (auth.uid() = id) | CHECK: (auth.uid() = id)",null
+referral_logs,BASE TABLE (Physical),id,uuid,NO,gen_random_uuid(),"COMMAND: SELECT | POLICY: Users can view own referrals | USING: (auth.uid() = new_user_id) | CHECK: ",null
+referral_logs,BASE TABLE (Physical),referrer_id,uuid,NO,null,"COMMAND: SELECT | POLICY: Users can view own referrals | USING: (auth.uid() = new_user_id) | CHECK: ",null
+referral_logs,BASE TABLE (Physical),new_user_id,uuid,NO,null,"COMMAND: SELECT | POLICY: Users can view own referrals | USING: (auth.uid() = new_user_id) | CHECK: ",null
+referral_logs,BASE TABLE (Physical),created_at,timestamp with time zone,YES,now(),"COMMAND: SELECT | POLICY: Users can view own referrals | USING: (auth.uid() = new_user_id) | CHECK: ",null
+security_logs,BASE TABLE (Physical),id,uuid,NO,gen_random_uuid(),"COMMAND: SELECT | POLICY: Admins only read security logs | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
+---
+COMMAND: INSERT | POLICY: Enable insert for tracking pulse | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: GM: View Security Pulse | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
+---
+COMMAND: INSERT | POLICY: Security: Silent Pulse Insert | USING:  | CHECK: true",null
+security_logs,BASE TABLE (Physical),created_at,timestamp with time zone,YES,now(),"COMMAND: SELECT | POLICY: Admins only read security logs | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
+---
+COMMAND: INSERT | POLICY: Enable insert for tracking pulse | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: GM: View Security Pulse | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
+---
+COMMAND: INSERT | POLICY: Security: Silent Pulse Insert | USING:  | CHECK: true",null
+security_logs,BASE TABLE (Physical),user_id,uuid,YES,null,"COMMAND: SELECT | POLICY: Admins only read security logs | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
+---
+COMMAND: INSERT | POLICY: Enable insert for tracking pulse | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: GM: View Security Pulse | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
+---
+COMMAND: INSERT | POLICY: Security: Silent Pulse Insert | USING:  | CHECK: true",null
+security_logs,BASE TABLE (Physical),device_id,text,NO,null,"COMMAND: SELECT | POLICY: Admins only read security logs | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
+---
+COMMAND: INSERT | POLICY: Enable insert for tracking pulse | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: GM: View Security Pulse | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
+---
+COMMAND: INSERT | POLICY: Security: Silent Pulse Insert | USING:  | CHECK: true",null
+security_logs,BASE TABLE (Physical),ip_address,inet,NO,null,"COMMAND: SELECT | POLICY: Admins only read security logs | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
+---
+COMMAND: INSERT | POLICY: Enable insert for tracking pulse | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: GM: View Security Pulse | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
+---
+COMMAND: INSERT | POLICY: Security: Silent Pulse Insert | USING:  | CHECK: true",null
+security_logs,BASE TABLE (Physical),action_type,text,YES,'site_load'::text,"COMMAND: SELECT | POLICY: Admins only read security logs | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
+---
+COMMAND: INSERT | POLICY: Enable insert for tracking pulse | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: GM: View Security Pulse | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
+---
+COMMAND: INSERT | POLICY: Security: Silent Pulse Insert | USING:  | CHECK: true",null
+security_logs,BASE TABLE (Physical),user_agent,text,YES,null,"COMMAND: SELECT | POLICY: Admins only read security logs | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
+---
+COMMAND: INSERT | POLICY: Enable insert for tracking pulse | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: GM: View Security Pulse | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
+---
+COMMAND: INSERT | POLICY: Security: Silent Pulse Insert | USING:  | CHECK: true",null
+security_logs,BASE TABLE (Physical),origin_page,text,YES,null,"COMMAND: SELECT | POLICY: Admins only read security logs | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
+---
+COMMAND: INSERT | POLICY: Enable insert for tracking pulse | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: GM: View Security Pulse | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
+---
+COMMAND: INSERT | POLICY: Security: Silent Pulse Insert | USING:  | CHECK: true",null
+security_logs,BASE TABLE (Physical),metadata,jsonb,YES,'{}'::jsonb,"COMMAND: SELECT | POLICY: Admins only read security logs | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
+---
+COMMAND: INSERT | POLICY: Enable insert for tracking pulse | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: GM: View Security Pulse | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
+---
+COMMAND: INSERT | POLICY: Security: Silent Pulse Insert | USING:  | CHECK: true",null

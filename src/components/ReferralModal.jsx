@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { getReferralCode } from '../lib/pointsSystem';
 
 export default function ReferralModal({ user, onClose }) {
@@ -26,8 +27,8 @@ export default function ReferralModal({ user, onClose }) {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  return (
-    <div className="lp-theme-scope fixed inset-0 z-[1000] bg-black/40 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
+  const modal = (
+    <div className="lp-theme-scope fixed inset-0 z-[100000] bg-black/40 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
       {/* Modal Container */}
       <div className="bg-white border-4 border-black w-full max-w-sm rounded-[32px] shadow-[12px_12px_0px_black] overflow-hidden animate-in zoom-in duration-200">
         
@@ -101,4 +102,6 @@ export default function ReferralModal({ user, onClose }) {
       </div>
     </div>
   );
+
+  return createPortal(modal, document.body);
 }

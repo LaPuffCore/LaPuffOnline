@@ -9,6 +9,7 @@ import {
   addPostReaction, removePostReaction, fetchReactionsForPosts,
   fetchCommentsForPost, submitPostComment, fetchCommentReactions,
   upsertCommentReaction, removeCommentReaction, fetchProfileForGeoPost,
+  syncSampleGeoPostsToSupabase, syncSampleGeoCommentsToSupabase,
 } from '../lib/supabase';
 import { uploadToOracleCloud, isOciConfigured } from '../lib/oracleStorage';
 import { NYC_ZIP_FEATURES } from '../lib/nycZipGeoJSON';
@@ -135,6 +136,15 @@ function getBoroughForZip(zip) {
   return match?.borough || null;
 }
 
+function makeStableSampleUuid(index, variant = '8') {
+  const n = Number(index || 0).toString(16).padStart(12, '0').slice(-12);
+  return `00000000-0000-4000-${variant}000-${n}`;
+}
+
+function isAnonymousAuthor(entity) {
+  return String(entity?.username || '').trim().toLowerCase() === 'anonymous';
+}
+
 const SAMPLE_ZIP_CHOICES = [
   { borough: 'Manhattan', zip: '10002' },
   { borough: 'Manhattan', zip: '10027' },
@@ -172,8 +182,8 @@ function buildSamplePosts() {
 
     const isParticipant = statusMode === 0;
     const isAnonymous = statusMode === 2;
-    const userId = isAnonymous ? null : `sample-user-${idx}`;
-    const username = isAnonymous ? 'Anonymous' : `sample_user_${idx}`;
+    const userId = null;
+    const username = isAnonymous ? 'anonymous' : `sample_user_${idx}`;
 
     const fill = SAMPLE_FILL_COLORS[i % SAMPLE_FILL_COLORS.length];
     const outline = SAMPLE_OUTLINE_COLORS[i % SAMPLE_OUTLINE_COLORS.length];
@@ -194,7 +204,7 @@ function buildSamplePosts() {
     const createdAt = new Date(now - daysAgo * 86400000 - (i % 6) * 3600000).toISOString();
 
     posts.push({
-      id: `sp${idx}`,
+      id: makeStableSampleUuid(idx, '8'),
       user_id: userId,
       username,
       is_participant: isParticipant,
@@ -219,23 +229,25 @@ function buildSamplePosts() {
 }
 
 const SAMPLE_POSTS = buildSamplePosts();
+const SAMPLE_POST_IDS = new Set(SAMPLE_POSTS.map((post) => post.id));
 
-function buildSampleComments() {
+function buildSampleComments(samplePosts) {
   const base = [];
+  const p = samplePosts.map((entry) => entry.id);
   const commentSeeds = [
-    { postId: 'sp1', main: 3, replies: [2, 5, 1] },
-    { postId: 'sp2', main: 2, replies: [0, 4] },
-    { postId: 'sp3', main: 1, replies: [6] },
-    { postId: 'sp4', main: 4, replies: [1, 0, 2, 3] },
-    { postId: 'sp5', main: 2, replies: [3, 0] },
-    { postId: 'sp6', main: 1, replies: [2] },
-    { postId: 'sp7', main: 3, replies: [0, 0, 4] },
-    { postId: 'sp8', main: 2, replies: [1, 5] },
+    { postId: p[0], main: 3, replies: [2, 5, 1] },
+    { postId: p[1], main: 2, replies: [0, 4] },
+    { postId: p[2], main: 1, replies: [6] },
+    { postId: p[3], main: 4, replies: [1, 0, 2, 3] },
+    { postId: p[4], main: 2, replies: [3, 0] },
+    { postId: p[5], main: 1, replies: [2] },
+    { postId: p[6], main: 3, replies: [0, 0, 4] },
+    { postId: p[7], main: 2, replies: [1, 5] },
   ];
   let counter = 1;
   commentSeeds.forEach((seed, seedIdx) => {
     for (let i = 0; i < seed.main; i += 1) {
-      const id = `sc${counter++}`;
+      const id = makeStableSampleUuid(counter++, '9');
       const mode = (seedIdx + i) % 3;
       const isAnonymous = mode === 2;
       const isParticipant = mode === 0;
@@ -244,8 +256,8 @@ function buildSampleComments() {
         id,
         post_id: seed.postId,
         parent_id: null,
-        user_id: isAnonymous ? null : `comment-user-${id}`,
-        username: isAnonymous ? 'anonymous' : `commenter_${id}`,
+        user_id: null,
+        username: isAnonymous ? 'anonymous' : `commenter_${counter}`,
         content: `Sample comment ${i + 1} on ${seed.postId} with ${isParticipant ? 'participant' : isAnonymous ? 'anonymous' : 'orbiter'} context.`,
         is_participant: isParticipant,
         borough: isAnonymous ? null : place.borough,
@@ -254,14 +266,14 @@ function buildSampleComments() {
       });
       const replyCount = seed.replies[i] || 0;
       for (let r = 0; r < replyCount; r += 1) {
-        const rid = `sc${counter++}`;
+        const rid = makeStableSampleUuid(counter++, 'a');
         const replyAnon = (r + i) % 4 === 3;
         base.push({
           id: rid,
           post_id: seed.postId,
           parent_id: id,
-          user_id: replyAnon ? null : `reply-user-${rid}`,
-          username: replyAnon ? 'anonymous' : `replier_${rid}`,
+          user_id: null,
+          username: replyAnon ? 'anonymous' : `replier_${counter}`,
           content: `Reply ${r + 1} in the subthread for ${id}.`,
           is_participant: (r % 2) === 0,
           borough: replyAnon ? null : place.borough,
@@ -291,7 +303,7 @@ function buildSampleCommentReactions(comments) {
   return reactions;
 }
 
-const SAMPLE_COMMENTS = buildSampleComments();
+const SAMPLE_COMMENTS = buildSampleComments(SAMPLE_POSTS);
 const SAMPLE_COMMENT_REACTIONS = buildSampleCommentReactions(SAMPLE_COMMENTS);
 
 // Anonymous reaction dedup via localStorage (prevents refresh-spam without accounts)
@@ -495,7 +507,7 @@ const AlignCenterIcon = () => <svg width="13" height="13" viewBox="0 0 16 16" fi
 const AlignRightIcon  = () => <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><rect x="1" y="2" width="14" height="2" rx="1"/><rect x="5" y="7" width="10" height="2" rx="1"/><rect x="3" y="12" width="12" height="2" rx="1"/></svg>;
 
 // ── PostCard ──────────────────────────────────────────────────────────────────
-function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, onSelectTag, zipHeatMap, boroughHeatMap, textScale = 1, commentCount = 0, commentsOpen = false, onToggleComments, commentsChildren }) {
+function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, onSelectTag, zipHeatMap, boroughHeatMap, textScale = 1, imageScale = 1, commentCount = 0, commentsOpen = false, onToggleComments, commentsChildren }) {
   const { resolvedTheme } = useSiteTheme();
   const theme = getPostVisualTheme(post, resolvedTheme);
   const date = new Date(post.created_at);
@@ -516,12 +528,13 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
   })();
   const postHtml = parsedContent.html || (typeof post.content === 'string' ? post.content : '') || '';
   const postTextColor = normalizeHexColor(parsedContent.textColor || '', theme.text);
+  const postIsAnonymous = isAnonymousAuthor(post);
 
   const fillIsNearRedOrGreen = isNearColor(theme.fill, '#ef4444') || isNearColor(theme.fill, '#22c55e');
 
   const statusStyle = post.is_participant
     ? { background: '#22c55e', color: '#fff', border: fillIsNearRedOrGreen ? '1px solid #000' : '1px solid transparent' }
-    : post.user_id == null
+    : postIsAnonymous
       ? { background: '#374151', color: '#f3f4f6', border: '1px solid transparent' }
       : { background: '#ef4444', color: '#fff', border: fillIsNearRedOrGreen ? '1px solid #000' : '1px solid transparent' };
 
@@ -535,7 +548,9 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
     backgroundColor: theme.fill,
     color: theme.text,
   };
-  const isNonStandardFrame = Math.abs(imgRatio - (16 / 9)) > 0.08;
+  const frameRatio = (16 / 9) / Math.max(0.5, Number(imageScale || 1));
+  const framePadding = `${56.25 * Math.max(0.5, Number(imageScale || 1))}%`;
+  const isNonStandardFrame = Math.abs(imgRatio - frameRatio) > 0.08;
 
   useEffect(() => {
     if (!imgModalOpen) return undefined;
@@ -556,11 +571,11 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
       }}
     >
       {post.image_url && (
-        <div className="relative w-full overflow-hidden aspect-video bg-black/5">
+        <div className="relative w-full overflow-hidden bg-black/5" style={{ height: 0, paddingBottom: framePadding }}>
           <img
             src={post.image_url}
             alt="post"
-            className={`w-full h-full object-cover transition-opacity duration-200 ${imgLoaded ? 'opacity-100' : 'opacity-0'}`}
+            className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-200 ${imgLoaded ? 'opacity-100' : 'opacity-0'}`}
             loading="lazy"
             onLoad={(e) => {
               try { setImgRatio(e.target.naturalWidth / e.target.naturalHeight); } catch {}
@@ -584,7 +599,7 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
 
       <div className="p-3" style={{ background: theme.fill }}>
         <div className="flex items-center gap-1.5 mb-2 flex-wrap">
-          {post.user_id == null ? (
+          {postIsAnonymous ? (
             <span className="font-black text-xs flex items-center gap-1" style={{ color: theme.text }}>
               <svg width="13" height="13" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ color: 'currentColor' }}>
                 <rect x="2" y="9" width="16" height="2.5" rx="1.25" fill="currentColor" />
@@ -598,11 +613,11 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
           )}
 
           <span
-            onClick={() => onSelectTag && onSelectTag({ status: post.user_id == null ? 'anonymous' : post.is_participant ? 'participant' : 'orbiter' })}
+            onClick={() => onSelectTag && onSelectTag({ status: postIsAnonymous ? 'anonymous' : post.is_participant ? 'participant' : 'orbiter' })}
             className="text-[9px] font-black px-1.5 py-0.5 rounded-full cursor-pointer"
             style={statusStyle}
           >
-            ● {post.is_participant ? 'PARTICIPANT' : post.user_id == null ? 'ANON' : 'ORBITER'}
+            ● {post.is_participant ? 'PARTICIPANT' : postIsAnonymous ? 'ANON' : 'ORBITER'}
           </span>
 
           <span className="text-[9px] ml-auto" style={{ color: theme.text }}>{dateStr} · {timeStr}</span>
@@ -702,10 +717,10 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
       </div>
 
       {imgModalOpen && (
-        <div className="fixed inset-0 z-[100000] flex items-center justify-center p-4">
+        <div className="fixed inset-x-0 top-[72px] bottom-0 z-[100000] overflow-y-auto">
           <div className="absolute inset-0 bg-black/60" onClick={() => setImgModalOpen(false)} />
-          <div className="relative max-h-[90vh] overflow-auto border-3 rounded-2xl bg-white" style={{ borderColor: theme.outline }}>
-            <img src={post.image_url} alt="full" className="max-w-[90vw] max-h-[90vh] object-contain" />
+          <div className="relative mx-auto w-full max-w-5xl border-3 rounded-2xl bg-white mt-3 mb-6" style={{ borderColor: theme.outline }}>
+            <img src={post.image_url} alt="full" className="w-full h-auto object-contain" />
             <button onClick={() => setImgModalOpen(false)} className="absolute top-2 right-2 w-8 h-8 rounded-full bg-white border-2 border-black">✕</button>
           </div>
         </div>
@@ -777,7 +792,7 @@ function CommentSection({
           const subReplies = repliesFor(comment.id);
           const limit = visibleReplies[comment.id] || 3;
           const shownReplies = subReplies.slice(0, limit);
-          const isAnon = comment.user_id == null || comment.username === 'anonymous';
+          const isAnon = isAnonymousAuthor(comment);
           return (
             <div key={comment.id} className="rounded-xl border border-black/10 bg-white p-2.5">
               <div className="flex items-start gap-2">
@@ -983,8 +998,8 @@ function applyFeedFilters(posts, {
   }
 
   if (statusFilter === 'participant') out = out.filter((p) => !!p.is_participant);
-  else if (statusFilter === 'orbiter') out = out.filter((p) => !p.is_participant && p.user_id != null);
-  else if (statusFilter === 'anonymous') out = out.filter((p) => p.user_id == null);
+  else if (statusFilter === 'orbiter') out = out.filter((p) => !p.is_participant && !isAnonymousAuthor(p));
+  else if (statusFilter === 'anonymous') out = out.filter((p) => isAnonymousAuthor(p));
 
   if (sortByTop) {
     out.sort((a, b) => {
@@ -1016,6 +1031,9 @@ export default function GeoPostView({ session }) {
   const [openDropdown,    setOpenDropdown]    = useState(null);
   const [searchQuery,     setSearchQuery]     = useState('');
   const [feedTextScale,   setFeedTextScale]   = useState(1);
+  const [feedImageScale,  setFeedImageScale]  = useState(1);
+  const [desktopScaleOpen, setDesktopScaleOpen] = useState(false);
+  const [mobileScaleOpen, setMobileScaleOpen] = useState(false);
 
   // ── feed state ────────────────────────────────────────────────────────────────
   const [posts,       setPosts]       = useState([]);
@@ -1086,7 +1104,12 @@ export default function GeoPostView({ session }) {
         sortByTop: false,
       });
       const samples = SAMPLE_MODE ? SAMPLE_POSTS : [];
-      const combined = [...(data || []), ...samples];
+      const combinedMap = new Map();
+      [...(data || []), ...samples].forEach((post) => {
+        const prev = combinedMap.get(post.id);
+        combinedMap.set(post.id, prev ? { ...post, ...prev } : post);
+      });
+      const combined = Array.from(combinedMap.values());
       const finalList = applyFeedFilters(combined, {
         locTab,
         filterBorough,
@@ -1100,7 +1123,7 @@ export default function GeoPostView({ session }) {
       setZipHeatMap(getZipHeatSnapshot());
       setVisibleCount(PAGE_SIZE);
       if (finalList.length > 0) {
-        const realIds = finalList.filter(p => !p.id.startsWith('sp') && !p.id.startsWith('gsp_')).map(p => p.id);
+        const realIds = finalList.filter((p) => !SAMPLE_POST_IDS.has(p.id)).map((p) => p.id);
         if (realIds.length > 0) {
           const rxns = await fetchReactionsForPosts(realIds);
           const byPost = {};
@@ -1159,6 +1182,24 @@ export default function GeoPostView({ session }) {
       if (!cancelled) setCurrentProfile(profile);
     };
     loadProfile();
+    return () => { cancelled = true; };
+  }, [session]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const syncSamples = async () => {
+      if (!SAMPLE_MODE) return;
+      try {
+        await syncSampleGeoPostsToSupabase(SAMPLE_POSTS, session);
+        await syncSampleGeoCommentsToSupabase(SAMPLE_COMMENTS, session);
+        if (!cancelled) {
+          loadFeed();
+        }
+      } catch {
+        // Non-fatal in development; local sample data still renders.
+      }
+    };
+    syncSamples();
     return () => { cancelled = true; };
   }, [session]);
 
@@ -1449,7 +1490,20 @@ export default function GeoPostView({ session }) {
 
   const ensureCommentsLoaded = useCallback(async (postId) => {
     if (!postId) return;
-    if (postId.startsWith('sp')) {
+    if (commentsByPost[postId]) return;
+    const comments = await fetchCommentsForPost(postId);
+    if (comments.length > 0) {
+      setCommentsByPost((prev) => ({ ...prev, [postId]: comments }));
+      const rxns = await fetchCommentReactions(comments.map((entry) => entry.id));
+      const grouped = {};
+      (rxns || []).forEach((entry) => {
+        if (!grouped[entry.comment_id]) grouped[entry.comment_id] = [];
+        grouped[entry.comment_id].push(entry);
+      });
+      setCommentReactionsByComment((prev) => ({ ...prev, ...grouped }));
+      return;
+    }
+    if (SAMPLE_POST_IDS.has(postId)) {
       const sampleComments = SAMPLE_COMMENTS.filter((entry) => entry.post_id === postId);
       setCommentsByPost((prev) => ({ ...prev, [postId]: sampleComments }));
       const ids = sampleComments.map((entry) => entry.id);
@@ -1459,19 +1513,8 @@ export default function GeoPostView({ session }) {
         grouped[entry.comment_id].push(entry);
       });
       setCommentReactionsByComment((prev) => ({ ...prev, ...grouped }));
-      return;
-    }
-    if (commentsByPost[postId]) return;
-    const comments = await fetchCommentsForPost(postId);
-    setCommentsByPost((prev) => ({ ...prev, [postId]: comments }));
-    if (comments.length > 0) {
-      const rxns = await fetchCommentReactions(comments.map((entry) => entry.id));
-      const grouped = {};
-      (rxns || []).forEach((entry) => {
-        if (!grouped[entry.comment_id]) grouped[entry.comment_id] = [];
-        grouped[entry.comment_id].push(entry);
-      });
-      setCommentReactionsByComment((prev) => ({ ...prev, ...grouped }));
+    } else {
+      setCommentsByPost((prev) => ({ ...prev, [postId]: [] }));
     }
   }, [commentsByPost]);
 
@@ -1514,7 +1557,6 @@ export default function GeoPostView({ session }) {
       ...author,
     };
     setCommentsByPost((prev) => ({ ...prev, [postId]: [...(prev[postId] || []), optimistic] }));
-    if (postId.startsWith('sp')) return;
     try {
       const saved = await submitPostComment({ post_id: postId, parent_id: parentId, content, ...author }, session);
       setCommentsByPost((prev) => ({
@@ -1596,7 +1638,7 @@ export default function GeoPostView({ session }) {
       const borough = normalizeSearchText(p.borough || '');
       const zip = normalizeSearchText(p.zip_code || '');
       const scope = normalizeSearchText(p.scope || '');
-      const status = p.user_id == null ? 'anonymous anon' : p.is_participant ? 'participant' : 'orbiter';
+      const status = isAnonymousAuthor(p) ? 'anonymous anon' : p.is_participant ? 'participant' : 'orbiter';
       const haystack = `${contentText} ${username} ${borough} ${zip} ${scope} ${status} nyc digital`;
       return searchTokens.every((token) => haystack.includes(token));
     });
@@ -1809,7 +1851,23 @@ export default function GeoPostView({ session }) {
                 <button onMouseDown={e => e.preventDefault()} onClick={() => { setLocTab('all'); setFilterBorough(''); setFilterZip(''); setOpenDropdown(null); }} className={baseFB} style={locTab === 'all' ? activeFS : {}}>🌀 All</button>
 
                 <div className="relative">
-                  <button onMouseDown={e => e.preventDefault()} onClick={() => setOpenDropdown(p => p === 'borough' ? null : 'borough')} className={baseFB} style={locTab === 'borough' && filterBorough ? activeFS : {}}>🏙 {locTab === 'borough' && filterBorough ? filterBorough : 'Borough'} ▾</button>
+                  <button
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={() => {
+                      if (locTab === 'borough' && filterBorough) {
+                        setLocTab('all');
+                        setFilterBorough('');
+                        setOpenDropdown(null);
+                        setVisibleCount(PAGE_SIZE);
+                        return;
+                      }
+                      setOpenDropdown(p => p === 'borough' ? null : 'borough');
+                    }}
+                    className={baseFB}
+                    style={locTab === 'borough' && filterBorough ? activeFS : {}}
+                  >
+                    🏙 {locTab === 'borough' && filterBorough ? `${filterBorough} ×` : 'Borough ▾'}
+                  </button>
                   <InlineDropdown open={openDropdown === 'borough'} onClose={() => setOpenDropdown(null)}>
                     {(locTab === 'borough' && filterBorough) && (
                       <button onMouseDown={e => e.preventDefault()} onClick={() => { setLocTab('all'); setFilterBorough(''); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100 border-b border-gray-200 text-red-500">× Clear</button>
@@ -1821,7 +1879,23 @@ export default function GeoPostView({ session }) {
                 </div>
 
                 <div className="relative">
-                  <button onMouseDown={e => e.preventDefault()} onClick={() => setOpenDropdown(p => p === 'zip' ? null : 'zip')} className={baseFB} style={locTab === 'zip' && filterZip ? activeFS : {}}>📍 {locTab === 'zip' && filterZip ? filterZip : 'Zip'} ▾</button>
+                  <button
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={() => {
+                      if (locTab === 'zip' && filterZip) {
+                        setLocTab('all');
+                        setFilterZip('');
+                        setOpenDropdown(null);
+                        setVisibleCount(PAGE_SIZE);
+                        return;
+                      }
+                      setOpenDropdown(p => p === 'zip' ? null : 'zip');
+                    }}
+                    className={baseFB}
+                    style={locTab === 'zip' && filterZip ? activeFS : {}}
+                  >
+                    📍 {locTab === 'zip' && filterZip ? `${filterZip} ×` : 'Zip ▾'}
+                  </button>
                   <InlineDropdown open={openDropdown === 'zip'} onClose={() => setOpenDropdown(null)} className="w-[220px] max-h-[280px]">
                     {(locTab === 'zip' && filterZip) && (
                       <button onMouseDown={e => e.preventDefault()} onClick={() => { setLocTab('all'); setFilterZip(''); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100 border-b border-gray-200 text-red-500">× Clear</button>
@@ -1840,7 +1914,22 @@ export default function GeoPostView({ session }) {
                 </div>
 
                 <div className="relative">
-                  <button onMouseDown={e => e.preventDefault()} onClick={() => setOpenDropdown(p => p === 'time' ? null : 'time')} className={baseFB} style={timeFilter !== 'all' ? activeFS : {}}>{timeLabel} ▾</button>
+                  <button
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={() => {
+                      if (timeFilter !== 'all') {
+                        setTimeFilter('all');
+                        setOpenDropdown(null);
+                        setVisibleCount(PAGE_SIZE);
+                        return;
+                      }
+                      setOpenDropdown(p => p === 'time' ? null : 'time');
+                    }}
+                    className={baseFB}
+                    style={timeFilter !== 'all' ? activeFS : {}}
+                  >
+                    {timeFilter !== 'all' ? `${timeLabel} ×` : `${timeLabel} ▾`}
+                  </button>
                   <InlineDropdown open={openDropdown === 'time'} onClose={() => setOpenDropdown(null)}>
                     {TIME_OPTIONS.map(t => (
                       <button key={t.key} onMouseDown={e => e.preventDefault()} onClick={() => { setTimeFilter(t.key); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100" style={timeFilter === t.key ? { background: accentColor + '22', color: accentColor } : {}}>{t.label}</button>
@@ -1849,11 +1938,19 @@ export default function GeoPostView({ session }) {
                 </div>
 
                 <div className="relative">
-                  <button onMouseDown={e => e.preventDefault()} onClick={() => setOpenDropdown(p => p === 'status' ? null : 'status')} className={baseFB}
+                  <button onMouseDown={e => e.preventDefault()} onClick={() => {
+                    if (statusFilter !== 'all') {
+                      setStatusFilter('all');
+                      setOpenDropdown(null);
+                      setVisibleCount(PAGE_SIZE);
+                      return;
+                    }
+                    setOpenDropdown(p => p === 'status' ? null : 'status');
+                  }} className={baseFB}
                     style={statusFilter === 'participant' ? { background: '#22c55e', color: '#fff', borderColor: '#22c55e' }
                       : statusFilter === 'orbiter' ? { background: '#ef4444', color: '#fff', borderColor: '#ef4444' }
                       : statusFilter === 'anonymous' ? { background: '#374151', color: '#fff', borderColor: '#374151' }
-                      : {}}>{statusFilter === 'participant' ? 'Participant' : statusFilter === 'orbiter' ? 'Orbiter' : statusFilter === 'anonymous' ? 'Anonymous' : 'Status'} ▾</button>
+                      : {}}>{statusFilter === 'participant' ? 'Participant ×' : statusFilter === 'orbiter' ? 'Orbiter ×' : statusFilter === 'anonymous' ? 'Anonymous ×' : 'Status ▾'}</button>
                   <InlineDropdown open={openDropdown === 'status'} onClose={() => setOpenDropdown(null)} alignRight>
                     {[['all','All'],['participant','Participant'],['orbiter','Orbiter'],['anonymous','Anonymous']].map(([k, l]) => (
                       <button key={k} onMouseDown={e => e.preventDefault()} onClick={() => { setStatusFilter(k); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100" style={statusFilter === k ? { background: accentColor + '22', color: accentColor } : {}}>{l}</button>
@@ -1861,14 +1958,22 @@ export default function GeoPostView({ session }) {
                   </InlineDropdown>
                 </div>
                 <div className="relative mt-1">
-                  <button onMouseDown={e => e.preventDefault()} onClick={() => setOpenDropdown(p => p === 'textScaleDesktop' ? null : 'textScaleDesktop')} className={baseFB}>Aa Text Size ▾</button>
-                  <InlineDropdown open={openDropdown === 'textScaleDesktop'} onClose={() => setOpenDropdown(null)} alignRight className="w-[220px] p-3">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-[10px] font-black">Text Size</span>
-                      <span className="text-[10px] font-black">{Math.round(feedTextScale * 100)}%</span>
+                  <button onMouseDown={e => e.preventDefault()} onClick={() => setDesktopScaleOpen((v) => !v)} className={baseFB}>Aa / Image Scale {desktopScaleOpen ? '▴' : '▾'}</button>
+                  {desktopScaleOpen && (
+                    <div className="mt-2 border-2 border-black rounded-lg p-2 bg-white">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[10px] font-black">Text Scale</span>
+                        <span className="text-[10px] font-black">{Math.round(feedTextScale * 100)}%</span>
+                      </div>
+                      <input type="range" min="0.5" max="2" step="0.05" value={feedTextScale} onChange={(e) => setFeedTextScale(Number(e.target.value))} className="w-full mb-2" />
+
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[10px] font-black">Image Scale</span>
+                        <span className="text-[10px] font-black">{Math.round(feedImageScale * 100)}%</span>
+                      </div>
+                      <input type="range" min="0.5" max="2" step="0.05" value={feedImageScale} onChange={(e) => setFeedImageScale(Number(e.target.value))} className="w-full" />
                     </div>
-                    <input type="range" min="0.5" max="2" step="0.05" value={feedTextScale} onChange={(e) => setFeedTextScale(Number(e.target.value))} className="w-full" />
-                  </InlineDropdown>
+                  )}
                 </div>
               </div>
             </div>
@@ -1882,7 +1987,23 @@ export default function GeoPostView({ session }) {
                 <button onMouseDown={e => e.preventDefault()} onClick={() => { setLocTab('all'); setFilterBorough(''); setFilterZip(''); setOpenDropdown(null); }} className={baseFB} style={locTab === 'all' ? activeFS : {}}>🌀 All</button>
 
                 <div className="relative">
-                  <button onMouseDown={e => e.preventDefault()} onClick={() => setOpenDropdown(p => p === 'borough' ? null : 'borough')} className={baseFB} style={locTab === 'borough' && filterBorough ? activeFS : {}}>🏙 {locTab === 'borough' && filterBorough ? filterBorough : 'Borough'} ▾</button>
+                  <button
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={() => {
+                      if (locTab === 'borough' && filterBorough) {
+                        setLocTab('all');
+                        setFilterBorough('');
+                        setOpenDropdown(null);
+                        setVisibleCount(PAGE_SIZE);
+                        return;
+                      }
+                      setOpenDropdown(p => p === 'borough' ? null : 'borough');
+                    }}
+                    className={baseFB}
+                    style={locTab === 'borough' && filterBorough ? activeFS : {}}
+                  >
+                    🏙 {locTab === 'borough' && filterBorough ? `${filterBorough} ×` : 'Borough ▾'}
+                  </button>
                   <InlineDropdown open={openDropdown === 'borough'} onClose={() => setOpenDropdown(null)}>
                     {(locTab === 'borough' && filterBorough) && (
                       <button onMouseDown={e => e.preventDefault()} onClick={() => { setLocTab('all'); setFilterBorough(''); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100 border-b border-gray-200 text-red-500">× Clear</button>
@@ -1894,7 +2015,23 @@ export default function GeoPostView({ session }) {
                 </div>
 
                 <div className="relative">
-                  <button onMouseDown={e => e.preventDefault()} onClick={() => setOpenDropdown(p => p === 'zip' ? null : 'zip')} className={baseFB} style={locTab === 'zip' && filterZip ? activeFS : {}}>📍 {locTab === 'zip' && filterZip ? filterZip : 'Zip'} ▾</button>
+                  <button
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={() => {
+                      if (locTab === 'zip' && filterZip) {
+                        setLocTab('all');
+                        setFilterZip('');
+                        setOpenDropdown(null);
+                        setVisibleCount(PAGE_SIZE);
+                        return;
+                      }
+                      setOpenDropdown(p => p === 'zip' ? null : 'zip');
+                    }}
+                    className={baseFB}
+                    style={locTab === 'zip' && filterZip ? activeFS : {}}
+                  >
+                    📍 {locTab === 'zip' && filterZip ? `${filterZip} ×` : 'Zip ▾'}
+                  </button>
                   <InlineDropdown open={openDropdown === 'zip'} onClose={() => setOpenDropdown(null)} className="w-[220px] max-h-[280px]">
                     {(locTab === 'zip' && filterZip) && (
                       <button onMouseDown={e => e.preventDefault()} onClick={() => { setLocTab('all'); setFilterZip(''); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100 border-b border-gray-200 text-red-500">× Clear</button>
@@ -1913,7 +2050,22 @@ export default function GeoPostView({ session }) {
                 </div>
 
                 <div className="relative">
-                  <button onMouseDown={e => e.preventDefault()} onClick={() => setOpenDropdown(p => p === 'time' ? null : 'time')} className={baseFB} style={timeFilter !== 'all' ? activeFS : {}}>{timeLabel} ▾</button>
+                  <button
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={() => {
+                      if (timeFilter !== 'all') {
+                        setTimeFilter('all');
+                        setOpenDropdown(null);
+                        setVisibleCount(PAGE_SIZE);
+                        return;
+                      }
+                      setOpenDropdown(p => p === 'time' ? null : 'time');
+                    }}
+                    className={baseFB}
+                    style={timeFilter !== 'all' ? activeFS : {}}
+                  >
+                    {timeFilter !== 'all' ? `${timeLabel} ×` : `${timeLabel} ▾`}
+                  </button>
                   <InlineDropdown open={openDropdown === 'time'} onClose={() => setOpenDropdown(null)}>
                     {TIME_OPTIONS.map(t => (
                       <button key={t.key} onMouseDown={e => e.preventDefault()} onClick={() => { setTimeFilter(t.key); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100" style={timeFilter === t.key ? { background: accentColor + '22', color: accentColor } : {}}>{t.label}</button>
@@ -1922,11 +2074,19 @@ export default function GeoPostView({ session }) {
                 </div>
 
                 <div className="relative">
-                  <button onMouseDown={e => e.preventDefault()} onClick={() => setOpenDropdown(p => p === 'status' ? null : 'status')} className={baseFB}
+                  <button onMouseDown={e => e.preventDefault()} onClick={() => {
+                    if (statusFilter !== 'all') {
+                      setStatusFilter('all');
+                      setOpenDropdown(null);
+                      setVisibleCount(PAGE_SIZE);
+                      return;
+                    }
+                    setOpenDropdown(p => p === 'status' ? null : 'status');
+                  }} className={baseFB}
                     style={statusFilter === 'participant' ? { background: '#22c55e', color: '#fff', borderColor: '#22c55e' }
                       : statusFilter === 'orbiter' ? { background: '#ef4444', color: '#fff', borderColor: '#ef4444' }
                       : statusFilter === 'anonymous' ? { background: '#374151', color: '#fff', borderColor: '#374151' }
-                      : {}}>{statusFilter === 'participant' ? 'Participant' : statusFilter === 'orbiter' ? 'Orbiter' : statusFilter === 'anonymous' ? 'Anonymous' : 'Status'} ▾</button>
+                      : {}}>{statusFilter === 'participant' ? 'Participant ×' : statusFilter === 'orbiter' ? 'Orbiter ×' : statusFilter === 'anonymous' ? 'Anonymous ×' : 'Status ▾'}</button>
                   <InlineDropdown open={openDropdown === 'status'} onClose={() => setOpenDropdown(null)} alignRight>
                     {[['all','All'],['participant','Participant'],['orbiter','Orbiter'],['anonymous','Anonymous']].map(([k, l]) => (
                       <button key={k} onMouseDown={e => e.preventDefault()} onClick={() => { setStatusFilter(k); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100" style={statusFilter === k ? { background: accentColor + '22', color: accentColor } : {}}>{l}</button>
@@ -1934,14 +2094,22 @@ export default function GeoPostView({ session }) {
                   </InlineDropdown>
                 </div>
                 <div className="relative w-full mt-1">
-                  <button onMouseDown={e => e.preventDefault()} onClick={() => setOpenDropdown(p => p === 'textScaleMobile' ? null : 'textScaleMobile')} className={baseFB}>Aa Text Size ▾</button>
-                  <InlineDropdown open={openDropdown === 'textScaleMobile'} onClose={() => setOpenDropdown(null)} className="w-[220px] p-3">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-[10px] font-black">Text Size</span>
-                      <span className="text-[10px] font-black">{Math.round(feedTextScale * 100)}%</span>
+                  <button onMouseDown={e => e.preventDefault()} onClick={() => setMobileScaleOpen((v) => !v)} className={baseFB}>Aa / Image Scale {mobileScaleOpen ? '▴' : '▾'}</button>
+                  {mobileScaleOpen && (
+                    <div className="mt-2 border-2 border-black rounded-lg p-2 bg-white w-full">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[10px] font-black">Text Scale</span>
+                        <span className="text-[10px] font-black">{Math.round(feedTextScale * 100)}%</span>
+                      </div>
+                      <input type="range" min="0.5" max="2" step="0.05" value={feedTextScale} onChange={(e) => setFeedTextScale(Number(e.target.value))} className="w-full mb-2" />
+
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[10px] font-black">Image Scale</span>
+                        <span className="text-[10px] font-black">{Math.round(feedImageScale * 100)}%</span>
+                      </div>
+                      <input type="range" min="0.5" max="2" step="0.05" value={feedImageScale} onChange={(e) => setFeedImageScale(Number(e.target.value))} className="w-full" />
                     </div>
-                    <input type="range" min="0.5" max="2" step="0.05" value={feedTextScale} onChange={(e) => setFeedTextScale(Number(e.target.value))} className="w-full" />
-                  </InlineDropdown>
+                  )}
                 </div>
               </div>
             </div>
@@ -1957,8 +2125,10 @@ export default function GeoPostView({ session }) {
               {filteredPosts.length > 0 && (
                 <div className="flex flex-col gap-3">
                   {visiblePosts.map(post => {
-                    const postComments = commentsByPost[post.id] || (post.id.startsWith('sp') ? SAMPLE_COMMENTS.filter((entry) => entry.post_id === post.id) : []);
-                    const commentCount = postComments.length || Number(post.total_comments || 0);
+                    const loadedComments = commentsByPost[post.id];
+                    const fallbackSampleComments = SAMPLE_POST_IDS.has(post.id) ? SAMPLE_COMMENTS.filter((entry) => entry.post_id === post.id) : [];
+                    const postComments = loadedComments ?? [];
+                    const commentCount = Number(post.total_comments || 0) || loadedComments?.length || fallbackSampleComments.length;
                     return (
                       <PostCard
                         key={post.id}
@@ -1971,13 +2141,14 @@ export default function GeoPostView({ session }) {
                         zipHeatMap={zipHeatMap}
                         boroughHeatMap={boroughHeatMap}
                         textScale={feedTextScale}
+                        imageScale={feedImageScale}
                         commentCount={commentCount}
                         commentsOpen={!!openCommentsByPost[post.id]}
                         onToggleComments={toggleComments}
                         commentsChildren={
                           <CommentSection
                             post={post}
-                            comments={postComments}
+                            comments={postComments.length ? postComments : fallbackSampleComments}
                             reactionsByComment={commentReactionsByComment}
                             onSubmitComment={(postId, content) => submitCommentForPost(postId, content, null)}
                             onSubmitReply={(postId, parentId, content) => submitCommentForPost(postId, content, parentId)}

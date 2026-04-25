@@ -411,6 +411,67 @@ export async function fetchProfileForGeoPost(userId, session = null) {
   return rows[0] || null;
 }
 
+export async function syncSampleGeoPostsToSupabase(samplePosts = [], session = null) {
+  if (!samplePosts.length) return true;
+  const headers = {
+    ...baseHeaders,
+    Prefer: 'resolution=ignore-duplicates,return=minimal',
+  };
+  if (session?.access_token) {
+    headers.Authorization = `Bearer ${session.access_token}`;
+  }
+  const payload = samplePosts.map((p) => ({
+    id: p.id,
+    user_id: p.user_id || null,
+    content: p.content,
+    image_url: p.image_url || null,
+    zip_code: p.zip_code || null,
+    borough: p.borough || null,
+    is_participant: !!p.is_participant,
+    post_approved: true,
+    post_fill: p.post_fill || null,
+    post_outline: p.post_outline || null,
+    scope: p.scope || 'digital',
+    post_shadow: p.post_shadow || null,
+    created_at: p.created_at,
+  }));
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/geoposts`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(payload),
+  });
+  return res.ok;
+}
+
+export async function syncSampleGeoCommentsToSupabase(sampleComments = [], session = null) {
+  if (!sampleComments.length) return true;
+  const headers = {
+    ...baseHeaders,
+    Prefer: 'resolution=ignore-duplicates,return=minimal',
+  };
+  if (session?.access_token) {
+    headers.Authorization = `Bearer ${session.access_token}`;
+  }
+  const payload = sampleComments.map((c) => ({
+    id: c.id,
+    post_id: c.post_id,
+    parent_id: c.parent_id || null,
+    user_id: c.user_id || null,
+    username: c.username || 'anonymous',
+    content: c.content,
+    is_participant: !!c.is_participant,
+    borough: c.borough || null,
+    zip_code: c.zip_code || null,
+    created_at: c.created_at,
+  }));
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/post_comments`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(payload),
+  });
+  return res.ok;
+}
+
 /**
  * Upload a geopost image to Supabase storage.
  * (Placeholder: uses same event-images bucket. Replace with Oracle Cloud when ready.)
