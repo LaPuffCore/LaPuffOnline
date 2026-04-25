@@ -1157,6 +1157,10 @@ export default function GeoPostView({ session }) {
   const topAnchorRef = useRef(null);
   const desktopGridRef = useRef(null);
   const desktopFilterRef = useRef(null);
+  // Cached distance from scroll-container top to grid top — computed once on mount / resize,
+  // NOT on every scroll event. Recalculating on scroll is wrong because the grid reflowing
+  // (when panel row changes) alters getBoundingClientRect().top, creating a feedback loop.
+  const gridOffsetCacheRef = useRef(0);
   const [imageFile,    setImageFile]    = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
   const [submitting,   setSubmitting]   = useState(false);
@@ -1809,6 +1813,18 @@ export default function GeoPostView({ session }) {
     // so window.scrollY is always 0 — we must listen on that container instead).
     const scrollEl = grid ? findScrollParent(grid) : window;
 
+    // Compute the stable distance from the scroll container's content-top to the grid's top.
+    // Must be done ONCE here (not inside the scroll handler) — getBoundingClientRect().top
+    // shifts every time the panel moves and the grid reflowed, causing a feedback loop.
+    const computeGridOffset = () => {
+      if (!desktopGridRef.current) return;
+      const scrollTop = scrollEl === window ? window.scrollY : scrollEl.scrollTop;
+      const containerClientTop = scrollEl === window ? 0 : scrollEl.getBoundingClientRect().top;
+      const gridClientTop = desktopGridRef.current.getBoundingClientRect().top;
+      gridOffsetCacheRef.current = gridClientTop - containerClientTop + scrollTop;
+    };
+    computeGridOffset();
+
     const updatePanelRow = () => {
       if (typeof window === 'undefined' || window.innerWidth < 768) {
         setDesktopPanelRow(1);
@@ -1817,25 +1833,24 @@ export default function GeoPostView({ session }) {
       if (!desktopGridRef.current) return;
 
       const scrollTop = scrollEl === window ? window.scrollY : scrollEl.scrollTop;
-      // Position of the grid relative to the scroll container's top (stable regardless of scroll position)
-      const containerClientTop = scrollEl === window ? 0 : scrollEl.getBoundingClientRect().top;
-      const gridClientTop = desktopGridRef.current.getBoundingClientRect().top;
-      const gridOffsetInContainer = gridClientTop - containerClientTop + scrollTop;
-
       const rowStep = Math.max(1, desktopUnitHeight + 12);
-      const relativeScroll = Math.max(0, scrollTop - gridOffsetInContainer);
-      const targetRow = Math.floor(relativeScroll / rowStep) + 1;
+      const relativeScroll = Math.max(0, scrollTop - gridOffsetCacheRef.current);
+      // Advance half a row early so the panel jumps before the current row is fully obscured.
+      const targetRow = Math.floor((relativeScroll + rowStep * 0.5) / rowStep) + 1;
       const maxRow = Math.max(1, Math.ceil(desktopGridRef.current.scrollHeight / rowStep));
       const boundedRow = Math.max(1, Math.min(maxRow, targetRow));
       setDesktopPanelRow((prev) => (prev === boundedRow ? prev : boundedRow));
     };
 
+    // Recompute grid offset on resize (layout may shift), then re-evaluate row.
+    const onResize = () => { computeGridOffset(); updatePanelRow(); };
+
     updatePanelRow();
     scrollEl.addEventListener('scroll', updatePanelRow, { passive: true });
-    window.addEventListener('resize', updatePanelRow);
+    window.addEventListener('resize', onResize);
     return () => {
       scrollEl.removeEventListener('scroll', updatePanelRow);
-      window.removeEventListener('resize', updatePanelRow);
+      window.removeEventListener('resize', onResize);
     };
   }, [desktopUnitHeight, visiblePosts.length, canShowMore, canShowLess]);
 
@@ -2078,6 +2093,9 @@ export default function GeoPostView({ session }) {
             gridAutoFlow: 'dense',
             gridTemplateColumns: 'repeat(14, minmax(0, 1fr))',
             gridAutoRows: `${desktopUnitHeight}px`,
+            // Prevent browser scroll-anchoring from jumping the scroll position when
+            // the panel moves to a new row and tiles reflow around it.
+            overflowAnchor: 'none',
           }}
         >
           <aside style={{ gridColumn: '1 / span 2', gridRow: `${desktopPanelRow} / span 1`, position: 'relative', zIndex: 20 }}>
