@@ -525,6 +525,8 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
   const [imgRatio, setImgRatio] = useState(1);
   const [imgModalOpen, setImgModalOpen] = useState(false);
   const [imgLoaded, setImgLoaded] = useState(false);
+  const [isTextOverflowing, setIsTextOverflowing] = useState(false);
+  const textBlockRef = useRef(null);
   // content can be a JSONB object or, rarely, a double-encoded JSON string
   const parsedContent = (() => {
     const c = post.content;
@@ -561,12 +563,13 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
     : 'square';
   const imageHeight = isDesktopMasonry
     ? Math.max(96, Math.min(
-      shape === 'portrait' ? gridUnitHeight * 0.58 : shape === 'landscape' ? gridUnitHeight * 0.28 : gridUnitHeight * 0.34,
-      shape === 'portrait' ? 260 : shape === 'landscape' ? 160 : 190,
+      shape === 'portrait' ? gridUnitHeight * 0.42 : shape === 'landscape' ? gridUnitHeight * 0.22 : gridUnitHeight * 0.28,
+      shape === 'portrait' ? 220 : shape === 'landscape' ? 130 : 160,
     ))
     : undefined;
   const columnSpan = shape === 'landscape' ? 4 : 2;
   const rowSpan = (shape === 'portrait' ? 2 : 1) + (commentsOpen && isDesktopMasonry ? 1 : 0);
+  const maxTextLines = shape === 'portrait' ? 18 : 9;
   const tileGridStyle = {
     gridColumn: `span ${columnSpan}`,
     gridRow: `span ${rowSpan}`,
@@ -580,6 +583,27 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [imgModalOpen]);
+
+  useEffect(() => {
+    const el = textBlockRef.current;
+    if (!el) return undefined;
+
+    const updateOverflow = () => {
+      const overflow = el.scrollHeight > el.clientHeight + 1;
+      setIsTextOverflowing(overflow);
+    };
+
+    updateOverflow();
+
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', updateOverflow);
+      return () => window.removeEventListener('resize', updateOverflow);
+    }
+
+    const observer = new ResizeObserver(() => updateOverflow());
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [postHtml, scale, maxTextLines, isDesktopMasonry, commentsOpen]);
 
   return (
     <div
@@ -623,6 +647,7 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
       )}
 
       <div className="p-3" style={{ background: theme.fill, flex: 1 }}>
+        <div className="flex flex-col h-full">
         <div className="flex items-center gap-1.5 mb-2 flex-wrap">
           {postIsAnonymous ? (
             <span className="font-black text-xs flex items-center gap-1" style={{ color: theme.text, fontSize: `${12 * scale}px` }}>
@@ -649,12 +674,32 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
         </div>
 
         <div
+          ref={textBlockRef}
           className="text-sm leading-relaxed mb-3 break-words min-h-[1.5rem]"
-          style={{ color: postTextColor, fontSize: `${14 * scale}px`, lineHeight: 1.45 }}
+          style={{
+            color: postTextColor,
+            fontSize: `${14 * scale}px`,
+            lineHeight: 1.45,
+            display: '-webkit-box',
+            WebkitBoxOrient: 'vertical',
+            WebkitLineClamp: maxTextLines,
+            overflow: 'hidden',
+          }}
           dangerouslySetInnerHTML={{ __html: postHtml }}
         />
 
-        <div className="flex items-center gap-1 flex-wrap">
+        {isTextOverflowing && (
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            className="self-start mb-3 text-[11px] font-black underline decoration-2"
+            style={{ color: theme.text }}
+          >
+            Show more
+          </button>
+        )}
+
+        <div className="flex items-center gap-1 flex-wrap mt-auto">
           {topEmojis.map(([emoji, count]) => (
             <button
               key={emoji}
@@ -739,6 +784,7 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
         )}
 
         {commentsOpen && commentsChildren}
+        </div>
       </div>
 
       {imgModalOpen && (
@@ -2000,7 +2046,7 @@ export default function GeoPostView({ session }) {
             gridAutoRows: `${desktopUnitHeight}px`,
           }}
         >
-          <aside style={{ gridColumn: '1 / span 2', gridRow: `${desktopPanelRow} / span 1`, position: 'sticky', top: '80px', zIndex: 20, alignSelf: 'start' }}>
+          <aside style={{ gridColumn: '1 / span 2', gridRow: `${desktopPanelRow} / span 1`, position: 'relative', zIndex: 20 }}>
             <div ref={desktopFilterRef} className="rounded-2xl border-3 border-black p-3 bg-white shadow-[4px_4px_0px_black]">
               <input
                 value={searchQuery}
