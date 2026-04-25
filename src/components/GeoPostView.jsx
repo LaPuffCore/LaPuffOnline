@@ -526,6 +526,7 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
   const [imgModalOpen, setImgModalOpen] = useState(false);
   const [imgLoaded, setImgLoaded] = useState(false);
   const [isTextOverflowing, setIsTextOverflowing] = useState(false);
+  const [visibleStdLineCount, setVisibleStdLineCount] = useState(0);
   const textBlockRef = useRef(null);
   // content can be a JSONB object or, rarely, a double-encoded JSON string
   const parsedContent = (() => {
@@ -558,6 +559,8 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
   const frameRatio = (16 / 9) / Math.max(0.5, Number(imageScale || 1));
   const isNonStandardFrame = Math.abs(imgRatio - frameRatio) > 0.08;
   const scale = Math.max(0.6, Math.min(2, Number(textScale || 1)));
+  const standardLineHeightPx = 14 * 1.45;
+  const lineHeightPx = 14 * scale * 1.45;
   const hasImage = Boolean(post.image_url);
   const shape = hasImage
     ? (imgRatio < 0.85 ? 'portrait' : imgRatio > 1.25 ? 'landscape' : 'square')
@@ -565,15 +568,19 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
   const isTallTile = hasImage && shape === 'portrait';
   const isLongTile = hasImage && shape === 'landscape';
   const isSquareImageTile = hasImage && shape === 'square';
-  const imageHeight = isDesktopMasonry
-    ? Math.max(96, Math.min(
-      isTallTile ? gridUnitHeight * 0.72 : isLongTile ? gridUnitHeight * 0.22 : isSquareImageTile ? gridUnitHeight * 0.28 : gridUnitHeight * 0.26,
-      isTallTile ? 520 : isLongTile ? 140 : isSquareImageTile ? 170 : 160,
-    ))
-    : undefined;
   const columnSpan = isLongTile ? 4 : 2;
   const rowSpan = (isTallTile ? 2 : 1) + (commentsOpen && isDesktopMasonry ? 1 : 0);
-  const maxTextLines = isTallTile ? 9 : hasImage ? 5 : 9;
+  const maxTextLines = isTallTile ? 9 : hasImage ? 3 : 9;
+  const shortTextStdDeficit = hasImage && !isTallTile && !isTextOverflowing
+    ? Math.max(0, 3 - Math.min(3, visibleStdLineCount || 0))
+    : 0;
+  const shortTextImageBoost = isDesktopMasonry ? shortTextStdDeficit * standardLineHeightPx : 0;
+  const imageHeight = isDesktopMasonry
+    ? Math.max(96, Math.min(
+      (isTallTile ? gridUnitHeight * 0.6 : isLongTile ? gridUnitHeight * 0.34 : isSquareImageTile ? gridUnitHeight * 0.4 : gridUnitHeight * 0.34) + shortTextImageBoost,
+      isTallTile ? 560 : isLongTile ? 220 : isSquareImageTile ? 260 : 220,
+    ))
+    : undefined;
   const tileGridStyle = {
     gridColumn: `span ${columnSpan}`,
     gridRow: `span ${rowSpan}`,
@@ -593,8 +600,12 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
     if (!el) return undefined;
 
     const updateOverflow = () => {
-      const overflow = el.scrollHeight > el.clientHeight + 1;
+      const maxAllowedHeight = lineHeightPx * maxTextLines;
+      const contentHeight = el.scrollHeight;
+      const overflow = contentHeight > maxAllowedHeight + 1;
+      const visibleHeight = overflow ? maxAllowedHeight : contentHeight;
       setIsTextOverflowing(overflow);
+      setVisibleStdLineCount(Math.max(0, visibleHeight / standardLineHeightPx));
     };
 
     updateOverflow();
@@ -607,7 +618,7 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
     const observer = new ResizeObserver(() => updateOverflow());
     observer.observe(el);
     return () => observer.disconnect();
-  }, [postHtml, scale, maxTextLines, isDesktopMasonry, commentsOpen]);
+  }, [postHtml, lineHeightPx, maxTextLines, isDesktopMasonry, commentsOpen, standardLineHeightPx]);
 
   return (
     <div
@@ -679,15 +690,15 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
 
         <div
           ref={textBlockRef}
-          className="text-sm leading-relaxed mb-3 break-words min-h-[1.5rem] min-h-0"
+          className="text-sm leading-relaxed mb-3 break-words min-h-[1.5rem] min-h-0 [&>*]:m-0"
           style={{
             color: postTextColor,
             fontSize: `${14 * scale}px`,
-            lineHeight: 1.45,
-            display: '-webkit-box',
-            WebkitBoxOrient: 'vertical',
-            WebkitLineClamp: maxTextLines,
+            lineHeight: `${lineHeightPx}px`,
+            maxHeight: `${lineHeightPx * maxTextLines}px`,
             overflow: 'hidden',
+            display: 'block',
+            flexShrink: 0,
           }}
           dangerouslySetInnerHTML={{ __html: postHtml }}
         />
@@ -1793,13 +1804,15 @@ export default function GeoPostView({ session }) {
       }
       const grid = desktopGridRef.current;
       if (!grid) return;
+
       const rect = grid.getBoundingClientRect();
+      const gridTopAbs = window.scrollY + rect.top;
       const rowStep = Math.max(1, desktopUnitHeight + 12);
-      const anchorY = 116;
-      const relativeY = anchorY - rect.top;
-      const nextRow = relativeY <= 0 ? 1 : 1 + Math.floor(relativeY / rowStep);
-      const maxRow = Math.max(1, Math.floor((grid.scrollHeight - 1) / rowStep));
-      const boundedRow = Math.max(1, Math.min(maxRow, nextRow));
+      const viewportAnchor = 108;
+      const relativeScroll = (window.scrollY + viewportAnchor) - gridTopAbs;
+      const targetRow = relativeScroll <= 0 ? 1 : 1 + Math.floor(relativeScroll / rowStep);
+      const maxRow = Math.max(1, Math.ceil((grid.scrollHeight - desktopUnitHeight) / rowStep) + 1);
+      const boundedRow = Math.max(1, Math.min(maxRow, targetRow));
       setDesktopPanelRow((prev) => (prev === boundedRow ? prev : boundedRow));
     };
 
