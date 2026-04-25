@@ -626,7 +626,7 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
         height: '100%',
         display: 'flex',
         flexDirection: 'column',
-        transition: 'transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1)',
+        transition: 'transform 2000ms cubic-bezier(0.16, 1, 0.3, 1)',
         ...tileGridStyle,
       }}
     >
@@ -698,19 +698,19 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
           dangerouslySetInnerHTML={{ __html: postHtml }}
         />
 
-        {/* spacer pushes reaction/tag row to bottom of the tile */}
-        <div style={{ flex: 1 }} />
-
         {isTextOverflowing && (
           <button
             type="button"
             onMouseDown={(e) => e.preventDefault()}
-            className="self-start mb-1 text-[11px] font-black underline decoration-2"
-            style={{ color: theme.text }}
+            className="self-start text-[11px] font-black underline decoration-2"
+            style={{ color: theme.text, marginTop: 2 }}
           >
             Show more
           </button>
         )}
+
+        {/* spacer pushes reaction/tag row to bottom of the tile */}
+        <div style={{ flex: 1, minHeight: 4 }} />
 
         <div className="flex items-center gap-1 flex-wrap">
           {topEmojis.map(([emoji, count]) => (
@@ -1159,7 +1159,7 @@ export default function GeoPostView({ session }) {
   const [openCommentsByPost, setOpenCommentsByPost] = useState({});
   const [commentReactorsModal, setCommentReactorsModal] = useState(null);
   const [currentProfile, setCurrentProfile] = useState(null);
-  const [desktopPanelRow, setDesktopPanelRow] = useState(2);
+  const [desktopPanelRow, setDesktopPanelRow] = useState(1);
   const [desktopUnitHeight, setDesktopUnitHeight] = useState(420);
   const createPostAreaRef = useRef(null);
   const [fabOpacity, setFabOpacity] = useState(0);
@@ -1179,8 +1179,9 @@ export default function GeoPostView({ session }) {
   const desktopGridRef = useRef(null);
   const desktopFilterRef = useRef(null);
   const filterPanelInnerRef = useRef(null);
-  const panelRowRef = useRef(2);
+  const panelRowRef = useRef(1);
   const rowStepRef = useRef(432);
+  const scrollSettleTimerRef = useRef(null);
   const scaleButtonRef = useRef(null);
   // Cached distance from scroll-container top to grid top — computed once on mount / resize,
   // NOT on every scroll event. Recalculating on scroll is wrong because the grid reflowing
@@ -1841,21 +1842,39 @@ export default function GeoPostView({ session }) {
       setDesktopPanelRow(newRow);
       return;
     }
+    // Capture current visual translateY (may be mid-animation)
     const matrix = window.getComputedStyle(el).transform;
     let currentTranslateY = 0;
     if (matrix && matrix !== 'none') {
       const vals = matrix.replace('matrix(', '').replace(')', '').split(',');
       if (vals.length >= 6) currentTranslateY = parseFloat(vals[5]) || 0;
     }
-    const delta = (prevRow - newRow) * rowStepRef.current;
+    const rowStep = rowStepRef.current;
+    const delta = (prevRow - newRow) * rowStep;
     const startTranslate = currentTranslateY + delta;
+    const travelDistance = Math.abs(startTranslate);
+
     panelRowRef.current = newRow;
     setDesktopPanelRow(newRow);
+
+    // 1. Snap: teleport grid-row but apply counter-translateY so panel APPEARS not to move
     el.style.transition = 'none';
     el.style.transform = `translateY(${startTranslate}px)`;
+    // Progressive blur proportional to travel distance
+    const blurPx = Math.min(18, Math.max(3, travelDistance / 28));
+    el.style.filter = `blur(${blurPx}px)`;
+    el.style.opacity = '0.6';
+
+    // 2. On next paint: release — smooth 2s cinematic glide to final position
     requestAnimationFrame(() => requestAnimationFrame(() => {
-      el.style.transition = 'transform 700ms cubic-bezier(0.22,1,0.36,1)';
+      el.style.transition = [
+        'transform 2000ms cubic-bezier(0.16, 1, 0.3, 1)',
+        'filter 1700ms cubic-bezier(0.4, 0, 0.2, 1)',
+        'opacity 900ms ease-out',
+      ].join(', ');
       el.style.transform = 'translateY(0px)';
+      el.style.filter = 'blur(0px)';
+      el.style.opacity = '1';
     }));
   }, []);
 
@@ -1872,31 +1891,50 @@ export default function GeoPostView({ session }) {
     };
     computeGridOffset();
 
-    const updatePanelRow = () => {
-      if (typeof window === 'undefined' || window.innerWidth < 768) {
-        setDesktopPanelRow(1);
-        return;
-      }
-      if (!desktopGridRef.current) return;
-
+    const computeTargetRow = () => {
+      if (typeof window === 'undefined' || window.innerWidth < 768) return 1;
+      if (!desktopGridRef.current) return panelRowRef.current;
       const scrollTop = scrollEl === window ? window.scrollY : scrollEl.scrollTop;
       const rowStep = Math.max(1, desktopUnitHeight + 12);
       rowStepRef.current = rowStep;
       const relativeScroll = Math.max(0, scrollTop - gridOffsetCacheRef.current);
-      // Advance half a row early. minRow=2 so panel never sits in the topmost grid row.
-      const targetRow = Math.max(2, Math.floor((relativeScroll + rowStep * 0.5) / rowStep) + 1);
-      const maxRow = Math.max(2, Math.ceil(desktopGridRef.current.scrollHeight / rowStep));
-      const boundedRow = Math.min(maxRow, targetRow);
-      applyPanelRow(boundedRow);
+      // Row 1 at start; advance half a row early so it never gets hidden
+      const targetRow = Math.max(1, Math.floor((relativeScroll + rowStep * 0.5) / rowStep) + 1);
+      // Clamp to actual last row (ensures panel is always visible at bottom of feed too)
+      const maxRow = Math.max(1, Math.ceil(desktopGridRef.current.scrollHeight / rowStep));
+      return Math.min(maxRow, targetRow);
     };
 
-    const onResize = () => { computeGridOffset(); updatePanelRow(); };
+    // Debounced: only fire 500ms after scrolling fully stops — no jitter, no chasing fast scroll
+    const onScroll = () => {
+      if (scrollSettleTimerRef.current) clearTimeout(scrollSettleTimerRef.current);
+      scrollSettleTimerRef.current = setTimeout(() => {
+        applyPanelRow(computeTargetRow());
+      }, 500);
+    };
 
-    updatePanelRow();
-    scrollEl.addEventListener('scroll', updatePanelRow, { passive: true });
+    const onResize = () => {
+      computeGridOffset();
+      if (scrollSettleTimerRef.current) clearTimeout(scrollSettleTimerRef.current);
+      applyPanelRow(computeTargetRow());
+    };
+
+    // Place panel immediately on mount/dep-change without animation
+    const initialRow = computeTargetRow();
+    panelRowRef.current = initialRow;
+    setDesktopPanelRow(initialRow);
+    if (filterPanelInnerRef.current) {
+      filterPanelInnerRef.current.style.transition = 'none';
+      filterPanelInnerRef.current.style.transform = 'translateY(0)';
+      filterPanelInnerRef.current.style.filter = 'blur(0)';
+      filterPanelInnerRef.current.style.opacity = '1';
+    }
+
+    scrollEl.addEventListener('scroll', onScroll, { passive: true });
     window.addEventListener('resize', onResize);
     return () => {
-      scrollEl.removeEventListener('scroll', updatePanelRow);
+      if (scrollSettleTimerRef.current) clearTimeout(scrollSettleTimerRef.current);
+      scrollEl.removeEventListener('scroll', onScroll);
       window.removeEventListener('resize', onResize);
     };
   }, [desktopUnitHeight, visiblePosts.length, canShowMore, canShowLess, applyPanelRow]);
@@ -1908,8 +1946,10 @@ export default function GeoPostView({ session }) {
       if (!createPostAreaRef.current) return;
       const rect = createPostAreaRef.current.getBoundingClientRect();
       const containerTop = scrollEl === window ? 0 : scrollEl.getBoundingClientRect().top;
-      // How far the bottom of create-post has gone above the container viewport top
-      const disappearProgress = Math.max(0, Math.min(1, (containerTop - rect.bottom) / Math.max(1, rect.height)));
+      // visibleFraction: 1 = fully visible, 0 = fully off screen
+      const visibleFraction = Math.max(0, Math.min(1, (rect.bottom - containerTop) / Math.max(1, rect.height)));
+      // Start fading in during last 40% of create-post leaving, reach 1.0 when fully gone
+      const disappearProgress = Math.max(0, Math.min(1, 1 - visibleFraction / 0.4));
       setFabOpacity(disappearProgress);
       setFabVisible(disappearProgress > 0);
     };
@@ -2162,7 +2202,7 @@ export default function GeoPostView({ session }) {
             overflowAnchor: 'none',
           }}
         >
-          <aside ref={filterPanelInnerRef} style={{ gridColumn: '1 / span 2', gridRow: `${desktopPanelRow} / span 1`, position: 'relative', zIndex: 20, willChange: 'transform' }}>
+          <aside ref={filterPanelInnerRef} style={{ gridColumn: '1 / span 2', gridRow: `${desktopPanelRow} / span 1`, position: 'relative', zIndex: 20, willChange: 'transform, filter, opacity' }}>
             <div ref={desktopFilterRef} className="rounded-2xl bg-white p-2" style={{ border: '5px dotted #000', boxShadow: 'none' }}>
               <div className="text-[10px] font-black text-center tracking-widest uppercase mb-1.5 opacity-60">Filter Panel</div>
               <input
@@ -2483,25 +2523,33 @@ export default function GeoPostView({ session }) {
       <ReactionListModal isOpen={!!reactorsModal} list={reactorsModal ? (reactions[reactorsModal] || []) : []} onClose={() => setReactorsModal(null)} />
       <ReactionListModal isOpen={!!commentReactorsModal} title="Comment Reactions" list={commentReactorsModal ? (commentReactionsByComment[commentReactorsModal] || []) : []} emojiField="emoji" onClose={() => setCommentReactorsModal(null)} />
 
-      {/* Quick Post FAB */}
+      {/* Quick Post FAB — 2x size, square, more padding, full toolbar */}
       {fabVisible && createPortal(
         <>
           <button
             onMouseDown={e => e.preventDefault()}
             onClick={() => setQuickPostOpen(v => !v)}
-            className="fixed bottom-6 left-6 z-[99970] w-12 h-12 rounded-full bg-white border-3 border-black flex items-center justify-center text-2xl font-black shadow-[3px_3px_0px_black] hover:scale-110 transition-transform"
-            style={{ opacity: fabOpacity, transition: 'opacity 200ms ease, transform 150ms ease' }}
+            className="fixed z-[99970] bg-white border-3 border-black flex items-center justify-center font-black shadow-[4px_4px_0px_black] hover:scale-105 active:scale-95"
+            style={{
+              bottom: 36, left: 36,
+              width: 56, height: 56,
+              borderRadius: 14,
+              fontSize: 28,
+              opacity: fabOpacity,
+              transition: 'opacity 300ms ease, transform 150ms ease',
+            }}
             aria-label="Quick post"
           >
             +
           </button>
           {quickPostOpen && (
             <div
-              className="fixed bottom-24 left-6 z-[99971] bg-white rounded-2xl border-3 border-black shadow-[6px_6px_0px_black] p-3 flex flex-col gap-2"
-              style={{ width: 340, maxHeight: '60vh', overflowY: 'auto', opacity: fabOpacity }}
+              className="fixed z-[99971] bg-white rounded-2xl border-3 border-black shadow-[8px_8px_0px_black] flex flex-col"
+              style={{ bottom: 108, left: 36, width: 680, maxHeight: '72vh', opacity: fabOpacity }}
             >
-              <div className="flex items-center justify-between mb-1">
-                <span className="font-black text-xs">Quick Post</span>
+              {/* Header */}
+              <div className="flex items-center justify-between px-4 py-2 border-b-2 border-black flex-shrink-0">
+                <span className="font-black text-sm">✍️ Quick Post</span>
                 <button
                   onMouseDown={e => e.preventDefault()}
                   onClick={() => {
@@ -2509,23 +2557,64 @@ export default function GeoPostView({ session }) {
                       editorRef.current.innerHTML = miniEditorRef.current.innerHTML;
                     }
                     setQuickPostOpen(false);
-                    topAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                    const scrollEl = desktopGridRef.current ? findScrollParent(desktopGridRef.current) : window;
+                    if (scrollEl && scrollEl !== window) {
+                      scrollEl.scrollTo({ top: 0, behavior: 'smooth' });
+                    } else {
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }
                   }}
-                  className="px-2 py-0.5 border-2 border-black rounded-lg text-[10px] font-black bg-yellow-100 hover:bg-yellow-200"
+                  className="px-3 py-1 border-2 border-black rounded-lg text-[11px] font-black bg-yellow-100 hover:bg-yellow-200"
                 >
                   ✏️ Edit Above
                 </button>
               </div>
+
+              {/* Mini toolbar */}
+              <div className="flex items-center gap-0.5 px-3 py-1.5 border-b-2 border-black flex-shrink-0 flex-wrap bg-gray-50">
+                {[
+                  { cmd: 'bold',      label: <b>B</b>,      title: 'Bold' },
+                  { cmd: 'italic',    label: <i>I</i>,      title: 'Italic' },
+                  { cmd: 'underline', label: <u>U</u>,      title: 'Underline' },
+                ].map(({ cmd, label, title }) => (
+                  <button key={cmd} title={title} onMouseDown={e => { e.preventDefault(); miniEditorRef.current?.focus(); document.execCommand(cmd, false, null); }}
+                    className="w-8 h-8 rounded font-black text-[12px] hover:bg-gray-200 flex items-center justify-center">
+                    {label}
+                  </button>
+                ))}
+                <div className="w-px h-5 bg-gray-300 mx-0.5" />
+                {['justifyLeft','justifyCenter','justifyRight'].map((cmd, i) => (
+                  <button key={cmd} title={cmd} onMouseDown={e => { e.preventDefault(); miniEditorRef.current?.focus(); document.execCommand(cmd, false, null); }}
+                    className="w-8 h-8 rounded text-[11px] hover:bg-gray-200 flex items-center justify-center font-black">
+                    {['≡','≡','≡'][i]}
+                  </button>
+                ))}
+                <div className="w-px h-5 bg-gray-300 mx-0.5" />
+                <button title="Font Smaller" onMouseDown={e => { e.preventDefault(); miniEditorRef.current?.focus(); document.execCommand('fontSize', false, String(Math.max(1, (parseInt(document.queryCommandValue('fontSize'))||3)-1))); }}
+                  className="w-8 h-8 rounded text-[10px] font-black hover:bg-gray-200 flex items-center justify-center">A↓</button>
+                <button title="Font Larger" onMouseDown={e => { e.preventDefault(); miniEditorRef.current?.focus(); document.execCommand('fontSize', false, String(Math.min(6, (parseInt(document.queryCommandValue('fontSize'))||3)+1))); }}
+                  className="w-8 h-8 rounded text-[10px] font-black hover:bg-gray-200 flex items-center justify-center">A↑</button>
+                <div className="w-px h-5 bg-gray-300 mx-0.5" />
+                <button title="Bullet list" onMouseDown={e => { e.preventDefault(); miniEditorRef.current?.focus(); document.execCommand('insertUnorderedList', false, null); }}
+                  className="w-8 h-8 rounded text-[11px] hover:bg-gray-200 flex items-center justify-center font-black">•≡</button>
+                <button title="Numbered list" onMouseDown={e => { e.preventDefault(); miniEditorRef.current?.focus(); document.execCommand('insertOrderedList', false, null); }}
+                  className="w-8 h-8 rounded text-[11px] hover:bg-gray-200 flex items-center justify-center font-black">1≡</button>
+                <div className="w-px h-5 bg-gray-300 mx-0.5" />
+                <button title="Clear formatting" onMouseDown={e => { e.preventDefault(); if (miniEditorRef.current) miniEditorRef.current.innerHTML = ''; }}
+                  className="w-8 h-8 rounded text-[11px] hover:bg-red-100 flex items-center justify-center font-black text-red-500">✕</button>
+              </div>
+
+              {/* Editor */}
               <div
                 ref={miniEditorRef}
                 contentEditable
                 suppressContentEditableWarning
-                className="min-h-[80px] px-2 py-2 text-xs border-2 border-black rounded-lg"
-                style={{ overflowWrap: 'break-word' }}
-                placeholder="Write something..."
+                className="flex-1 px-4 py-3 text-sm border-0 outline-none overflow-y-auto"
+                style={{ minHeight: 160, overflowWrap: 'break-word' }}
               />
-              <div className="flex gap-2 items-center">
+
+              {/* Bottom bar */}
+              <div className="flex gap-2 items-center px-4 py-2 border-t-2 border-black flex-shrink-0 bg-gray-50">
                 <input
                   type="file"
                   accept="image/*"
@@ -2534,12 +2623,10 @@ export default function GeoPostView({ session }) {
                   onChange={async (e) => {
                     const file = e.target.files?.[0];
                     if (!file) return;
-                    const evt = new Event('change', { bubbles: true });
-                    Object.defineProperty(evt, 'target', { value: e.target });
-                    handleImageChange(evt);
+                    handleImageChange(e);
                   }}
                 />
-                <label htmlFor="fab-file-input" className="px-2 py-1 border-2 border-black rounded-lg text-[11px] font-black bg-white cursor-pointer hover:bg-gray-100">📎</label>
+                <label htmlFor="fab-file-input" className="px-3 py-1.5 border-2 border-black rounded-lg text-[12px] font-black bg-white cursor-pointer hover:bg-gray-100">📎 Image</label>
                 <button
                   onMouseDown={e => e.preventDefault()}
                   onClick={async () => {
@@ -2550,7 +2637,7 @@ export default function GeoPostView({ session }) {
                     setQuickPostOpen(false);
                     if (miniEditorRef.current) miniEditorRef.current.innerHTML = '';
                   }}
-                  className="ml-auto px-3 py-1 border-2 border-black rounded-lg text-[11px] font-black text-white"
+                  className="ml-auto px-5 py-1.5 border-2 border-black rounded-lg text-[12px] font-black text-white shadow-[2px_2px_0px_black]"
                   style={{ background: accentColor }}
                 >
                   Post
