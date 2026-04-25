@@ -25,7 +25,7 @@ const BOROUGH_ZIPS = BOROUGHS.reduce((acc, b) => {
   acc[b] = NYC_ZIP_FEATURES.filter(z => z.borough === b).sort((a, x) => a.zip.localeCompare(x.zip));
   return acc;
 }, {});
-const PAGE_SIZE = 10;
+const PAGE_SIZE = 30;
 const TIME_OPTIONS = [
   { key: 'all', label: 'All Time' },
   { key: '1d',  label: '1 Day' },
@@ -556,6 +556,19 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
   const frameRatio = (16 / 9) / Math.max(0.5, Number(imageScale || 1));
   const framePadding = `${56.25 * Math.max(0.5, Number(imageScale || 1))}%`;
   const isNonStandardFrame = Math.abs(imgRatio - frameRatio) > 0.08;
+  const scale = Math.max(0.6, Math.min(2, Number(textScale || 1)));
+  const shape = post.image_url
+    ? (imgRatio < 0.85 ? 'portrait' : imgRatio > 1.25 ? 'landscape' : 'square')
+    : 'square';
+  const imagePadding = shape === 'portrait' ? '140%' : shape === 'landscape' ? '58%' : '100%';
+  const bodyTextLen = stripHtmlTags(postHtml).length;
+  const textUnits = Math.max(3, Math.min(14, Math.ceil((bodyTextLen * scale) / 115)));
+  const baseUnits = shape === 'portrait' ? 28 : shape === 'landscape' ? 18 : 20;
+  const columnSpan = shape === 'landscape' ? (Math.max(0.5, Number(imageScale || 1)) < 0.9 ? 3 : 2) : 1;
+  const tileGridStyle = {
+    gridColumn: `span ${columnSpan}`,
+    gridRow: `span ${baseUnits + textUnits}`,
+  };
 
   useEffect(() => {
     if (!imgModalOpen) return undefined;
@@ -572,10 +585,11 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
       style={{
         borderColor: theme.outline,
         boxShadow: `4px 4px 0px ${theme.shadow}`,
+        ...tileGridStyle,
       }}
     >
       {post.image_url && (
-        <div className="relative w-full overflow-hidden bg-black/5" style={{ height: 0, paddingBottom: framePadding }}>
+        <div className="relative w-full overflow-hidden bg-black/5" style={{ height: 0, paddingBottom: imagePadding }}>
           <img
             src={post.image_url}
             alt="post"
@@ -602,10 +616,10 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
         </div>
       )}
 
-      <div className="p-3" style={{ background: theme.fill, fontSize: `${Math.max(0.5, Number(textScale || 1))}em` }}>
+      <div className="p-3" style={{ background: theme.fill }}>
         <div className="flex items-center gap-1.5 mb-2 flex-wrap">
           {postIsAnonymous ? (
-            <span className="font-black text-xs flex items-center gap-1" style={{ color: theme.text }}>
+            <span className="font-black text-xs flex items-center gap-1" style={{ color: theme.text, fontSize: `${12 * scale}px` }}>
               <svg width="13" height="13" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ color: 'currentColor' }}>
                 <rect x="2" y="9" width="16" height="2.5" rx="1.25" fill="currentColor" />
                 <rect x="5" y="3" width="10" height="7" rx="1.5" fill="currentColor" />
@@ -614,23 +628,23 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
               Anonymous
             </span>
           ) : (
-            <span className="font-black text-xs" style={{ color: theme.text }}>{post.username || 'Orbiter'}</span>
+            <span className="font-black text-xs" style={{ color: theme.text, fontSize: `${12 * scale}px` }}>{post.username || 'Orbiter'}</span>
           )}
 
           <span
             onClick={() => onSelectTag && onSelectTag({ status: postIsAnonymous ? 'anonymous' : post.is_participant ? 'participant' : 'orbiter' })}
             className="text-[9px] font-black px-1.5 py-0.5 rounded-full cursor-pointer"
-            style={statusStyle}
+            style={{ ...statusStyle, fontSize: `${9 * scale}px` }}
           >
             ● {post.is_participant ? 'PARTICIPANT' : postIsAnonymous ? 'ANON' : 'ORBITER'}
           </span>
 
-          <span className="text-[9px] ml-auto" style={{ color: theme.text }}>{dateStr} · {timeStr}</span>
+          <span className="text-[9px] ml-auto" style={{ color: theme.text, fontSize: `${9 * scale}px` }}>{dateStr} · {timeStr}</span>
         </div>
 
         <div
           className="text-sm leading-relaxed mb-3 break-words min-h-[1.5rem]"
-          style={{ color: postTextColor }}
+          style={{ color: postTextColor, fontSize: `${14 * scale}px`, lineHeight: 1.45 }}
           dangerouslySetInnerHTML={{ __html: postHtml }}
         />
 
@@ -641,7 +655,7 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => onReact(post.id, emoji)}
               className="flex items-center gap-0.5 px-2 py-0.5 rounded-full border-2 text-xs font-black hover:scale-105 transition-transform"
-              style={post.post_fill ? outlineButtonStyle : { borderColor: '#000', backgroundColor: '#f3f4f6', color: '#000' }}
+              style={post.post_fill ? { ...outlineButtonStyle, fontSize: `${11 * scale}px` } : { borderColor: '#000', backgroundColor: '#f3f4f6', color: '#000', fontSize: `${11 * scale}px` }}
             >
               {emoji}<span className="text-[10px]">{count}</span>
             </button>
@@ -651,7 +665,7 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => setQepOpen((v) => !v)}
             className="px-2 py-0.5 rounded-full border-2 text-xs font-black hover:scale-105 transition-transform"
-            style={post.post_fill ? outlineButtonStyle : { borderColor: '#000', backgroundColor: '#f3f4f6', color: '#000' }}
+            style={post.post_fill ? { ...outlineButtonStyle, fontSize: `${11 * scale}px` } : { borderColor: '#000', backgroundColor: '#f3f4f6', color: '#000', fontSize: `${11 * scale}px` }}
           >
             +
           </button>
@@ -661,7 +675,7 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => onOpenReactors(post.id)}
               className="px-2 py-0.5 rounded-full border-2 text-[10px] font-black hover:scale-105 transition-transform"
-              style={post.post_fill ? outlineButtonStyle : { borderColor: '#000', backgroundColor: '#f3f4f6', color: '#000' }}
+              style={post.post_fill ? { ...outlineButtonStyle, fontSize: `${10 * scale}px` } : { borderColor: '#000', backgroundColor: '#f3f4f6', color: '#000', fontSize: `${10 * scale}px` }}
             >
               …
             </button>
@@ -671,7 +685,7 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => onToggleComments && onToggleComments(post.id)}
             className="px-2 py-0.5 rounded-full border-2 text-[10px] font-black hover:scale-105 transition-transform"
-            style={post.post_fill ? outlineButtonStyle : { borderColor: '#000', backgroundColor: '#f3f4f6', color: '#000' }}
+            style={post.post_fill ? { ...outlineButtonStyle, fontSize: `${10 * scale}px` } : { borderColor: '#000', backgroundColor: '#f3f4f6', color: '#000', fontSize: `${10 * scale}px` }}
           >
             💬 {commentCount}
           </button>
@@ -681,7 +695,7 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
               <span
                 onClick={() => onSelectTag && onSelectTag({ ...post, scope: 'borough' })}
                 className="text-[9px] font-black px-1.5 py-0.5 rounded-full cursor-pointer"
-                style={{ background: boroughTagBg, color: boroughTagText, border: `1px solid ${boroughTagText}` }}
+                style={{ background: boroughTagBg, color: boroughTagText, border: `1px solid ${boroughTagText}`, fontSize: `${9 * scale}px` }}
               >
                 🏙 {post.borough}
               </span>
@@ -691,10 +705,10 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
               onClick={() => onSelectTag && onSelectTag(post)}
               className="text-[9px] font-black px-1.5 py-0.5 rounded-full cursor-pointer"
               style={post.scope === 'zip' && post.zip_code
-                ? { background: zipTagBg, color: zipTagText, border: `1px solid ${zipTagText}` }
+                ? { background: zipTagBg, color: zipTagText, border: `1px solid ${zipTagText}`, fontSize: `${9 * scale}px` }
                 : post.borough
-                  ? { background: boroughTagBg, color: boroughTagText, border: `1px solid ${boroughTagText}` }
-                  : { background: '#f3f4f6', border: '1px solid #d1d5db', color: '#4b5563' }}
+                  ? { background: boroughTagBg, color: boroughTagText, border: `1px solid ${boroughTagText}`, fontSize: `${9 * scale}px` }
+                  : { background: '#f3f4f6', border: '1px solid #d1d5db', color: '#4b5563', fontSize: `${9 * scale}px` }}
             >
               {post.scope === 'zip' && post.zip_code
                 ? `📍 ${post.zip_code}`
@@ -1722,6 +1736,45 @@ export default function GeoPostView({ session }) {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  const renderFeedPostCard = (post, index) => {
+    const loadedComments = commentsByPost[post.id];
+    const fallbackSampleComments = SAMPLE_POST_IDS.has(post.id) ? SAMPLE_COMMENTS.filter((entry) => entry.post_id === post.id) : [];
+    const postComments = loadedComments ?? [];
+    const commentCount = Number(post.total_comments || 0) || loadedComments?.length || fallbackSampleComments.length;
+    return (
+      <PostCard
+        key={post.id}
+        post={post}
+        postReactions={reactions[post.id]}
+        onReact={handleReact}
+        onOpenReactors={id => setReactorsModal(id)}
+        accentColor={accentColor}
+        onSelectTag={handleSelectTag}
+        zipHeatMap={zipHeatMap}
+        boroughHeatMap={boroughHeatMap}
+        textScale={feedTextScale}
+        imageScale={feedImageScale}
+        imagePriority={index < 10}
+        commentCount={commentCount}
+        commentsOpen={!!openCommentsByPost[post.id]}
+        onToggleComments={toggleComments}
+        commentsChildren={
+          <CommentSection
+            post={post}
+            comments={postComments.length ? postComments : fallbackSampleComments}
+            reactionsByComment={commentReactionsByComment}
+            onSubmitComment={(postId, content) => submitCommentForPost(postId, content, null)}
+            onSubmitReply={(postId, parentId, content) => submitCommentForPost(postId, content, parentId)}
+            onToggleReaction={handleCommentReaction}
+            onOpenReactors={(commentId) => setCommentReactorsModal(commentId)}
+            zipHeatMap={zipHeatMap}
+            boroughHeatMap={boroughHeatMap}
+          />
+        }
+      />
+    );
+  };
+
   return (
     <div className="w-full" ref={topAnchorRef}>
       <div className="w-full max-w-7xl mx-auto px-3 pt-3">
@@ -1872,14 +1925,173 @@ export default function GeoPostView({ session }) {
         </div>
       </div>
 
-      <div className="w-full max-w-7xl mx-auto px-3">
+      <div className="w-full px-3 md:px-4">
         <div className="flex items-center gap-2 mt-2 mb-3">
           <div className="flex-1 border-t-2 border-black" />
           <span className="font-black text-xs text-black whitespace-nowrap px-1">- Geo-Feed -</span>
           <div className="flex-1 border-t-2 border-black" />
         </div>
 
-        <div className="md:grid md:grid-cols-3 md:gap-4">
+        <div
+          className="hidden md:grid gap-3 pb-10"
+          style={{
+            '--image-scale': Math.max(0.5, Number(feedImageScale || 1)),
+            gridAutoFlow: 'dense',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(calc(120px * var(--image-scale)), 1fr))',
+            gridAutoRows: '10px',
+          }}
+        >
+          <aside style={{ gridColumn: '1', gridRow: 'span 60', position: 'sticky', top: '80px', zIndex: 20, alignSelf: 'start' }}>
+            <div className="rounded-2xl border-3 border-black p-3 bg-white shadow-[4px_4px_0px_black]">
+              <input
+                value={searchQuery}
+                onChange={(e) => { setSearchQuery(e.target.value); setVisibleCount(PAGE_SIZE); }}
+                placeholder="Search posts, usernames, zips..."
+                className="w-full px-3 py-2 border-2 border-black rounded text-sm font-black mb-3"
+              />
+              <div className="flex flex-col gap-2">
+                <button onMouseDown={e => e.preventDefault()} onClick={() => setSortByTop(v => !v)} className={baseFB} style={sortByTop ? activeFS : {}}>🔥 Top</button>
+                <button onMouseDown={e => e.preventDefault()} onClick={() => { setLocTab('all'); setFilterBorough(''); setFilterZip(''); setOpenDropdown(null); }} className={baseFB} style={locTab === 'all' ? activeFS : {}}>🌀 All</button>
+
+                <div className="relative">
+                  <button
+                    ref={boroughTriggerDesktopRef}
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={() => setOpenDropdown(p => p === 'borough' ? null : 'borough')}
+                    className={baseFB}
+                    style={locTab === 'borough' && filterBorough ? activeFS : {}}
+                  >
+                    🏙 {locTab === 'borough' && filterBorough ? `${filterBorough} ×` : 'Borough ▾'}
+                  </button>
+                  <InlineDropdown open={openDropdown === 'borough'} onClose={() => setOpenDropdown(null)} triggerRef={boroughTriggerDesktopRef}>
+                    {(locTab === 'borough' && filterBorough) && (
+                      <button onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setLocTab('all'); setFilterBorough(''); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100 border-b border-gray-200 text-red-500">× Clear</button>
+                    )}
+                    {BOROUGHS.map(b => (
+                      <button key={b} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setFilterBorough(b); setFilterZip(''); setLocTab('borough'); setFilterZipBoro(b); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100" style={filterBorough === b ? { background: accentColor + '22', color: accentColor } : {}}>{b}</button>
+                    ))}
+                  </InlineDropdown>
+                </div>
+
+                <div className="relative">
+                  <button
+                    ref={zipTriggerDesktopRef}
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={() => setOpenDropdown(p => p === 'zip' ? null : 'zip')}
+                    className={baseFB}
+                    style={locTab === 'zip' && filterZip ? activeFS : {}}
+                  >
+                    📍 {locTab === 'zip' && filterZip ? `${filterZip} ×` : 'Zip ▾'}
+                  </button>
+                  <InlineDropdown open={openDropdown === 'zip'} onClose={() => setOpenDropdown(null)} className="w-[220px] max-h-[280px]" triggerRef={zipTriggerDesktopRef}>
+                    {(locTab === 'zip' && filterZip) && (
+                      <button onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setLocTab('all'); setFilterZip(''); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100 border-b border-gray-200 text-red-500">× Clear</button>
+                    )}
+                    <div className="p-2 border-b border-gray-200">
+                      <div className="flex gap-1 flex-wrap">
+                        {BOROUGHS.map(b => (
+                          <button key={b} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setFilterZipBoro(b); }} className="px-1.5 py-0.5 rounded text-[10px] font-black border border-black" style={filterZipBoro === b ? { background: accentColor, color: '#fff' } : {}}>{b.split(' ')[0]}</button>
+                        ))}
+                      </div>
+                    </div>
+                    {zipList.map(z => (
+                      <button key={z.zip} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setFilterZip(z.zip); setFilterBorough(''); setLocTab('zip'); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1 text-xs font-semibold hover:bg-gray-100" style={filterZip === z.zip ? { background: accentColor + '22', color: accentColor } : {}}>{z.zip} <span className="text-[10px] text-gray-400">{z.name}</span></button>
+                    ))}
+                  </InlineDropdown>
+                </div>
+
+                <div className="relative">
+                  <button
+                    ref={timeTriggerDesktopRef}
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={() => setOpenDropdown(p => p === 'time' ? null : 'time')}
+                    className={baseFB}
+                    style={timeFilter !== 'all' ? activeFS : {}}
+                  >
+                    {timeFilter !== 'all' ? `${timeLabel} ×` : `${timeLabel} ▾`}
+                  </button>
+                  <InlineDropdown open={openDropdown === 'time'} onClose={() => setOpenDropdown(null)} triggerRef={timeTriggerDesktopRef}>
+                    {timeFilter !== 'all' && (
+                      <button onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setTimeFilter('all'); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100 border-b border-gray-200 text-red-500">× Clear</button>
+                    )}
+                    {TIME_OPTIONS.map(t => (
+                      <button key={t.key} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setTimeFilter(t.key); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100" style={timeFilter === t.key ? { background: accentColor + '22', color: accentColor } : {}}>{t.label}</button>
+                    ))}
+                  </InlineDropdown>
+                </div>
+
+                <div className="relative">
+                  <button ref={statusTriggerDesktopRef} onMouseDown={e => e.preventDefault()} onClick={() => setOpenDropdown(p => p === 'status' ? null : 'status')} className={baseFB}
+                    style={statusFilter === 'participant' ? { background: '#22c55e', color: '#fff', borderColor: '#22c55e' }
+                      : statusFilter === 'orbiter' ? { background: '#ef4444', color: '#fff', borderColor: '#ef4444' }
+                      : statusFilter === 'anonymous' ? { background: '#374151', color: '#fff', borderColor: '#374151' }
+                      : {}}>{statusFilter === 'participant' ? 'Participant ×' : statusFilter === 'orbiter' ? 'Orbiter ×' : statusFilter === 'anonymous' ? 'Anonymous ×' : 'Status ▾'}</button>
+                  <InlineDropdown open={openDropdown === 'status'} onClose={() => setOpenDropdown(null)} alignRight triggerRef={statusTriggerDesktopRef}>
+                    {statusFilter !== 'all' && (
+                      <button onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setStatusFilter('all'); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100 border-b border-gray-200 text-red-500">× Clear</button>
+                    )}
+                    {[['all','All'],['participant','Participant'],['orbiter','Orbiter'],['anonymous','Anonymous']].map(([k, l]) => (
+                      <button key={k} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setStatusFilter(k); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100" style={statusFilter === k ? { background: accentColor + '22', color: accentColor } : {}}>{l}</button>
+                    ))}
+                  </InlineDropdown>
+                </div>
+
+                <div className="relative mt-1">
+                  <button onMouseDown={e => e.preventDefault()} onClick={() => setDesktopScaleOpen((v) => !v)} className={baseFB}>Aa / Image Scale {desktopScaleOpen ? '▴' : '▾'}</button>
+                  {desktopScaleOpen && (
+                    <div className="mt-2 border-2 border-black rounded-lg p-2 bg-white">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[10px] font-black">Text Scale</span>
+                        <span className="text-[10px] font-black">{Math.round(feedTextScale * 100)}%</span>
+                      </div>
+                      <input type="range" min="0.5" max="2" step="0.05" value={feedTextScale} onChange={(e) => setFeedTextScale(Number(e.target.value))} className="w-full mb-2" />
+
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[10px] font-black">Image Scale</span>
+                        <span className="text-[10px] font-black">{Math.round(feedImageScale * 100)}%</span>
+                      </div>
+                      <input type="range" min="0.5" max="2" step="0.05" value={feedImageScale} onChange={(e) => setFeedImageScale(Number(e.target.value))} className="w-full" />
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </aside>
+
+          {!loading && filteredPosts.length === 0 && (
+            <div className="rounded-2xl border-3 border-black bg-white shadow-[4px_4px_0px_black] flex items-center justify-center" style={{ gridColumn: '2 / -1', gridRow: 'span 16' }}>
+              <div className="text-center py-8 px-4">
+                <div className="text-4xl mb-2">🌀</div>
+                <p className="font-black text-gray-500">Nothing here yet! Be the first!</p>
+              </div>
+            </div>
+          )}
+
+          {!loading && visiblePosts.map((post, index) => renderFeedPostCard(post, index))}
+
+          {loading && (
+            <div className="rounded-2xl border-3 border-black bg-white shadow-[4px_4px_0px_black] flex items-center justify-center" style={{ gridColumn: '2 / -1', gridRow: 'span 12' }}>
+              <p className="text-center text-sm text-gray-400 font-semibold py-4">Loading...</p>
+            </div>
+          )}
+
+          {(canShowMore || canShowLess) && (
+            <div className="flex justify-center gap-3 pt-2 pb-6" style={{ gridColumn: '1 / -1' }}>
+              {canShowMore && (
+                <button onMouseDown={e => e.preventDefault()} onClick={() => setVisibleCount(v => v + PAGE_SIZE)} className="px-4 py-1.5 border-2 border-black rounded-full text-xs font-black bg-white shadow-[2px_2px_0px_black] hover:scale-105 transition-transform">
+                  Show More ({filteredPosts.length - visibleCount} remaining)
+                </button>
+              )}
+              {canShowLess && (
+                <button onMouseDown={e => e.preventDefault()} onClick={() => setVisibleCount(PAGE_SIZE)} className="px-4 py-1.5 border-2 border-black rounded-full text-xs font-black bg-white shadow-[2px_2px_0px_black] hover:scale-105 transition-transform">
+                  Show Less
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="md:hidden">
           <aside className="hidden md:block md:col-span-1 md:sticky md:top-24 self-start">
             <div className="rounded-2xl border-3 border-black p-3 bg-white shadow-[4px_4px_0px_black]">
               <input
@@ -2115,47 +2327,10 @@ export default function GeoPostView({ session }) {
               )}
 
               {filteredPosts.length > 0 && (
-                <div className="flex flex-col gap-3">
-                  {visiblePosts.map((post, index) => {
-                    const loadedComments = commentsByPost[post.id];
-                    const fallbackSampleComments = SAMPLE_POST_IDS.has(post.id) ? SAMPLE_COMMENTS.filter((entry) => entry.post_id === post.id) : [];
-                    const postComments = loadedComments ?? [];
-                    const commentCount = Number(post.total_comments || 0) || loadedComments?.length || fallbackSampleComments.length;
-                    return (
-                      <PostCard
-                        key={post.id}
-                        post={post}
-                        postReactions={reactions[post.id]}
-                        onReact={handleReact}
-                        onOpenReactors={id => setReactorsModal(id)}
-                        accentColor={accentColor}
-                        onSelectTag={handleSelectTag}
-                        zipHeatMap={zipHeatMap}
-                        boroughHeatMap={boroughHeatMap}
-                        textScale={feedTextScale}
-                        imageScale={feedImageScale}
-                        imagePriority={index < 8}
-                        commentCount={commentCount}
-                        commentsOpen={!!openCommentsByPost[post.id]}
-                        onToggleComments={toggleComments}
-                        commentsChildren={
-                          <CommentSection
-                            post={post}
-                            comments={postComments.length ? postComments : fallbackSampleComments}
-                            reactionsByComment={commentReactionsByComment}
-                            onSubmitComment={(postId, content) => submitCommentForPost(postId, content, null)}
-                            onSubmitReply={(postId, parentId, content) => submitCommentForPost(postId, content, parentId)}
-                            onToggleReaction={handleCommentReaction}
-                            onOpenReactors={(commentId) => setCommentReactorsModal(commentId)}
-                            zipHeatMap={zipHeatMap}
-                            boroughHeatMap={boroughHeatMap}
-                          />
-                        }
-                      />
-                    );
-                  })}
+                <div className="flex flex-col gap-3 pb-8">
+                  {visiblePosts.map((post, index) => renderFeedPostCard(post, index))}
                   {(canShowMore || canShowLess) && (
-                    <div className="flex justify-center gap-3 pt-1">
+                    <div className="flex justify-center gap-3 pt-2 pb-2">
                       {canShowMore && (
                         <button onMouseDown={e => e.preventDefault()} onClick={() => setVisibleCount(v => v + PAGE_SIZE)} className="px-4 py-1.5 border-2 border-black rounded-full text-xs font-black bg-white shadow-[2px_2px_0px_black] hover:scale-105 transition-transform">
                           Show More ({filteredPosts.length - visibleCount} remaining)
