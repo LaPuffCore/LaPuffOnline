@@ -561,13 +561,11 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
     ? (imgRatio < 0.85 ? 'portrait' : imgRatio > 1.25 ? 'landscape' : 'square')
     : 'square';
   const imagePadding = shape === 'portrait' ? '140%' : shape === 'landscape' ? '58%' : '100%';
-  const bodyTextLen = stripHtmlTags(postHtml).length;
-  const textUnits = Math.max(3, Math.min(14, Math.ceil((bodyTextLen * scale) / 115)));
-  const baseUnits = shape === 'portrait' ? 28 : shape === 'landscape' ? 18 : 20;
-  const columnSpan = shape === 'landscape' ? (Math.max(0.5, Number(imageScale || 1)) < 0.9 ? 3 : 2) : 1;
+  const columnSpan = shape === 'landscape' ? 4 : 2;
+  const rowSpan = shape === 'portrait' ? 2 : 1;
   const tileGridStyle = {
     gridColumn: `span ${columnSpan}`,
-    gridRow: `span ${baseUnits + textUnits}`,
+    gridRow: `span ${rowSpan}`,
   };
 
   useEffect(() => {
@@ -583,8 +581,12 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
     <div
       className="rounded-2xl border-3 overflow-hidden"
       style={{
+        background: theme.fill,
         borderColor: theme.outline,
         boxShadow: `4px 4px 0px ${theme.shadow}`,
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
         ...tileGridStyle,
       }}
     >
@@ -616,7 +618,7 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
         </div>
       )}
 
-      <div className="p-3" style={{ background: theme.fill }}>
+      <div className="p-3" style={{ background: theme.fill, flex: 1 }}>
         <div className="flex items-center gap-1.5 mb-2 flex-wrap">
           {postIsAnonymous ? (
             <span className="font-black text-xs flex items-center gap-1" style={{ color: theme.text, fontSize: `${12 * scale}px` }}>
@@ -1069,6 +1071,8 @@ export default function GeoPostView({ session }) {
   const [openCommentsByPost, setOpenCommentsByPost] = useState({});
   const [commentReactorsModal, setCommentReactorsModal] = useState(null);
   const [currentProfile, setCurrentProfile] = useState(null);
+  const [desktopPanelRow, setDesktopPanelRow] = useState(1);
+  const [desktopUnitHeight, setDesktopUnitHeight] = useState(420);
 
   // ── editor scope ──────────────────────────────────────────────────────────────
   const [editorScope,   setEditorScope]   = useState('digital');
@@ -1079,6 +1083,8 @@ export default function GeoPostView({ session }) {
   const editorRef    = useRef(null);
   const fileInputRef = useRef(null);
   const topAnchorRef = useRef(null);
+  const desktopGridRef = useRef(null);
+  const desktopFilterRef = useRef(null);
   const [imageFile,    setImageFile]    = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
   const [submitting,   setSubmitting]   = useState(false);
@@ -1704,6 +1710,51 @@ export default function GeoPostView({ session }) {
   const canShowMore  = visibleCount < filteredPosts.length;
   const canShowLess  = visibleCount > PAGE_SIZE;
 
+  useEffect(() => {
+    const el = desktopFilterRef.current;
+    if (!el || typeof window === 'undefined') return undefined;
+
+    const updateHeight = () => {
+      const h = Math.max(260, Math.round(el.getBoundingClientRect().height));
+      setDesktopUnitHeight(h);
+    };
+
+    updateHeight();
+
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', updateHeight);
+      return () => window.removeEventListener('resize', updateHeight);
+    }
+
+    const observer = new ResizeObserver(() => updateHeight());
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const updatePanelRow = () => {
+      if (typeof window === 'undefined' || window.innerWidth < 768) {
+        setDesktopPanelRow(1);
+        return;
+      }
+      const grid = desktopGridRef.current;
+      if (!grid) return;
+      const rect = grid.getBoundingClientRect();
+      const passed = Math.max(0, 80 - rect.top);
+      const step = Math.max(1, desktopUnitHeight + 12);
+      const row = 1 + Math.floor(passed / step);
+      setDesktopPanelRow(Math.max(1, Math.min(300, row)));
+    };
+
+    updatePanelRow();
+    window.addEventListener('scroll', updatePanelRow, { passive: true });
+    window.addEventListener('resize', updatePanelRow);
+    return () => {
+      window.removeEventListener('scroll', updatePanelRow);
+      window.removeEventListener('resize', updatePanelRow);
+    };
+  }, [desktopUnitHeight]);
+
   const Divider = () => <div className="w-px h-4 bg-gray-300 mx-0.5 flex-shrink-0" />;
 
   // Handle tag clicks from posts: either location tags or status tags
@@ -1933,16 +1984,17 @@ export default function GeoPostView({ session }) {
         </div>
 
         <div
+          ref={desktopGridRef}
           className="hidden md:grid gap-3 pb-10"
           style={{
             '--image-scale': Math.max(0.5, Number(feedImageScale || 1)),
             gridAutoFlow: 'dense',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(calc(120px * var(--image-scale)), 1fr))',
-            gridAutoRows: '10px',
+            gridTemplateColumns: 'repeat(14, minmax(0, 1fr))',
+            gridAutoRows: `${desktopUnitHeight}px`,
           }}
         >
-          <aside style={{ gridColumn: '1', gridRow: 'span 60', position: 'sticky', top: '80px', zIndex: 20, alignSelf: 'start' }}>
-            <div className="rounded-2xl border-3 border-black p-3 bg-white shadow-[4px_4px_0px_black]">
+          <aside style={{ gridColumn: '1 / span 2', gridRow: `${desktopPanelRow} / span 1`, position: 'sticky', top: '80px', zIndex: 20, alignSelf: 'start' }}>
+            <div ref={desktopFilterRef} className="rounded-2xl border-3 border-black p-3 bg-white shadow-[4px_4px_0px_black]">
               <input
                 value={searchQuery}
                 onChange={(e) => { setSearchQuery(e.target.value); setVisibleCount(PAGE_SIZE); }}
@@ -2059,7 +2111,7 @@ export default function GeoPostView({ session }) {
           </aside>
 
           {!loading && filteredPosts.length === 0 && (
-            <div className="rounded-2xl border-3 border-black bg-white shadow-[4px_4px_0px_black] flex items-center justify-center" style={{ gridColumn: '2 / -1', gridRow: 'span 16' }}>
+            <div className="rounded-2xl border-3 border-black bg-white shadow-[4px_4px_0px_black] flex items-center justify-center" style={{ gridColumn: '3 / -1', gridRow: 'span 1' }}>
               <div className="text-center py-8 px-4">
                 <div className="text-4xl mb-2">🌀</div>
                 <p className="font-black text-gray-500">Nothing here yet! Be the first!</p>
@@ -2070,7 +2122,7 @@ export default function GeoPostView({ session }) {
           {!loading && visiblePosts.map((post, index) => renderFeedPostCard(post, index))}
 
           {loading && (
-            <div className="rounded-2xl border-3 border-black bg-white shadow-[4px_4px_0px_black] flex items-center justify-center" style={{ gridColumn: '2 / -1', gridRow: 'span 12' }}>
+            <div className="rounded-2xl border-3 border-black bg-white shadow-[4px_4px_0px_black] flex items-center justify-center" style={{ gridColumn: '3 / -1', gridRow: 'span 1' }}>
               <p className="text-center text-sm text-gray-400 font-semibold py-4">Loading...</p>
             </div>
           )}
@@ -2078,12 +2130,12 @@ export default function GeoPostView({ session }) {
           {(canShowMore || canShowLess) && (
             <div className="flex justify-center gap-3 pt-2 pb-6" style={{ gridColumn: '1 / -1' }}>
               {canShowMore && (
-                <button onMouseDown={e => e.preventDefault()} onClick={() => setVisibleCount(v => v + PAGE_SIZE)} className="px-4 py-1.5 border-2 border-black rounded-full text-xs font-black bg-white shadow-[2px_2px_0px_black] hover:scale-105 transition-transform">
+                <button onMouseDown={e => e.preventDefault()} onClick={() => setVisibleCount(v => v + PAGE_SIZE)} className="min-h-[44px] px-4 py-2 border-2 border-black rounded-full text-xs font-black bg-white shadow-[2px_2px_0px_black] hover:scale-105 transition-transform leading-tight text-center flex items-center justify-center">
                   Show More ({filteredPosts.length - visibleCount} remaining)
                 </button>
               )}
               {canShowLess && (
-                <button onMouseDown={e => e.preventDefault()} onClick={() => setVisibleCount(PAGE_SIZE)} className="px-4 py-1.5 border-2 border-black rounded-full text-xs font-black bg-white shadow-[2px_2px_0px_black] hover:scale-105 transition-transform">
+                <button onMouseDown={e => e.preventDefault()} onClick={() => setVisibleCount(PAGE_SIZE)} className="min-h-[44px] px-4 py-2 border-2 border-black rounded-full text-xs font-black bg-white shadow-[2px_2px_0px_black] hover:scale-105 transition-transform leading-tight text-center flex items-center justify-center">
                   Show Less
                 </button>
               )}
@@ -2092,123 +2144,7 @@ export default function GeoPostView({ session }) {
         </div>
 
         <div className="md:hidden">
-          <aside className="hidden md:block md:col-span-1 md:sticky md:top-24 self-start">
-            <div className="rounded-2xl border-3 border-black p-3 bg-white shadow-[4px_4px_0px_black]">
-              <input
-                value={searchQuery}
-                onChange={(e) => { setSearchQuery(e.target.value); setVisibleCount(PAGE_SIZE); }}
-                placeholder="Search posts, usernames, zips..."
-                className="w-full px-3 py-2 border-2 border-black rounded text-sm font-black mb-3"
-              />
-              <div className="flex flex-col gap-2">
-                <button onMouseDown={e => e.preventDefault()} onClick={() => setSortByTop(v => !v)} className={baseFB} style={sortByTop ? activeFS : {}}>🔥 Top</button>
-                <button onMouseDown={e => e.preventDefault()} onClick={() => { setLocTab('all'); setFilterBorough(''); setFilterZip(''); setOpenDropdown(null); }} className={baseFB} style={locTab === 'all' ? activeFS : {}}>🌀 All</button>
-
-                <div className="relative">
-                  <button
-                    ref={boroughTriggerDesktopRef}
-                    onMouseDown={e => e.preventDefault()}
-                    onClick={() => setOpenDropdown(p => p === 'borough' ? null : 'borough')}
-                    className={baseFB}
-                    style={locTab === 'borough' && filterBorough ? activeFS : {}}
-                  >
-                    🏙 {locTab === 'borough' && filterBorough ? `${filterBorough} ×` : 'Borough ▾'}
-                  </button>
-                  <InlineDropdown open={openDropdown === 'borough'} onClose={() => setOpenDropdown(null)} triggerRef={boroughTriggerDesktopRef}>
-                    {(locTab === 'borough' && filterBorough) && (
-                      <button onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setLocTab('all'); setFilterBorough(''); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100 border-b border-gray-200 text-red-500">× Clear</button>
-                    )}
-                    {BOROUGHS.map(b => (
-                      <button key={b} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setFilterBorough(b); setFilterZip(''); setLocTab('borough'); setFilterZipBoro(b); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100" style={filterBorough === b ? { background: accentColor + '22', color: accentColor } : {}}>{b}</button>
-                    ))}
-                  </InlineDropdown>
-                </div>
-
-                <div className="relative">
-                  <button
-                    ref={zipTriggerDesktopRef}
-                    onMouseDown={e => e.preventDefault()}
-                    onClick={() => setOpenDropdown(p => p === 'zip' ? null : 'zip')}
-                    className={baseFB}
-                    style={locTab === 'zip' && filterZip ? activeFS : {}}
-                  >
-                    📍 {locTab === 'zip' && filterZip ? `${filterZip} ×` : 'Zip ▾'}
-                  </button>
-                  <InlineDropdown open={openDropdown === 'zip'} onClose={() => setOpenDropdown(null)} className="w-[220px] max-h-[280px]" triggerRef={zipTriggerDesktopRef}>
-                    {(locTab === 'zip' && filterZip) && (
-                      <button onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setLocTab('all'); setFilterZip(''); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100 border-b border-gray-200 text-red-500">× Clear</button>
-                    )}
-                    <div className="p-2 border-b border-gray-200">
-                      <div className="flex gap-1 flex-wrap">
-                        {BOROUGHS.map(b => (
-                          <button key={b} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setFilterZipBoro(b); }} className="px-1.5 py-0.5 rounded text-[10px] font-black border border-black" style={filterZipBoro === b ? { background: accentColor, color: '#fff' } : {}}>{b.split(' ')[0]}</button>
-                        ))}
-                      </div>
-                    </div>
-                    {zipList.map(z => (
-                      <button key={z.zip} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setFilterZip(z.zip); setFilterBorough(''); setLocTab('zip'); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1 text-xs font-semibold hover:bg-gray-100" style={filterZip === z.zip ? { background: accentColor + '22', color: accentColor } : {}}>{z.zip} <span className="text-[10px] text-gray-400">{z.name}</span></button>
-                    ))}
-                  </InlineDropdown>
-                </div>
-
-                <div className="relative">
-                  <button
-                    ref={timeTriggerDesktopRef}
-                    onMouseDown={e => e.preventDefault()}
-                    onClick={() => setOpenDropdown(p => p === 'time' ? null : 'time')}
-                    className={baseFB}
-                    style={timeFilter !== 'all' ? activeFS : {}}
-                  >
-                    {timeFilter !== 'all' ? `${timeLabel} ×` : `${timeLabel} ▾`}
-                  </button>
-                  <InlineDropdown open={openDropdown === 'time'} onClose={() => setOpenDropdown(null)} triggerRef={timeTriggerDesktopRef}>
-                    {timeFilter !== 'all' && (
-                      <button onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setTimeFilter('all'); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100 border-b border-gray-200 text-red-500">× Clear</button>
-                    )}
-                    {TIME_OPTIONS.map(t => (
-                      <button key={t.key} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setTimeFilter(t.key); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100" style={timeFilter === t.key ? { background: accentColor + '22', color: accentColor } : {}}>{t.label}</button>
-                    ))}
-                  </InlineDropdown>
-                </div>
-
-                <div className="relative">
-                  <button ref={statusTriggerDesktopRef} onMouseDown={e => e.preventDefault()} onClick={() => setOpenDropdown(p => p === 'status' ? null : 'status')} className={baseFB}
-                    style={statusFilter === 'participant' ? { background: '#22c55e', color: '#fff', borderColor: '#22c55e' }
-                      : statusFilter === 'orbiter' ? { background: '#ef4444', color: '#fff', borderColor: '#ef4444' }
-                      : statusFilter === 'anonymous' ? { background: '#374151', color: '#fff', borderColor: '#374151' }
-                      : {}}>{statusFilter === 'participant' ? 'Participant ×' : statusFilter === 'orbiter' ? 'Orbiter ×' : statusFilter === 'anonymous' ? 'Anonymous ×' : 'Status ▾'}</button>
-                  <InlineDropdown open={openDropdown === 'status'} onClose={() => setOpenDropdown(null)} alignRight triggerRef={statusTriggerDesktopRef}>
-                    {statusFilter !== 'all' && (
-                      <button onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setStatusFilter('all'); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100 border-b border-gray-200 text-red-500">× Clear</button>
-                    )}
-                    {[['all','All'],['participant','Participant'],['orbiter','Orbiter'],['anonymous','Anonymous']].map(([k, l]) => (
-                      <button key={k} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setStatusFilter(k); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100" style={statusFilter === k ? { background: accentColor + '22', color: accentColor } : {}}>{l}</button>
-                    ))}
-                  </InlineDropdown>
-                </div>
-                <div className="relative mt-1">
-                  <button onMouseDown={e => e.preventDefault()} onClick={() => setDesktopScaleOpen((v) => !v)} className={baseFB}>Aa / Image Scale {desktopScaleOpen ? '▴' : '▾'}</button>
-                  {desktopScaleOpen && (
-                    <div className="mt-2 border-2 border-black rounded-lg p-2 bg-white">
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-[10px] font-black">Text Scale</span>
-                        <span className="text-[10px] font-black">{Math.round(feedTextScale * 100)}%</span>
-                      </div>
-                      <input type="range" min="0.5" max="2" step="0.05" value={feedTextScale} onChange={(e) => setFeedTextScale(Number(e.target.value))} className="w-full mb-2" />
-
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-[10px] font-black">Image Scale</span>
-                        <span className="text-[10px] font-black">{Math.round(feedImageScale * 100)}%</span>
-                      </div>
-                      <input type="range" min="0.5" max="2" step="0.05" value={feedImageScale} onChange={(e) => setFeedImageScale(Number(e.target.value))} className="w-full" />
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          </aside>
-
-          <section className="md:col-span-2" data-geopost-feed-scroll>
+          <section data-geopost-feed-scroll>
             <div className="md:hidden rounded-2xl border-3 border-black p-3 bg-white shadow-[4px_4px_0px_black] mb-3">
               <input value={searchQuery} onChange={(e) => { setSearchQuery(e.target.value); setVisibleCount(PAGE_SIZE); }} placeholder="Search posts, usernames, zips..." className="w-full px-3 py-2 border-2 border-black rounded text-sm font-black mb-3" />
               <div className="flex items-center gap-1 flex-wrap">
@@ -2332,12 +2268,12 @@ export default function GeoPostView({ session }) {
                   {(canShowMore || canShowLess) && (
                     <div className="flex justify-center gap-3 pt-2 pb-2">
                       {canShowMore && (
-                        <button onMouseDown={e => e.preventDefault()} onClick={() => setVisibleCount(v => v + PAGE_SIZE)} className="px-4 py-1.5 border-2 border-black rounded-full text-xs font-black bg-white shadow-[2px_2px_0px_black] hover:scale-105 transition-transform">
+                        <button onMouseDown={e => e.preventDefault()} onClick={() => setVisibleCount(v => v + PAGE_SIZE)} className="min-h-[44px] px-4 py-2 border-2 border-black rounded-full text-xs font-black bg-white shadow-[2px_2px_0px_black] hover:scale-105 transition-transform leading-tight text-center flex items-center justify-center">
                           Show More ({filteredPosts.length - visibleCount} remaining)
                         </button>
                       )}
                       {canShowLess && (
-                        <button onMouseDown={e => e.preventDefault()} onClick={() => setVisibleCount(PAGE_SIZE)} className="px-4 py-1.5 border-2 border-black rounded-full text-xs font-black bg-white shadow-[2px_2px_0px_black] hover:scale-105 transition-transform">
+                        <button onMouseDown={e => e.preventDefault()} onClick={() => setVisibleCount(PAGE_SIZE)} className="min-h-[44px] px-4 py-2 border-2 border-black rounded-full text-xs font-black bg-white shadow-[2px_2px_0px_black] hover:scale-105 transition-transform leading-tight text-center flex items-center justify-center">
                           Show Less
                         </button>
                       )}
