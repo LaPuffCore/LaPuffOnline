@@ -43,6 +43,18 @@ function stripHtmlTags(value = '') {
   return String(value).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
+// Walks up the DOM to find the nearest element with overflow-y: auto|scroll.
+// Falls back to window if none found (standard page scroll).
+function findScrollParent(el) {
+  let node = el?.parentElement;
+  while (node && node !== document.body) {
+    const style = window.getComputedStyle(node);
+    if (style.overflowY === 'auto' || style.overflowY === 'scroll') return node;
+    node = node.parentElement;
+  }
+  return window;
+}
+
 function normalizeHexColor(value, fallback = '#ffffff') {
   if (!value) return fallback;
   const v = String(value).trim();
@@ -613,11 +625,12 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
       }}
     >
       {post.image_url && (
-        // flex: 1 — image grows to fill all remaining tile space the footer doesn't claim
+        // flex: 1 — image grows elastically to fill all remaining tile space the footer doesn't claim.
+        // No maxHeight so the image truly fills: tall tiles use 2 rows (~840px), short use 1 row (~420px).
         <div
           className="relative w-full overflow-hidden bg-black/5"
           style={isDesktopMasonry
-            ? { flex: 1, minHeight: 80, maxHeight: isTallTile ? 540 : 240, position: 'relative' }
+            ? { flex: 1, minHeight: 80, position: 'relative' }
             : { height: 0, paddingBottom: shape === 'portrait' ? '110%' : shape === 'landscape' ? '48%' : '72%' }
           }
         >
@@ -1791,30 +1804,37 @@ export default function GeoPostView({ session }) {
   }, []);
 
   useEffect(() => {
+    const grid = desktopGridRef.current;
+    // Find the real scroll container (GeoPostView lives inside an overflow-y:auto div in Home.jsx,
+    // so window.scrollY is always 0 — we must listen on that container instead).
+    const scrollEl = grid ? findScrollParent(grid) : window;
+
     const updatePanelRow = () => {
       if (typeof window === 'undefined' || window.innerWidth < 768) {
         setDesktopPanelRow(1);
         return;
       }
-      const grid = desktopGridRef.current;
-      if (!grid) return;
+      if (!desktopGridRef.current) return;
 
-      // getBoundingClientRect().top + scrollY = stable absolute document position regardless of scroll containers
-      const gridTopAbs = grid.getBoundingClientRect().top + window.scrollY;
+      const scrollTop = scrollEl === window ? window.scrollY : scrollEl.scrollTop;
+      // Position of the grid relative to the scroll container's top (stable regardless of scroll position)
+      const containerClientTop = scrollEl === window ? 0 : scrollEl.getBoundingClientRect().top;
+      const gridClientTop = desktopGridRef.current.getBoundingClientRect().top;
+      const gridOffsetInContainer = gridClientTop - containerClientTop + scrollTop;
+
       const rowStep = Math.max(1, desktopUnitHeight + 12);
-      const relativeScroll = Math.max(0, window.scrollY - gridTopAbs);
+      const relativeScroll = Math.max(0, scrollTop - gridOffsetInContainer);
       const targetRow = Math.floor(relativeScroll / rowStep) + 1;
-      const maxRow = Math.max(1, Math.floor(grid.scrollHeight / rowStep));
+      const maxRow = Math.max(1, Math.ceil(desktopGridRef.current.scrollHeight / rowStep));
       const boundedRow = Math.max(1, Math.min(maxRow, targetRow));
       setDesktopPanelRow((prev) => (prev === boundedRow ? prev : boundedRow));
     };
 
-    // Direct scroll handler — no RAF so row jumps fire in the same frame as the scroll event
     updatePanelRow();
-    window.addEventListener('scroll', updatePanelRow, { passive: true });
+    scrollEl.addEventListener('scroll', updatePanelRow, { passive: true });
     window.addEventListener('resize', updatePanelRow);
     return () => {
-      window.removeEventListener('scroll', updatePanelRow);
+      scrollEl.removeEventListener('scroll', updatePanelRow);
       window.removeEventListener('resize', updatePanelRow);
     };
   }, [desktopUnitHeight, visiblePosts.length, canShowMore, canShowLess]);
