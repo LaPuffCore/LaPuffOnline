@@ -191,27 +191,27 @@ export default function Home({ events = [], eventsLoading = false }) {
       auto_play: true,
       show_artwork: false,
       callback: () => {
-        // B: Watchdog — if still paused after 1.2s, force play
+        // B: Watchdog — kicks in at 600ms if the next+play below hangs
         const watchdog = setTimeout(() => {
           w.isPaused(paused => {
-            if (paused) { w.play(); setIsMusicOn(true); }
-          });
-        }, 1200);
-
-        // C: 200ms buffer then shuffle-skip
-        setTimeout(() => {
-          w.getSounds(sounds => {
-            if (sounds && sounds.length > 0) {
-              const idx = Math.floor(Math.random() * sounds.length);
-              w.skip(idx);
+            if (paused) {
               w.setShuffle(true);
+              w.next();
+              w.play();
+              setIsMusicOn(true);
             }
-            clearTimeout(watchdog);
-            w.setVolume(musicVolumeRef.current);
-            w.play();
-            setIsMusicOn(true);
           });
-        }, 250); // extra buffer for metadata stability
+        }, 600);
+
+        // C: 200ms buffer then setShuffle+next — no getSounds race condition
+        setTimeout(() => {
+          w.setShuffle(true);
+          w.next(); // widget picks random track internally via shuffle
+          clearTimeout(watchdog);
+          w.setVolume(musicVolumeRef.current);
+          w.play();
+          setIsMusicOn(true);
+        }, 200);
       },
     });
   }
@@ -268,13 +268,8 @@ export default function Home({ events = [], eventsLoading = false }) {
 
   function triggerCloutCullingGames() {
     setCurrentMode('clout');
-    const w = scWidgetRef.current;
-    if (loadedPlaylistRef.current === 'clout' && w) {
-      // Already on this station — shuffle-skip to new track
-      w.setShuffle(true);
-      w.next();
-      w.play();
-      setIsMusicOn(true);
+    if (loadedPlaylistRef.current === 'clout') {
+      handleNextTrack(); // re-tap same station = skip to next shuffled track
     } else {
       _changePlaylist(CLOUT_URL, 'clout');
     }
@@ -282,13 +277,8 @@ export default function Home({ events = [], eventsLoading = false }) {
 
   function triggerDimesRadio() {
     setCurrentMode('dimes');
-    const w = scWidgetRef.current;
-    if (loadedPlaylistRef.current === 'dimes' && w) {
-      // Already on this station — shuffle-skip to new track
-      w.setShuffle(true);
-      w.next();
-      w.play();
-      setIsMusicOn(true);
+    if (loadedPlaylistRef.current === 'dimes') {
+      handleNextTrack(); // re-tap same station = skip to next shuffled track
     } else {
       _changePlaylist(DIMES_URL, 'dimes');
     }
@@ -297,6 +287,8 @@ export default function Home({ events = [], eventsLoading = false }) {
   function stopMusic() {
     setIsMusicOn(false);
     setCurrentMode(null);
+    loadedPlaylistRef.current = null;
+    setShowMusicMenu(false); // Stop is the only action that closes the menu
     if (scWidgetRef.current) scWidgetRef.current.pause();
   }
 
@@ -399,7 +391,7 @@ export default function Home({ events = [], eventsLoading = false }) {
                     <p className="font-black text-[10px] text-gray-400 uppercase tracking-widest">Radio</p>
                   </div>
                   <button
-                    onClick={() => { triggerCloutCullingGames(); setShowMusicMenu(false); }}
+                    onClick={() => triggerCloutCullingGames()}
                     className="w-full px-3 py-2 text-left text-xs font-black hover:bg-gray-50 flex items-center gap-2 border-b border-gray-100 transition-colors"
                     style={currentMode === 'clout' ? { color: accentColor } : {}}>
                     <span>🎮</span>
@@ -407,7 +399,7 @@ export default function Home({ events = [], eventsLoading = false }) {
                     {currentMode === 'clout' && isMusicOn && <span className="text-[8px] animate-pulse" style={{ color: accentColor }}>▶</span>}
                   </button>
                   <button
-                    onClick={() => { triggerDimesRadio(); setShowMusicMenu(false); }}
+                    onClick={() => triggerDimesRadio()}
                     className="w-full px-3 py-2 text-left text-xs font-black hover:bg-gray-50 flex items-center gap-2 border-b border-gray-100 transition-colors"
                     style={currentMode === 'dimes' ? { color: accentColor } : {}}>
                     <span>🎵</span>
@@ -415,7 +407,7 @@ export default function Home({ events = [], eventsLoading = false }) {
                     {currentMode === 'dimes' && isMusicOn && <span className="text-[8px] animate-pulse" style={{ color: accentColor }}>▶</span>}
                   </button>
                   <button
-                    onClick={() => { stopMusic(); setShowMusicMenu(false); }}
+                    onClick={() => stopMusic()}
                     className="w-full px-3 py-2 text-left text-xs font-black hover:bg-gray-50 flex items-center gap-2 transition-colors"
                     style={!isMusicOn ? { color: accentColor } : { color: '#9ca3af' }}>
                     <span>⏹</span>
@@ -565,7 +557,7 @@ export default function Home({ events = [], eventsLoading = false }) {
                      <p className="font-black text-[10px] text-gray-400 uppercase tracking-widest">Radio</p>
                    </div>
                    <button
-                     onClick={() => { triggerCloutCullingGames(); setShowMusicMenu(false); }}
+                     onClick={() => triggerCloutCullingGames()}
                      className="w-full px-3 py-2 text-left text-xs font-black hover:bg-gray-50 flex items-center gap-2 border-b border-gray-100 transition-colors"
                      style={currentMode === 'clout' ? { color: accentColor } : {}}>
                      <span>🎮</span>
@@ -573,7 +565,7 @@ export default function Home({ events = [], eventsLoading = false }) {
                      {currentMode === 'clout' && isMusicOn && <span className="text-[8px] animate-pulse" style={{ color: accentColor }}>▶</span>}
                    </button>
                    <button
-                     onClick={() => { triggerDimesRadio(); setShowMusicMenu(false); }}
+                     onClick={() => triggerDimesRadio()}
                      className="w-full px-3 py-2 text-left text-xs font-black hover:bg-gray-50 flex items-center gap-2 border-b border-gray-100 transition-colors"
                      style={currentMode === 'dimes' ? { color: accentColor } : {}}>
                      <span>🎵</span>
@@ -581,7 +573,7 @@ export default function Home({ events = [], eventsLoading = false }) {
                      {currentMode === 'dimes' && isMusicOn && <span className="text-[8px] animate-pulse" style={{ color: accentColor }}>▶</span>}
                    </button>
                    <button
-                     onClick={() => { stopMusic(); setShowMusicMenu(false); }}
+                     onClick={() => stopMusic()}
                      className="w-full px-3 py-2 text-left text-xs font-black hover:bg-gray-50 flex items-center gap-2 transition-colors"
                      style={!isMusicOn ? { color: accentColor } : { color: '#9ca3af' }}>
                      <span>⏹</span>
