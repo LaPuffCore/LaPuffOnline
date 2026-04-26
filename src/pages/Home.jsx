@@ -175,10 +175,10 @@ export default function Home({ events = [], eventsLoading = false }) {
       widget.bind(window.SC.Widget.Events.READY, () => {
         scReadyRef.current = true;
         widget.setVolume(musicVolumeRef.current);
+        widget.setShuffle(true);
         if (pendingPlayRef.current) {
           pendingPlayRef.current = false;
           widget.play();
-          widget.setShuffle(true);
         }
         if (pendingSkipRef.current) {
           pendingSkipRef.current = false;
@@ -277,40 +277,17 @@ export default function Home({ events = [], eventsLoading = false }) {
   }
 
   function handlePrevTrack() {
-    if (!scWidgetRef.current || !scReadyRef.current) return;
-    scWidgetRef.current.getSounds(sounds => {
-      if (!sounds || sounds.length === 0) { scWidgetRef.current.prev(); return; }
-      if (sounds.length === 1) { scWidgetRef.current.skip(0); return; }
-      scWidgetRef.current.getCurrentSoundIndex(currentIdx => {
-        let prevIdx;
-        let attempts = 0;
-        do {
-          prevIdx = Math.floor(Math.random() * sounds.length);
-          attempts++;
-        } while (prevIdx === currentIdx && attempts < 20);
-        scWidgetRef.current.setShuffle(true);
-        scWidgetRef.current.skip(prevIdx);
-      });
-    });
+    const w = scWidgetRef.current;
+    if (!w) return;
+    w.setShuffle(true);
+    w.prev();
   }
 
   function handleNextTrack() {
-    if (!scWidgetRef.current || !scReadyRef.current) return;
-    // True shuffle: pick a random track index different from current
-    scWidgetRef.current.getSounds(sounds => {
-      if (!sounds || sounds.length === 0) { scWidgetRef.current.next(); return; }
-      if (sounds.length === 1) { scWidgetRef.current.skip(0); return; }
-      scWidgetRef.current.getCurrentSoundIndex(currentIdx => {
-        let nextIdx;
-        let attempts = 0;
-        do {
-          nextIdx = Math.floor(Math.random() * sounds.length);
-          attempts++;
-        } while (nextIdx === currentIdx && attempts < 20);
-        scWidgetRef.current.setShuffle(true);
-        scWidgetRef.current.skip(nextIdx);
-      });
-    });
+    const w = scWidgetRef.current;
+    if (!w) return;
+    w.setShuffle(true);
+    w.next();
   }
 
   function handleTogglePlayPause() {
