@@ -540,6 +540,8 @@ function PostDetailPopup({ post, postReactions, onReact, onOpenReactors, accentC
   const [imgLoaded, setImgLoaded] = useState(false);
   const [commentDraft, setCommentDraft] = useState('');
   const [commentsExpanded, setCommentsExpanded] = useState(true);
+  const [popupQepRect, setPopupQepRect] = useState(null);
+  const popupQepBtnRef = useRef(null);
 
   const parsedContent = useMemo(() => {
     try { return typeof post.content === 'string' ? JSON.parse(post.content) : (post.content || {}); } catch { return {}; }
@@ -569,14 +571,14 @@ function PostDetailPopup({ post, postReactions, onReact, onOpenReactors, accentC
   const isNarrowImage = post.image_url && imgRatio < (9/16);
 
   useEffect(() => {
-    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    const onKey = (e) => { if (e.key === 'Escape') { if (popupQepRect) { setPopupQepRect(null); } else { onClose(); } } };
     window.addEventListener('keydown', onKey);
     document.body.style.overflow = 'hidden';
     return () => {
       window.removeEventListener('keydown', onKey);
       document.body.style.overflow = '';
     };
-  }, [onClose]);
+  }, [onClose, popupQepRect]);
 
   const locationLabel = (() => {
     if (post.zip_code) return `📍 ${post.zip_code}${post.borough ? ' · ' + post.borough : ''}`;
@@ -585,11 +587,17 @@ function PostDetailPopup({ post, postReactions, onReact, onOpenReactors, accentC
     return '💻 Digital';
   })();
 
+  const handleStatusTagClick = () => {
+    const status = postIsAnonymous ? 'anonymous' : post.is_participant ? 'participant' : 'orbiter';
+    onSelectTag && onSelectTag({ status });
+    onClose();
+  };
+
   return createPortal(
     <div
       className="fixed inset-0 z-[100010] flex items-start justify-center"
       style={{ overflowY: 'auto', background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)' }}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      onClick={(e) => { if (e.target === e.currentTarget && !popupQepRect) onClose(); }}
     >
       <div
         className="relative my-8 mx-4 rounded-2xl border-3 border-black shadow-[8px_8px_0px_black] flex flex-col overflow-hidden"
@@ -632,7 +640,11 @@ function PostDetailPopup({ post, postReactions, onReact, onOpenReactors, accentC
             <span className="font-black text-sm" style={{ color: chromeText }}>
               {postIsAnonymous ? '🎭 Anonymous' : post.username || 'Orbiter'}
             </span>
-            <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full" style={statusStyle}>
+            <span
+              className="text-[9px] font-black px-1.5 py-0.5 rounded-full cursor-pointer hover:opacity-75 transition-opacity"
+              style={statusStyle}
+              onClick={handleStatusTagClick}
+            >
               ● {post.is_participant ? 'PARTICIPANT' : postIsAnonymous ? 'ANON' : 'ORBITER'}
             </span>
             <span className="text-xs ml-auto opacity-60" style={{ color: chromeText }}>{dateStr} · {timeStr}</span>
@@ -652,12 +664,20 @@ function PostDetailPopup({ post, postReactions, onReact, onOpenReactors, accentC
                 {emoji}<span className="text-xs">{count}</span>
               </button>
             ))}
-            <button onMouseDown={e => e.preventDefault()} onClick={() => onOpenReactors(post.id)}
-              className="px-2 py-0.5 rounded-full border-2 text-[10px] font-black"
+            {/* + button: opens quick emoji picker (not reactors list) */}
+            <button
+              ref={popupQepBtnRef}
+              onMouseDown={e => e.preventDefault()}
+              onClick={() => {
+                if (popupQepRect) { setPopupQepRect(null); return; }
+                const rect = popupQepBtnRef.current.getBoundingClientRect();
+                setPopupQepRect({ top: rect.top, left: rect.left, bottom: rect.bottom });
+              }}
+              className="px-2 py-0.5 rounded-full border-2 text-[10px] font-black hover:scale-105 transition-transform"
               style={{ background: chromeBg, color: chromeText, borderColor: chromeBorder }}>+</button>
             {topEmojis.length > 0 && (
               <button onMouseDown={e => e.preventDefault()} onClick={() => onOpenReactors(post.id)}
-                className="px-2 py-0.5 rounded-full border-2 text-[10px] font-black"
+                className="px-2 py-0.5 rounded-full border-2 text-[10px] font-black hover:scale-105 transition-transform"
                 style={{ background: chromeBg, color: chromeText, borderColor: chromeBorder }}>…</button>
             )}
             <button
@@ -681,15 +701,29 @@ function PostDetailPopup({ post, postReactions, onReact, onOpenReactors, accentC
             </button>
             {commentsExpanded && (
               <div className="flex flex-col gap-2">
-                {(comments || []).map(c => (
-                  <div key={c.id} className="rounded-xl p-2" style={{ background: chromeBg, border: `1px solid ${chromeBorder}` }}>
-                    <div className="flex items-center gap-1 mb-1">
-                      <span className="text-[10px] font-black" style={{ color: chromeText }}>{c.username || 'Orbiter'}</span>
-                      <span className="text-[9px] opacity-50 ml-auto" style={{ color: chromeText }}>{c.created_at ? new Date(c.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric'}) : ''}</span>
+                {(comments || []).map(c => {
+                  const cIsAnon = !c.user_id && (!c.username || c.username === 'anonymous');
+                  const cStatusStyle = c.is_participant
+                    ? { background: '#00cc66', color: '#fff' }
+                    : cIsAnon
+                    ? { background: '#333', color: '#fff' }
+                    : { background: '#ff4444', color: '#fff' };
+                  const cStatusLabel = c.is_participant ? 'PARTICIPANT' : cIsAnon ? 'ANON' : 'ORBITER';
+                  return (
+                    <div key={c.id} className="rounded-xl p-2" style={{ background: chromeBg, border: `1px solid ${chromeBorder}` }}>
+                      <div className="flex items-center gap-1 mb-1 flex-wrap">
+                        <span className="text-[10px] font-black" style={{ color: chromeText }}>{cIsAnon ? '🎭 Anonymous' : c.username || 'Orbiter'}</span>
+                        <span
+                          className="text-[8px] font-black px-1 py-0.5 rounded-full cursor-pointer hover:opacity-75"
+                          style={cStatusStyle}
+                          onClick={() => { onSelectTag && onSelectTag({ status: cIsAnon ? 'anonymous' : c.is_participant ? 'participant' : 'orbiter' }); onClose(); }}
+                        >● {cStatusLabel}</span>
+                        <span className="text-[9px] opacity-50 ml-auto" style={{ color: chromeText }}>{c.created_at ? new Date(c.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric'}) : ''}</span>
+                      </div>
+                      <div className="text-xs" style={{ color: chromeText }}>{c.text || c.content}</div>
                     </div>
-                    <div className="text-xs" style={{ color: chromeText }}>{c.text || c.content}</div>
-                  </div>
-                ))}
+                  );
+                })}
                 {(comments || []).length === 0 && (
                   <p className="text-xs opacity-50 text-center py-2" style={{ color: chromeText }}>No comments yet</p>
                 )}
@@ -714,6 +748,30 @@ function PostDetailPopup({ post, postReactions, onReact, onOpenReactors, accentC
           </div>
         </div>
       </div>
+
+      {/* Quick emoji picker for popup — z above the popup itself */}
+      {popupQepRect && createPortal(
+        <>
+          <div className="fixed inset-0 z-[100015]" onClick={(e) => { e.stopPropagation(); setPopupQepRect(null); }} />
+          <div
+            className="fixed z-[100016]"
+            style={popupQepRect.top > window.innerHeight * 0.5
+              ? { bottom: window.innerHeight - popupQepRect.top + 4, left: Math.max(4, popupQepRect.left - 80) }
+              : { top: popupQepRect.bottom + 4, left: Math.max(4, popupQepRect.left - 80) }
+            }
+            onMouseDown={e => e.stopPropagation()}
+            onClick={e => e.stopPropagation()}
+          >
+            <EmojiPicker
+              embedded={true}
+              compact={true}
+              value=""
+              onChange={(e) => { if (e) { onReact(post.id, e); setPopupQepRect(null); } }}
+            />
+          </div>
+        </>,
+        document.body
+      )}
     </div>,
     document.body
   );
@@ -797,7 +855,7 @@ function GeoPostMosaic({ posts, accentColor, opacity = 0.42, onTileClick = null 
 }
 
 // ── PostCard ──────────────────────────────────────────────────────────────────
-function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, onSelectTag, zipHeatMap, boroughHeatMap, textScale = 1, imageScale = 1, imagePriority = false, isDesktopMasonry = false, gridUnitHeight = 0, commentCount = 0, commentsOpen = false, onToggleComments, commentsChildren, onOpenPopup }) {
+function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, onSelectTag, zipHeatMap, boroughHeatMap, textScale = 1, imageScale = 1, imagePriority = false, isDesktopMasonry = false, gridUnitHeight = 0, commentCount = 0, commentsOpen = false, onToggleComments, commentsChildren, onOpenPopup, onHide }) {
   const { resolvedTheme } = useSiteTheme();
   const theme = getPostVisualTheme(post, resolvedTheme);
   const date = new Date(post.created_at);
@@ -849,10 +907,11 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
   const textFontSizeRem = 0.875 * scale;           // 14px base * scale (for UI chrome only)
   const hasImage = Boolean(post.image_url);
   const shape = hasImage
-    ? (imgRatio < 0.85 ? 'portrait' : imgRatio > 1.25 ? 'landscape' : 'square')
+    ? (imgRatio > 2.33 ? 'ultrawide' : imgRatio < 0.85 ? 'portrait' : imgRatio > 1.25 ? 'landscape' : 'square')
     : 'square';
   const isTallTile = hasImage && shape === 'portrait';
   const isLongTile = hasImage && shape === 'landscape';
+  const isUltrawideTile = hasImage && shape === 'ultrawide';
   const columnSpan = isLongTile ? 4 : 2;
 
   // Advanced gridding with bisected half-rows
@@ -864,6 +923,7 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
 
   let finalColSpan = columnSpan;
   let finalRowSpan = isTallTile ? 4 : 2;
+  let isSplitTile = false; // square image with lots of text → image left / text right
 
   if (!hasImage) {
     if (estLinesAt2col <= 5) {
@@ -874,6 +934,10 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
     } else {
       finalRowSpan = 2;
     }
+  } else if (isUltrawideTile) {
+    // Ultra-wide image (>2.33:1): 8 cols wide, 2 rows tall — image top, content below
+    finalColSpan = 8;
+    finalRowSpan = 2;
   } else if (isTallTile) {
     finalRowSpan = 4;
   } else if (isLongTile) {
@@ -883,7 +947,13 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
       finalRowSpan = 2;
     }
   } else {
-    if (estLinesAt2col > 3) {
+    // square tile
+    if (estLinesAt2col > 15) {
+      // Heavy text: split layout — image left, text right — 6 cols wide, 2 rows tall
+      isSplitTile = true;
+      finalColSpan = 6;
+      finalRowSpan = 2;
+    } else if (estLinesAt2col > 3) {
       finalRowSpan = 3;
     } else {
       finalRowSpan = 2;
@@ -891,7 +961,14 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
   }
 
   const rowSpan = finalRowSpan + (commentsOpen && isDesktopMasonry ? 2 : 0);
-  const maxTextLines = isTallTile ? 9 : (finalRowSpan === 3) ? 4 : hasImage ? 3 : (finalRowSpan === 1 ? 3 : 9);
+  // Increase text budget for larger tiles
+  const maxTextLines = isTallTile ? 9
+    : isSplitTile ? 12
+    : (finalRowSpan === 3) ? 4
+    : hasImage ? 3
+    : (finalRowSpan === 1) ? 3
+    : (finalColSpan >= 4) ? 13  // no-image wide 4w×2t: +4 more standard lines
+    : 11;                        // no-image normal 2w×2t: +2 more standard lines
   // Fixed pixel budget: 16px (browser normal font) × 1.5 line-height × maxTextLines × slider scale
   const maxBudgetPx = Math.floor(16 * scale * textLineHeight) * maxTextLines;
   const tileGridStyle = {
@@ -971,19 +1048,19 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
         boxShadow: `4px 4px 0px ${theme.shadow}`,
         height: '100%',
         display: 'flex',
-        flexDirection: 'column',
+        // Split tile: row layout (image left, content right)
+        flexDirection: isSplitTile ? 'row' : 'column',
         transition: 'transform 2000ms cubic-bezier(0.16, 1, 0.3, 1)',
         ...tileGridStyle,
       }}
     >
-      {post.image_url && (
+      {post.image_url && !isSplitTile && (
         // flex: 1 — image grows elastically to fill all remaining tile space the footer doesn't claim.
-        // No maxHeight so the image truly fills: tall tiles use 2 rows (~840px), short use 1 row (~420px).
         <div
-          className="relative w-full overflow-hidden bg-black/5"
+          className="relative w-full overflow-hidden bg-black/5 group"
           style={isDesktopMasonry
             ? { flex: 1, minHeight: 80, position: 'relative', cursor: onOpenPopup ? 'pointer' : 'default' }
-            : { height: 0, paddingBottom: shape === 'portrait' ? '110%' : shape === 'landscape' ? '48%' : '72%', cursor: onOpenPopup ? 'pointer' : 'default' }
+            : { height: 0, paddingBottom: shape === 'portrait' ? '110%' : isUltrawideTile ? '25%' : shape === 'landscape' ? '48%' : '72%', cursor: onOpenPopup ? 'pointer' : 'default' }
           }
           onClick={() => onOpenPopup && onOpenPopup(post)}
         >
@@ -1000,11 +1077,42 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
             onClick={() => {}}
           />
           {!imgLoaded && <div className="absolute inset-0 animate-pulse bg-black/5" />}
+          {/* Hide button: appears on image hover */}
+          {onHide && (
+            <button
+              className="absolute top-1.5 left-1.5 w-6 h-6 rounded-full bg-black/70 text-white text-xs font-black flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black z-10"
+              onMouseDown={e => e.preventDefault()}
+              onClick={(e) => { e.stopPropagation(); onHide(post.id); }}
+              title="Hide this post"
+            >✕</button>
+          )}
+        </div>
+      )}
+
+      {/* Split tile: image on left half */}
+      {post.image_url && isSplitTile && (
+        <div
+          className="relative overflow-hidden bg-black/5 flex-shrink-0"
+          style={{ width: '40%', cursor: onOpenPopup ? 'pointer' : 'default', minHeight: 0 }}
+          onClick={() => onOpenPopup && onOpenPopup(post)}
+        >
+          <img
+            src={post.image_url}
+            alt="post"
+            className={`absolute inset-0 block w-full h-full object-cover transition-opacity duration-200 ${imgLoaded ? 'opacity-100' : 'opacity-0'}`}
+            loading={imagePriority ? 'eager' : 'lazy'}
+            decoding="async"
+            onLoad={(e) => {
+              try { setImgRatio(e.target.naturalWidth / e.target.naturalHeight); } catch {}
+              setImgLoaded(true);
+            }}
+          />
+          {!imgLoaded && <div className="absolute inset-0 animate-pulse bg-black/5" />}
         </div>
       )}
 
       {/* footer: flex-1 on no-image tiles so reactions can pin to bottom; flex-shrink-0 when image is present */}
-      <div className="p-3" style={{ background: theme.fill, flex: hasImage ? '0 0 auto' : '1 1 auto', display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
+      <div className="p-3" style={{ background: theme.fill, flex: (hasImage && !isSplitTile) ? '0 0 auto' : '1 1 auto', display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
         <div className="flex items-center gap-1 mb-1 overflow-hidden" style={{ flexWrap: 'nowrap', minWidth: 0, flexShrink: 0 }}>
           {postIsAnonymous ? (
             <span className="font-black text-xs flex items-center gap-1 flex-shrink" style={{ color: theme.text, fontSize: `${12 * scale}px`, minWidth: 0, flexShrink: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}>
@@ -1053,10 +1161,11 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
           <button
             type="button"
             onMouseDown={(e) => e.preventDefault()}
-            className="self-start text-[11px] font-black underline decoration-2"
-            style={{ color: theme.text, marginTop: 2 }}
+            onClick={() => onOpenPopup && onOpenPopup(post)}
+            className="self-start text-[11px] font-black underline decoration-2 hover:opacity-70"
+            style={{ color: theme.text, marginTop: 2, cursor: 'pointer' }}
           >
-            Show more
+            Show more ↗
           </button>
         )}
 
@@ -1522,6 +1631,12 @@ export default function GeoPostView({ session }) {
   const [tileViewKey, setTileViewKey] = useState(0);
   const [mosaicPeek, setMosaicPeek] = useState(false); // hold-to-peek mosaic
   const [mosaicPeekOn, setMosaicPeekOn] = useState(false); // click-toggle mosaic
+  const [hiddenPostIds, setHiddenPostIds] = useState(() => {
+    try { return new Set(JSON.parse(localStorage.getItem('lapuff_hidden_posts') || '[]')); }
+    catch { return new Set(); }
+  });
+  const [hiddenPanelOpen, setHiddenPanelOpen] = useState(false);
+  const hiddenBtnRef = useRef(null);
   // Feed layout: 'tiles' = bento masonry, 'list' = simple sidebar + stacked feed (from b10941b)
   const [feedLayout, setFeedLayout] = useState(() => {
     try { return localStorage.getItem('lapuff_feed_layout') || 'tiles'; } catch { return 'tiles'; }
@@ -2234,7 +2349,7 @@ export default function GeoPostView({ session }) {
     });
   }, [posts, normalizedQuery, searchTokens]);
 
-  const visiblePosts = filteredPosts.slice(0, visibleCount);
+  const visiblePosts = filteredPosts.filter(p => !hiddenPostIds.has(p.id)).slice(0, visibleCount);
   const canShowMore  = visibleCount < filteredPosts.length;
   const canShowLess  = visibleCount > PAGE_SIZE;
   canShowMoreRef.current = canShowMore;
@@ -2494,6 +2609,27 @@ export default function GeoPostView({ session }) {
     }
   };
 
+  const hidePost = (postId) => {
+    setHiddenPostIds(prev => {
+      const next = new Set(prev);
+      next.add(postId);
+      localStorage.setItem('lapuff_hidden_posts', JSON.stringify([...next]));
+      return next;
+    });
+  };
+  const unhidePost = (postId) => {
+    setHiddenPostIds(prev => {
+      const next = new Set(prev);
+      next.delete(postId);
+      localStorage.setItem('lapuff_hidden_posts', JSON.stringify([...next]));
+      return next;
+    });
+  };
+  const resetHiddenPosts = () => {
+    setHiddenPostIds(new Set());
+    localStorage.removeItem('lapuff_hidden_posts');
+  };
+
   const scrollToTop = () => {
     topAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -2525,6 +2661,7 @@ export default function GeoPostView({ session }) {
         commentsOpen={!!openCommentsByPost[post.id]}
         onToggleComments={toggleComments}
         onOpenPopup={(p) => setOpenPostPopup(p)}
+        onHide={hidePost}
         commentsChildren={
           <CommentSection
             post={post}
@@ -2555,7 +2692,7 @@ export default function GeoPostView({ session }) {
         <div className="hidden md:block absolute inset-0" style={{ zIndex: 0, pointerEvents: mosaicPeekOn ? 'auto' : 'none' }} aria-hidden={!mosaicPeekOn}>
           <GeoPostMosaic posts={posts} accentColor={accentColor} opacity={(mosaicPeek || mosaicPeekOn) ? 1 : 0.42} onTileClick={mosaicPeekOn ? (post) => setOpenPostPopup(post) : null} />
         </div>
-      <div className="w-full max-w-7xl mx-auto px-3 pt-8 pb-0" style={{ position: 'relative', zIndex: 1 }}>
+      <div className="w-full max-w-7xl mx-auto px-3 pt-8 pb-0" style={{ position: 'relative', zIndex: 1, pointerEvents: mosaicPeekOn ? 'none' : 'auto' }}>
         <div ref={createPostAreaRef} className="rounded-2xl border-3 border-black shadow-[4px_4px_0px_black] relative overflow-hidden"
           style={{ background: surfaceBg, borderColor: postOutline || '#000', opacity: (mosaicPeek || mosaicPeekOn) ? 0 : 1, pointerEvents: (mosaicPeek || mosaicPeekOn) ? 'none' : 'auto', transition: 'opacity 200ms ease' }}>
 
@@ -2706,7 +2843,7 @@ export default function GeoPostView({ session }) {
         </div>
       </div>
       {/* Top-right controls: feed layout toggle + eye peek button */}
-      <div className="hidden md:flex absolute items-center gap-2" style={{ top: 10, right: 24, zIndex: 10 }}>
+      <div className="hidden md:flex absolute items-center gap-2" style={{ top: 10, right: 24, zIndex: 10, pointerEvents: mosaicPeekOn ? 'none' : 'auto' }}>
         {/* Layout toggle: tile mode or list mode */}
         <div className="flex items-center rounded-lg border-2 border-black bg-white shadow-[2px_2px_0px_black] overflow-hidden select-none">
           <button
@@ -2764,6 +2901,59 @@ export default function GeoPostView({ session }) {
             display: 'block',
           }}>👁</span>
         </button>
+
+        {/* Hidden posts manager button — only shown if there are hidden posts */}
+        {hiddenPostIds.size > 0 && (
+          <div className="relative" ref={hiddenBtnRef}>
+            <button
+              onMouseDown={e => e.preventDefault()}
+              onClick={() => setHiddenPanelOpen(v => !v)}
+              className="flex items-center justify-center w-8 h-8 rounded-full border-2 border-black bg-white hover:scale-110 select-none transition-all duration-200"
+              style={{ boxShadow: '2px 2px 0px black', cursor: 'pointer', userSelect: 'none', position: 'relative' }}
+              title={`${hiddenPostIds.size} hidden post${hiddenPostIds.size > 1 ? 's' : ''}`}
+            >
+              {/* Crossed-out square icon */}
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                <rect x="1" y="1" width="12" height="12" rx="1.5" stroke="currentColor" strokeWidth="1.5" fill="none"/>
+                <line x1="2" y1="2" x2="12" y2="12" stroke="currentColor" strokeWidth="1.5"/>
+              </svg>
+              <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-white text-[9px] font-black flex items-center justify-center">{hiddenPostIds.size}</span>
+            </button>
+            {hiddenPanelOpen && (
+              <>
+                <div className="fixed inset-0 z-[200]" onClick={() => setHiddenPanelOpen(false)} />
+                <div className="absolute right-0 top-10 z-[201] bg-white border-3 border-black rounded-2xl shadow-[4px_4px_0px_black] w-72 overflow-hidden">
+                  <div className="p-2 border-b-2 border-black flex items-center gap-2">
+                    <span className="font-black text-[11px] flex-1">Hidden Posts ({hiddenPostIds.size})</span>
+                    <button onMouseDown={e => e.preventDefault()} onClick={() => { resetHiddenPosts(); setHiddenPanelOpen(false); }}
+                      className="px-2 py-1 rounded-lg border-2 border-black text-[10px] font-black bg-red-50 hover:bg-red-100">
+                      Unhide All
+                    </button>
+                  </div>
+                  <div className="max-h-64 overflow-y-auto divide-y divide-gray-100">
+                    {posts.filter(p => hiddenPostIds.has(p.id)).map(p => {
+                      const pIsAnon = !p.user_id;
+                      const pContent = typeof p.content === 'string' ? (() => { try { return JSON.parse(p.content); } catch { return {}; } })() : (p.content || {});
+                      const pText = (pContent.html || '').replace(/<[^>]+>/g, '').slice(0, 50);
+                      return (
+                        <div key={p.id} className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50">
+                          <div className="flex-1 min-w-0">
+                            <div className="font-black text-[10px] truncate">{pIsAnon ? '🎭 Anonymous' : p.username || 'Orbiter'}</div>
+                            <div className="text-[10px] text-gray-500 truncate">{pText || '(no text)'}</div>
+                          </div>
+                          <button onMouseDown={e => e.preventDefault()} onClick={() => unhidePost(p.id)}
+                            className="w-6 h-6 rounded-full border-2 border-black flex items-center justify-center text-xs font-black hover:bg-gray-100 flex-shrink-0">
+                            ✕
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        )}
       </div>
       </div>{/* end mosaic section wrapper */}
 
@@ -2773,13 +2963,13 @@ export default function GeoPostView({ session }) {
       <div className="w-full relative" style={{ height: 44, overflow: 'visible', zIndex: 10 }}>
         {/* Line button: full width, anchored at top:0 (= mosaic bottom), border-y, no shadow */}
         <div className="absolute left-0 right-0 flex items-center justify-center" style={{ top: 0, height: 20, borderTop: '3px solid #000', borderBottom: '3px solid #000', background: '#fff', zIndex: 1 }}>
-          <div style={{ width: '40%', height: 2, background: '#000', borderRadius: 1 }} />
+          <div style={{ position: 'absolute', left: 0, right: 0, top: '50%', height: 2, background: '#000', transform: 'translateY(-50%)' }} />
         </div>
         {/* GEO-FEED pill: center locked to line center (top:10px = midpoint of 20px line).
             translateY(-50%) pulls it up by half its own height → top half overlaps mosaic. */}
         <div className="absolute left-1/2" style={{ top: 10, transform: 'translate(-50%, -50%)', zIndex: 5 }}>
           <div className="border-[3px] border-black rounded-xl px-4 py-1.5 bg-white" style={{ whiteSpace: 'nowrap' }}>
-            <span className="font-black text-[1.75rem] leading-none tracking-tight text-black">GEO-FEED</span>
+            <span className="font-black text-[1.75rem] leading-none tracking-tight text-black">🌎 Geo-Feed</span>
           </div>
         </div>
       </div>
