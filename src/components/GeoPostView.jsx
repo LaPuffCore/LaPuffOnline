@@ -593,7 +593,7 @@ function PostDetailPopup({ post, postReactions, onReact, onOpenReactors, accentC
     >
       <div
         className="relative my-8 mx-4 rounded-2xl border-3 border-black shadow-[8px_8px_0px_black] flex flex-col overflow-hidden"
-        style={{ background: surfaceBg, width: '100%', maxWidth: 600, minWidth: 0 }}
+        style={{ background: surfaceBg, width: '100%', maxWidth: 600, minWidth: 0, transform: 'translateZ(0)', isolation: 'isolate' }}
         onClick={e => e.stopPropagation()}
       >
         <button
@@ -2407,27 +2407,32 @@ export default function GeoPostView({ session }) {
     };
   }, [desktopUnitHeight, visiblePosts.length, canShowMore, canShowLess, applyPanelRow, feedLayout, filterPanelMode]);
 
-  // When switching back to tile mode, defer one rAF to ensure the grid DOM is
-  // fully laid out, then recompute gridOffset + reset panel to row 1.
-  // (Grid was unmounted in list mode so getBoundingClientRect was stale)
+  // When switching back to tile mode, double-rAF to ensure two browser layout passes
+  // (grid was unmounted in list mode so getBoundingClientRect was stale after remount)
   useEffect(() => {
     if (feedLayout !== 'tiles') return;
-    const raf = requestAnimationFrame(() => {
-      if (!desktopGridRef.current) return;
-      const scrollEl = findScrollParent(desktopGridRef.current);
-      const scrollTop = scrollEl === window ? window.scrollY : scrollEl.scrollTop;
-      const containerClientTop = scrollEl === window ? 0 : scrollEl.getBoundingClientRect().top;
-      const gridClientTop = desktopGridRef.current.getBoundingClientRect().top;
-      gridOffsetCacheRef.current = gridClientTop - containerClientTop + scrollTop;
-      // Reset aside animation state cleanly
-      if (filterPanelInnerRef.current) {
-        filterPanelInnerRef.current.style.transition = 'none';
-        filterPanelInnerRef.current.style.transform = 'translateY(0)';
-        filterPanelInnerRef.current.style.filter = 'blur(0)';
-        filterPanelInnerRef.current.style.opacity = '1';
-      }
+    const raf1 = requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (!desktopGridRef.current) return;
+        const scrollEl = findScrollParent(desktopGridRef.current);
+        const scrollTop = scrollEl === window ? window.scrollY : scrollEl.scrollTop;
+        const containerClientTop = scrollEl === window ? 0 : scrollEl.getBoundingClientRect().top;
+        const gridClientTop = desktopGridRef.current.getBoundingClientRect().top;
+        // Fresh grid offset — old value was 0 (invalidated in click handler)
+        gridOffsetCacheRef.current = gridClientTop - containerClientTop + scrollTop;
+        // Hard-reset all tracking refs so computeTargetRow() starts clean
+        panelRowRef.current = 1;
+        lastAppliedRowRef.current = 1;
+        setDesktopPanelRow(1);
+        if (filterPanelInnerRef.current) {
+          filterPanelInnerRef.current.style.transition = 'none';
+          filterPanelInnerRef.current.style.transform = 'translateY(0)';
+          filterPanelInnerRef.current.style.filter = 'blur(0)';
+          filterPanelInnerRef.current.style.opacity = '1';
+        }
+      });
     });
-    return () => cancelAnimationFrame(raf);
+    return () => cancelAnimationFrame(raf1);
   }, [feedLayout]);
 
   // FAB visibility: fade in as create-post area scrolls away
@@ -2692,7 +2697,17 @@ export default function GeoPostView({ session }) {
         <div className="flex items-center rounded-lg border-2 border-black bg-white shadow-[2px_2px_0px_black] overflow-hidden select-none">
           <button
             onMouseDown={e => e.preventDefault()}
-            onClick={() => { setFeedLayout('tiles'); setDesktopPanelRow(1); }}
+            onClick={() => {
+              // Full reset to load-time tile state — clears any stale filterPanelMode/refs from list mode
+              setFeedLayout('tiles');
+              setFilterPanelMode('panel');
+              setFilterPanelPinned(false);
+              setDesktopPanelRow(1);
+              // Invalidate stale panel refs so the scroll effect recomputes fresh
+              gridOffsetCacheRef.current = 0;
+              panelRowRef.current = 1;
+              lastAppliedRowRef.current = 1;
+            }}
             title="Tile / bento view"
             className="flex items-center justify-center w-7 h-7 transition-colors"
             style={{ background: feedLayout === 'tiles' ? accentColor : '#fff', color: feedLayout === 'tiles' ? '#fff' : '#000' }}
@@ -2724,20 +2739,22 @@ export default function GeoPostView({ session }) {
           aria-label="Peek at mosaic"
         >👁</button>
       </div>
-      {/* Separator — inside mosaic wrapper so mosaic fills all the way to the line.
-          The ribbon sits at the very bottom of the mosaic. GEO-FEED pill is absolutely
-          centered on the ribbon, larger than it, so it slightly overlaps the mosaic above. */}
-      <div className="w-full" style={{ position: 'relative', height: 56, flexShrink: 0 }}>
-        {/* Line/ribbon button — no shadow, top anchored at 0 = mosaic bottom */}
-        <div className="absolute left-0 right-0" style={{ top: 0, height: 20, borderTop: '3px solid #000', borderBottom: '3px solid #000', background: '#fff', zIndex: 0 }} />
-        {/* GEO-FEED pill — centered vertically on the ribbon, overlaps mosaic slightly */}
-        <div className="absolute left-1/2" style={{ top: '50%', transform: 'translate(-50%, -50%)', zIndex: 2 }}>
+      </div>{/* end mosaic section wrapper */}
+
+      {/* GEO-FEED Separator: OUTSIDE mosaic wrapper. overflow:visible so pill pokes up into mosaic.
+          Line button top = mosaic wrapper bottom exactly.
+          GEO-FEED pill centered on line → extends ~half-height above into mosaic area. */}
+      <div className="w-full relative" style={{ height: 44, overflow: 'visible', zIndex: 10 }}>
+        {/* Line button: full width, anchored at top:0 (= mosaic bottom), border-y, no shadow */}
+        <div className="absolute left-0 right-0" style={{ top: 0, height: 20, borderTop: '3px solid #000', borderBottom: '3px solid #000', background: '#fff', zIndex: 1 }} />
+        {/* GEO-FEED pill: center locked to line center (top:10px = midpoint of 20px line).
+            translateY(-50%) pulls it up by half its own height → top half overlaps mosaic. */}
+        <div className="absolute left-1/2" style={{ top: 10, transform: 'translate(-50%, -50%)', zIndex: 5 }}>
           <div className="border-[3px] border-black rounded-xl px-4 py-1.5 bg-white" style={{ whiteSpace: 'nowrap' }}>
             <span className="font-black text-[1.75rem] leading-none tracking-tight text-black">GEO-FEED</span>
           </div>
         </div>
       </div>
-      </div>{/* end mosaic section wrapper */}
 
       {/* Horizontal filter top bar — only in tile mode when filterPanelMode === 'topbar' */}
       {filterPanelMode === 'topbar' && feedLayout === 'tiles' && (
