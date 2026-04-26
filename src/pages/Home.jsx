@@ -177,15 +177,6 @@ export default function Home({ events = [], eventsLoading = false }) {
   const CLOUT_URL = 'https://soundcloud.com/justin-lapuff/sets/clout-culling-games';
   const DIMES_URL = 'https://soundcloud.com/justin-lapuff/sets/dimes-square';
 
-  /** Random skip within the current playlist */
-  function _shuffleSkip(w) {
-    w.getSounds(sounds => {
-      if (!sounds || sounds.length <= 1) { w.next(); return; }
-      const idx = Math.floor(Math.random() * sounds.length);
-      w.skip(idx);
-    });
-  }
-
   /**
    * Switch to a playlist. Keeps the same iframe — uses widget.load() with
    * auto_play:true so the callback fires reliably once the widget is ready.
@@ -207,8 +198,14 @@ export default function Home({ events = [], eventsLoading = false }) {
       callback: () => {
         scReadyRef.current = true;
         w.setVolume(musicVolumeRef.current);
-        w.setShuffle(true);
-        _shuffleSkip(w);
+        // True shuffle: skip to random track first, then enable shuffle for future nav
+        w.getSounds(sounds => {
+          if (sounds && sounds.length > 0) {
+            const idx = Math.floor(Math.random() * sounds.length);
+            w.skip(idx);
+          }
+          w.setShuffle(true);
+        });
       },
     });
   }
@@ -240,7 +237,8 @@ export default function Home({ events = [], eventsLoading = false }) {
         });
       });
       widget.bind(E.PAUSE,  () => setIsMusicOn(false));
-      widget.bind(E.FINISH, () => setIsMusicOn(false));
+      // FINISH: auto-advance to next shuffled track (bound once here, never re-bound)
+      widget.bind(E.FINISH, () => { if (scWidgetRef.current) scWidgetRef.current.next(); });
     }
 
     if (window.SC) {
@@ -301,13 +299,11 @@ export default function Home({ events = [], eventsLoading = false }) {
   }
 
   function handlePrevTrack() {
-    if (!scWidgetRef.current) return;
-    _shuffleSkip(scWidgetRef.current);
+    if (scWidgetRef.current) scWidgetRef.current.prev();
   }
 
   function handleNextTrack() {
-    if (!scWidgetRef.current) return;
-    _shuffleSkip(scWidgetRef.current);
+    if (scWidgetRef.current) scWidgetRef.current.next();
   }
 
   function handleTogglePlayPause() {
