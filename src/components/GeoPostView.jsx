@@ -530,6 +530,13 @@ function PostDetailPopup({ post, postReactions, onReact, onOpenReactors, accentC
   const surfaceBg = resolvedTheme?.surfaceBgColor || '#FFFFFF';
   const bodyTextColor = resolvedTheme?.bodyTextColor || '#000000';
 
+  const theme = getPostVisualTheme(post, resolvedTheme);
+  const fillBg = theme.fill || surfaceBg;
+  const fillLuminance = luminanceFromHex(fillBg) || 0;
+  const chromeBg = fillLuminance < 0.35 ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.06)';
+  const chromeText = fillLuminance < 0.35 ? '#fff' : bodyTextColor;
+  const chromeBorder = fillLuminance < 0.35 ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.15)';
+
   const [imgLoaded, setImgLoaded] = useState(false);
   const [commentDraft, setCommentDraft] = useState('');
   const [commentsExpanded, setCommentsExpanded] = useState(true);
@@ -617,15 +624,15 @@ function PostDetailPopup({ post, postReactions, onReact, onOpenReactors, accentC
           </div>
         )}
 
-        <div className="p-4 flex flex-col gap-3">
+        <div className="p-4 flex flex-col gap-3" style={{ backgroundColor: fillBg }}>
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-black text-sm" style={{ color: bodyTextColor }}>
+            <span className="font-black text-sm" style={{ color: chromeText }}>
               {postIsAnonymous ? '🎭 Anonymous' : post.username || 'Orbiter'}
             </span>
             <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full" style={statusStyle}>
               ● {post.is_participant ? 'PARTICIPANT' : postIsAnonymous ? 'ANON' : 'ORBITER'}
             </span>
-            <span className="text-xs ml-auto opacity-60" style={{ color: bodyTextColor }}>{dateStr} · {timeStr}</span>
+            <span className="text-xs ml-auto opacity-60" style={{ color: chromeText }}>{dateStr} · {timeStr}</span>
           </div>
 
           <div
@@ -634,49 +641,54 @@ function PostDetailPopup({ post, postReactions, onReact, onOpenReactors, accentC
             dangerouslySetInnerHTML={{ __html: postHtml }}
           />
 
-          <button
-            onMouseDown={e => e.preventDefault()}
-            onClick={() => { onSelectTag && onSelectTag({ scope: post.scope, borough: post.borough, zip_code: post.zip_code }); onClose(); }}
-            className="self-start px-2 py-0.5 rounded-full text-[10px] font-black border border-black bg-gray-100 hover:bg-gray-200"
-          >
-            {locationLabel}
-          </button>
-
           <div className="flex items-center gap-1.5 flex-wrap">
             {topEmojis.map(([emoji, count]) => (
               <button key={emoji} onMouseDown={e => e.preventDefault()} onClick={() => onReact(post.id, emoji)}
-                className="flex items-center gap-0.5 px-2 py-0.5 rounded-full border-2 border-black text-sm font-black hover:scale-105 transition-transform bg-gray-50">
+                className="flex items-center gap-0.5 px-2 py-0.5 rounded-full border-2 text-sm font-black hover:scale-105 transition-transform"
+                style={{ background: chromeBg, color: chromeText, borderColor: chromeBorder }}>
                 {emoji}<span className="text-xs">{count}</span>
               </button>
             ))}
+            <button onMouseDown={e => e.preventDefault()} onClick={() => onOpenReactors(post.id)}
+              className="px-2 py-0.5 rounded-full border-2 text-[10px] font-black"
+              style={{ background: chromeBg, color: chromeText, borderColor: chromeBorder }}>+</button>
             {topEmojis.length > 0 && (
               <button onMouseDown={e => e.preventDefault()} onClick={() => onOpenReactors(post.id)}
-                className="px-2 py-0.5 rounded-full border-2 border-black text-[10px] font-black bg-gray-50 hover:bg-gray-100">…</button>
+                className="px-2 py-0.5 rounded-full border-2 text-[10px] font-black"
+                style={{ background: chromeBg, color: chromeText, borderColor: chromeBorder }}>…</button>
             )}
+            <button
+              onMouseDown={e => e.preventDefault()}
+              onClick={() => { onSelectTag && onSelectTag({ scope: post.scope, borough: post.borough, zip_code: post.zip_code }); onClose(); }}
+              className="ml-auto px-2 py-0.5 rounded-full text-[10px] font-black border hover:opacity-80"
+              style={{ background: chromeBg, color: chromeText, borderColor: chromeBorder }}
+            >
+              {locationLabel}
+            </button>
           </div>
 
-          <div className="border-t-2 border-black pt-3">
+          <div className="pt-3" style={{ borderTop: `2px solid ${chromeBorder}` }}>
             <button
               onMouseDown={e => e.preventDefault()}
               onClick={() => setCommentsExpanded(v => !v)}
               className="text-xs font-black mb-2 hover:underline"
-              style={{ color: bodyTextColor }}
+              style={{ color: chromeText }}
             >
               💬 Comments {commentsExpanded ? '▲' : '▼'}
             </button>
             {commentsExpanded && (
               <div className="flex flex-col gap-2">
                 {(comments || []).map(c => (
-                  <div key={c.id} className="bg-gray-50 rounded-xl p-2 border border-gray-200">
+                  <div key={c.id} className="rounded-xl p-2" style={{ background: chromeBg, border: `1px solid ${chromeBorder}` }}>
                     <div className="flex items-center gap-1 mb-1">
-                      <span className="text-[10px] font-black">{c.username || 'Orbiter'}</span>
-                      <span className="text-[9px] opacity-50 ml-auto">{c.created_at ? new Date(c.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric'}) : ''}</span>
+                      <span className="text-[10px] font-black" style={{ color: chromeText }}>{c.username || 'Orbiter'}</span>
+                      <span className="text-[9px] opacity-50 ml-auto" style={{ color: chromeText }}>{c.created_at ? new Date(c.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric'}) : ''}</span>
                     </div>
-                    <div className="text-xs" style={{ color: bodyTextColor }}>{c.text || c.content}</div>
+                    <div className="text-xs" style={{ color: chromeText }}>{c.text || c.content}</div>
                   </div>
                 ))}
                 {(comments || []).length === 0 && (
-                  <p className="text-xs opacity-50 text-center py-2">No comments yet</p>
+                  <p className="text-xs opacity-50 text-center py-2" style={{ color: chromeText }}>No comments yet</p>
                 )}
                 <div className="flex gap-2 mt-1">
                   <input
@@ -684,7 +696,8 @@ function PostDetailPopup({ post, postReactions, onReact, onOpenReactors, accentC
                     onChange={e => setCommentDraft(e.target.value)}
                     onKeyDown={e => { if (e.key === 'Enter' && commentDraft.trim()) { onSubmitComment(post.id, commentDraft.trim()); setCommentDraft(''); } }}
                     placeholder="Add a comment..."
-                    className="flex-1 px-3 py-1.5 border-2 border-black rounded-lg text-xs font-black"
+                    className="flex-1 px-3 py-1.5 border-2 rounded-lg text-xs font-black"
+                    style={{ borderColor: chromeBorder, background: chromeBg, color: chromeText }}
                   />
                   <button
                     onMouseDown={e => e.preventDefault()}
@@ -700,6 +713,78 @@ function PostDetailPopup({ post, postReactions, onReact, onOpenReactors, accentC
       </div>
     </div>,
     document.body
+  );
+}
+
+// ── GeoPostMosaic ─────────────────────────────────────────────────────────────
+function GeoPostMosaic({ posts, accentColor }) {
+  const COLS = 16;
+  const ROWS = 6;
+  const TOTAL = COLS * ROWS; // 96
+
+  const imagePosts = useMemo(() => {
+    const imgs = posts.filter(p => p.image_url).slice(0, TOTAL);
+    return imgs;
+  }, [posts, TOTAL]);
+
+  const tiles = useMemo(() => {
+    const result = [];
+    for (let i = 0; i < TOTAL; i++) {
+      result.push(imagePosts[i] || null);
+    }
+    return result;
+  }, [imagePosts, TOTAL]);
+
+  return (
+    <div
+      className="absolute inset-0 overflow-hidden pointer-events-none"
+      style={{ zIndex: 0, borderRadius: 'inherit' }}
+      aria-hidden="true"
+    >
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: `repeat(${COLS}, 1fr)`,
+          gridTemplateRows: `repeat(${ROWS}, 1fr)`,
+          width: '100%',
+          height: '100%',
+          opacity: 0.18,
+          imageRendering: 'pixelated',
+        }}
+      >
+        {tiles.map((post, idx) => (
+          <div key={idx} style={{ overflow: 'hidden', aspectRatio: '1 / 1', width: '100%' }}>
+            {post ? (
+              <img
+                src={post.image_url}
+                alt=""
+                loading="lazy"
+                width={56}
+                height={56}
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'cover',
+                  display: 'block',
+                  imageRendering: 'pixelated',
+                }}
+              />
+            ) : (
+              <div style={{
+                width: '100%',
+                height: '100%',
+                background: '#1a6bbf',
+                border: '0.5px solid rgba(0,0,0,0.3)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '1.2rem',
+              }}>🌍</div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -785,20 +870,20 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
     finalRowSpan = 4;
   } else if (isLongTile) {
     if (estLinesAt4col > 3) {
-      finalRowSpan = 6;
+      finalRowSpan = 3;
     } else {
       finalRowSpan = 2;
     }
   } else {
     if (estLinesAt2col > 3) {
-      finalRowSpan = 6;
+      finalRowSpan = 3;
     } else {
       finalRowSpan = 2;
     }
   }
 
   const rowSpan = finalRowSpan + (commentsOpen && isDesktopMasonry ? 2 : 0);
-  const maxTextLines = isTallTile ? 9 : (finalRowSpan >= 6) ? 6 : hasImage ? 3 : (finalRowSpan === 1 ? 5 : 9);
+  const maxTextLines = isTallTile ? 9 : (finalRowSpan === 3) ? 4 : hasImage ? 3 : (finalRowSpan === 1 ? 5 : 9);
   // Fixed pixel budget: 16px (browser normal font) × 1.5 line-height × maxTextLines × slider scale
   const maxBudgetPx = Math.floor(16 * scale * textLineHeight) * maxTextLines;
   const tileGridStyle = {
@@ -889,9 +974,10 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
         <div
           className="relative w-full overflow-hidden bg-black/5"
           style={isDesktopMasonry
-            ? { flex: 1, minHeight: 80, position: 'relative' }
-            : { height: 0, paddingBottom: shape === 'portrait' ? '110%' : shape === 'landscape' ? '48%' : '72%' }
+            ? { flex: 1, minHeight: 80, position: 'relative', cursor: onOpenPopup ? 'pointer' : 'default' }
+            : { height: 0, paddingBottom: shape === 'portrait' ? '110%' : shape === 'landscape' ? '48%' : '72%', cursor: onOpenPopup ? 'pointer' : 'default' }
           }
+          onClick={() => onOpenPopup && onOpenPopup(post)}
         >
           <img
             src={post.image_url}
@@ -911,10 +997,10 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
 
       {/* footer: flex-1 on no-image tiles so reactions can pin to bottom; flex-shrink-0 when image is present */}
       <div className="p-3" style={{ background: theme.fill, flex: hasImage ? '0 0 auto' : '1 1 auto', display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
-        <div className="flex items-center gap-1.5 mb-2 flex-wrap">
+        <div className="flex items-center gap-1 mb-1 overflow-hidden" style={{ flexWrap: 'nowrap', minWidth: 0 }}>
           {postIsAnonymous ? (
-            <span className="font-black text-xs flex items-center gap-1" style={{ color: theme.text, fontSize: `${12 * scale}px` }}>
-              <svg width="13" height="13" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ color: 'currentColor' }}>
+            <span className="font-black text-xs flex items-center gap-1 flex-shrink" style={{ color: theme.text, fontSize: `${12 * scale}px`, minWidth: 0, flexShrink: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}>
+              <svg width="13" height="13" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ color: 'currentColor', flexShrink: 0 }}>
                 <rect x="2" y="9" width="16" height="2.5" rx="1.25" fill="currentColor" />
                 <rect x="5" y="3" width="10" height="7" rx="1.5" fill="currentColor" />
                 <circle cx="9.5" cy="15" r="3" stroke="currentColor" strokeWidth="1.5" fill="none" />
@@ -922,18 +1008,18 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
               Anonymous
             </span>
           ) : (
-            <span className="font-black text-xs" style={{ color: theme.text, fontSize: `${12 * scale}px` }}>{post.username || 'Orbiter'}</span>
+            <span className="font-black text-xs" style={{ color: theme.text, fontSize: `${12 * scale}px`, minWidth: 0, flexShrink: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}>{post.username || 'Orbiter'}</span>
           )}
 
           <span
             onClick={() => onSelectTag && onSelectTag({ status: postIsAnonymous ? 'anonymous' : post.is_participant ? 'participant' : 'orbiter' })}
             className="text-[9px] font-black px-1.5 py-0.5 rounded-full cursor-pointer"
-            style={{ ...statusStyle, fontSize: `${9 * scale}px` }}
+            style={{ ...statusStyle, fontSize: `${9 * scale}px`, flexShrink: 0, whiteSpace: 'nowrap' }}
           >
-            ● {post.is_participant ? 'PARTICIPANT' : postIsAnonymous ? 'ANON' : 'ORBITER'}
+            ● {post.is_participant ? (finalColSpan <= 2 ? 'PAR' : 'PARTICIPANT') : postIsAnonymous ? 'ANON' : (finalColSpan <= 2 ? 'ORB' : 'ORBITER')}
           </span>
 
-          <span className="text-[9px] ml-auto" style={{ color: theme.text, fontSize: `${9 * scale}px` }}>{dateStr} · {timeStr}</span>
+          <span className="text-[9px] ml-auto" style={{ color: theme.text, fontSize: `${9 * scale}px`, flexShrink: 0, whiteSpace: 'nowrap' }}>{dateStr} · {timeStr}</span>
         </div>
 
         <div
@@ -1934,7 +2020,6 @@ export default function GeoPostView({ session }) {
 
   const ensureCommentsLoaded = useCallback(async (postId) => {
     if (!postId) return;
-    if (commentsByPost[postId]) return;
     const comments = await fetchCommentsForPost(postId);
     if (comments.length > 0) {
       setCommentsByPost((prev) => ({ ...prev, [postId]: comments }));
@@ -1968,6 +2053,15 @@ export default function GeoPostView({ session }) {
       await ensureCommentsLoaded(postId);
     }
   };
+
+  useEffect(() => {
+    if (!openPostPopup) return;
+    const fetchForPopup = async () => {
+      const comments = await fetchCommentsForPost(openPostPopup.id);
+      setCommentsByPost(prev => ({ ...prev, [openPostPopup.id]: comments }));
+    };
+    fetchForPopup();
+  }, [openPostPopup?.id]);
 
   const buildCommentAuthor = async () => {
     if (!session?.user?.id) {
@@ -2383,15 +2477,15 @@ export default function GeoPostView({ session }) {
     <div className="w-full" ref={topAnchorRef}>
       <style>{`
         .geopost-tiles-animating > *:not(aside) {
-          transition: transform 1000ms cubic-bezier(0.16, 1, 0.3, 1), filter 800ms ease-out !important;
-          filter: blur(1.5px);
+          transition: transform 1000ms cubic-bezier(0.16, 1, 0.3, 1) !important;
         }
-        .geopost-tiles-animating > *:not(aside):hover { filter: none; }
       `}</style>
       <div className="w-full max-w-7xl mx-auto px-3 pt-3">
-        <div ref={createPostAreaRef} className="rounded-2xl border-3 border-black shadow-[4px_4px_0px_black]"
+        <div ref={createPostAreaRef} className="rounded-2xl border-3 border-black shadow-[4px_4px_0px_black] relative overflow-hidden"
           style={{ background: surfaceBg, borderColor: postOutline || '#000' }}>
+          <GeoPostMosaic posts={posts} accentColor={accentColor} />
 
+          <div className="relative" style={{ zIndex: 1 }}>
           {/* image preview at top, rounded */}
           {imagePreview && (
             <div className="relative overflow-hidden rounded-t-2xl">
@@ -2534,13 +2628,16 @@ export default function GeoPostView({ session }) {
               {submitting ? '...' : 'Post'}
             </button>
           </div>
+          </div>
         </div>
       </div>
 
       <div className="w-full px-3 md:px-4">
-        <div className="flex items-center gap-2 mt-2 mb-3">
+        <div className="flex items-center gap-2 mt-3 mb-4">
           <div className="flex-1 border-t-2 border-black" />
-          <span className="font-black text-xs text-black whitespace-nowrap px-1">- Geo-Feed -</span>
+          <div className="border-3 border-black rounded-xl px-4 py-2 bg-white shadow-[3px_3px_0px_black]">
+            <span className="font-black text-[2.25rem] leading-none tracking-tight text-black whitespace-nowrap">GEO-FEED</span>
+          </div>
           <div className="flex-1 border-t-2 border-black" />
         </div>
 
@@ -2557,8 +2654,6 @@ export default function GeoPostView({ session }) {
             // Prevent browser scroll-anchoring from jumping the scroll position when
             // the panel moves to a new row and tiles reflow around it.
             overflowAnchor: 'none',
-            overflow: 'hidden',
-            maxHeight: `${16 * Math.max(1, (desktopUnitHeight - 12) / 2) + 15 * 12}px`,
           }}
         >
           <aside ref={filterPanelInnerRef} style={{ gridColumn: '1 / span 2', gridRow: `${desktopPanelRow} / span 2`, position: 'relative', zIndex: 20, willChange: 'transform, filter, opacity' }}>
@@ -2578,7 +2673,13 @@ export default function GeoPostView({ session }) {
                   <button
                     ref={boroughTriggerDesktopRef}
                     onMouseDown={e => e.preventDefault()}
-                    onClick={() => setOpenDropdown(p => p === 'borough' ? null : 'borough')}
+                    onClick={() => {
+                      if (locTab === 'borough' && filterBorough) {
+                        setLocTab('all'); setFilterBorough(''); setVisibleCount(PAGE_SIZE);
+                      } else {
+                        setOpenDropdown(p => p === 'borough' ? null : 'borough');
+                      }
+                    }}
                     className={baseFB}
                     style={locTab === 'borough' && filterBorough ? activeFS : {}}
                   >
@@ -2598,7 +2699,13 @@ export default function GeoPostView({ session }) {
                   <button
                     ref={zipTriggerDesktopRef}
                     onMouseDown={e => e.preventDefault()}
-                    onClick={() => setOpenDropdown(p => p === 'zip' ? null : 'zip')}
+                    onClick={() => {
+                      if (locTab === 'zip' && filterZip) {
+                        setLocTab('all'); setFilterZip(''); setVisibleCount(PAGE_SIZE);
+                      } else {
+                        setOpenDropdown(p => p === 'zip' ? null : 'zip');
+                      }
+                    }}
                     className={baseFB}
                     style={locTab === 'zip' && filterZip ? activeFS : {}}
                   >
@@ -2625,7 +2732,13 @@ export default function GeoPostView({ session }) {
                   <button
                     ref={timeTriggerDesktopRef}
                     onMouseDown={e => e.preventDefault()}
-                    onClick={() => setOpenDropdown(p => p === 'time' ? null : 'time')}
+                    onClick={() => {
+                      if (timeFilter !== 'all') {
+                        setTimeFilter('all'); setVisibleCount(PAGE_SIZE);
+                      } else {
+                        setOpenDropdown(p => p === 'time' ? null : 'time');
+                      }
+                    }}
                     className={baseFB}
                     style={timeFilter !== 'all' ? activeFS : {}}
                   >
@@ -2642,7 +2755,13 @@ export default function GeoPostView({ session }) {
                 </div>
 
                 <div className="relative">
-                  <button ref={statusTriggerDesktopRef} onMouseDown={e => e.preventDefault()} onClick={() => setOpenDropdown(p => p === 'status' ? null : 'status')} className={baseFB}
+                  <button ref={statusTriggerDesktopRef} onMouseDown={e => e.preventDefault()} onClick={() => {
+                      if (statusFilter !== 'all') {
+                        setStatusFilter('all'); setVisibleCount(PAGE_SIZE);
+                      } else {
+                        setOpenDropdown(p => p === 'status' ? null : 'status');
+                      }
+                    }} className={baseFB}
                     style={statusFilter === 'participant' ? { background: '#22c55e', color: '#fff', borderColor: '#22c55e' }
                       : statusFilter === 'orbiter' ? { background: '#ef4444', color: '#fff', borderColor: '#ef4444' }
                       : statusFilter === 'anonymous' ? { background: '#374151', color: '#fff', borderColor: '#374151' }
@@ -2722,7 +2841,13 @@ export default function GeoPostView({ session }) {
                   <button
                     ref={boroughTriggerMobileRef}
                     onMouseDown={e => e.preventDefault()}
-                    onClick={() => setOpenDropdown(p => p === 'borough' ? null : 'borough')}
+                    onClick={() => {
+                      if (locTab === 'borough' && filterBorough) {
+                        setLocTab('all'); setFilterBorough(''); setVisibleCount(PAGE_SIZE);
+                      } else {
+                        setOpenDropdown(p => p === 'borough' ? null : 'borough');
+                      }
+                    }}
                     className={baseFB}
                     style={locTab === 'borough' && filterBorough ? activeFS : {}}
                   >
@@ -2742,7 +2867,13 @@ export default function GeoPostView({ session }) {
                   <button
                     ref={zipTriggerMobileRef}
                     onMouseDown={e => e.preventDefault()}
-                    onClick={() => setOpenDropdown(p => p === 'zip' ? null : 'zip')}
+                    onClick={() => {
+                      if (locTab === 'zip' && filterZip) {
+                        setLocTab('all'); setFilterZip(''); setVisibleCount(PAGE_SIZE);
+                      } else {
+                        setOpenDropdown(p => p === 'zip' ? null : 'zip');
+                      }
+                    }}
                     className={baseFB}
                     style={locTab === 'zip' && filterZip ? activeFS : {}}
                   >
@@ -2769,7 +2900,13 @@ export default function GeoPostView({ session }) {
                   <button
                     ref={timeTriggerMobileRef}
                     onMouseDown={e => e.preventDefault()}
-                    onClick={() => setOpenDropdown(p => p === 'time' ? null : 'time')}
+                    onClick={() => {
+                      if (timeFilter !== 'all') {
+                        setTimeFilter('all'); setVisibleCount(PAGE_SIZE);
+                      } else {
+                        setOpenDropdown(p => p === 'time' ? null : 'time');
+                      }
+                    }}
                     className={baseFB}
                     style={timeFilter !== 'all' ? activeFS : {}}
                   >
@@ -2786,7 +2923,13 @@ export default function GeoPostView({ session }) {
                 </div>
 
                 <div className="relative">
-                  <button ref={statusTriggerMobileRef} onMouseDown={e => e.preventDefault()} onClick={() => setOpenDropdown(p => p === 'status' ? null : 'status')} className={baseFB}
+                  <button ref={statusTriggerMobileRef} onMouseDown={e => e.preventDefault()} onClick={() => {
+                      if (statusFilter !== 'all') {
+                        setStatusFilter('all'); setVisibleCount(PAGE_SIZE);
+                      } else {
+                        setOpenDropdown(p => p === 'status' ? null : 'status');
+                      }
+                    }} className={baseFB}
                     style={statusFilter === 'participant' ? { background: '#22c55e', color: '#fff', borderColor: '#22c55e' }
                       : statusFilter === 'orbiter' ? { background: '#ef4444', color: '#fff', borderColor: '#ef4444' }
                       : statusFilter === 'anonymous' ? { background: '#374151', color: '#fff', borderColor: '#374151' }
