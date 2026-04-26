@@ -1514,6 +1514,11 @@ export default function GeoPostView({ session }) {
   });
   const [filterPanelPinned, setFilterPanelPinned] = useState(false); // resets on refresh
   const [mosaicPeek, setMosaicPeek] = useState(false); // hold-to-peek mosaic
+  // Feed layout: 'tiles' = bento masonry, 'list' = simple sidebar + stacked feed (from b10941b)
+  const [feedLayout, setFeedLayout] = useState(() => {
+    try { return localStorage.getItem('lapuff_feed_layout') || 'tiles'; } catch { return 'tiles'; }
+  });
+  const [listScaleOpen, setListScaleOpen] = useState(false);
   const createPostAreaRef = useRef(null);
   const [fabOpacity, setFabOpacity] = useState(0);
   const [fabVisible, setFabVisible] = useState(false);
@@ -1593,6 +1598,11 @@ export default function GeoPostView({ session }) {
   const zipTriggerDesktopRef = useRef(null);
   const timeTriggerDesktopRef = useRef(null);
   const statusTriggerDesktopRef = useRef(null);
+  // Separate refs for list mode aside (tile mode aside is visibility:hidden in list mode)
+  const boroughTriggerListRef = useRef(null);
+  const zipTriggerListRef = useRef(null);
+  const timeTriggerListRef = useRef(null);
+  const statusTriggerListRef = useRef(null);
   const boroughTriggerMobileRef = useRef(null);
   const zipTriggerMobileRef = useRef(null);
   const timeTriggerMobileRef = useRef(null);
@@ -1680,10 +1690,13 @@ export default function GeoPostView({ session }) {
     return () => clearTimeout(t);
   }, [loadFeed]);
 
-  // Persist filterPanelMode to localStorage
+  // Persist filterPanelMode + feedLayout to localStorage
   useEffect(() => {
     try { localStorage.setItem('lapuff_filter_panel_mode', filterPanelMode); } catch {}
   }, [filterPanelMode]);
+  useEffect(() => {
+    try { localStorage.setItem('lapuff_feed_layout', feedLayout); } catch {}
+  }, [feedLayout]);
 
   useEffect(() => {
     const refreshHeat = () => setZipHeatMap(getZipHeatSnapshot());
@@ -2651,18 +2664,44 @@ export default function GeoPostView({ session }) {
           </div>
         </div>
       </div>
-      {/* Eye button: floats top-right, hold to peek at mosaic behind createpost */}
-      <button
-        className="hidden md:flex absolute items-center justify-center w-8 h-8 rounded-full border-2 border-black bg-white shadow-[2px_2px_0px_black] hover:scale-110 transition-transform select-none"
-        style={{ top: 10, right: 24, zIndex: 10, cursor: 'pointer', userSelect: 'none' }}
-        onMouseDown={() => setMosaicPeek(true)}
-        onMouseUp={() => setMosaicPeek(false)}
-        onMouseLeave={() => setMosaicPeek(false)}
-        onTouchStart={() => setMosaicPeek(true)}
-        onTouchEnd={() => setMosaicPeek(false)}
-        title="Hold to peek at mosaic"
-        aria-label="Peek at mosaic"
-      >👁</button>
+      {/* Top-right controls: feed layout toggle + eye peek button */}
+      <div className="hidden md:flex absolute items-center gap-2" style={{ top: 10, right: 24, zIndex: 10 }}>
+        {/* Layout toggle: tile mode or list mode */}
+        <div className="flex items-center rounded-lg border-2 border-black bg-white shadow-[2px_2px_0px_black] overflow-hidden select-none">
+          <button
+            onMouseDown={e => e.preventDefault()}
+            onClick={() => setFeedLayout('tiles')}
+            title="Tile / bento view"
+            className="flex items-center justify-center w-7 h-7 transition-colors"
+            style={{ background: feedLayout === 'tiles' ? accentColor : '#fff', color: feedLayout === 'tiles' ? '#fff' : '#000' }}
+          >
+            {/* 2×2 grid icon */}
+            <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><rect x="0" y="0" width="5.5" height="5.5" rx="1" fill="currentColor"/><rect x="7.5" y="0" width="5.5" height="5.5" rx="1" fill="currentColor"/><rect x="0" y="7.5" width="5.5" height="5.5" rx="1" fill="currentColor"/><rect x="7.5" y="7.5" width="5.5" height="5.5" rx="1" fill="currentColor"/></svg>
+          </button>
+          <button
+            onMouseDown={e => e.preventDefault()}
+            onClick={() => setFeedLayout('list')}
+            title="Simple list view"
+            className="flex items-center justify-center w-7 h-7 transition-colors"
+            style={{ background: feedLayout === 'list' ? accentColor : '#fff', color: feedLayout === 'list' ? '#fff' : '#000' }}
+          >
+            {/* 3 stacked bars icon */}
+            <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><rect x="0" y="0.5" width="13" height="3" rx="1" fill="currentColor"/><rect x="0" y="5" width="13" height="3" rx="1" fill="currentColor"/><rect x="0" y="9.5" width="13" height="3" rx="1" fill="currentColor"/></svg>
+          </button>
+        </div>
+        {/* Eye button: hold to peek at mosaic behind createpost */}
+        <button
+          className="flex items-center justify-center w-8 h-8 rounded-full border-2 border-black bg-white shadow-[2px_2px_0px_black] hover:scale-110 transition-transform select-none"
+          style={{ cursor: 'pointer', userSelect: 'none' }}
+          onMouseDown={() => setMosaicPeek(true)}
+          onMouseUp={() => setMosaicPeek(false)}
+          onMouseLeave={() => setMosaicPeek(false)}
+          onTouchStart={() => setMosaicPeek(true)}
+          onTouchEnd={() => setMosaicPeek(false)}
+          title="Hold to peek at mosaic"
+          aria-label="Peek at mosaic"
+        >👁</button>
+      </div>
       {/* Separator — inside mosaic wrapper, no px padding → spans full screen width */}
       <div className="w-full flex items-center" style={{ position: 'relative', zIndex: 1, marginTop: 12 }}>
         {/* Back-layer: thin ribbon ~1/3 height of GEO-FEED pill, vertically centered */}
@@ -2676,8 +2715,8 @@ export default function GeoPostView({ session }) {
       </div>
       </div>{/* end mosaic section wrapper */}
 
-      {/* Horizontal filter top bar — full width, outside px-3 container so it can be sticky edge-to-edge */}
-      {filterPanelMode === 'topbar' && (
+      {/* Horizontal filter top bar — only in tile mode when filterPanelMode === 'topbar' */}
+      {filterPanelMode === 'topbar' && feedLayout === 'tiles' && (
         <div
           className="hidden md:flex items-center gap-2 flex-wrap px-3 py-2 bg-white"
           style={{
@@ -2760,6 +2799,8 @@ export default function GeoPostView({ session }) {
       )}
 
       <div className="w-full px-3 md:px-4">
+        {/* ── TILE / BENTO MODE ── */}
+        {feedLayout === 'tiles' && (<>
         <div ref={desktopGridRef} className="hidden md:grid gap-3 mt-3"
           style={{
             '--image-scale': Math.max(0.5, Number(feedImageScale || 1)),
@@ -2965,6 +3006,128 @@ export default function GeoPostView({ session }) {
             )}
           </div>
         )}
+        </>)}{/* end feedLayout === 'tiles' */}
+
+        {/* ── LIST MODE ── desktop only, feedLayout === 'list', layout from b10941b */}
+        {feedLayout === 'list' && (
+          <div className="hidden md:grid grid-cols-3 gap-4 mt-3">
+
+            {/* Sticky filter aside — 1/3 width */}
+            <aside className="col-span-1 sticky self-start" style={{ top: 16 }}>
+              <div className="rounded-2xl border-3 border-black p-3 bg-white shadow-[4px_4px_0px_black]">
+                <div className="text-[10px] font-black text-center tracking-widest uppercase mb-1.5 opacity-60">Filter Panel</div>
+                <input
+                  value={searchQuery}
+                  onChange={(e) => { setSearchQuery(e.target.value); setVisibleCount(PAGE_SIZE); }}
+                  placeholder="Search posts, usernames, zips..."
+                  className="w-full px-2 py-1.5 border-2 border-black rounded text-[11px] font-black mb-3"
+                />
+                <div className="flex flex-col gap-2">
+                  <button onMouseDown={e => e.preventDefault()} onClick={() => setSortByTop(v => !v)} className={baseFB} style={sortByTop ? activeFS : {}}>🔥 Top</button>
+                  <button onMouseDown={e => e.preventDefault()} onClick={() => { setLocTab('all'); setFilterBorough(''); setFilterZip(''); setOpenDropdown(null); }} className={baseFB} style={locTab === 'all' ? activeFS : {}}>🌀 All</button>
+
+                  <div className="relative">
+                    <button ref={boroughTriggerListRef} onMouseDown={e => e.preventDefault()}
+                      onClick={() => { if (locTab === 'borough' && filterBorough) { setLocTab('all'); setFilterBorough(''); setVisibleCount(PAGE_SIZE); } else { setOpenDropdown(p => p === 'boroughL' ? null : 'boroughL'); } }}
+                      className={baseFB} style={locTab === 'borough' && filterBorough ? activeFS : {}}>
+                      🏙 {locTab === 'borough' && filterBorough ? `${filterBorough} ×` : 'Borough ▾'}
+                    </button>
+                    <InlineDropdown open={openDropdown === 'boroughL'} onClose={() => setOpenDropdown(null)} triggerRef={boroughTriggerListRef}>
+                      {(locTab === 'borough' && filterBorough) && (<button onMouseDown={e=>{e.preventDefault();e.stopPropagation();}} onClick={() => { setLocTab('all'); setFilterBorough(''); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100 border-b border-gray-200 text-red-500">× Clear</button>)}
+                      {BOROUGHS.map(b => (<button key={b} onMouseDown={e=>{e.preventDefault();e.stopPropagation();}} onClick={() => { setFilterBorough(b); setFilterZip(''); setLocTab('borough'); setFilterZipBoro(b); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100" style={filterBorough === b ? { background: accentColor+'22', color: accentColor } : {}}>{b}</button>))}
+                    </InlineDropdown>
+                  </div>
+
+                  <div className="relative">
+                    <button ref={zipTriggerListRef} onMouseDown={e => e.preventDefault()}
+                      onClick={() => { if (locTab === 'zip' && filterZip) { setLocTab('all'); setFilterZip(''); setVisibleCount(PAGE_SIZE); } else { setOpenDropdown(p => p === 'zipL' ? null : 'zipL'); } }}
+                      className={baseFB} style={locTab === 'zip' && filterZip ? activeFS : {}}>
+                      📍 {locTab === 'zip' && filterZip ? `${filterZip} ×` : 'Zip ▾'}
+                    </button>
+                    <InlineDropdown open={openDropdown === 'zipL'} onClose={() => setOpenDropdown(null)} triggerRef={zipTriggerListRef}>
+                      {(locTab === 'zip' && filterZip) && (<button onMouseDown={e=>{e.preventDefault();e.stopPropagation();}} onClick={() => { setLocTab('all'); setFilterZip(''); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100 border-b border-gray-200 text-red-500">× Clear</button>)}
+                      <div className="p-2 border-b border-gray-200"><div className="flex gap-1 flex-wrap">{BOROUGHS.map(b => (<button key={b} onMouseDown={e=>{e.preventDefault();e.stopPropagation();}} onClick={() => setFilterZipBoro(b)} className="px-1.5 py-0.5 rounded text-[10px] font-black border border-black" style={filterZipBoro === b ? { background: accentColor, color: '#fff' } : {}}>{b.split(' ')[0]}</button>))}</div></div>
+                      {zipList.map(z => (<button key={z.zip} onMouseDown={e=>{e.preventDefault();e.stopPropagation();}} onClick={() => { setFilterZip(z.zip); setFilterBorough(''); setLocTab('zip'); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1 text-xs font-semibold hover:bg-gray-100" style={filterZip === z.zip ? { background: accentColor+'22', color: accentColor } : {}}>{z.zip} <span className="text-[10px] text-gray-400">{z.name}</span></button>))}
+                    </InlineDropdown>
+                  </div>
+
+                  <div className="relative">
+                    <button ref={timeTriggerListRef} onMouseDown={e => e.preventDefault()}
+                      onClick={() => { if (timeFilter !== 'all') { setTimeFilter('all'); setVisibleCount(PAGE_SIZE); } else { setOpenDropdown(p => p === 'timeL' ? null : 'timeL'); } }}
+                      className={baseFB} style={timeFilter !== 'all' ? activeFS : {}}>
+                      {timeFilter !== 'all' ? `${timeLabel} ×` : `${timeLabel} ▾`}
+                    </button>
+                    <InlineDropdown open={openDropdown === 'timeL'} onClose={() => setOpenDropdown(null)} triggerRef={timeTriggerListRef}>
+                      {timeFilter !== 'all' && (<button onMouseDown={e=>{e.preventDefault();e.stopPropagation();}} onClick={() => { setTimeFilter('all'); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100 border-b border-gray-200 text-red-500">× Clear</button>)}
+                      {TIME_OPTIONS.map(t => (<button key={t.key} onMouseDown={e=>{e.preventDefault();e.stopPropagation();}} onClick={() => { setTimeFilter(t.key); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100" style={timeFilter === t.key ? { background: accentColor+'22', color: accentColor } : {}}>{t.label}</button>))}
+                    </InlineDropdown>
+                  </div>
+
+                  <div className="relative">
+                    <button ref={statusTriggerListRef} onMouseDown={e => e.preventDefault()}
+                      onClick={() => { if (statusFilter !== 'all') { setStatusFilter('all'); setVisibleCount(PAGE_SIZE); } else { setOpenDropdown(p => p === 'statusL' ? null : 'statusL'); } }}
+                      className={baseFB}
+                      style={statusFilter === 'participant' ? { background: '#22c55e', color: '#fff', borderColor: '#22c55e' } : statusFilter === 'orbiter' ? { background: '#ef4444', color: '#fff', borderColor: '#ef4444' } : statusFilter === 'anonymous' ? { background: '#374151', color: '#fff', borderColor: '#374151' } : {}}>
+                      {statusFilter === 'participant' ? 'Participant ×' : statusFilter === 'orbiter' ? 'Orbiter ×' : statusFilter === 'anonymous' ? 'Anonymous ×' : 'Status ▾'}
+                    </button>
+                    <InlineDropdown open={openDropdown === 'statusL'} onClose={() => setOpenDropdown(null)} alignRight triggerRef={statusTriggerListRef}>
+                      {statusFilter !== 'all' && (<button onMouseDown={e=>{e.preventDefault();e.stopPropagation();}} onClick={() => { setStatusFilter('all'); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100 border-b border-gray-200 text-red-500">× Clear</button>)}
+                      {[['all','All'],['participant','Participant'],['orbiter','Orbiter'],['anonymous','Anonymous']].map(([k,l]) => (<button key={k} onMouseDown={e=>{e.preventDefault();e.stopPropagation();}} onClick={() => { setStatusFilter(k); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100" style={statusFilter === k ? { background: accentColor+'22', color: accentColor } : {}}>{l}</button>))}
+                    </InlineDropdown>
+                  </div>
+
+                  {/* Text / image scale */}
+                  <div className="mt-1">
+                    <button onMouseDown={e => e.preventDefault()} onClick={() => setListScaleOpen(v => !v)} className={baseFB}>Aa {listScaleOpen ? '▴' : '▾'}</button>
+                    {listScaleOpen && (
+                      <div className="mt-2 border-2 border-black rounded-lg p-2 bg-white">
+                        <div className="flex items-center justify-between mb-1"><span className="text-[10px] font-black">Text Scale</span><span className="text-[10px] font-black">{Math.round(feedTextScale * 100)}%</span></div>
+                        <input type="range" min="0.5" max="2" step="0.05" value={feedTextScale} onChange={(e) => setFeedTextScale(Number(e.target.value))} className="w-full mb-2" />
+                        <div className="flex items-center justify-between mb-1"><span className="text-[10px] font-black">Image Scale</span><span className="text-[10px] font-black">{Math.round(feedImageScale * 100)}%</span></div>
+                        <input type="range" min="0.5" max="2" step="0.05" value={feedImageScale} onChange={(e) => setFeedImageScale(Number(e.target.value))} className="w-full" />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </aside>
+
+            {/* Posts feed — 2/3 width, simple stacked list */}
+            <section className="col-span-2">
+              {loading && (
+                <div className="rounded-2xl border-3 border-black bg-white shadow-[4px_4px_0px_black] flex items-center justify-center py-8">
+                  <p className="text-sm text-gray-400 font-semibold">Loading...</p>
+                </div>
+              )}
+              {!loading && filteredPosts.length === 0 && (
+                <div className="rounded-2xl border-3 border-black bg-white shadow-[4px_4px_0px_black] text-center py-8 px-4">
+                  <div className="text-4xl mb-2">🌀</div>
+                  <p className="font-black text-gray-500">Nothing here yet! Be the first!</p>
+                </div>
+              )}
+              {!loading && (
+                <div className="flex flex-col gap-3">
+                  {visiblePosts.map((post, index) => renderFeedPostCard(post, index, { desktop: false }))}
+                </div>
+              )}
+              {(canShowMore || canShowLess) && (
+                <div className="flex justify-center gap-3 pt-3 pb-1">
+                  {canShowMore && (
+                    <button onMouseDown={e => e.preventDefault()} onClick={() => setVisibleCount(v => v + PAGE_SIZE)} className="min-h-[32px] px-4 py-1.5 border-2 border-black rounded-full text-xs font-black bg-white shadow-[2px_2px_0px_black] hover:scale-105 transition-transform">
+                      Show More ({filteredPosts.length - visibleCount} remaining)
+                    </button>
+                  )}
+                  {canShowLess && (
+                    <button onMouseDown={e => e.preventDefault()} onClick={() => setVisibleCount(PAGE_SIZE)} className="min-h-[32px] px-4 py-1.5 border-2 border-black rounded-full text-xs font-black bg-white shadow-[2px_2px_0px_black] hover:scale-105 transition-transform">
+                      Show Less
+                    </button>
+                  )}
+                </div>
+              )}
+            </section>
+
+          </div>
+        )}{/* end feedLayout === 'list' */}
 
         <div className="md:hidden">
           <section data-geopost-feed-scroll>
