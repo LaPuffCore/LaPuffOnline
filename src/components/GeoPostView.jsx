@@ -1513,6 +1513,8 @@ export default function GeoPostView({ session }) {
     try { return localStorage.getItem('lapuff_filter_panel_mode') || 'panel'; } catch { return 'panel'; }
   });
   const [filterPanelPinned, setFilterPanelPinned] = useState(false); // resets on refresh
+  // Incremented every time we switch back to tile mode — forces full grid DOM rebuild identical to page load
+  const [tileViewKey, setTileViewKey] = useState(0);
   const [mosaicPeek, setMosaicPeek] = useState(false); // hold-to-peek mosaic
   // Feed layout: 'tiles' = bento masonry, 'list' = simple sidebar + stacked feed (from b10941b)
   const [feedLayout, setFeedLayout] = useState(() => {
@@ -2409,6 +2411,7 @@ export default function GeoPostView({ session }) {
 
   // When switching back to tile mode, double-rAF to ensure two browser layout passes
   // (grid was unmounted in list mode so getBoundingClientRect was stale after remount)
+  // Also fires when tileViewKey increments (full rebuild via key prop on grid)
   useEffect(() => {
     if (feedLayout !== 'tiles') return;
     const raf1 = requestAnimationFrame(() => {
@@ -2433,7 +2436,8 @@ export default function GeoPostView({ session }) {
       });
     });
     return () => cancelAnimationFrame(raf1);
-  }, [feedLayout]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [feedLayout, tileViewKey]);
 
   // FAB visibility: fade in as create-post area scrolls away
   useEffect(() => {    const scrollEl = desktopGridRef.current ? findScrollParent(desktopGridRef.current) : window;
@@ -2541,7 +2545,7 @@ export default function GeoPostView({ session }) {
         <div className="hidden md:block absolute inset-0 pointer-events-none" style={{ zIndex: 0 }} aria-hidden="true">
           <GeoPostMosaic posts={posts} accentColor={accentColor} opacity={mosaicPeek ? 1 : 0.42} />
         </div>
-      <div className="w-full max-w-7xl mx-auto px-3 pt-3" style={{ position: 'relative', zIndex: 1 }}>
+      <div className="w-full max-w-3xl mx-auto px-4 pt-4 pb-2" style={{ position: 'relative', zIndex: 1 }}>
         <div ref={createPostAreaRef} className="rounded-2xl border-3 border-black shadow-[4px_4px_0px_black] relative overflow-hidden"
           style={{ background: surfaceBg, borderColor: postOutline || '#000', opacity: mosaicPeek ? 0 : 1, pointerEvents: mosaicPeek ? 'none' : 'auto', transition: 'opacity 200ms ease' }}>
 
@@ -2703,6 +2707,8 @@ export default function GeoPostView({ session }) {
               setFilterPanelMode('panel');
               setFilterPanelPinned(false);
               setDesktopPanelRow(1);
+              // Increment key → forces full DOM rebuild of tile grid (identical to page load)
+              setTileViewKey(k => k + 1);
               // Invalidate stale panel refs so the scroll effect recomputes fresh
               gridOffsetCacheRef.current = 0;
               panelRowRef.current = 1;
@@ -2746,7 +2752,9 @@ export default function GeoPostView({ session }) {
           GEO-FEED pill centered on line → extends ~half-height above into mosaic area. */}
       <div className="w-full relative" style={{ height: 44, overflow: 'visible', zIndex: 10 }}>
         {/* Line button: full width, anchored at top:0 (= mosaic bottom), border-y, no shadow */}
-        <div className="absolute left-0 right-0" style={{ top: 0, height: 20, borderTop: '3px solid #000', borderBottom: '3px solid #000', background: '#fff', zIndex: 1 }} />
+        <div className="absolute left-0 right-0 flex items-center justify-center" style={{ top: 0, height: 20, borderTop: '3px solid #000', borderBottom: '3px solid #000', background: '#fff', zIndex: 1 }}>
+          <span className="font-black text-[11px] tracking-[0.25em] text-black select-none" style={{ letterSpacing: '0.3em' }}>——————————</span>
+        </div>
         {/* GEO-FEED pill: center locked to line center (top:10px = midpoint of 20px line).
             translateY(-50%) pulls it up by half its own height → top half overlaps mosaic. */}
         <div className="absolute left-1/2" style={{ top: 10, transform: 'translate(-50%, -50%)', zIndex: 5 }}>
@@ -2842,7 +2850,7 @@ export default function GeoPostView({ session }) {
       <div className="w-full px-3 md:px-4">
         {/* ── TILE / BENTO MODE ── */}
         {feedLayout === 'tiles' && (<>
-        <div ref={desktopGridRef} className="hidden md:grid gap-3 mt-3"
+        <div key={tileViewKey} ref={desktopGridRef} className="hidden md:grid gap-3 mt-3"
           style={{
             '--image-scale': Math.max(0.5, Number(feedImageScale || 1)),
             gridAutoFlow: 'dense',
