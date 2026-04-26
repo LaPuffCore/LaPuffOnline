@@ -2681,12 +2681,13 @@ export default function GeoPostView({ session }) {
         {/* Horizontal filter top bar — shown when filterPanelMode === 'topbar' on desktop */}
         {filterPanelMode === 'topbar' && (
           <div
-            className="hidden md:flex items-center gap-2 flex-wrap px-2 py-2 mb-2 rounded-xl bg-white"
+              className={`hidden md:flex items-center gap-2 flex-wrap px-2 py-2 ${filterPanelPinned ? '' : 'mb-2 rounded-xl bg-white'}`}
             style={{
               border: '5px dotted #000',
               position: filterPanelPinned ? 'sticky' : 'static',
-              top: filterPanelPinned ? 58 : undefined,
+                top: filterPanelPinned ? 0 : undefined,
               zIndex: filterPanelPinned ? 50 : undefined,
+                ...(filterPanelPinned ? { background: '#fff', borderRadius: 0, marginBottom: 0 } : {}),
             }}
           >
             <input
@@ -2750,7 +2751,7 @@ export default function GeoPostView({ session }) {
             </div>
 
             <div className="flex items-center gap-1 ml-auto">
-              <button onMouseDown={e => e.preventDefault()} onClick={() => setFilterPanelMode('panel')} className={baseFB} style={activeFS} title="Return to side panel">⬆️</button>
+              <button onMouseDown={e => e.preventDefault()} onClick={() => { setFilterPanelMode('panel'); setFilterPanelPinned(false); setDesktopPanelRow(1); }} className={baseFB} style={activeFS} title="Return to side panel">⬆️</button>
               <button onMouseDown={e => e.preventDefault()} onClick={() => setFilterPanelPinned(v => !v)} className={baseFB} style={filterPanelPinned ? activeFS : {}} title={filterPanelPinned ? 'Unpin top bar' : 'Pin top bar below topbar'}>📌</button>
             </div>
           </div>
@@ -2765,7 +2766,7 @@ export default function GeoPostView({ session }) {
             overflowAnchor: 'none',
             // Clip at 16 half-rows when at initial page; expand when user presses Show More
             overflow: canShowLess ? 'visible' : 'hidden',
-            maxHeight: canShowLess ? 'none' : `${16 * Math.max(1, (desktopUnitHeight - 12) / 2) + 15 * 12}px`,
+                      maxHeight: canShowLess ? 'none' : `${24 * Math.max(1, (desktopUnitHeight - 12) / 2) + 23 * 12}px`,
           }}
         >
           {/* Filter aside — only shown in 'panel' mode */}
@@ -2910,18 +2911,11 @@ export default function GeoPostView({ session }) {
                 <div className="flex items-center gap-1 mt-2 pt-2 border-t border-gray-200">
                   <button
                     onMouseDown={e => e.preventDefault()}
-                    onClick={() => setFilterPanelMode(m => m === 'topbar' ? 'panel' : 'topbar')}
+                      onClick={() => setFilterPanelMode('topbar')}
                     className={baseFB}
-                    style={filterPanelMode === 'topbar' ? activeFS : {}}
+                      style={{}}
                     title="Switch to horizontal top bar"
                   >⬆️</button>
-                  <button
-                    onMouseDown={e => e.preventDefault()}
-                    onClick={() => setFilterPanelPinned(v => !v)}
-                    className={baseFB}
-                    style={filterPanelPinned ? activeFS : {}}
-                    title="Pin panel in place"
-                  >📌</button>
                 </div>
               </div>
             </div>
