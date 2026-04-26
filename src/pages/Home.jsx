@@ -62,11 +62,11 @@ export default function Home({ events = [], eventsLoading = false }) {
   const [currentTrack,  setCurrentTrack]  = useState(null); // { title, artist, url }
   const [showMusicMenu, setShowMusicMenu] = useState(false);
   const [musicVolume,   setMusicVolume]   = useState(80);
-  const scIframeRef        = useRef(null);
+  const scContainerRef     = useRef(null); // div that holds the iframe
   const scWidgetRef        = useRef(null);
   const scReadyRef         = useRef(false);
   const skipOnFirstPlayRef = useRef(false); // auto-skip first song on any radio start
-  const loadedPlaylistRef  = useRef('clout'); // 'clout' | 'dimes'
+  const loadedPlaylistRef  = useRef(null);  // 'clout' | 'dimes' | null
   const musicVolumeRef     = useRef(80);
   const mapAutoPlayedRef   = useRef(false);
   const musicDesktopRef  = useRef(null);
@@ -193,42 +193,70 @@ export default function Home({ events = [], eventsLoading = false }) {
     });
   }
 
-  useEffect(() => {
-    function initWidget() {
-      if (!scIframeRef.current || !window.SC) return;
-      const widget = window.SC.Widget(scIframeRef.current);
-      scWidgetRef.current = widget;
-      widget.bind(window.SC.Widget.Events.READY, () => {
-        scReadyRef.current = true;
-        widget.setVolume(musicVolumeRef.current);
-        widget.setShuffle(true);
-      });
-      widget.bind(window.SC.Widget.Events.PLAY, () => {
-        setIsMusicOn(true);
-        widget.getCurrentSound(sound => {
-          if (sound) {
-            setCurrentTrack({
-              title: sound.title || 'Unknown Track',
-              artist: sound.user?.username || '',
-              url: sound.permalink_url || '',
-              artwork: sound.artwork_url ? sound.artwork_url.replace('-large', '-t300x300') : null,
-            });
-          }
-        });
-        // Auto-skip first song on any new radio session
-        if (skipOnFirstPlayRef.current) {
-          skipOnFirstPlayRef.current = false;
-          setTimeout(() => _shuffleSkip(widget), 1500);
+  /** Bind all SC events to a fresh widget instance */
+  function _bindWidgetEvents(widget) {
+    const E = window.SC.Widget.Events;
+    widget.bind(E.READY, () => {
+      scReadyRef.current = true;
+      widget.setVolume(musicVolumeRef.current);
+      widget.setShuffle(true);
+      widget.play();
+    });
+    widget.bind(E.PLAY, () => {
+      setIsMusicOn(true);
+      widget.getCurrentSound(sound => {
+        if (sound) {
+          setCurrentTrack({
+            title: sound.title || 'Unknown Track',
+            artist: sound.user?.username || '',
+            url: sound.permalink_url || '',
+            artwork: sound.artwork_url ? sound.artwork_url.replace('-large', '-t300x300') : null,
+          });
         }
       });
-      widget.bind(window.SC.Widget.Events.PAUSE, () => { setIsMusicOn(false); });
-      widget.bind(window.SC.Widget.Events.FINISH, () => { setIsMusicOn(false); });
-    }
-    if (window.SC) { initWidget(); return; }
+      if (skipOnFirstPlayRef.current) {
+        skipOnFirstPlayRef.current = false;
+        setTimeout(() => _shuffleSkip(widget), 1500);
+      }
+    });
+    widget.bind(E.PAUSE,  () => setIsMusicOn(false));
+    widget.bind(E.FINISH, () => setIsMusicOn(false));
+  }
+
+  /**
+   * Destroy any existing iframe and build a fresh one for the given playlist URL.
+   * This is the most reliable way to switch SC playlists — no widget.load() quirks.
+   */
+  function _rebuildPlayer(url, modeKey) {
+    const container = scContainerRef.current;
+    if (!container || !window.SC) return;
+    // Tear down old widget
+    scReadyRef.current = false;
+    scWidgetRef.current = null;
+    // Remove old iframe
+    while (container.firstChild) container.removeChild(container.firstChild);
+    // Build new iframe
+    const iframe = document.createElement('iframe');
+    iframe.src = `https://w.soundcloud.com/player/?url=${encodeURIComponent(url)}&auto_play=false&hide_related=true&show_comments=false&show_user=false&show_reposts=false&show_teaser=false&visual=false`;
+    iframe.allow = 'autoplay';
+    iframe.width = '0';
+    iframe.height = '0';
+    iframe.style.cssText = 'visibility:hidden;position:absolute;pointer-events:none;top:0;left:0;';
+    container.appendChild(iframe);
+    // Attach widget
+    const widget = window.SC.Widget(iframe);
+    scWidgetRef.current = widget;
+    loadedPlaylistRef.current = modeKey;
+    skipOnFirstPlayRef.current = true;
+    _bindWidgetEvents(widget);
+  }
+
+  // Load SC API script once on mount (no auto-play; playlists built on demand)
+  useEffect(() => {
+    if (window.SC) return;
     const script = document.createElement('script');
     script.src = 'https://w.soundcloud.com/player/api.js';
     script.async = true;
-    script.onload = initWidget;
     document.head.appendChild(script);
   }, []);
 
@@ -244,58 +272,36 @@ export default function Home({ events = [], eventsLoading = false }) {
     return () => document.removeEventListener('mousedown', handler);
   }, [showMusicMenu]);
 
-  function _playNewPlaylist(url, modeKey) {
-    const w = scWidgetRef.current;
-    if (!w) return;
-    // widget.load() docs: "options" can include a callback fired when new widget is ready
-    // All previously-bound event listeners (PLAY/PAUSE/FINISH) continue working after load()
-    scReadyRef.current = false;
-    loadedPlaylistRef.current = modeKey;
-    skipOnFirstPlayRef.current = true;
-    w.load(url, {
-      auto_play: false,
-      hide_related: true,
-      show_comments: false,
-      show_user: false,
-      show_reposts: false,
-      show_teaser: false,
-      visual: false,
-      callback: () => {
-        scReadyRef.current = true;
-        w.setVolume(musicVolumeRef.current);
-        w.setShuffle(true);
-        w.play();
-      }
-    });
-  }
-
   function triggerCloutCullingGames() {
     setCurrentMode('clout');
-    setIsMusicOn(true);
-    const w = scWidgetRef.current;
-    if (!w) return;
-    if (loadedPlaylistRef.current === 'clout' && scReadyRef.current) {
-      // Already loaded — just play + shuffle
+    if (loadedPlaylistRef.current === 'clout' && scReadyRef.current && scWidgetRef.current) {
+      // Already loaded and ready — just resume + shuffle
       skipOnFirstPlayRef.current = true;
-      w.setShuffle(true);
-      w.play();
+      scWidgetRef.current.setShuffle(true);
+      scWidgetRef.current.play();
     } else {
-      _playNewPlaylist(CLOUT_URL, 'clout');
+      // Destroy old iframe and build fresh one for this playlist
+      const doRebuild = () => _rebuildPlayer(CLOUT_URL, 'clout');
+      if (window.SC) doRebuild();
+      else {
+        const t = setInterval(() => { if (window.SC) { clearInterval(t); doRebuild(); } }, 100);
+      }
     }
   }
 
   function triggerDimesRadio() {
     setCurrentMode('dimes');
-    setIsMusicOn(true);
-    const w = scWidgetRef.current;
-    if (!w) return;
-    if (loadedPlaylistRef.current === 'dimes' && scReadyRef.current) {
-      // Already loaded — just play + shuffle
+    if (loadedPlaylistRef.current === 'dimes' && scReadyRef.current && scWidgetRef.current) {
+      // Already loaded and ready — just resume + shuffle
       skipOnFirstPlayRef.current = true;
-      w.setShuffle(true);
-      w.play();
+      scWidgetRef.current.setShuffle(true);
+      scWidgetRef.current.play();
     } else {
-      _playNewPlaylist(DIMES_URL, 'dimes');
+      const doRebuild = () => _rebuildPlayer(DIMES_URL, 'dimes');
+      if (window.SC) doRebuild();
+      else {
+        const t = setInterval(() => { if (window.SC) { clearInterval(t); doRebuild(); } }, 100);
+      }
     }
   }
 
@@ -709,16 +715,11 @@ export default function Home({ events = [], eventsLoading = false }) {
       {showForm && <EventSubmitForm onClose={() => setShowForm(false)} />}
       {showAuth && <AuthModal onClose={() => setShowAuth(false)} onSuccess={handleAuthSuccess} />}
 
-      {/* ── Ghost SoundCloud Player iframe (single, playlist swapped via widget.load() + callback) ── */}
-      <iframe
-        ref={scIframeRef}
-        id="sc-ghost-player"
-        width="0"
-        height="0"
-        allow="autoplay"
-        src="https://w.soundcloud.com/player/?url=https%3A//soundcloud.com/justin-lapuff/sets/clout-culling-games&auto_play=false&hide_related=true&show_comments=false&show_user=false&show_reposts=false&show_teaser=false&visual=false"
-        style={{ visibility: 'hidden', position: 'absolute', pointerEvents: 'none', top: 0, left: 0 }}
-        title="SC Ghost Player"
+      {/* ── Ghost SoundCloud Player container — iframe rebuilt on demand for each playlist ── */}
+      <div
+        ref={scContainerRef}
+        id="sc-ghost-container"
+        style={{ visibility: 'hidden', position: 'absolute', pointerEvents: 'none', top: 0, left: 0, width: 0, height: 0 }}
       />
     </div>
   );
