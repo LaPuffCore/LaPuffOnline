@@ -568,7 +568,11 @@ function PostDetailPopup({ post, postReactions, onReact, onOpenReactors, accentC
   const topEmojis = Object.entries(reactionMap).sort((a,b) => b[1]-a[1]);
 
   const [imgRatio, setImgRatio] = useState(1);
-  const isNarrowImage = post.image_url && imgRatio < (9/16);
+  // tall = portrait (ratio < 0.95): expand popup downward to show full image
+  // wide = landscape (ratio > 1.2): use full popup width, image fills naturally
+  // square (~1:1): square display
+  const isTallPopupImage = post.image_url && imgRatio < 0.95 && imgRatio > 0;
+  const isWidePopupImage = post.image_url && imgRatio > 1.2;
 
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') { if (popupQepRect) { setPopupQepRect(null); } else { onClose(); } } };
@@ -601,7 +605,7 @@ function PostDetailPopup({ post, postReactions, onReact, onOpenReactors, accentC
     >
       <div
         className="relative my-8 mx-4 rounded-2xl border-3 border-black shadow-[8px_8px_0px_black] flex flex-col overflow-hidden"
-        style={{ background: surfaceBg, width: '100%', maxWidth: 600, minWidth: 0, transform: 'translateZ(0)', isolation: 'isolate' }}
+        style={{ background: surfaceBg, width: '100%', maxWidth: isWidePopupImage ? '95vw' : 600, minWidth: 0, transform: 'translateZ(0)', isolation: 'isolate' }}
         onClick={e => e.stopPropagation()}
       >
         <button
@@ -612,20 +616,33 @@ function PostDetailPopup({ post, postReactions, onReact, onOpenReactors, accentC
 
         {post.image_url && (
           <div
-            className="relative w-full overflow-hidden rounded-t-2xl bg-black/5"
+            className="relative w-full bg-black/5 rounded-t-2xl overflow-hidden"
             style={{
               isolation: 'isolate',
               transform: 'translateZ(0)',
-              ...(isNarrowImage
-                ? { aspectRatio: '9/16', maxHeight: 480 }
-                : { maxHeight: 520 }),
+              // Tall portrait: no height cap — let image dictate full height
+              // Wide landscape: let width be 100%, height auto — shows whole image
+              // Square: fixed square aspect
+              ...(isTallPopupImage
+                ? {}
+                : isWidePopupImage
+                ? { maxHeight: '60vh' }
+                : { aspectRatio: '1 / 1', maxHeight: 600 }),
             }}
           >
             <img
               src={post.image_url}
               alt="post"
-              className={`w-full object-contain transition-opacity duration-200 ${imgLoaded ? 'opacity-100' : 'opacity-0'}`}
-              style={{ display: 'block' }}
+              className={`w-full transition-opacity duration-200 ${imgLoaded ? 'opacity-100' : 'opacity-0'}`}
+              style={{
+                display: 'block',
+                // Tall: full natural height, no cropping
+                // Wide: fit within container width, no overflow
+                // Square: cover the square area
+                objectFit: isTallPopupImage ? 'contain' : isWidePopupImage ? 'contain' : 'cover',
+                height: isTallPopupImage ? 'auto' : isWidePopupImage ? '100%' : '100%',
+                maxHeight: isTallPopupImage ? 'none' : undefined,
+              }}
               onLoad={(e) => {
                 try { setImgRatio(e.target.naturalWidth / e.target.naturalHeight); } catch {}
                 setImgLoaded(true);
@@ -966,9 +983,9 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
     : isSplitTile ? 12
     : (finalRowSpan === 3) ? 4
     : hasImage ? 3
-    : (finalRowSpan === 1) ? 3
-    : (finalColSpan >= 4) ? 13  // no-image wide 4w×2t: +4 more standard lines
-    : 11;                        // no-image normal 2w×2t: +2 more standard lines
+    : (finalRowSpan === 1) ? 4   // no-image 2w×1t half-tile: 4 lines
+    : (finalColSpan >= 4) ? 13   // no-image wide 4w×2t
+    : 12;                         // no-image normal 2w×2t
   // Fixed pixel budget: 16px (browser normal font) × 1.5 line-height × maxTextLines × slider scale
   const maxBudgetPx = Math.floor(16 * scale * textLineHeight) * maxTextLines;
   const tileGridStyle = {
@@ -1041,7 +1058,7 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
 
   return (
     <div
-      className="rounded-2xl border-3 overflow-hidden"
+      className="rounded-2xl border-3 overflow-hidden group"
       style={{
         background: theme.fill,
         borderColor: theme.outline,
@@ -1051,9 +1068,19 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
         // Split tile: row layout (image left, content right)
         flexDirection: isSplitTile ? 'row' : 'column',
         transition: 'transform 2000ms cubic-bezier(0.16, 1, 0.3, 1)',
+        position: 'relative',
         ...tileGridStyle,
       }}
     >
+      {/* Hide button for no-image tiles — top-left corner, visible on tile hover */}
+      {!hasImage && onHide && (
+        <button
+          className="absolute top-1.5 left-1.5 w-6 h-6 rounded-full bg-black/70 text-white text-xs font-black flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black z-10 flex-shrink-0"
+          onMouseDown={e => e.preventDefault()}
+          onClick={(e) => { e.stopPropagation(); onHide(post.id); }}
+          title="Hide this post"
+        >✕</button>
+      )}
       {post.image_url && !isSplitTile && (
         // flex: 1 — image grows elastically to fill all remaining tile space the footer doesn't claim.
         <div
@@ -2843,7 +2870,7 @@ export default function GeoPostView({ session }) {
         </div>
       </div>
       {/* Top-right controls: feed layout toggle + eye peek button */}
-      <div className="hidden md:flex absolute items-center gap-2" style={{ top: 10, right: 24, zIndex: 10, pointerEvents: mosaicPeekOn ? 'none' : 'auto' }}>
+      <div className="hidden md:flex absolute items-center gap-2" style={{ top: 10, right: 24, zIndex: 10 }} onClick={e => e.stopPropagation()} onMouseDown={e => e.stopPropagation()}>
         {/* Layout toggle: tile mode or list mode */}
         <div className="flex items-center rounded-lg border-2 border-black bg-white shadow-[2px_2px_0px_black] overflow-hidden select-none">
           <button
