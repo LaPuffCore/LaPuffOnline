@@ -720,7 +720,7 @@ function PostDetailPopup({ post, postReactions, onReact, onOpenReactors, accentC
 }
 
 // ── GeoPostMosaic ─────────────────────────────────────────────────────────────
-function GeoPostMosaic({ posts, accentColor }) {
+function GeoPostMosaic({ posts, accentColor, opacity = 0.42 }) {
   const COLS = 16;
   const ROWS = 6;
   const TOTAL = COLS * ROWS; // 96
@@ -751,7 +751,7 @@ function GeoPostMosaic({ posts, accentColor }) {
           gridTemplateRows: `repeat(${ROWS}, 1fr)`,
           width: '100%',
           height: '100%',
-          opacity: 0.18,
+          opacity: opacity,
           imageRendering: 'pixelated',
         }}
       >
@@ -1059,6 +1059,7 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
         <div style={{ flex: 1, minHeight: 4 }} />
 
         <div className="flex items-center gap-1 flex-wrap" style={{ flexShrink: 0 }}>
+          {topEmojis.map(([emoji, count]) => (
             <button
               key={emoji}
               onMouseDown={(e) => e.preventDefault()}
@@ -1512,6 +1513,7 @@ export default function GeoPostView({ session }) {
     try { return localStorage.getItem('lapuff_filter_panel_mode') || 'panel'; } catch { return 'panel'; }
   });
   const [filterPanelPinned, setFilterPanelPinned] = useState(false); // resets on refresh
+  const [mosaicPeek, setMosaicPeek] = useState(false); // hold-to-peek mosaic
   const createPostAreaRef = useRef(null);
   const [fabOpacity, setFabOpacity] = useState(0);
   const [fabVisible, setFabVisible] = useState(false);
@@ -2497,11 +2499,11 @@ export default function GeoPostView({ session }) {
       <div className="w-full relative overflow-hidden">
         {/* Mosaic: absolute background layer, fills height of this section, behind createpost */}
         <div className="hidden md:block absolute inset-0 pointer-events-none" style={{ zIndex: 0 }} aria-hidden="true">
-          <GeoPostMosaic posts={posts} accentColor={accentColor} />
+          <GeoPostMosaic posts={posts} accentColor={accentColor} opacity={mosaicPeek ? 1 : 0.42} />
         </div>
       <div className="w-full max-w-7xl mx-auto px-3 pt-3" style={{ position: 'relative', zIndex: 1 }}>
         <div ref={createPostAreaRef} className="rounded-2xl border-3 border-black shadow-[4px_4px_0px_black] relative overflow-hidden"
-          style={{ background: surfaceBg, borderColor: postOutline || '#000' }}>
+          style={{ background: surfaceBg, borderColor: postOutline || '#000', opacity: mosaicPeek ? 0 : 1, pointerEvents: mosaicPeek ? 'none' : 'auto', transition: 'opacity 200ms ease' }}>
 
           <div className="relative" style={{ zIndex: 1 }}>
           {/* image preview at top, rounded */}
@@ -2649,6 +2651,18 @@ export default function GeoPostView({ session }) {
           </div>
         </div>
       </div>
+      {/* Eye button: floats top-right, hold to peek at mosaic behind createpost */}
+      <button
+        className="hidden md:flex absolute items-center justify-center w-8 h-8 rounded-full border-2 border-black bg-white shadow-[2px_2px_0px_black] hover:scale-110 transition-transform select-none"
+        style={{ top: 10, right: 24, zIndex: 10, cursor: 'pointer', userSelect: 'none' }}
+        onMouseDown={() => setMosaicPeek(true)}
+        onMouseUp={() => setMosaicPeek(false)}
+        onMouseLeave={() => setMosaicPeek(false)}
+        onTouchStart={() => setMosaicPeek(true)}
+        onTouchEnd={() => setMosaicPeek(false)}
+        title="Hold to peek at mosaic"
+        aria-label="Peek at mosaic"
+      >👁</button>
       </div>{/* end mosaic section wrapper */}
 
       <div className="w-full px-3 md:px-4">
