@@ -62,13 +62,11 @@ export default function Home({ events = [], eventsLoading = false }) {
   const [currentTrack,  setCurrentTrack]  = useState(null); // { title, artist, url }
   const [showMusicMenu, setShowMusicMenu] = useState(false);
   const [musicVolume,   setMusicVolume]   = useState(80);
-  const cloutIframeRef     = useRef(null);  // hidden iframe for Clout playlist
-  const dimesIframeRef     = useRef(null);  // hidden iframe for Dimes playlist
-  const cloutWidgetRef     = useRef(null);
-  const dimesWidgetRef     = useRef(null);
-  const cloutReadyRef      = useRef(false);
-  const dimesReadyRef      = useRef(false);
+  const scIframeRef        = useRef(null);
+  const scWidgetRef        = useRef(null);
+  const scReadyRef         = useRef(false);
   const skipOnFirstPlayRef = useRef(false); // auto-skip first song on any radio start
+  const loadedPlaylistRef  = useRef('clout'); // 'clout' | 'dimes'
   const musicVolumeRef     = useRef(80);
   const mapAutoPlayedRef   = useRef(false);
   const musicDesktopRef  = useRef(null);
@@ -176,86 +174,61 @@ export default function Home({ events = [], eventsLoading = false }) {
     setTileViewKey((prev) => prev + 1);
   }
 
-  // ── SoundCloud Widget API bootstrap — two iframes, one per playlist ─────
+  // ── SoundCloud Widget API — single iframe, load() with callback for playlist swap ─
   const CLOUT_URL = 'https://soundcloud.com/justin-lapuff/sets/clout-culling-games';
   const DIMES_URL = 'https://soundcloud.com/justin-lapuff/sets/dimes-square';
 
-  /** Shuffle-skip to a random track on the given widget */
-  function _shuffleSkip(widget) {
-    widget.setShuffle(true);
-    widget.getSounds(sounds => {
-      if (!sounds || sounds.length === 0) { widget.next(); return; }
-      if (sounds.length === 1) { widget.skip(0); return; }
-      widget.getCurrentSoundIndex(currentIdx => {
-        let idx;
-        let attempts = 0;
+  /** Shuffle-skip to a random track on the widget */
+  function _shuffleSkip(w) {
+    w.setShuffle(true);
+    w.getSounds(sounds => {
+      if (!sounds || sounds.length === 0) { w.next(); return; }
+      if (sounds.length === 1) { w.skip(0); return; }
+      w.getCurrentSoundIndex(currentIdx => {
+        let idx; let attempts = 0;
         do { idx = Math.floor(Math.random() * sounds.length); attempts++; }
         while (idx === currentIdx && attempts < 20);
-        widget.skip(idx);
+        w.skip(idx);
       });
     });
   }
-
-  function _initOneWidget(iframeRef, widgetRef, readyRef, label) {
-    if (!iframeRef.current || !window.SC) return;
-    const widget = window.SC.Widget(iframeRef.current);
-    widgetRef.current = widget;
-    widget.bind(window.SC.Widget.Events.READY, () => {
-      readyRef.current = true;
-      widget.setVolume(musicVolumeRef.current);
-      widget.setShuffle(true);
-    });
-    widget.bind(window.SC.Widget.Events.PLAY, () => {
-      // Only update state if THIS is the active widget
-      const isClout = widgetRef === cloutWidgetRef;
-      const isActive = (isClout && currentModeRef.current === 'clout') ||
-                       (!isClout && currentModeRef.current === 'dimes');
-      if (!isActive) return;
-      setIsMusicOn(true);
-      widget.getCurrentSound(sound => {
-        if (sound) {
-          setCurrentTrack({
-            title: sound.title || 'Unknown Track',
-            artist: sound.user?.username || '',
-            url: sound.permalink_url || '',
-            artwork: sound.artwork_url ? sound.artwork_url.replace('-large', '-t300x300') : null,
-          });
-        }
-      });
-      // Auto-skip first song of a new radio session
-      if (skipOnFirstPlayRef.current) {
-        skipOnFirstPlayRef.current = false;
-        setTimeout(() => _shuffleSkip(widget), 1500);
-      }
-    });
-    widget.bind(window.SC.Widget.Events.PAUSE, () => {
-      const isClout = widgetRef === cloutWidgetRef;
-      const isActive = (isClout && currentModeRef.current === 'clout') ||
-                       (!isClout && currentModeRef.current === 'dimes');
-      if (isActive) setIsMusicOn(false);
-    });
-    widget.bind(window.SC.Widget.Events.FINISH, () => {
-      const isClout = widgetRef === cloutWidgetRef;
-      const isActive = (isClout && currentModeRef.current === 'clout') ||
-                       (!isClout && currentModeRef.current === 'dimes');
-      if (isActive) setIsMusicOn(false);
-    });
-  }
-
-  // Stable ref for currentMode (avoids stale closure in widget callbacks)
-  const currentModeRef = useRef(null);
 
   useEffect(() => {
-    function boot() {
-      if (!window.SC) return;
-      _initOneWidget(cloutIframeRef, cloutWidgetRef, cloutReadyRef, 'clout');
-      _initOneWidget(dimesIframeRef, dimesWidgetRef, dimesReadyRef, 'dimes');
+    function initWidget() {
+      if (!scIframeRef.current || !window.SC) return;
+      const widget = window.SC.Widget(scIframeRef.current);
+      scWidgetRef.current = widget;
+      widget.bind(window.SC.Widget.Events.READY, () => {
+        scReadyRef.current = true;
+        widget.setVolume(musicVolumeRef.current);
+        widget.setShuffle(true);
+      });
+      widget.bind(window.SC.Widget.Events.PLAY, () => {
+        setIsMusicOn(true);
+        widget.getCurrentSound(sound => {
+          if (sound) {
+            setCurrentTrack({
+              title: sound.title || 'Unknown Track',
+              artist: sound.user?.username || '',
+              url: sound.permalink_url || '',
+              artwork: sound.artwork_url ? sound.artwork_url.replace('-large', '-t300x300') : null,
+            });
+          }
+        });
+        // Auto-skip first song on any new radio session
+        if (skipOnFirstPlayRef.current) {
+          skipOnFirstPlayRef.current = false;
+          setTimeout(() => _shuffleSkip(widget), 1500);
+        }
+      });
+      widget.bind(window.SC.Widget.Events.PAUSE, () => { setIsMusicOn(false); });
+      widget.bind(window.SC.Widget.Events.FINISH, () => { setIsMusicOn(false); });
     }
-    if (window.SC) { boot(); return; }
+    if (window.SC) { initWidget(); return; }
     const script = document.createElement('script');
     script.src = 'https://w.soundcloud.com/player/api.js';
     script.async = true;
-    script.onload = boot;
+    script.onload = initWidget;
     document.head.appendChild(script);
   }, []);
 
@@ -271,96 +244,91 @@ export default function Home({ events = [], eventsLoading = false }) {
     return () => document.removeEventListener('mousedown', handler);
   }, [showMusicMenu]);
 
-  function _getActiveWidget() {
-    return currentModeRef.current === 'dimes' ? dimesWidgetRef.current : cloutWidgetRef.current;
-  }
-  function _getActiveReady() {
-    return currentModeRef.current === 'dimes' ? dimesReadyRef.current : cloutReadyRef.current;
+  function _playNewPlaylist(url, modeKey) {
+    const w = scWidgetRef.current;
+    if (!w) return;
+    // widget.load() docs: "options" can include a callback fired when new widget is ready
+    // All previously-bound event listeners (PLAY/PAUSE/FINISH) continue working after load()
+    scReadyRef.current = false;
+    loadedPlaylistRef.current = modeKey;
+    skipOnFirstPlayRef.current = true;
+    w.load(url, {
+      auto_play: false,
+      hide_related: true,
+      show_comments: false,
+      show_user: false,
+      show_reposts: false,
+      show_teaser: false,
+      visual: false,
+      callback: () => {
+        scReadyRef.current = true;
+        w.setVolume(musicVolumeRef.current);
+        w.setShuffle(true);
+        w.play();
+      }
+    });
   }
 
   function triggerCloutCullingGames() {
-    // Pause Dimes if playing
-    if (dimesWidgetRef.current) dimesWidgetRef.current.pause();
-    currentModeRef.current = 'clout';
     setCurrentMode('clout');
     setIsMusicOn(true);
-    skipOnFirstPlayRef.current = true;
-    const w = cloutWidgetRef.current;
-    if (w && cloutReadyRef.current) {
+    const w = scWidgetRef.current;
+    if (!w) return;
+    if (loadedPlaylistRef.current === 'clout' && scReadyRef.current) {
+      // Already loaded — just play + shuffle
+      skipOnFirstPlayRef.current = true;
       w.setShuffle(true);
       w.play();
-    }
-    // Widget not ready yet: READY handler will set volume+shuffle but won't auto-play
-    // so we start playing once ready via a one-time check
-    if (!cloutReadyRef.current) {
-      const check = setInterval(() => {
-        if (cloutReadyRef.current && cloutWidgetRef.current) {
-          clearInterval(check);
-          cloutWidgetRef.current.setShuffle(true);
-          cloutWidgetRef.current.play();
-        }
-      }, 200);
+    } else {
+      _playNewPlaylist(CLOUT_URL, 'clout');
     }
   }
 
   function triggerDimesRadio() {
-    // Pause Clout if playing
-    if (cloutWidgetRef.current) cloutWidgetRef.current.pause();
-    currentModeRef.current = 'dimes';
     setCurrentMode('dimes');
     setIsMusicOn(true);
-    skipOnFirstPlayRef.current = true;
-    const w = dimesWidgetRef.current;
-    if (w && dimesReadyRef.current) {
+    const w = scWidgetRef.current;
+    if (!w) return;
+    if (loadedPlaylistRef.current === 'dimes' && scReadyRef.current) {
+      // Already loaded — just play + shuffle
+      skipOnFirstPlayRef.current = true;
       w.setShuffle(true);
       w.play();
-    }
-    if (!dimesReadyRef.current) {
-      const check = setInterval(() => {
-        if (dimesReadyRef.current && dimesWidgetRef.current) {
-          clearInterval(check);
-          dimesWidgetRef.current.setShuffle(true);
-          dimesWidgetRef.current.play();
-        }
-      }, 200);
+    } else {
+      _playNewPlaylist(DIMES_URL, 'dimes');
     }
   }
 
   function stopMusic() {
     setIsMusicOn(false);
     setCurrentMode(null);
-    currentModeRef.current = null;
-    if (cloutWidgetRef.current) cloutWidgetRef.current.pause();
-    if (dimesWidgetRef.current) dimesWidgetRef.current.pause();
+    if (scWidgetRef.current) scWidgetRef.current.pause();
   }
 
   function handleVolumeChange(val) {
     setMusicVolume(val);
     musicVolumeRef.current = val;
-    if (cloutWidgetRef.current) cloutWidgetRef.current.setVolume(val);
-    if (dimesWidgetRef.current) dimesWidgetRef.current.setVolume(val);
+    if (scWidgetRef.current) scWidgetRef.current.setVolume(val);
   }
 
   function handlePrevTrack() {
-    const w = _getActiveWidget();
-    if (!w) return;
-    _shuffleSkip(w);
+    if (!scWidgetRef.current) return;
+    _shuffleSkip(scWidgetRef.current);
   }
 
   function handleNextTrack() {
-    const w = _getActiveWidget();
-    if (!w) return;
-    _shuffleSkip(w);
+    if (!scWidgetRef.current) return;
+    _shuffleSkip(scWidgetRef.current);
   }
 
   function handleTogglePlayPause() {
-    const w = _getActiveWidget();
+    const w = scWidgetRef.current;
     if (isMusicOn) {
       setIsMusicOn(false);
       if (w) w.pause();
     } else if (currentMode) {
       setIsMusicOn(true);
-      if (w && _getActiveReady()) w.play();
+      if (w && scReadyRef.current) w.play();
     } else {
       triggerCloutCullingGames();
     }
@@ -741,13 +709,17 @@ export default function Home({ events = [], eventsLoading = false }) {
       {showForm && <EventSubmitForm onClose={() => setShowForm(false)} />}
       {showAuth && <AuthModal onClose={() => setShowAuth(false)} onSuccess={handleAuthSuccess} />}
 
-      {/* ── Ghost SoundCloud Players (one per playlist, always in DOM) ── */}
-      <iframe ref={cloutIframeRef} id="sc-clout-player" width="0" height="0" allow="autoplay"
+      {/* ── Ghost SoundCloud Player iframe (single, playlist swapped via widget.load() + callback) ── */}
+      <iframe
+        ref={scIframeRef}
+        id="sc-ghost-player"
+        width="0"
+        height="0"
+        allow="autoplay"
         src="https://w.soundcloud.com/player/?url=https%3A//soundcloud.com/justin-lapuff/sets/clout-culling-games&auto_play=false&hide_related=true&show_comments=false&show_user=false&show_reposts=false&show_teaser=false&visual=false"
-        style={{ visibility: 'hidden', position: 'absolute', pointerEvents: 'none', top: 0, left: 0 }} title="SC Clout Player" />
-      <iframe ref={dimesIframeRef} id="sc-dimes-player" width="0" height="0" allow="autoplay"
-        src="https://w.soundcloud.com/player/?url=https%3A//soundcloud.com/justin-lapuff/sets/dimes-square&auto_play=false&hide_related=true&show_comments=false&show_user=false&show_reposts=false&show_teaser=false&visual=false"
-        style={{ visibility: 'hidden', position: 'absolute', pointerEvents: 'none', top: 0, left: 0 }} title="SC Dimes Player" />
+        style={{ visibility: 'hidden', position: 'absolute', pointerEvents: 'none', top: 0, left: 0 }}
+        title="SC Ghost Player"
+      />
     </div>
   );
 }
