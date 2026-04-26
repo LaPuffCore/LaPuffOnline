@@ -186,16 +186,20 @@ export default function Home({ events = [], eventsLoading = false }) {
         }
       });
       widget.bind(window.SC.Widget.Events.PLAY, () => {
+        setIsMusicOn(true);
         widget.getCurrentSound(sound => {
           if (sound) {
             setCurrentTrack({
               title: sound.title || 'Unknown Track',
               artist: sound.user?.username || '',
               url: sound.permalink_url || '',
+              artwork: sound.artwork_url ? sound.artwork_url.replace('-large', '-t300x300') : null,
             });
           }
         });
       });
+      widget.bind(window.SC.Widget.Events.PAUSE, () => { setIsMusicOn(false); });
+      widget.bind(window.SC.Widget.Events.FINISH, () => { setIsMusicOn(false); });
     }
     if (window.SC) { initWidget(); return; }
     const script = document.createElement('script');
@@ -269,7 +273,7 @@ export default function Home({ events = [], eventsLoading = false }) {
   function handleVolumeChange(val) {
     setMusicVolume(val);
     musicVolumeRef.current = val;
-    if (scWidgetRef.current && scReadyRef.current) scWidgetRef.current.setVolume(val);
+    if (scWidgetRef.current) scWidgetRef.current.setVolume(val);
   }
 
   function handlePrevTrack() {
@@ -415,9 +419,16 @@ export default function Home({ events = [], eventsLoading = false }) {
                   {currentTrack && isMusicOn && (
                     <div className="px-3 pb-3">
                       <a href={currentTrack.url} target="_blank" rel="noopener noreferrer"
-                        className="block w-full px-2.5 py-2 rounded-xl border-2 border-gray-200 bg-gray-50 hover:bg-gray-100 hover:border-gray-400 transition-all cursor-pointer text-left no-underline">
-                        <p className="font-black text-[10px] text-gray-800 truncate leading-tight">{currentTrack.title}</p>
-                        <p className="font-bold text-[9px] text-gray-500 truncate leading-tight mt-0.5">{currentTrack.artist}</p>
+                        className="flex items-center gap-2 w-full px-2 py-1.5 rounded-xl border-2 border-gray-200 bg-gray-50 hover:bg-gray-100 hover:border-gray-400 transition-all cursor-pointer no-underline overflow-hidden">
+                        {currentTrack.artwork && (
+                          <img src={currentTrack.artwork} alt="" className="w-9 h-9 rounded-lg object-cover flex-shrink-0 border border-gray-200" />
+                        )}
+                        <div className="flex-1 min-w-0 overflow-hidden">
+                          <div className="overflow-hidden">
+                            <span className="radio-marquee-inner font-black text-[10px] text-gray-800 leading-tight">{currentTrack.title}</span>
+                          </div>
+                          <p className="font-bold text-[9px] text-gray-500 truncate leading-tight mt-0.5">{currentTrack.artist}</p>
+                        </div>
                       </a>
                     </div>
                   )}
@@ -578,9 +589,16 @@ export default function Home({ events = [], eventsLoading = false }) {
                    {currentTrack && isMusicOn && (
                      <div className="px-3 pb-3">
                        <a href={currentTrack.url} target="_blank" rel="noopener noreferrer"
-                         className="block w-full px-2.5 py-2 rounded-xl border-2 border-gray-200 bg-gray-50 hover:bg-gray-100 hover:border-gray-400 transition-all cursor-pointer text-left no-underline">
-                         <p className="font-black text-[10px] text-gray-800 truncate leading-tight">{currentTrack.title}</p>
-                         <p className="font-bold text-[9px] text-gray-500 truncate leading-tight mt-0.5">{currentTrack.artist}</p>
+                         className="flex items-center gap-2 w-full px-2 py-1.5 rounded-xl border-2 border-gray-200 bg-gray-50 hover:bg-gray-100 hover:border-gray-400 transition-all cursor-pointer no-underline overflow-hidden">
+                         {currentTrack.artwork && (
+                           <img src={currentTrack.artwork} alt="" className="w-9 h-9 rounded-lg object-cover flex-shrink-0 border border-gray-200" />
+                         )}
+                         <div className="flex-1 min-w-0 overflow-hidden">
+                           <div className="overflow-hidden">
+                             <span className="radio-marquee-inner font-black text-[10px] text-gray-800 leading-tight">{currentTrack.title}</span>
+                           </div>
+                           <p className="font-bold text-[9px] text-gray-500 truncate leading-tight mt-0.5">{currentTrack.artist}</p>
+                         </div>
                        </a>
                      </div>
                    )}

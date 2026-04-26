@@ -263,3 +263,16 @@ html.lp-emoji-stain-active .lp-emoji {
   color: transparent !important;
   text-shadow: 0 0 0 var(--lp-emoji-stain) !important;
 }
+
+/* Radio track title marquee scroll */
+@keyframes radio-marquee {
+  0%   { transform: translateX(0); }
+  10%  { transform: translateX(0); }
+  90%  { transform: translateX(var(--marquee-dist, -50%)); }
+  100% { transform: translateX(var(--marquee-dist, -50%)); }
+}
+.radio-marquee-inner {
+  display: inline-block;
+  white-space: nowrap;
+  animation: radio-marquee 6s linear infinite alternate;
+}
