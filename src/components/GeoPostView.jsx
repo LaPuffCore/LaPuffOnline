@@ -720,7 +720,7 @@ function PostDetailPopup({ post, postReactions, onReact, onOpenReactors, accentC
 }
 
 // ── GeoPostMosaic ─────────────────────────────────────────────────────────────
-function GeoPostMosaic({ posts, accentColor, opacity = 0.42 }) {
+function GeoPostMosaic({ posts, accentColor, opacity = 0.42, onTileClick = null }) {
   const COLS = 16;
   const ROWS = 6;
   const TOTAL = COLS * ROWS; // 96
@@ -740,9 +740,9 @@ function GeoPostMosaic({ posts, accentColor, opacity = 0.42 }) {
 
   return (
     <div
-      className="absolute inset-0 overflow-hidden pointer-events-none"
-      style={{ zIndex: 0, borderRadius: 'inherit' }}
-      aria-hidden="true"
+      className="absolute inset-0 overflow-hidden"
+      style={{ zIndex: 0, borderRadius: 'inherit', pointerEvents: onTileClick ? 'auto' : 'none' }}
+      aria-hidden={!onTileClick}
     >
       <div
         style={{
@@ -756,7 +756,12 @@ function GeoPostMosaic({ posts, accentColor, opacity = 0.42 }) {
         }}
       >
         {tiles.map((post, idx) => (
-          <div key={idx} style={{ overflow: 'hidden', aspectRatio: '1 / 1', width: '100%' }}>
+          <div
+            key={idx}
+            style={{ overflow: 'hidden', aspectRatio: '1 / 1', width: '100%', cursor: (onTileClick && post) ? 'pointer' : 'default' }}
+            onClick={onTileClick && post ? () => onTileClick(post) : undefined}
+            title={onTileClick && post ? (post.content?.html?.replace(/<[^>]+>/g, '').slice(0, 60) || 'View post') : undefined}
+          >
             {post ? (
               <img
                 src={post.image_url}
@@ -1516,6 +1521,7 @@ export default function GeoPostView({ session }) {
   // Incremented every time we switch back to tile mode — forces full grid DOM rebuild identical to page load
   const [tileViewKey, setTileViewKey] = useState(0);
   const [mosaicPeek, setMosaicPeek] = useState(false); // hold-to-peek mosaic
+  const [mosaicPeekOn, setMosaicPeekOn] = useState(false); // click-toggle mosaic
   // Feed layout: 'tiles' = bento masonry, 'list' = simple sidebar + stacked feed (from b10941b)
   const [feedLayout, setFeedLayout] = useState(() => {
     try { return localStorage.getItem('lapuff_feed_layout') || 'tiles'; } catch { return 'tiles'; }
@@ -2235,6 +2241,8 @@ export default function GeoPostView({ session }) {
   canShowLessRef.current = canShowLess;
 
   useEffect(() => {
+    // Only measure in tile mode — filter panel only exists in tile grid
+    if (feedLayout !== 'tiles') return undefined;
     const el = desktopFilterRef.current;
     if (!el || typeof window === 'undefined') return undefined;
 
@@ -2253,7 +2261,9 @@ export default function GeoPostView({ session }) {
     const observer = new ResizeObserver(() => updateHeight());
     observer.observe(el);
     return () => observer.disconnect();
-  }, []);
+  // Re-observe when switching back to tile mode or after grid rebuild via tileViewKey
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [feedLayout, tileViewKey]);
 
   const applyPanelRow = useCallback((newRow) => {
     const prevRow = panelRowRef.current;
@@ -2407,7 +2417,7 @@ export default function GeoPostView({ session }) {
       scrollEl.removeEventListener('scroll', onScroll);
       window.removeEventListener('resize', onResize);
     };
-  }, [desktopUnitHeight, visiblePosts.length, canShowMore, canShowLess, applyPanelRow, feedLayout, filterPanelMode]);
+  }, [desktopUnitHeight, visiblePosts.length, canShowMore, canShowLess, applyPanelRow, feedLayout, filterPanelMode, tileViewKey]);
 
   // When switching back to tile mode, double-rAF to ensure two browser layout passes
   // (grid was unmounted in list mode so getBoundingClientRect was stale after remount)
@@ -2542,12 +2552,12 @@ export default function GeoPostView({ session }) {
       {/* Create-post section with mosaic behind it */}
       <div className="w-full relative overflow-hidden" style={{ paddingBottom: 48 }}>
         {/* Mosaic: absolute background layer, fills height of this section, behind createpost */}
-        <div className="hidden md:block absolute inset-0 pointer-events-none" style={{ zIndex: 0 }} aria-hidden="true">
-          <GeoPostMosaic posts={posts} accentColor={accentColor} opacity={mosaicPeek ? 1 : 0.42} />
+        <div className="hidden md:block absolute inset-0" style={{ zIndex: 0, pointerEvents: mosaicPeekOn ? 'auto' : 'none' }} aria-hidden={!mosaicPeekOn}>
+          <GeoPostMosaic posts={posts} accentColor={accentColor} opacity={(mosaicPeek || mosaicPeekOn) ? 1 : 0.42} onTileClick={mosaicPeekOn ? (post) => setOpenPostPopup(post) : null} />
         </div>
-      <div className="w-full max-w-3xl mx-auto px-4 pt-4 pb-2" style={{ position: 'relative', zIndex: 1 }}>
+      <div className="w-full max-w-7xl mx-auto px-3 pt-8 pb-0" style={{ position: 'relative', zIndex: 1 }}>
         <div ref={createPostAreaRef} className="rounded-2xl border-3 border-black shadow-[4px_4px_0px_black] relative overflow-hidden"
-          style={{ background: surfaceBg, borderColor: postOutline || '#000', opacity: mosaicPeek ? 0 : 1, pointerEvents: mosaicPeek ? 'none' : 'auto', transition: 'opacity 200ms ease' }}>
+          style={{ background: surfaceBg, borderColor: postOutline || '#000', opacity: (mosaicPeek || mosaicPeekOn) ? 0 : 1, pointerEvents: (mosaicPeek || mosaicPeekOn) ? 'none' : 'auto', transition: 'opacity 200ms ease' }}>
 
           <div className="relative" style={{ zIndex: 1 }}>
           {/* image preview at top, rounded */}
@@ -2732,18 +2742,28 @@ export default function GeoPostView({ session }) {
             <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><rect x="0" y="0.5" width="13" height="3" rx="1" fill="currentColor"/><rect x="0" y="5" width="13" height="3" rx="1" fill="currentColor"/><rect x="0" y="9.5" width="13" height="3" rx="1" fill="currentColor"/></svg>
           </button>
         </div>
-        {/* Eye button: hold to peek at mosaic behind createpost */}
+        {/* Eye button: click to toggle mosaic peek — mosaic becomes visible, createpost hides.
+            When on: icon grows, button gets accent fill, mosaic tiles are clickable (→ popup). */}
         <button
-          className="flex items-center justify-center w-8 h-8 rounded-full border-2 border-black bg-white shadow-[2px_2px_0px_black] hover:scale-110 transition-transform select-none"
-          style={{ cursor: 'pointer', userSelect: 'none' }}
-          onMouseDown={() => setMosaicPeek(true)}
-          onMouseUp={() => setMosaicPeek(false)}
-          onMouseLeave={() => setMosaicPeek(false)}
-          onTouchStart={() => setMosaicPeek(true)}
-          onTouchEnd={() => setMosaicPeek(false)}
-          title="Hold to peek at mosaic"
-          aria-label="Peek at mosaic"
-        >👁</button>
+          onClick={() => setMosaicPeekOn(v => !v)}
+          className="flex items-center justify-center w-8 h-8 rounded-full border-2 border-black hover:scale-110 select-none transition-all duration-200"
+          style={{
+            background: mosaicPeekOn ? accentColor : '#fff',
+            color: mosaicPeekOn ? '#fff' : '#000',
+            boxShadow: mosaicPeekOn ? `0 0 0 2px ${accentColor}55` : '2px 2px 0px black',
+            cursor: 'pointer',
+            userSelect: 'none',
+          }}
+          title={mosaicPeekOn ? 'Close mosaic view' : 'Peek at mosaic'}
+          aria-label={mosaicPeekOn ? 'Close mosaic view' : 'Peek at mosaic'}
+        >
+          <span style={{
+            fontSize: mosaicPeekOn ? '1.3rem' : '1rem',
+            transition: 'font-size 250ms cubic-bezier(0.34,1.56,0.64,1)',
+            lineHeight: 1,
+            display: 'block',
+          }}>👁</span>
+        </button>
       </div>
       </div>{/* end mosaic section wrapper */}
 
@@ -2753,7 +2773,7 @@ export default function GeoPostView({ session }) {
       <div className="w-full relative" style={{ height: 44, overflow: 'visible', zIndex: 10 }}>
         {/* Line button: full width, anchored at top:0 (= mosaic bottom), border-y, no shadow */}
         <div className="absolute left-0 right-0 flex items-center justify-center" style={{ top: 0, height: 20, borderTop: '3px solid #000', borderBottom: '3px solid #000', background: '#fff', zIndex: 1 }}>
-          <span className="font-black text-[11px] tracking-[0.25em] text-black select-none" style={{ letterSpacing: '0.3em' }}>——————————</span>
+          <div style={{ width: '40%', height: 2, background: '#000', borderRadius: 1 }} />
         </div>
         {/* GEO-FEED pill: center locked to line center (top:10px = midpoint of 20px line).
             translateY(-50%) pulls it up by half its own height → top half overlaps mosaic. */}
@@ -2850,7 +2870,7 @@ export default function GeoPostView({ session }) {
       <div className="w-full px-3 md:px-4">
         {/* ── TILE / BENTO MODE ── */}
         {feedLayout === 'tiles' && (<>
-        <div key={tileViewKey} ref={desktopGridRef} className="hidden md:grid gap-3 mt-3"
+        <div ref={desktopGridRef} className="hidden md:grid gap-3 mt-3"
           style={{
             '--image-scale': Math.max(0.5, Number(feedImageScale || 1)),
             gridAutoFlow: 'dense',
