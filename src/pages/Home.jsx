@@ -195,10 +195,10 @@ export default function Home({ events = [], eventsLoading = false }) {
     if (!w) return;
     scReadyRef.current = false;
     loadedPlaylistRef.current = modeKey;
-    // Trigger play 200ms after load starts — user click counts as activation
-    setTimeout(() => { if (scWidgetRef.current) scWidgetRef.current.play(); }, 200);
+    // auto_play:true — this call is within the user's click handler so
+    // the browser activation chain allows autoplay without a delay
     w.load(url, {
-      auto_play: false,
+      auto_play: true,
       hide_related: true,
       show_comments: false,
       show_user: false,
@@ -214,6 +214,7 @@ export default function Home({ events = [], eventsLoading = false }) {
           if (sounds && sounds.length > 0) {
             const idx = Math.floor(Math.random() * sounds.length);
             w.skip(idx);
+            w.setShuffle(true); // re-arm after skip to persist for next/prev
           }
         });
       },
@@ -247,8 +248,13 @@ export default function Home({ events = [], eventsLoading = false }) {
         });
       });
       widget.bind(E.PAUSE,  () => setIsMusicOn(false));
-      // FINISH: auto-advance to next shuffled track (bound once here, never re-bound)
-      widget.bind(E.FINISH, () => { if (scWidgetRef.current) scWidgetRef.current.next(); });
+      // FINISH: re-arm shuffle then advance (bound once, never re-bound)
+      widget.bind(E.FINISH, () => {
+        const w = scWidgetRef.current;
+        if (!w) return;
+        w.setShuffle(true);
+        w.next();
+      });
     }
 
     if (window.SC) {
