@@ -60,6 +60,9 @@ export default function Home({ events = [], eventsLoading = false }) {
   const mapAutoPlayedRef   = useRef(false);
   const musicDesktopRef  = useRef(null);
   const musicMobileRef   = useRef(null);
+  // JS-managed shuffle queue — eliminates reliance on w.next() / setShuffle
+  const playlistQueueRef   = useRef([]); // shuffled index array
+  const queuePointerRef    = useRef(0);  // current position in queue
 
   const location = useLocation();
   const isMap = view === 'map';
@@ -178,12 +181,24 @@ export default function Home({ events = [], eventsLoading = false }) {
     });
   }
 
+  // Advance the JS-owned shuffle queue and jump to that track absolutely
+  function advanceQueue(w) {
+    const queue = playlistQueueRef.current;
+    if (!w || queue.length === 0) return;
+    queuePointerRef.current = (queuePointerRef.current + 1) % queue.length;
+    w.skip(queue[queuePointerRef.current]);
+    w.play();
+    setIsMusicOn(true);
+  }
+
   function _changePlaylist(url, modeKey) {
     const w = scWidgetRef.current;
     if (!w) return;
     loadedPlaylistRef.current = modeKey;
+    playlistQueueRef.current = []; // clear stale queue from previous station
+    queuePointerRef.current  = 0;
 
-    // A: Instant gesture unlock — mute+play cashes in the click token immediately
+    // Gesture unlock — mute+play cashes the click token immediately
     w.setVolume(0);
     w.play();
 
@@ -191,27 +206,25 @@ export default function Home({ events = [], eventsLoading = false }) {
       auto_play: true,
       show_artwork: false,
       callback: () => {
-        // B: Watchdog — kicks in at 600ms if the next+play below hangs
-        const watchdog = setTimeout(() => {
-          w.isPaused(paused => {
-            if (paused) {
-              w.setShuffle(true);
-              w.next();
-              w.play();
-              setIsMusicOn(true);
-            }
-          });
-        }, 600);
-
-        // C: 200ms buffer then setShuffle+next — no getSounds race condition
+        // 250ms buffer so getSounds returns a full tracklist (not empty array)
         setTimeout(() => {
-          w.setShuffle(true);
-          w.next(); // widget picks random track internally via shuffle
-          clearTimeout(watchdog);
-          w.setVolume(musicVolumeRef.current);
-          w.play();
-          setIsMusicOn(true);
-        }, 250); // 250ms for metadata stability (blueprint-aligned)
+          w.getSounds(sounds => {
+            if (!sounds || sounds.length === 0) return;
+            // Fisher-Yates shuffle of indices — JS owns randomisation entirely
+            const indices = Array.from({ length: sounds.length }, (_, i) => i);
+            for (let i = indices.length - 1; i > 0; i--) {
+              const j = Math.floor(Math.random() * (i + 1));
+              [indices[i], indices[j]] = [indices[j], indices[i]];
+            }
+            playlistQueueRef.current = indices;
+            queuePointerRef.current  = 0;
+            // Absolute skip to first shuffled track — no setShuffle, no w.next()
+            w.skip(indices[0]);
+            w.setVolume(musicVolumeRef.current);
+            w.play();
+            setIsMusicOn(true);
+          });
+        }, 250);
       },
     });
   }
@@ -228,7 +241,6 @@ export default function Home({ events = [], eventsLoading = false }) {
       widget.bind(E.READY, () => {
         scReadyRef.current = true;
         widget.setVolume(musicVolumeRef.current);
-        widget.setShuffle(true);
       });
       widget.bind(E.PLAY, () => {
         setIsMusicOn(true);
@@ -242,8 +254,8 @@ export default function Home({ events = [], eventsLoading = false }) {
         });
       });
       widget.bind(E.PAUSE,  () => setIsMusicOn(false));
-      // FINISH: advance to next (bound once, never re-bound to prevent doubling)
-      widget.bind(E.FINISH, () => { if (scWidgetRef.current) scWidgetRef.current.next(); });
+      // FINISH: advance JS-owned queue with absolute skip — never w.next()
+      widget.bind(E.FINISH, () => { advanceQueue(scWidgetRef.current); });
     }
 
     if (window.SC) { initWidget(); return; }
@@ -288,6 +300,8 @@ export default function Home({ events = [], eventsLoading = false }) {
     setIsMusicOn(false);
     setCurrentMode(null);
     loadedPlaylistRef.current = null;
+    playlistQueueRef.current  = [];
+    queuePointerRef.current   = 0;
     setShowMusicMenu(false); // Stop is the only action that closes the menu
     if (scWidgetRef.current) scWidgetRef.current.pause();
   }
@@ -300,18 +314,16 @@ export default function Home({ events = [], eventsLoading = false }) {
 
   function handlePrevTrack() {
     const w = scWidgetRef.current;
-    if (!w) return;
-    w.prev();
+    const queue = playlistQueueRef.current;
+    if (!w || queue.length === 0) return;
+    queuePointerRef.current = (queuePointerRef.current - 1 + queue.length) % queue.length;
+    w.skip(queue[queuePointerRef.current]);
+    w.play();
     setIsMusicOn(true);
   }
 
   function handleNextTrack() {
-    const w = scWidgetRef.current;
-    if (!w) return;
-    w.setShuffle(true); // wake up API sequencer + re-assert shuffle
-    w.next();
-    w.play();           // fallback if widget is in a "busy" state
-    setIsMusicOn(true);
+    advanceQueue(scWidgetRef.current);
   }
 
   function handleTogglePlayPause() {
