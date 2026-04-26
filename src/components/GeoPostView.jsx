@@ -39,6 +39,35 @@ const PRESET_COLORS = [
   '#3b82f6','#8b5cf6','#ec4899','#06b6d4','#84cc16','#f43f5e',
 ];
 
+const GEOPOST_SHAPES = [
+  { id: 'square', label: 'Square', clip: null, icon: '▪' },
+  { id: 'circle', label: 'Circle', clip: 'ellipse(50% 50% at 50% 50%)', icon: '●' },
+  { id: 'oval', label: 'Oval', clip: 'ellipse(45% 50% at 50% 50%)', icon: '⬭' },
+  { id: 'pill-h', label: 'Pill H', clip: 'inset(0% round 999px)', aspectRatio: '3/1', icon: '💊' },
+  { id: 'pill-v', label: 'Pill V', clip: 'inset(0% round 999px)', aspectRatio: '1/3', icon: '⬮' },
+  { id: 'tri-equi', label: 'Equilateral △', clip: 'polygon(50% 0%, 0% 100%, 100% 100%)', icon: '△' },
+  { id: 'tri-iso', label: 'Isosceles △', clip: 'polygon(50% 0%, 15% 100%, 85% 100%)', icon: '▲' },
+  { id: 'tri-scalene', label: 'Scalene △', clip: 'polygon(30% 0%, 0% 100%, 100% 85%)', icon: '⟁' },
+  { id: 'tri-right', label: 'Right △', clip: 'polygon(0% 0%, 0% 100%, 100% 100%)', icon: '◺' },
+  { id: 'tri-reuleaux', label: 'Reuleaux △', clip: 'polygon(50% 0%, 93% 75%, 7% 75%)', icon: '◬' },
+  { id: 'star', label: 'Star ★', clip: 'polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%)', icon: '★' },
+  { id: 'rhombus', label: 'Rhombus', clip: 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)', icon: '◆' },
+  { id: 'diamond', label: 'Diamond / Kite', clip: 'polygon(50% 0%, 100% 40%, 50% 100%, 0% 40%)', icon: '♦' },
+  { id: 'trapezoid', label: 'Trapezoid', clip: 'polygon(20% 0%, 80% 0%, 100% 100%, 0% 100%)', icon: '⏢' },
+  { id: 'pentagon', label: 'Pentagon', clip: 'polygon(50% 0%, 100% 38%, 82% 100%, 18% 100%, 0% 38%)', icon: '⬠' },
+  { id: 'octagon', label: 'Octagon', clip: 'polygon(30% 0%, 70% 0%, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0% 70%, 0% 30%)', icon: '⬡' },
+  { id: 'heart', label: 'Heart ♥', clip: 'polygon(50% 20%, 80% 0%, 100% 25%, 85% 55%, 50% 90%, 15% 55%, 0% 25%, 20% 0%)', icon: '♥' },
+  { id: 'half-up', label: 'Half Circle ↑', clip: 'polygon(0% 100%, 0% 50%, 50% 0%, 100% 50%, 100% 100%)', icon: '⌓' },
+  { id: 'half-down', label: 'Half Circle ↓', clip: 'polygon(0% 0%, 100% 0%, 100% 50%, 50% 100%, 0% 50%)', icon: '⌒' },
+  { id: 'half-left', label: 'Half Circle ←', clip: 'polygon(100% 0%, 100% 100%, 50% 100%, 0% 50%, 50% 0%)', icon: '◑' },
+  { id: 'half-right', label: 'Half Circle →', clip: 'polygon(0% 0%, 50% 0%, 100% 50%, 50% 100%, 0% 100%)', icon: '◐' },
+  { id: 'speech', label: 'Speech Bubble', clip: 'polygon(0% 0%, 100% 0%, 100% 75%, 75% 75%, 75% 100%, 50% 75%, 0% 75%)', icon: '💬' },
+  { id: 'thought', label: 'Thought Bubble', clip: 'polygon(10% 10%, 90% 10%, 95% 50%, 90% 80%, 70% 90%, 30% 90%, 10% 80%, 5% 50%)', icon: '💭' },
+  { id: 'pow', label: 'POW Bubble', clip: 'polygon(50% 0%, 65% 15%, 85% 5%, 80% 25%, 100% 30%, 85% 45%, 100% 60%, 80% 65%, 85% 85%, 65% 75%, 50% 100%, 35% 75%, 15% 85%, 20% 65%, 0% 60%, 15% 45%, 0% 30%, 20% 25%, 15% 5%, 35% 15%)', icon: '💥' },
+  { id: 'quatrefoil', label: 'Quatrefoil', clip: 'polygon(50% 0%, 65% 20%, 80% 5%, 80% 25%, 100% 35%, 80% 50%, 100% 65%, 80% 75%, 80% 95%, 65% 80%, 50% 100%, 35% 80%, 20% 95%, 20% 75%, 0% 65%, 20% 50%, 0% 35%, 20% 25%, 20% 5%, 35% 20%)', icon: '✿' },
+  { id: 'cloud', label: 'Cloud ☁', clip: 'polygon(10% 60%, 5% 40%, 15% 20%, 35% 15%, 45% 5%, 65% 5%, 75% 15%, 90% 20%, 95% 40%, 88% 55%, 95% 65%, 85% 80%, 15% 80%, 5% 65%)', icon: '☁' },
+];
+
 function stripHtmlTags(value = '') {
   return String(value).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
 }
@@ -1613,6 +1642,144 @@ function applyFeedFilters(posts, {
   return out;
 }
 
+// ── ShapePostCard ─────────────────────────────────────────────────────────────
+function ShapePostCard({ post, shapeId = 'square', shapeSize = 1, postReactions = [], onReact, onOpenPopup, accentColor, session }) {
+  const { resolvedTheme } = useSiteTheme();
+  const theme = getPostVisualTheme(post, resolvedTheme);
+  const shapeDef = GEOPOST_SHAPES.find(s => s.id === shapeId) || GEOPOST_SHAPES[0];
+
+  const parsedContent = useMemo(() => {
+    try { return typeof post.content === 'string' ? JSON.parse(post.content) : (post.content || {}); } catch { return {}; }
+  }, [post.content]);
+  const postHtml = parsedContent.html || '';
+  const postIsAnon = !post.user_id;
+  const username = postIsAnon ? '🎭 Anon' : (post.username || 'Orbiter');
+
+  const reactionMap = {};
+  (postReactions || []).forEach(r => { reactionMap[r.emoji_text] = (reactionMap[r.emoji_text] || 0) + 1; });
+  const topEmojis = Object.entries(reactionMap).sort((a, b) => b[1] - a[1]).slice(0, 3);
+
+  const baseSize = 180 * shapeSize;
+
+  return (
+    <div
+      onClick={() => onOpenPopup && onOpenPopup(post)}
+      style={{
+        width: baseSize,
+        height: baseSize,
+        clipPath: shapeDef.clip || undefined,
+        borderRadius: shapeDef.id === 'circle' || shapeDef.id === 'oval' ? '50%' : (shapeDef.id === 'pill-h' || shapeDef.id === 'pill-v') ? '999px' : undefined,
+        background: theme.fill,
+        border: `3px solid ${theme.outline}`,
+        boxShadow: `4px 4px 0px ${theme.shadow}`,
+        cursor: 'pointer',
+        overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '12px',
+        boxSizing: 'border-box',
+        userSelect: 'none',
+        flexShrink: 0,
+      }}
+    >
+      <div style={{ color: theme.text, fontWeight: 900, fontSize: 10, overflow: 'hidden', width: '100%', textAlign: 'center', lineClamp: 1, WebkitLineClamp: 1, display: '-webkit-box', WebkitBoxOrient: 'vertical' }}>
+        {username}
+      </div>
+      {postHtml ? (
+        <div
+          style={{ color: theme.text, fontSize: 9, lineHeight: 1.3, overflow: 'hidden', width: '100%', textAlign: 'center', maxHeight: baseSize * 0.4, display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical' }}
+          dangerouslySetInnerHTML={{ __html: postHtml }}
+        />
+      ) : null}
+      {post.image_url && (
+        <img src={post.image_url} alt="" style={{ width: '60%', height: '40%', objectFit: 'cover', borderRadius: 4, marginTop: 4 }} />
+      )}
+      {topEmojis.length > 0 && (
+        <div style={{ display: 'flex', gap: 2, marginTop: 4, flexWrap: 'wrap', justifyContent: 'center' }}>
+          {topEmojis.map(([emoji, count]) => (
+            <span key={emoji} onClick={e => { e.stopPropagation(); onReact && onReact(post.id, emoji); }}
+              style={{ fontSize: 10, background: 'rgba(0,0,0,0.08)', borderRadius: 8, padding: '1px 4px', cursor: 'pointer' }}>
+              {emoji}{count > 1 ? count : ''}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── ShapeModeView ─────────────────────────────────────────────────────────────
+function ShapeModeView({ posts, postReactions, onReact, onOpenPopup, accentColor, session }) {
+  const [dropped, setDropped] = useState(false);
+  const [settled, setSettled] = useState(false);
+  const containerRef = useRef(null);
+
+  const postsWithShapes = useMemo(() => {
+    return posts.map((post, i) => {
+      const shapeId = post.tile_shape && post.tile_shape !== 'square'
+        ? post.tile_shape
+        : GEOPOST_SHAPES[i % GEOPOST_SHAPES.length].id;
+      const size = post.shape_size === 'small' ? 0.7 : post.shape_size === 'large' ? 1.4 : post.shape_size === 'xlarge' ? 1.8 : 1.0;
+      return { post, shapeId, size };
+    });
+  }, [posts]);
+
+  useEffect(() => {
+    if (!dropped) {
+      const t = setTimeout(() => setDropped(true), 100);
+      return () => clearTimeout(t);
+    }
+  }, [dropped]);
+
+  useEffect(() => {
+    if (dropped) {
+      const t = setTimeout(() => setSettled(true), postsWithShapes.length * 80 + 1200);
+      return () => clearTimeout(t);
+    }
+  }, [dropped, postsWithShapes.length]);
+
+  return (
+    <div ref={containerRef} className="relative w-full" style={{ minHeight: 600 }}>
+      {!settled && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 font-black text-sm opacity-60 animate-pulse">
+          Dropping shapes…
+        </div>
+      )}
+      <div className="flex flex-wrap gap-4 p-6 items-end justify-start" style={{ minHeight: 500 }}>
+        {postsWithShapes.map(({ post, shapeId, size }, i) => {
+          const delay = i * 80;
+          const finalRotation = ((i * 37) % 30) - 15;
+          return (
+            <div
+              key={post.id}
+              style={{
+                transform: dropped ? `rotate(${finalRotation}deg)` : `translateY(-120vh) rotate(${finalRotation * 3}deg)`,
+                transition: dropped
+                  ? `transform ${600 + (i % 4) * 100}ms cubic-bezier(0.34, 1.2, 0.64, 1) ${delay}ms`
+                  : 'none',
+                opacity: dropped ? 1 : 0,
+              }}
+            >
+              <ShapePostCard
+                post={post}
+                shapeId={shapeId}
+                shapeSize={size}
+                postReactions={postReactions[post.id]}
+                onReact={onReact}
+                onOpenPopup={onOpenPopup}
+                accentColor={accentColor}
+                session={session}
+              />
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ── GeoPostView ───────────────────────────────────────────────────────────────
 export default function GeoPostView({ session }) {
   const { resolvedTheme } = useSiteTheme();
@@ -1658,6 +1825,12 @@ export default function GeoPostView({ session }) {
   const [tileViewKey, setTileViewKey] = useState(0);
   const [mosaicPeek, setMosaicPeek] = useState(false); // hold-to-peek mosaic
   const [mosaicPeekOn, setMosaicPeekOn] = useState(false); // click-toggle mosaic
+  // Shape mode state
+  const [shapeModeDropped, setShapeModeDropped] = useState(false);
+  const shapeModeRef = useRef(null);
+  const matterEngineRef = useRef(null);
+  const matterRenderRef = useRef(null);
+  const matterRunnerRef = useRef(null);
   const [hiddenPostIds, setHiddenPostIds] = useState(() => {
     try { return new Set(JSON.parse(localStorage.getItem('lapuff_hidden_posts') || '[]')); }
     catch { return new Set(); }
@@ -1722,6 +1895,10 @@ export default function GeoPostView({ session }) {
   const [fmtSize,      setFmtSize]      = useState(3);
   const [activeCoolFont, setActiveCoolFont] = useState(null);
   const [openToolbar,  setOpenToolbar]  = useState(null);
+  // Shape selector state (for createpost toolbar)
+  const [selectedShape, setSelectedShape] = useState('square');
+  const [selectedShapeSize, setSelectedShapeSize] = useState(1.0);
+  const shapeBtnRef = useRef(null);
   const [miniOpenToolbar, setMiniOpenToolbar] = useState(null);
   const [miniPostFill, setMiniPostFill] = useState('');
   const [miniPostOutline, setMiniPostOutline] = useState('');
@@ -2111,6 +2288,8 @@ export default function GeoPostView({ session }) {
         post_fill:    postFill    || null,
         post_outline: postOutline || null,
         post_shadow:  postShadow  || null,
+        tile_shape: selectedShape,
+        shape_size: selectedShapeSize >= 1.5 ? 'large' : selectedShapeSize >= 1.2 ? 'medium-large' : selectedShapeSize <= 0.7 ? 'small' : 'medium',
         is_participant: isParticipant,
         post_approved,
         user_id: session?.user?.id || null,
@@ -2741,6 +2920,15 @@ export default function GeoPostView({ session }) {
           </div>
 
           {/* contenteditable editor — border shows postOutline simulation, expands with content */}
+          <div
+            style={{
+              clipPath: selectedShape !== 'square' ? (GEOPOST_SHAPES.find(s => s.id === selectedShape)?.clip || undefined) : undefined,
+              transition: 'clip-path 0.3s ease',
+              borderRadius: selectedShape === 'circle' || selectedShape === 'oval' ? '50%' : selectedShape === 'pill-h' || selectedShape === 'pill-v' ? '999px' : undefined,
+              transform: `scale(${selectedShapeSize})`,
+              transformOrigin: 'top center',
+            }}
+          >
           <div ref={editorRef} contentEditable suppressContentEditableWarning
             className="min-h-[80px] md:min-h-[240px] px-3 py-4 text-sm border-t border-gray-100"
             style={{
@@ -2761,6 +2949,7 @@ export default function GeoPostView({ session }) {
               }
             }}
           />
+          </div>
 
           {/* ── Toolbar ──────────────────────────────────────────────────────── */}
           <div className="border-t border-gray-200 px-2 py-2 md:py-3 flex items-center gap-1 flex-wrap bg-gray-50">
@@ -2853,6 +3042,37 @@ export default function GeoPostView({ session }) {
               <EmojiPicker embedded={true} compact={true} value="" onChange={e => { if (e) handleInsertEmoji(e); }} />
             </PortalPopup>
 
+            {/* Shape selector */}
+            <div className="relative inline-block">
+              {tbBtn(openToolbar === 'shape' || selectedShape !== 'square', e => { e.preventDefault(); openTb('shape'); }, <span style={{ fontSize: 9, fontWeight: 900 }}>⬡▲</span>, 'Shape', shapeBtnRef)}
+              <PortalPopup btnRef={shapeBtnRef} open={openToolbar === 'shape'} onClose={closeToolbar} minWidth={200} alignRight>
+                <div className="bg-white border-3 border-black rounded-xl shadow-[4px_4px_0px_black] overflow-hidden">
+                  <div className="p-2">
+                    <div className="text-[10px] font-black mb-1 opacity-60">TILE SHAPE</div>
+                    <div className="grid grid-cols-4 gap-1">
+                      {GEOPOST_SHAPES.map(s => (
+                        <button key={s.id} onMouseDown={e => e.preventDefault()}
+                          onClick={() => { setSelectedShape(s.id); closeToolbar(); }}
+                          className="flex flex-col items-center justify-center p-1 rounded border text-center hover:bg-gray-100"
+                          style={{ borderColor: selectedShape === s.id ? accentColor : 'transparent', background: selectedShape === s.id ? accentColor + '22' : undefined }}
+                          title={s.label}>
+                          <span style={{ fontSize: 16 }}>{s.icon}</span>
+                          <span style={{ fontSize: 7, lineHeight: 1.1, textAlign: 'center' }}>{s.label.slice(0, 8)}</span>
+                        </button>
+                      ))}
+                    </div>
+                    <div className="mt-2">
+                      <div className="text-[10px] font-black mb-1 opacity-60">SIZE</div>
+                      <input type="range" min="0.5" max="2.0" step="0.1" value={selectedShapeSize}
+                        onChange={e => setSelectedShapeSize(parseFloat(e.target.value))}
+                        className="w-full" />
+                      <div className="text-[9px] text-center opacity-50">{selectedShapeSize.toFixed(1)}×</div>
+                    </div>
+                  </div>
+                </div>
+              </PortalPopup>
+            </div>
+
             {tbBtn(false, e => { e.preventDefault(); handleClear(); }, '✕', 'Clear')}
           </div>
 
@@ -2904,6 +3124,16 @@ export default function GeoPostView({ session }) {
           >
             {/* 3 stacked bars icon */}
             <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><rect x="0" y="0.5" width="13" height="3" rx="1" fill="currentColor"/><rect x="0" y="5" width="13" height="3" rx="1" fill="currentColor"/><rect x="0" y="9.5" width="13" height="3" rx="1" fill="currentColor"/></svg>
+          </button>
+          <button
+            onMouseDown={e => e.preventDefault()}
+            onClick={() => setFeedLayout('shapes')}
+            title="Shape mode"
+            className="flex items-center justify-center w-7 h-7 transition-colors"
+            style={{ background: feedLayout === 'shapes' ? accentColor : '#fff', color: feedLayout === 'shapes' ? '#fff' : '#000' }}
+          >
+            {/* Triangle icon */}
+            <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><polygon points="6.5,1 13,12 0,12" fill="currentColor"/></svg>
           </button>
         </div>
         {/* Eye button: click to toggle mosaic peek — mosaic becomes visible, createpost hides.
@@ -3416,6 +3646,20 @@ export default function GeoPostView({ session }) {
 
           </div>
         )}{/* end feedLayout === 'list' */}
+
+        {/* ── SHAPE MODE ── */}
+        {feedLayout === 'shapes' && (
+          <div className="col-span-full p-4">
+            <ShapeModeView
+              posts={filteredPosts}
+              postReactions={reactions}
+              onReact={handleReact}
+              onOpenPopup={(p) => setOpenPostPopup(p)}
+              accentColor={accentColor}
+              session={session}
+            />
+          </div>
+        )}
 
         <div className="md:hidden">
           <section data-geopost-feed-scroll>
