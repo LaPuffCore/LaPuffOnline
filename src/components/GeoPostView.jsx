@@ -25,7 +25,7 @@ const BOROUGH_ZIPS = BOROUGHS.reduce((acc, b) => {
   acc[b] = NYC_ZIP_FEATURES.filter(z => z.borough === b).sort((a, x) => a.zip.localeCompare(x.zip));
   return acc;
 }, {});
-const PAGE_SIZE = 30;
+const PAGE_SIZE = 40;
 const TIME_OPTIONS = [
   { key: 'all', label: 'All Time' },
   { key: '1d',  label: '1 Day' },
@@ -581,12 +581,12 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
   const isTallTile = hasImage && shape === 'portrait';
   const isLongTile = hasImage && shape === 'landscape';
   const columnSpan = isLongTile ? 4 : 2;
-  const rowSpan = (isTallTile ? 2 : 1) + (commentsOpen && isDesktopMasonry ? 1 : 0);
+  // Grid is bisected: each visual row = 2 grid half-rows.
+  // square/long = 2 half-rows (1 visual row), tall = 4 half-rows (2 visual rows), comments add 2 half-rows.
+  const rowSpan = (isTallTile ? 4 : 2) + (commentsOpen && isDesktopMasonry ? 2 : 0);
   const maxTextLines = isTallTile ? 9 : hasImage ? 3 : 9;
-  // Use 16px as the base — browser renders <font size="3"> (our "normal") at 16px regardless
-  // of the 0.875rem CSS font-size on the container. Math.floor ensures we never show a partial line.
-  const standardLineHeightPx = Math.floor(16 * scale * textLineHeight);
-  const maxHeightPx = maxTextLines * standardLineHeightPx;
+  // Fixed pixel budget: 16px (browser normal font) × 1.5 line-height × maxTextLines × slider scale
+  const maxBudgetPx = Math.floor(16 * scale * textLineHeight) * maxTextLines;
   const tileGridStyle = {
     gridColumn: `span ${columnSpan}`,
     gridRow: `span ${rowSpan}`,
@@ -604,17 +604,56 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
   useEffect(() => {
     const el = textBlockRef.current;
     if (!el) return undefined;
-    // scrollHeight > clientHeight means webkit-box-clamp is active i.e. text was truncated
-    const check = () => setIsTextOverflowing(el.scrollHeight > el.clientHeight + 2);
-    check();
+
+    const applySnap = () => {
+      // 1. Measure full content height
+      el.style.maxHeight = 'none';
+      const fullH = el.scrollHeight;
+
+      if (fullH <= maxBudgetPx) {
+        // Content fits — let overflow:hidden do the rest, nothing to clip
+        el.style.maxHeight = `${maxBudgetPx}px`;
+        setIsTextOverflowing(false);
+        return;
+      }
+
+      // 2. Content overflows — walk text nodes via Range to find the lowest
+      //    line-bottom that is fully within the budget. This handles any mix
+      //    of font sizes (size 1-6) without half-line clips.
+      const elRect = el.getBoundingClientRect();
+      const range = document.createRange();
+      let lastCompleteLine = 0;
+
+      const walk = (node) => {
+        if (node.nodeType === Node.TEXT_NODE && node.textContent.trim()) {
+          range.selectNodeContents(node);
+          for (const r of range.getClientRects()) {
+            const lineBottom = r.bottom - elRect.top;
+            if (lineBottom <= maxBudgetPx + 0.5) {
+              lastCompleteLine = Math.max(lastCompleteLine, Math.ceil(lineBottom));
+            }
+          }
+        }
+        node.childNodes?.forEach(walk);
+      };
+
+      el.style.maxHeight = 'none'; // keep none so rects are accurate
+      walk(el);
+
+      const snapped = lastCompleteLine > 0 ? lastCompleteLine : maxBudgetPx;
+      el.style.maxHeight = `${snapped}px`;
+      setIsTextOverflowing(true);
+    };
+
+    applySnap();
     if (typeof ResizeObserver === 'undefined') {
-      window.addEventListener('resize', check);
-      return () => window.removeEventListener('resize', check);
+      window.addEventListener('resize', applySnap);
+      return () => window.removeEventListener('resize', applySnap);
     }
-    const ro = new ResizeObserver(check);
+    const ro = new ResizeObserver(applySnap);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [postHtml, maxTextLines, isDesktopMasonry, commentsOpen]);
+  }, [postHtml, maxBudgetPx, isDesktopMasonry, commentsOpen]);
 
   return (
     <div
@@ -691,7 +730,8 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
             fontSize: `${textFontSizeRem}rem`,
             lineHeight: textLineHeight,
             overflow: 'hidden',
-            maxHeight: `${maxHeightPx}px`,
+            // Initial maxHeight set as budget; snap useEffect refines it to last complete line
+            maxHeight: `${maxBudgetPx}px`,
             wordBreak: 'break-word',
             flexShrink: 0,
           }}
@@ -1895,14 +1935,19 @@ export default function GeoPostView({ session }) {
       if (typeof window === 'undefined' || window.innerWidth < 768) return 1;
       if (!desktopGridRef.current) return panelRowRef.current;
       const scrollTop = scrollEl === window ? window.scrollY : scrollEl.scrollTop;
-      const rowStep = Math.max(1, desktopUnitHeight + 12);
-      rowStepRef.current = rowStep;
+      // Bisected grid: half-row = (desktopUnitHeight - 12) / 2 + 12 = desktopUnitHeight/2 + 6 px.
+      // Two half-rows (one full visual row) = desktopUnitHeight + 12 px — same as pre-bisection.
+      const halfRowPx = Math.max(1, (desktopUnitHeight - 12) / 2 + 12);
+      const fullVisualRowPx = halfRowPx * 2; // = desktopUnitHeight + 12
+      rowStepRef.current = halfRowPx;
       const relativeScroll = Math.max(0, scrollTop - gridOffsetCacheRef.current);
-      // Row 1 at start; advance half a row early so it never gets hidden
-      const targetRow = Math.max(1, Math.floor((relativeScroll + rowStep * 0.5) / rowStep) + 1);
-      // Clamp to actual last row (ensures panel is always visible at bottom of feed too)
-      const maxRow = Math.max(1, Math.ceil(desktopGridRef.current.scrollHeight / rowStep));
-      return Math.min(maxRow, targetRow);
+      // Advance half-a-visual-row early; panel row always odd (aligned to visual row boundaries)
+      const visualRowIdx = Math.floor((relativeScroll + fullVisualRowPx * 0.5) / fullVisualRowPx);
+      const targetRow = Math.max(1, 1 + visualRowIdx * 2);
+      // Clamp to last valid odd row
+      const maxHalfRow = Math.max(1, Math.floor(desktopGridRef.current.scrollHeight / halfRowPx));
+      const maxOddRow = maxHalfRow % 2 === 1 ? maxHalfRow : Math.max(1, maxHalfRow - 1);
+      return Math.min(maxOddRow, targetRow);
     };
 
     // Debounced: only fire 500ms after scrolling fully stops — no jitter, no chasing fast scroll
@@ -2191,18 +2236,20 @@ export default function GeoPostView({ session }) {
 
         <div
           ref={desktopGridRef}
-          className="hidden md:grid gap-3 pb-10"
+          className="hidden md:grid gap-3 pb-2"
           style={{
             '--image-scale': Math.max(0.5, Number(feedImageScale || 1)),
             gridAutoFlow: 'dense',
             gridTemplateColumns: 'repeat(14, minmax(0, 1fr))',
-            gridAutoRows: `${desktopUnitHeight}px`,
+            // Bisected grid: each half-row = (desktopUnitHeight - 12) / 2 px.
+            // A tile spanning 2 half-rows = 2×halfRow + 1×gap = desktopUnitHeight - 12 + 12 = desktopUnitHeight px exactly.
+            gridAutoRows: `${Math.max(1, (desktopUnitHeight - 12) / 2)}px`,
             // Prevent browser scroll-anchoring from jumping the scroll position when
             // the panel moves to a new row and tiles reflow around it.
             overflowAnchor: 'none',
           }}
         >
-          <aside ref={filterPanelInnerRef} style={{ gridColumn: '1 / span 2', gridRow: `${desktopPanelRow} / span 1`, position: 'relative', zIndex: 20, willChange: 'transform, filter, opacity' }}>
+          <aside ref={filterPanelInnerRef} style={{ gridColumn: '1 / span 2', gridRow: `${desktopPanelRow} / span 2`, position: 'relative', zIndex: 20, willChange: 'transform, filter, opacity' }}>
             <div ref={desktopFilterRef} className="rounded-2xl bg-white p-2" style={{ border: '5px dotted #000', boxShadow: 'none' }}>
               <div className="text-[10px] font-black text-center tracking-widest uppercase mb-1.5 opacity-60">Filter Panel</div>
               <input
@@ -2319,7 +2366,7 @@ export default function GeoPostView({ session }) {
           </aside>
 
           {!loading && filteredPosts.length === 0 && (
-            <div className="rounded-2xl border-3 border-black bg-white shadow-[4px_4px_0px_black] flex items-center justify-center" style={{ gridColumn: '3 / -1', gridRow: 'span 1' }}>
+            <div className="rounded-2xl border-3 border-black bg-white shadow-[4px_4px_0px_black] flex items-center justify-center" style={{ gridColumn: '3 / -1', gridRow: 'span 2' }}>
               <div className="text-center py-8 px-4">
                 <div className="text-4xl mb-2">🌀</div>
                 <p className="font-black text-gray-500">Nothing here yet! Be the first!</p>
@@ -2330,7 +2377,7 @@ export default function GeoPostView({ session }) {
           {!loading && visiblePosts.map((post, index) => renderFeedPostCard(post, index, { desktop: true }))}
 
           {loading && (
-            <div className="rounded-2xl border-3 border-black bg-white shadow-[4px_4px_0px_black] flex items-center justify-center" style={{ gridColumn: '3 / -1', gridRow: 'span 1' }}>
+            <div className="rounded-2xl border-3 border-black bg-white shadow-[4px_4px_0px_black] flex items-center justify-center" style={{ gridColumn: '3 / -1', gridRow: 'span 2' }}>
               <p className="text-center text-sm text-gray-400 font-semibold py-4">Loading...</p>
             </div>
           )}
