@@ -2407,9 +2407,31 @@ export default function GeoPostView({ session }) {
     };
   }, [desktopUnitHeight, visiblePosts.length, canShowMore, canShowLess, applyPanelRow, feedLayout, filterPanelMode]);
 
-  // FAB visibility: fade in as create-post area scrolls away
+  // When switching back to tile mode, defer one rAF to ensure the grid DOM is
+  // fully laid out, then recompute gridOffset + reset panel to row 1.
+  // (Grid was unmounted in list mode so getBoundingClientRect was stale)
   useEffect(() => {
-    const scrollEl = desktopGridRef.current ? findScrollParent(desktopGridRef.current) : window;
+    if (feedLayout !== 'tiles') return;
+    const raf = requestAnimationFrame(() => {
+      if (!desktopGridRef.current) return;
+      const scrollEl = findScrollParent(desktopGridRef.current);
+      const scrollTop = scrollEl === window ? window.scrollY : scrollEl.scrollTop;
+      const containerClientTop = scrollEl === window ? 0 : scrollEl.getBoundingClientRect().top;
+      const gridClientTop = desktopGridRef.current.getBoundingClientRect().top;
+      gridOffsetCacheRef.current = gridClientTop - containerClientTop + scrollTop;
+      // Reset aside animation state cleanly
+      if (filterPanelInnerRef.current) {
+        filterPanelInnerRef.current.style.transition = 'none';
+        filterPanelInnerRef.current.style.transform = 'translateY(0)';
+        filterPanelInnerRef.current.style.filter = 'blur(0)';
+        filterPanelInnerRef.current.style.opacity = '1';
+      }
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [feedLayout]);
+
+  // FAB visibility: fade in as create-post area scrolls away
+  useEffect(() => {    const scrollEl = desktopGridRef.current ? findScrollParent(desktopGridRef.current) : window;
     const handleFabScroll = () => {
       if (!createPostAreaRef.current) return;
       const rect = createPostAreaRef.current.getBoundingClientRect();
@@ -2509,7 +2531,7 @@ export default function GeoPostView({ session }) {
         }
       `}</style>
       {/* Create-post section with mosaic behind it */}
-      <div className="w-full relative overflow-hidden">
+      <div className="w-full relative overflow-hidden" style={{ paddingBottom: 48 }}>
         {/* Mosaic: absolute background layer, fills height of this section, behind createpost */}
         <div className="hidden md:block absolute inset-0 pointer-events-none" style={{ zIndex: 0 }} aria-hidden="true">
           <GeoPostMosaic posts={posts} accentColor={accentColor} opacity={mosaicPeek ? 1 : 0.42} />
@@ -2702,25 +2724,27 @@ export default function GeoPostView({ session }) {
           aria-label="Peek at mosaic"
         >👁</button>
       </div>
-      </div>{/* end mosaic section wrapper */}
-      {/* GEO-FEED Separator — outside mosaic so ribbon top = mosaic bottom exactly */}
-      <div className="w-full flex items-center" style={{ position: 'relative', zIndex: 1, minHeight: 52 }}>
-        {/* Ribbon/line button: anchored at top:0 (= mosaic bottom), NO drop shadow, slightly taller */}
-        <div className="absolute left-0 right-0 border-y-[3px] border-black bg-white" style={{ top: 0, height: 16, zIndex: 0 }} />
-        <div className="flex-1" style={{ position: 'relative', zIndex: 1 }} />
-        {/* GEO-FEED pill: slightly larger, centered vertically in separator */}
-        <div className="border-[3px] border-black rounded-xl px-4 py-1.5 bg-white shadow-[3px_3px_0px_black]" style={{ position: 'relative', zIndex: 2 }}>
-          <span className="font-black text-[1.75rem] leading-none tracking-tight text-black whitespace-nowrap">GEO-FEED</span>
+      {/* Separator — inside mosaic wrapper so mosaic fills all the way to the line.
+          The ribbon sits at the very bottom of the mosaic. GEO-FEED pill is absolutely
+          centered on the ribbon, larger than it, so it slightly overlaps the mosaic above. */}
+      <div className="w-full" style={{ position: 'relative', height: 56, flexShrink: 0 }}>
+        {/* Line/ribbon button — no shadow, top anchored at 0 = mosaic bottom */}
+        <div className="absolute left-0 right-0" style={{ top: 0, height: 20, borderTop: '3px solid #000', borderBottom: '3px solid #000', background: '#fff', zIndex: 0 }} />
+        {/* GEO-FEED pill — centered vertically on the ribbon, overlaps mosaic slightly */}
+        <div className="absolute left-1/2" style={{ top: '50%', transform: 'translate(-50%, -50%)', zIndex: 2 }}>
+          <div className="border-[3px] border-black rounded-xl px-4 py-1.5 bg-white" style={{ whiteSpace: 'nowrap' }}>
+            <span className="font-black text-[1.75rem] leading-none tracking-tight text-black">GEO-FEED</span>
+          </div>
         </div>
-        <div className="flex-1" style={{ position: 'relative', zIndex: 1 }} />
       </div>
+      </div>{/* end mosaic section wrapper */}
 
       {/* Horizontal filter top bar — only in tile mode when filterPanelMode === 'topbar' */}
       {filterPanelMode === 'topbar' && feedLayout === 'tiles' && (
         <div
           className="hidden md:flex items-center gap-2 flex-wrap px-3 py-2 bg-white"
           style={{
-            border: '5px solid #000',
+            border: '3px solid #000',
             borderRadius: 12,
             position: filterPanelPinned ? 'sticky' : 'static',
             top: filterPanelPinned ? 4 : undefined,
@@ -3012,7 +3036,7 @@ export default function GeoPostView({ session }) {
 
         {/* ── LIST MODE ── desktop only, feedLayout === 'list', layout from b10941b */}
         {feedLayout === 'list' && (
-          <div className="hidden md:grid grid-cols-3 gap-4 mt-3">
+          <div className="hidden md:grid grid-cols-3 gap-4 mt-3 max-w-7xl mx-auto">
 
             {/* Sticky filter aside — 1/3 width */}
             <aside className="col-span-1 sticky self-start" style={{ top: 16 }}>
