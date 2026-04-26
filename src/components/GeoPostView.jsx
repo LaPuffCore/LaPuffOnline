@@ -1,6 +1,7 @@
 // @ts-nocheck
 import { useState, useRef, useEffect, useCallback, useLayoutEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
+import Matter from 'matter-js';
 import { useSiteTheme } from '../lib/theme';
 import { containsProfanity } from '../lib/profanityFilter';
 import { isUserInZipCode } from '../lib/locationService';
@@ -40,32 +41,84 @@ const PRESET_COLORS = [
 ];
 
 const GEOPOST_SHAPES = [
-  { id: 'square', label: 'Square', clip: null, icon: '▪' },
-  { id: 'circle', label: 'Circle', clip: 'ellipse(50% 50% at 50% 50%)', icon: '●' },
-  { id: 'oval', label: 'Oval', clip: 'ellipse(45% 50% at 50% 50%)', icon: '⬭' },
-  { id: 'pill-h', label: 'Pill H', clip: 'inset(0% round 999px)', aspectRatio: '3/1', icon: '💊' },
-  { id: 'pill-v', label: 'Pill V', clip: 'inset(0% round 999px)', aspectRatio: '1/3', icon: '⬮' },
-  { id: 'tri-equi', label: 'Equilateral △', clip: 'polygon(50% 0%, 0% 100%, 100% 100%)', icon: '△' },
-  { id: 'tri-iso', label: 'Isosceles △', clip: 'polygon(50% 0%, 15% 100%, 85% 100%)', icon: '▲' },
-  { id: 'tri-scalene', label: 'Scalene △', clip: 'polygon(30% 0%, 0% 100%, 100% 85%)', icon: '⟁' },
-  { id: 'tri-right', label: 'Right △', clip: 'polygon(0% 0%, 0% 100%, 100% 100%)', icon: '◺' },
-  { id: 'tri-reuleaux', label: 'Reuleaux △', clip: 'polygon(50% 0%, 93% 75%, 7% 75%)', icon: '◬' },
-  { id: 'star', label: 'Star ★', clip: 'polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%)', icon: '★' },
-  { id: 'rhombus', label: 'Rhombus', clip: 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)', icon: '◆' },
-  { id: 'diamond', label: 'Diamond / Kite', clip: 'polygon(50% 0%, 100% 40%, 50% 100%, 0% 40%)', icon: '♦' },
-  { id: 'trapezoid', label: 'Trapezoid', clip: 'polygon(20% 0%, 80% 0%, 100% 100%, 0% 100%)', icon: '⏢' },
-  { id: 'pentagon', label: 'Pentagon', clip: 'polygon(50% 0%, 100% 38%, 82% 100%, 18% 100%, 0% 38%)', icon: '⬠' },
-  { id: 'octagon', label: 'Octagon', clip: 'polygon(30% 0%, 70% 0%, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0% 70%, 0% 30%)', icon: '⬡' },
-  { id: 'heart', label: 'Heart ♥', clip: 'polygon(50% 20%, 80% 0%, 100% 25%, 85% 55%, 50% 90%, 15% 55%, 0% 25%, 20% 0%)', icon: '♥' },
-  { id: 'half-up', label: 'Half Circle ↑', clip: 'polygon(0% 100%, 0% 50%, 50% 0%, 100% 50%, 100% 100%)', icon: '⌓' },
-  { id: 'half-down', label: 'Half Circle ↓', clip: 'polygon(0% 0%, 100% 0%, 100% 50%, 50% 100%, 0% 50%)', icon: '⌒' },
-  { id: 'half-left', label: 'Half Circle ←', clip: 'polygon(100% 0%, 100% 100%, 50% 100%, 0% 50%, 50% 0%)', icon: '◑' },
-  { id: 'half-right', label: 'Half Circle →', clip: 'polygon(0% 0%, 50% 0%, 100% 50%, 50% 100%, 0% 100%)', icon: '◐' },
-  { id: 'speech', label: 'Speech Bubble', clip: 'polygon(0% 0%, 100% 0%, 100% 75%, 75% 75%, 75% 100%, 50% 75%, 0% 75%)', icon: '💬' },
-  { id: 'thought', label: 'Thought Bubble', clip: 'polygon(10% 10%, 90% 10%, 95% 50%, 90% 80%, 70% 90%, 30% 90%, 10% 80%, 5% 50%)', icon: '💭' },
-  { id: 'pow', label: 'POW Bubble', clip: 'polygon(50% 0%, 65% 15%, 85% 5%, 80% 25%, 100% 30%, 85% 45%, 100% 60%, 80% 65%, 85% 85%, 65% 75%, 50% 100%, 35% 75%, 15% 85%, 20% 65%, 0% 60%, 15% 45%, 0% 30%, 20% 25%, 15% 5%, 35% 15%)', icon: '💥' },
-  { id: 'quatrefoil', label: 'Quatrefoil', clip: 'polygon(50% 0%, 65% 20%, 80% 5%, 80% 25%, 100% 35%, 80% 50%, 100% 65%, 80% 75%, 80% 95%, 65% 80%, 50% 100%, 35% 80%, 20% 95%, 20% 75%, 0% 65%, 20% 50%, 0% 35%, 20% 25%, 20% 5%, 35% 20%)', icon: '✿' },
-  { id: 'cloud', label: 'Cloud ☁', clip: 'polygon(10% 60%, 5% 40%, 15% 20%, 35% 15%, 45% 5%, 65% 5%, 75% 15%, 90% 20%, 95% 40%, 88% 55%, 95% 65%, 85% 80%, 15% 80%, 5% 65%)', icon: '☁' },
+  { id: 'square',      label: 'Square',          icon: '▪', clip: null,
+    inscribed: { x: 0.10, y: 0.10, w: 0.80, h: 0.80 },
+    vertices: [{x:0,y:0},{x:100,y:0},{x:100,y:100},{x:0,y:100}] },
+  { id: 'circle',      label: 'Circle',           icon: '●', clip: 'circle',
+    inscribed: { x: 0.15, y: 0.15, w: 0.70, h: 0.70 },
+    vertices: null /* use Bodies.circle */ },
+  { id: 'oval',        label: 'Oval',             icon: '⬭', clip: 'ellipse',
+    inscribed: { x: 0.10, y: 0.15, w: 0.80, h: 0.70 },
+    vertices: null },
+  { id: 'pill-h',      label: 'Pill H',           icon: '💊', clip: 'pill-h',
+    inscribed: { x: 0.10, y: 0.20, w: 0.80, h: 0.60 },
+    vertices: [{x:15,y:0},{x:85,y:0},{x:100,y:50},{x:85,y:100},{x:15,y:100},{x:0,y:50}] },
+  { id: 'pill-v',      label: 'Pill V',           icon: '⬮', clip: 'pill-v',
+    inscribed: { x: 0.20, y: 0.10, w: 0.60, h: 0.80 },
+    vertices: [{x:50,y:0},{x:100,y:15},{x:100,y:85},{x:50,y:100},{x:0,y:85},{x:0,y:15}] },
+  { id: 'tri-equi',    label: 'Equilateral △',    icon: '△', clip: 'polygon(50% 0%, 0% 100%, 100% 100%)',
+    inscribed: { x: 0.25, y: 0.55, w: 0.50, h: 0.38 },
+    vertices: [{x:50,y:0},{x:0,y:100},{x:100,y:100}] },
+  { id: 'tri-iso',     label: 'Isosceles △',      icon: '▲', clip: 'polygon(50% 0%, 15% 100%, 85% 100%)',
+    inscribed: { x: 0.28, y: 0.52, w: 0.44, h: 0.40 },
+    vertices: [{x:50,y:0},{x:15,y:100},{x:85,y:100}] },
+  { id: 'tri-scalene', label: 'Scalene △',        icon: '⟁', clip: 'polygon(30% 0%, 0% 100%, 100% 85%)',
+    inscribed: { x: 0.15, y: 0.52, w: 0.60, h: 0.36 },
+    vertices: [{x:30,y:0},{x:0,y:100},{x:100,y:85}] },
+  { id: 'tri-right',   label: 'Right △',          icon: '◺', clip: 'polygon(0% 0%, 0% 100%, 100% 100%)',
+    inscribed: { x: 0.05, y: 0.50, w: 0.50, h: 0.44 },
+    vertices: [{x:0,y:0},{x:0,y:100},{x:100,y:100}] },
+  { id: 'tri-reuleaux',label: 'Reuleaux △',       icon: '◬', clip: 'polygon(50% 0%, 93% 75%, 7% 75%)',
+    inscribed: { x: 0.25, y: 0.38, w: 0.50, h: 0.36 },
+    vertices: [{x:50,y:0},{x:93,y:75},{x:7,y:75}] },
+  { id: 'star',        label: 'Star ★',           icon: '★', clip: 'polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%)',
+    inscribed: { x: 0.25, y: 0.28, w: 0.50, h: 0.42 },
+    vertices: [{x:50,y:0},{x:61,y:35},{x:98,y:35},{x:68,y:57},{x:79,y:91},{x:50,y:70},{x:21,y:91},{x:32,y:57},{x:2,y:35},{x:39,y:35}] },
+  { id: 'rhombus',     label: 'Rhombus',          icon: '◆', clip: 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)',
+    inscribed: { x: 0.22, y: 0.28, w: 0.56, h: 0.44 },
+    vertices: [{x:50,y:0},{x:100,y:50},{x:50,y:100},{x:0,y:50}] },
+  { id: 'diamond',     label: 'Diamond / Kite',   icon: '♦', clip: 'polygon(50% 0%, 100% 40%, 50% 100%, 0% 40%)',
+    inscribed: { x: 0.22, y: 0.18, w: 0.56, h: 0.50 },
+    vertices: [{x:50,y:0},{x:100,y:40},{x:50,y:100},{x:0,y:40}] },
+  { id: 'trapezoid',   label: 'Trapezoid',        icon: '⏢', clip: 'polygon(20% 0%, 80% 0%, 100% 100%, 0% 100%)',
+    inscribed: { x: 0.18, y: 0.05, w: 0.64, h: 0.75 },
+    vertices: [{x:20,y:0},{x:80,y:0},{x:100,y:100},{x:0,y:100}] },
+  { id: 'pentagon',    label: 'Pentagon',         icon: '⬠', clip: 'polygon(50% 0%, 100% 38%, 82% 100%, 18% 100%, 0% 38%)',
+    inscribed: { x: 0.18, y: 0.20, w: 0.64, h: 0.62 },
+    vertices: [{x:50,y:0},{x:100,y:38},{x:82,y:100},{x:18,y:100},{x:0,y:38}] },
+  { id: 'octagon',     label: 'Octagon',          icon: '⬡', clip: 'polygon(30% 0%, 70% 0%, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0% 70%, 0% 30%)',
+    inscribed: { x: 0.12, y: 0.08, w: 0.76, h: 0.84 },
+    vertices: [{x:30,y:0},{x:70,y:0},{x:100,y:30},{x:100,y:70},{x:70,y:100},{x:30,y:100},{x:0,y:70},{x:0,y:30}] },
+  { id: 'heart',       label: 'Heart ♥',          icon: '♥', clip: 'polygon(50% 20%, 80% 0%, 100% 25%, 85% 55%, 50% 90%, 15% 55%, 0% 25%, 20% 0%)',
+    inscribed: { x: 0.20, y: 0.22, w: 0.60, h: 0.55 },
+    vertices: [{x:50,y:20},{x:80,y:0},{x:100,y:25},{x:85,y:55},{x:50,y:90},{x:15,y:55},{x:0,y:25},{x:20,y:0}] },
+  { id: 'half-up',     label: 'Half Circle ↑',    icon: '⌓', clip: 'polygon(0% 100%, 0% 50%, 50% 0%, 100% 50%, 100% 100%)',
+    inscribed: { x: 0.10, y: 0.48, w: 0.80, h: 0.46 },
+    vertices: [{x:0,y:100},{x:0,y:50},{x:50,y:0},{x:100,y:50},{x:100,y:100}] },
+  { id: 'half-down',   label: 'Half Circle ↓',    icon: '⌒', clip: 'polygon(0% 0%, 100% 0%, 100% 50%, 50% 100%, 0% 50%)',
+    inscribed: { x: 0.10, y: 0.05, w: 0.80, h: 0.46 },
+    vertices: [{x:0,y:0},{x:100,y:0},{x:100,y:50},{x:50,y:100},{x:0,y:50}] },
+  { id: 'half-left',   label: 'Half Circle ←',    icon: '◑', clip: 'polygon(100% 0%, 100% 100%, 50% 100%, 0% 50%, 50% 0%)',
+    inscribed: { x: 0.48, y: 0.10, w: 0.44, h: 0.80 },
+    vertices: [{x:100,y:0},{x:100,y:100},{x:50,y:100},{x:0,y:50},{x:50,y:0}] },
+  { id: 'half-right',  label: 'Half Circle →',    icon: '◐', clip: 'polygon(0% 0%, 50% 0%, 100% 50%, 50% 100%, 0% 100%)',
+    inscribed: { x: 0.06, y: 0.10, w: 0.44, h: 0.80 },
+    vertices: [{x:0,y:0},{x:50,y:0},{x:100,y:50},{x:50,y:100},{x:0,y:100}] },
+  { id: 'speech',      label: 'Speech Bubble',    icon: '💬', clip: 'polygon(0% 0%, 100% 0%, 100% 75%, 75% 75%, 75% 100%, 50% 75%, 0% 75%)',
+    inscribed: { x: 0.05, y: 0.05, w: 0.90, h: 0.65 },
+    vertices: [{x:0,y:0},{x:100,y:0},{x:100,y:75},{x:75,y:75},{x:75,y:100},{x:50,y:75},{x:0,y:75}] },
+  { id: 'thought',     label: 'Thought Bubble',   icon: '💭', clip: 'polygon(10% 10%, 90% 10%, 95% 50%, 90% 80%, 70% 90%, 30% 90%, 10% 80%, 5% 50%)',
+    inscribed: { x: 0.12, y: 0.12, w: 0.76, h: 0.62 },
+    vertices: [{x:10,y:10},{x:90,y:10},{x:95,y:50},{x:90,y:80},{x:70,y:90},{x:30,y:90},{x:10,y:80},{x:5,y:50}] },
+  { id: 'pow',         label: 'POW Burst',        icon: '💥', clip: 'polygon(50% 0%, 65% 15%, 85% 5%, 80% 25%, 100% 30%, 85% 45%, 100% 60%, 80% 65%, 85% 85%, 65% 75%, 50% 100%, 35% 75%, 15% 85%, 20% 65%, 0% 60%, 15% 45%, 0% 30%, 20% 25%, 15% 5%, 35% 15%)',
+    inscribed: { x: 0.22, y: 0.22, w: 0.56, h: 0.56 },
+    vertices: [{x:50,y:0},{x:65,y:15},{x:85,y:5},{x:80,y:25},{x:100,y:30},{x:85,y:45},{x:100,y:60},{x:80,y:65},{x:85,y:85},{x:65,y:75},{x:50,y:100},{x:35,y:75},{x:15,y:85},{x:20,y:65},{x:0,y:60},{x:15,y:45},{x:0,y:30},{x:20,y:25},{x:15,y:5},{x:35,y:15}] },
+  { id: 'quatrefoil',  label: 'Quatrefoil',       icon: '✿', clip: 'polygon(50% 0%, 65% 20%, 80% 5%, 80% 25%, 100% 35%, 80% 50%, 100% 65%, 80% 75%, 80% 95%, 65% 80%, 50% 100%, 35% 80%, 20% 95%, 20% 75%, 0% 65%, 20% 50%, 0% 35%, 20% 25%, 20% 5%, 35% 20%)',
+    inscribed: { x: 0.22, y: 0.22, w: 0.56, h: 0.56 },
+    vertices: [{x:50,y:0},{x:80,y:20},{x:100,y:50},{x:80,y:80},{x:50,y:100},{x:20,y:80},{x:0,y:50},{x:20,y:20}] },
+  { id: 'cloud',       label: 'Cloud ☁',          icon: '☁', clip: 'polygon(10% 60%, 5% 40%, 15% 20%, 35% 15%, 45% 5%, 65% 5%, 75% 15%, 90% 20%, 95% 40%, 88% 55%, 95% 65%, 85% 80%, 15% 80%, 5% 65%)',
+    inscribed: { x: 0.10, y: 0.15, w: 0.80, h: 0.58 },
+    vertices: [{x:10,y:60},{x:5,y:40},{x:15,y:20},{x:35,y:15},{x:45,y:5},{x:65,y:5},{x:75,y:15},{x:90,y:20},{x:95,y:40},{x:88,y:55},{x:95,y:65},{x:85,y:80},{x:15,y:80},{x:5,y:65}] },
 ];
 
 function stripHtmlTags(value = '') {
@@ -214,6 +267,14 @@ const SAMPLE_SHADOW_COLORS = [
   '#000000', '#1f2937', '#7f1d1d', '#78350f', '#166534', '#155e75', '#1d4ed8', '#6d28d9', '#9d174d', '#334155',
 ];
 
+const SAMPLE_TILE_SHAPES = [
+  'circle','pentagon','tri-equi','rhombus','octagon','star','speech',
+  'heart','trapezoid','diamond','cloud','thought','tri-iso','half-up',
+  'half-down','pill-h','pow','quatrefoil','half-right','tri-right',
+  'oval','tri-reuleaux','tri-scalene','pill-v','half-left','square',
+];
+const SAMPLE_SHAPE_SIZES = ['medium','small','large','medium','xlarge','small','large','medium','small','large'];
+
 function buildSamplePosts() {
   const now = Date.now();
   const scopes = ['digital', 'nyc', 'borough', 'zip'];
@@ -267,6 +328,8 @@ function buildSamplePosts() {
       total_reactions: (idx * 7) % 53,
       created_at: createdAt,
       post_approved: true,
+      tile_shape: SAMPLE_TILE_SHAPES[i % SAMPLE_TILE_SHAPES.length],
+      shape_size: SAMPLE_SHAPE_SIZES[i % SAMPLE_SHAPE_SIZES.length],
     });
   }
 
@@ -1642,8 +1705,40 @@ function applyFeedFilters(posts, {
   return out;
 }
 
-// ── ShapePostCard ─────────────────────────────────────────────────────────────
-function ShapePostCard({ post, shapeId = 'square', shapeSize = 1, postReactions = [], onReact, onOpenPopup, accentColor, session }) {
+// Parse clip-path polygon string to SVG points string for a given size
+function clipPathToSvgPoints(clipStr, size) {
+  if (!clipStr || !clipStr.startsWith('polygon(')) return null;
+  const inner = clipStr.slice(8, -1);
+  return inner.split(',').map(pair => {
+    const parts = pair.trim().split(/\s+/);
+    const px = parseFloat(parts[0]) / 100 * size;
+    const py = parseFloat(parts[1]) / 100 * size;
+    return `${px.toFixed(1)},${py.toFixed(1)}`;
+  }).join(' ');
+}
+
+// Build a matter-js body for a shape at position (x, y) with given size
+function buildMatterBody(shapeDef, x, y, size) {
+  const options = { friction: 0.4, restitution: 0.15, frictionAir: 0.015 };
+  if (shapeDef.clip === 'circle' || shapeDef.clip === 'ellipse') {
+    return Matter.Bodies.circle(x, y, size / 2, options);
+  }
+  if (!shapeDef.vertices || shapeDef.vertices.length < 3) {
+    return Matter.Bodies.rectangle(x, y, size, size, options);
+  }
+  const verts = shapeDef.vertices.map(v => ({
+    x: (v.x / 100) * size - size / 2,
+    y: (v.y / 100) * size - size / 2,
+  }));
+  try {
+    const body = Matter.Bodies.fromVertices(x, y, verts, options, true);
+    if (body) return body;
+  } catch (e) { /* fall through */ }
+  return Matter.Bodies.rectangle(x, y, size, size, options);
+}
+
+// ── ShapePostCard (SVG-based — correct stroke + foreignObject text wrapping) ──
+function ShapePostCard({ post, shapeId = 'square', size = 270, onClick }) {
   const { resolvedTheme } = useSiteTheme();
   const theme = getPostVisualTheme(post, resolvedTheme);
   const shapeDef = GEOPOST_SHAPES.find(s => s.id === shapeId) || GEOPOST_SHAPES[0];
@@ -1655,127 +1750,390 @@ function ShapePostCard({ post, shapeId = 'square', shapeSize = 1, postReactions 
   const postIsAnon = !post.user_id;
   const username = postIsAnon ? '🎭 Anon' : (post.username || 'Orbiter');
 
-  const reactionMap = {};
-  (postReactions || []).forEach(r => { reactionMap[r.emoji_text] = (reactionMap[r.emoji_text] || 0) + 1; });
-  const topEmojis = Object.entries(reactionMap).sort((a, b) => b[1] - a[1]).slice(0, 3);
+  const ins = shapeDef.inscribed || { x: 0.1, y: 0.1, w: 0.8, h: 0.8 };
+  const ix = ins.x * size;
+  const iy = ins.y * size;
+  const iw = ins.w * size;
+  const ih = ins.h * size;
 
-  const baseSize = 180 * shapeSize;
+  const svgPoints = clipPathToSvgPoints(shapeDef.clip, size);
+  const isCircle = shapeDef.clip === 'circle';
+  const isEllipse = shapeDef.clip === 'ellipse';
+  const isPillH = shapeDef.clip === 'pill-h';
+  const isPillV = shapeDef.clip === 'pill-v';
+  const pillRx = isPillH ? size / 2 : isPillV ? size / 2 : 0;
 
   return (
-    <div
-      onClick={() => onOpenPopup && onOpenPopup(post)}
-      style={{
-        width: baseSize,
-        height: baseSize,
-        clipPath: shapeDef.clip || undefined,
-        borderRadius: shapeDef.id === 'circle' || shapeDef.id === 'oval' ? '50%' : (shapeDef.id === 'pill-h' || shapeDef.id === 'pill-v') ? '999px' : undefined,
-        background: theme.fill,
-        border: `3px solid ${theme.outline}`,
-        boxShadow: `4px 4px 0px ${theme.shadow}`,
-        cursor: 'pointer',
-        overflow: 'hidden',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '12px',
-        boxSizing: 'border-box',
-        userSelect: 'none',
-        flexShrink: 0,
-      }}
+    <svg
+      width={size}
+      height={size}
+      viewBox={`0 0 ${size} ${size}`}
+      onClick={onClick}
+      style={{ cursor: 'pointer', userSelect: 'none', display: 'block', overflow: 'visible' }}
     >
-      <div style={{ color: theme.text, fontWeight: 900, fontSize: 10, overflow: 'hidden', width: '100%', textAlign: 'center', lineClamp: 1, WebkitLineClamp: 1, display: '-webkit-box', WebkitBoxOrient: 'vertical' }}>
-        {username}
-      </div>
-      {postHtml ? (
+      {isCircle && (
+        <circle cx={size/2} cy={size/2} r={size/2 - 2}
+          fill={theme.fill} stroke={theme.outline} strokeWidth="3" />
+      )}
+      {isEllipse && (
+        <ellipse cx={size/2} cy={size/2} rx={size/2 - 2} ry={size*0.48}
+          fill={theme.fill} stroke={theme.outline} strokeWidth="3" />
+      )}
+      {(isPillH || isPillV) && (
+        <rect x="2" y="2" width={size-4} height={size-4} rx={pillRx} ry={pillRx}
+          fill={theme.fill} stroke={theme.outline} strokeWidth="3" />
+      )}
+      {!isCircle && !isEllipse && !isPillH && !isPillV && svgPoints && (
+        <polygon points={svgPoints}
+          fill={theme.fill} stroke={theme.outline} strokeWidth="3" strokeLinejoin="round" />
+      )}
+      {!isCircle && !isEllipse && !isPillH && !isPillV && !svgPoints && (
+        <rect x="2" y="2" width={size-4} height={size-4} rx="8"
+          fill={theme.fill} stroke={theme.outline} strokeWidth="3" />
+      )}
+
+      <foreignObject x={ix} y={iy} width={iw} height={ih}>
         <div
-          style={{ color: theme.text, fontSize: 9, lineHeight: 1.3, overflow: 'hidden', width: '100%', textAlign: 'center', maxHeight: baseSize * 0.4, display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical' }}
-          dangerouslySetInnerHTML={{ __html: postHtml }}
-        />
-      ) : null}
-      {post.image_url && (
-        <img src={post.image_url} alt="" style={{ width: '60%', height: '40%', objectFit: 'cover', borderRadius: 4, marginTop: 4 }} />
-      )}
-      {topEmojis.length > 0 && (
-        <div style={{ display: 'flex', gap: 2, marginTop: 4, flexWrap: 'wrap', justifyContent: 'center' }}>
-          {topEmojis.map(([emoji, count]) => (
-            <span key={emoji} onClick={e => { e.stopPropagation(); onReact && onReact(post.id, emoji); }}
-              style={{ fontSize: 10, background: 'rgba(0,0,0,0.08)', borderRadius: 8, padding: '1px 4px', cursor: 'pointer' }}>
-              {emoji}{count > 1 ? count : ''}
-            </span>
-          ))}
+          xmlns="http://www.w3.org/1999/xhtml"
+          style={{
+            width: '100%',
+            height: '100%',
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '3px',
+            padding: '4px',
+            boxSizing: 'border-box',
+            pointerEvents: 'none',
+          }}
+        >
+          <div style={{ color: theme.text, fontWeight: 900, fontSize: Math.max(9, size * 0.048), textAlign: 'center', lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', width: '100%' }}>
+            {username}
+          </div>
+          {postHtml ? (
+            <div
+              style={{ color: theme.text, fontSize: Math.max(8, size * 0.042), lineHeight: 1.3, overflow: 'hidden', textAlign: 'center', width: '100%', maxHeight: ih * 0.55, display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical' }}
+              dangerouslySetInnerHTML={{ __html: postHtml }}
+            />
+          ) : null}
+          {post.image_url && (
+            <img
+              src={post.image_url}
+              alt=""
+              style={{ width: '55%', maxHeight: ih * 0.35, objectFit: 'cover', borderRadius: 3, flexShrink: 0 }}
+            />
+          )}
         </div>
-      )}
-    </div>
+      </foreignObject>
+    </svg>
   );
 }
 
-// ── ShapeModeView ─────────────────────────────────────────────────────────────
-function ShapeModeView({ posts, postReactions, onReact, onOpenPopup, accentColor, session }) {
-  const [dropped, setDropped] = useState(false);
-  const [settled, setSettled] = useState(false);
+// ── ShapeDetailPopup — post popup shaped like the post's shape ─────────────────
+function ShapeDetailPopup({ post, shapeId, onClose, onReact, postReactions, accentColor, onSelectTag }) {
+  const { resolvedTheme } = useSiteTheme();
+  const theme = getPostVisualTheme(post, resolvedTheme);
+  const shapeDef = GEOPOST_SHAPES.find(s => s.id === shapeId) || GEOPOST_SHAPES[0];
+
+  const parsedContent = useMemo(() => {
+    try { return typeof post.content === 'string' ? JSON.parse(post.content) : (post.content || {}); } catch { return {}; }
+  }, [post.content]);
+  const postHtml = parsedContent.html || '';
+  const postIsAnon = !post.user_id;
+  const username = postIsAnon ? '🎭 Anonymous' : (post.username || 'Orbiter');
+
+  const popupSize = Math.min(520, window.innerWidth * 0.85);
+  const ins = shapeDef.inscribed || { x: 0.1, y: 0.1, w: 0.8, h: 0.8 };
+  const ix = ins.x * popupSize;
+  const iy = ins.y * popupSize;
+  const iw = ins.w * popupSize;
+  const ih = ins.h * popupSize;
+  const svgPoints = clipPathToSvgPoints(shapeDef.clip, popupSize);
+  const isCircle = shapeDef.clip === 'circle';
+  const isEllipse = shapeDef.clip === 'ellipse';
+  const isPillH = shapeDef.clip === 'pill-h';
+  const isPillV = shapeDef.clip === 'pill-v';
+  const pillRx = isPillH || isPillV ? popupSize / 2 : 0;
+
+  const reactions = postReactions || [];
+  const reactionMap = {};
+  reactions.forEach(r => { reactionMap[r.emoji_text] = (reactionMap[r.emoji_text] || 0) + 1; });
+  const topEmojis = Object.entries(reactionMap).sort((a,b) => b[1]-a[1]).slice(0, 6);
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    document.body.style.overflow = 'hidden';
+    return () => { window.removeEventListener('keydown', onKey); document.body.style.overflow = ''; };
+  }, [onClose]);
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[100010] flex items-center justify-center"
+      style={{ background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(6px)' }}
+      onClick={onClose}
+    >
+      <div style={{ position: 'relative', width: popupSize, height: popupSize }} onClick={e => e.stopPropagation()}>
+        <button
+          onMouseDown={e => e.preventDefault()}
+          onClick={onClose}
+          style={{ position: 'absolute', top: -16, right: -16, zIndex: 10, width: 32, height: 32, borderRadius: '50%', background: '#000', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 900, fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        >×</button>
+
+        <svg width={popupSize} height={popupSize} viewBox={`0 0 ${popupSize} ${popupSize}`} overflow="visible" style={{ display: 'block' }}>
+          {isCircle && <circle cx={popupSize/2} cy={popupSize/2} r={popupSize/2-3} fill={theme.fill} stroke={theme.outline} strokeWidth="4" />}
+          {isEllipse && <ellipse cx={popupSize/2} cy={popupSize/2} rx={popupSize/2-3} ry={popupSize*0.48} fill={theme.fill} stroke={theme.outline} strokeWidth="4" />}
+          {(isPillH || isPillV) && <rect x="3" y="3" width={popupSize-6} height={popupSize-6} rx={pillRx} ry={pillRx} fill={theme.fill} stroke={theme.outline} strokeWidth="4" />}
+          {!isCircle && !isEllipse && !isPillH && !isPillV && svgPoints && <polygon points={svgPoints} fill={theme.fill} stroke={theme.outline} strokeWidth="4" strokeLinejoin="round" />}
+          {!isCircle && !isEllipse && !isPillH && !isPillV && !svgPoints && <rect x="3" y="3" width={popupSize-6} height={popupSize-6} rx="12" fill={theme.fill} stroke={theme.outline} strokeWidth="4" />}
+
+          <foreignObject x={ix} y={iy} width={iw} height={ih}>
+            <div xmlns="http://www.w3.org/1999/xhtml" style={{ width: '100%', height: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column', gap: 6, padding: 8, boxSizing: 'border-box', alignItems: 'center' }}>
+              <div style={{ color: theme.text, fontWeight: 900, fontSize: 14, textAlign: 'center' }}>{username}</div>
+              {postHtml && (
+                <div style={{ color: theme.text, fontSize: 11, lineHeight: 1.45, overflow: 'hidden', textAlign: 'center', width: '100%', maxHeight: ih * 0.45, display: '-webkit-box', WebkitLineClamp: 6, WebkitBoxOrient: 'vertical' }}
+                  dangerouslySetInnerHTML={{ __html: postHtml }} />
+              )}
+              {post.image_url && (
+                <img src={post.image_url} alt="" style={{ maxWidth: '70%', maxHeight: ih * 0.38, objectFit: 'cover', borderRadius: 6, flexShrink: 0 }} />
+              )}
+              {topEmojis.length > 0 && (
+                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', justifyContent: 'center' }}>
+                  {topEmojis.map(([emoji, count]) => (
+                    <span key={emoji} onClick={e => { e.stopPropagation(); onReact && onReact(post.id, emoji); }}
+                      style={{ fontSize: 13, background: 'rgba(0,0,0,0.1)', borderRadius: 10, padding: '2px 6px', cursor: 'pointer' }}>
+                      {emoji}{count > 1 ? count : ''}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          </foreignObject>
+        </svg>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+// ── ShapeModeView — matter-js upward-gravity physics drop ─────────────────────
+const SHAPE_PAGE_SIZE = 12;
+
+function ShapeModeView({ posts, postReactions, onReact, onSelectTag, accentColor, session }) {
   const containerRef = useRef(null);
+  const engineRef = useRef(null);
+  const runnerRef = useRef(null);
+  const bodiesRef = useRef([]);
+  const rafRef = useRef(null);
+  const [bodyStates, setBodyStates] = useState([]);
+  const [containerHeight, setContainerHeight] = useState(700);
+  const [visibleCount, setVisibleCount] = useState(SHAPE_PAGE_SIZE);
+  const [shapePopupPost, setShapePopupPost] = useState(null);
+  const [shapePopupId, setShapePopupId] = useState('square');
+  const hasMoreRef = useRef(false);
+
+  const visiblePosts = useMemo(() => posts.slice(0, visibleCount), [posts, visibleCount]);
+  hasMoreRef.current = visibleCount < posts.length;
 
   const postsWithShapes = useMemo(() => {
-    return posts.map((post, i) => {
-      const shapeId = post.tile_shape && post.tile_shape !== 'square'
+    return [...visiblePosts].reverse().map((post, i) => {
+      const shapeId = (post.tile_shape && GEOPOST_SHAPES.find(s => s.id === post.tile_shape))
         ? post.tile_shape
-        : GEOPOST_SHAPES[i % GEOPOST_SHAPES.length].id;
-      const size = post.shape_size === 'small' ? 0.7 : post.shape_size === 'large' ? 1.4 : post.shape_size === 'xlarge' ? 1.8 : 1.0;
+        : GEOPOST_SHAPES[(i + 3) % GEOPOST_SHAPES.length].id;
+      const sizeScale = post.shape_size === 'small' ? 0.7
+        : post.shape_size === 'large' ? 1.4
+        : post.shape_size === 'xlarge' ? 1.8
+        : 1.0;
+      const size = Math.round(270 * sizeScale * 1.5);
       return { post, shapeId, size };
     });
-  }, [posts]);
+  }, [visiblePosts]);
 
+  // Re-init physics only when post count changes (not on every containerHeight expansion)
+  const postCountRef = useRef(0);
   useEffect(() => {
-    if (!dropped) {
-      const t = setTimeout(() => setDropped(true), 100);
-      return () => clearTimeout(t);
-    }
-  }, [dropped]);
+    const containerEl = containerRef.current;
+    if (!containerEl) return;
 
-  useEffect(() => {
-    if (dropped) {
-      const t = setTimeout(() => setSettled(true), postsWithShapes.length * 80 + 1200);
-      return () => clearTimeout(t);
-    }
-  }, [dropped, postsWithShapes.length]);
+    const containerWidth = containerEl.offsetWidth || 900;
+    const CEIL_Y = 20;
+    const WALL_THICK = 40;
+
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    if (runnerRef.current) Matter.Runner.stop(runnerRef.current);
+    if (engineRef.current) Matter.Engine.clear(engineRef.current);
+    bodiesRef.current = [];
+
+    const engine = Matter.Engine.create({ gravity: { x: 0, y: -0.8 } });
+    engineRef.current = engine;
+
+    const ceiling = Matter.Bodies.rectangle(containerWidth / 2, CEIL_Y, containerWidth + WALL_THICK * 2, WALL_THICK, {
+      isStatic: true, label: 'ceiling', friction: 0.5, restitution: 0.1,
+    });
+    const leftWall = Matter.Bodies.rectangle(-WALL_THICK / 2, containerHeight / 2, WALL_THICK, containerHeight * 3, {
+      isStatic: true, label: 'wall',
+    });
+    const rightWall = Matter.Bodies.rectangle(containerWidth + WALL_THICK / 2, containerHeight / 2, WALL_THICK, containerHeight * 3, {
+      isStatic: true, label: 'wall',
+    });
+
+    Matter.Composite.add(engine.world, [ceiling, leftWall, rightWall]);
+
+    postsWithShapes.forEach(({ post, shapeId, size }, i) => {
+      const shapeDef = GEOPOST_SHAPES.find(s => s.id === shapeId) || GEOPOST_SHAPES[0];
+      const cols = Math.max(1, Math.floor((containerWidth - WALL_THICK * 2) / (size + 10)));
+      const spawnX = WALL_THICK + size / 2 + (i % cols) * (size + 10);
+      const spawnY = containerHeight + size + i * 20;
+
+      const body = buildMatterBody(shapeDef, spawnX, spawnY, size);
+      body._postId = post.id;
+      body._shapeId = shapeId;
+      body._size = size;
+
+      bodiesRef.current.push({ body, postId: post.id, shapeId, size });
+
+      setTimeout(() => {
+        if (!engineRef.current) return;
+        Matter.Composite.add(engine.world, body);
+        Matter.Body.setVelocity(body, {
+          x: (Math.random() - 0.5) * 3,
+          y: -(4 + Math.random() * 2),
+        });
+        Matter.Body.setAngularVelocity(body, (Math.random() - 0.5) * 0.1);
+      }, i * 150);
+    });
+
+    const runner = Matter.Runner.create();
+    Matter.Runner.run(runner, engine);
+    runnerRef.current = runner;
+
+    let expandedTo = containerHeight;
+    const tick = () => {
+      const states = bodiesRef.current
+        .filter(({ body }) => body && Matter.Composite.get(engine.world, body.id, 'body'))
+        .map(({ body, postId, size }) => ({
+          postId,
+          x: body.position.x,
+          y: body.position.y,
+          angle: body.angle,
+          size,
+        }));
+
+      setBodyStates([...states]);
+
+      if (states.length > 0) {
+        const maxBodyY = Math.max(...states.map(s => s.y + s.size / 2));
+        if (maxBodyY > expandedTo - 80) {
+          expandedTo += 350;
+          setContainerHeight(expandedTo);
+        }
+      }
+
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+
+    return () => {
+      cancelAnimationFrame(rafRef.current);
+      Matter.Runner.stop(runner);
+      Matter.Engine.clear(engine);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [postsWithShapes.length]);
+
+  const handleShapeClick = (postId) => {
+    const found = visiblePosts.find(p => p.id === postId);
+    if (!found) return;
+    const shapeEntry = postsWithShapes.find(e => e.post.id === postId);
+    setShapePopupId(shapeEntry?.shapeId || 'square');
+    setShapePopupPost(found);
+  };
 
   return (
-    <div ref={containerRef} className="relative w-full" style={{ minHeight: 600 }}>
-      {!settled && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 font-black text-sm opacity-60 animate-pulse">
-          Dropping shapes…
-        </div>
-      )}
-      <div className="flex flex-wrap gap-4 p-6 items-end justify-start" style={{ minHeight: 500 }}>
-        {postsWithShapes.map(({ post, shapeId, size }, i) => {
-          const delay = i * 80;
-          const finalRotation = ((i * 37) % 30) - 15;
+    <div style={{ width: '100%', position: 'relative' }}>
+      <div
+        ref={containerRef}
+        style={{
+          position: 'relative',
+          width: '100%',
+          height: containerHeight,
+          overflow: 'hidden',
+          background: 'transparent',
+        }}
+      >
+        {bodyStates.map(({ postId, x, y, angle, size }) => {
+          const entry = postsWithShapes.find(e => e.post.id === postId);
+          if (!entry) return null;
           return (
             <div
-              key={post.id}
+              key={postId}
               style={{
-                transform: dropped ? `rotate(${finalRotation}deg)` : `translateY(-120vh) rotate(${finalRotation * 3}deg)`,
-                transition: dropped
-                  ? `transform ${600 + (i % 4) * 100}ms cubic-bezier(0.34, 1.2, 0.64, 1) ${delay}ms`
-                  : 'none',
-                opacity: dropped ? 1 : 0,
+                position: 'absolute',
+                left: x - size / 2,
+                top: y - size / 2,
+                width: size,
+                height: size,
+                transform: `rotate(${angle}rad)`,
+                transformOrigin: 'center center',
+                willChange: 'transform',
+                pointerEvents: 'auto',
               }}
             >
               <ShapePostCard
-                post={post}
-                shapeId={shapeId}
-                shapeSize={size}
-                postReactions={postReactions[post.id]}
-                onReact={onReact}
-                onOpenPopup={onOpenPopup}
-                accentColor={accentColor}
-                session={session}
+                post={entry.post}
+                shapeId={entry.shapeId}
+                size={size}
+                onClick={() => handleShapeClick(postId)}
               />
             </div>
           );
         })}
+
+        {bodyStates.length === 0 && (
+          <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', fontWeight: 900, opacity: 0.4, fontSize: 14 }}>
+            ▲ Shapes rising…
+          </div>
+        )}
       </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, padding: '16px 0' }}>
+        <div style={{ fontSize: 11, fontWeight: 900, opacity: 0.5 }}>
+          {Math.min(visibleCount, posts.length)} of {posts.length} shapes
+        </div>
+        {hasMoreRef.current && (
+          <button
+            onMouseDown={e => e.preventDefault()}
+            onClick={() => setVisibleCount(c => c + SHAPE_PAGE_SIZE)}
+            style={{
+              padding: '8px 24px',
+              borderRadius: 999,
+              border: '3px solid #000',
+              background: accentColor,
+              color: '#fff',
+              fontWeight: 900,
+              fontSize: 13,
+              cursor: 'pointer',
+              boxShadow: '3px 3px 0px black',
+            }}
+          >
+            Drop more shapes ▲
+          </button>
+        )}
+      </div>
+
+      {shapePopupPost && (
+        <ShapeDetailPopup
+          post={shapePopupPost}
+          shapeId={shapePopupId}
+          postReactions={postReactions[shapePopupPost.id]}
+          onReact={onReact}
+          onSelectTag={onSelectTag}
+          accentColor={accentColor}
+          onClose={() => setShapePopupPost(null)}
+        />
+      )}
     </div>
   );
 }
@@ -3654,7 +4012,7 @@ export default function GeoPostView({ session }) {
               posts={filteredPosts}
               postReactions={reactions}
               onReact={handleReact}
-              onOpenPopup={(p) => setOpenPostPopup(p)}
+              onSelectTag={handleSelectTag}
               accentColor={accentColor}
               session={session}
             />
