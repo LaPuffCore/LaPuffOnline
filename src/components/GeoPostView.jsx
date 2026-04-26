@@ -2664,9 +2664,9 @@ export default function GeoPostView({ session }) {
         aria-label="Peek at mosaic"
       >👁</button>
       {/* Separator — inside mosaic wrapper, no px padding → spans full screen width */}
-      <div className="w-full flex items-center" style={{ position: 'relative', zIndex: 1, minHeight: 22, marginTop: 12 }}>
-        {/* Back-layer: full-width half-height ribbon extending edge-to-edge */}
-        <div className="absolute inset-0 border-y-[3px] border-black bg-white shadow-[4px_4px_0px_black]" style={{ zIndex: 0 }} />
+      <div className="w-full flex items-center" style={{ position: 'relative', zIndex: 1, marginTop: 12 }}>
+        {/* Back-layer: thin ribbon ~1/3 height of GEO-FEED pill, vertically centered */}
+        <div className="absolute left-0 right-0 border-y-[3px] border-black bg-white shadow-[4px_4px_0px_black]" style={{ top: '50%', transform: 'translateY(-50%)', height: 11, zIndex: 0 }} />
         <div className="flex-1 border-t-2 border-black" style={{ position: 'relative', zIndex: 1 }} />
         {/* Front-layer: GEO-FEED pill, centered on ribbon */}
         <div className="border-[3px] border-black rounded-xl px-3 py-0.5 bg-white shadow-[3px_3px_0px_black]" style={{ position: 'relative', zIndex: 2 }}>
@@ -2682,11 +2682,13 @@ export default function GeoPostView({ session }) {
           className="hidden md:flex items-center gap-2 flex-wrap px-3 py-2 bg-white"
           style={{
             border: '5px dotted #000',
+            borderRadius: 12,
             position: filterPanelPinned ? 'sticky' : 'static',
-            top: filterPanelPinned ? 0 : undefined,
+            top: filterPanelPinned ? 4 : undefined,
             zIndex: filterPanelPinned ? 50 : undefined,
-            borderRadius: filterPanelPinned ? 0 : 12,
-            marginBottom: filterPanelPinned ? 0 : 8,
+            marginLeft: filterPanelPinned ? 16 : undefined,
+            marginRight: filterPanelPinned ? 16 : undefined,
+            marginBottom: filterPanelPinned ? 4 : 12,
           }}
         >
           <input
@@ -2758,7 +2760,7 @@ export default function GeoPostView({ session }) {
       )}
 
       <div className="w-full px-3 md:px-4">
-        <div ref={desktopGridRef} className="hidden md:grid gap-3"
+        <div ref={desktopGridRef} className="hidden md:grid gap-3 mt-3"
           style={{
             '--image-scale': Math.max(0.5, Number(feedImageScale || 1)),
             gridAutoFlow: 'dense',
