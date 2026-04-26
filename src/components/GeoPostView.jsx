@@ -2405,7 +2405,7 @@ export default function GeoPostView({ session }) {
       scrollEl.removeEventListener('scroll', onScroll);
       window.removeEventListener('resize', onResize);
     };
-  }, [desktopUnitHeight, visiblePosts.length, canShowMore, canShowLess, applyPanelRow]);
+  }, [desktopUnitHeight, visiblePosts.length, canShowMore, canShowLess, applyPanelRow, feedLayout, filterPanelMode]);
 
   // FAB visibility: fade in as create-post area scrolls away
   useEffect(() => {
@@ -2670,7 +2670,7 @@ export default function GeoPostView({ session }) {
         <div className="flex items-center rounded-lg border-2 border-black bg-white shadow-[2px_2px_0px_black] overflow-hidden select-none">
           <button
             onMouseDown={e => e.preventDefault()}
-            onClick={() => setFeedLayout('tiles')}
+            onClick={() => { setFeedLayout('tiles'); setDesktopPanelRow(1); }}
             title="Tile / bento view"
             className="flex items-center justify-center w-7 h-7 transition-colors"
             style={{ background: feedLayout === 'tiles' ? accentColor : '#fff', color: feedLayout === 'tiles' ? '#fff' : '#000' }}
@@ -2702,25 +2702,25 @@ export default function GeoPostView({ session }) {
           aria-label="Peek at mosaic"
         >👁</button>
       </div>
-      {/* Separator — inside mosaic wrapper, no px padding → spans full screen width */}
-      <div className="w-full flex items-center" style={{ position: 'relative', zIndex: 1, marginTop: 12 }}>
-        {/* Back-layer: thin ribbon ~1/3 height of GEO-FEED pill, vertically centered */}
-        <div className="absolute left-0 right-0 border-y-[3px] border-black bg-white shadow-[4px_4px_0px_black]" style={{ top: '50%', transform: 'translateY(-50%)', height: 11, zIndex: 0 }} />
-        <div className="flex-1 border-t-2 border-black" style={{ position: 'relative', zIndex: 1 }} />
-        {/* Front-layer: GEO-FEED pill, centered on ribbon */}
-        <div className="border-[3px] border-black rounded-xl px-3 py-0.5 bg-white shadow-[3px_3px_0px_black]" style={{ position: 'relative', zIndex: 2 }}>
-          <span className="font-black text-[1.5rem] leading-none tracking-tight text-black whitespace-nowrap">GEO-FEED</span>
-        </div>
-        <div className="flex-1 border-t-2 border-black" style={{ position: 'relative', zIndex: 1 }} />
-      </div>
       </div>{/* end mosaic section wrapper */}
+      {/* GEO-FEED Separator — outside mosaic so ribbon top = mosaic bottom exactly */}
+      <div className="w-full flex items-center" style={{ position: 'relative', zIndex: 1, minHeight: 52 }}>
+        {/* Ribbon/line button: anchored at top:0 (= mosaic bottom), NO drop shadow, slightly taller */}
+        <div className="absolute left-0 right-0 border-y-[3px] border-black bg-white" style={{ top: 0, height: 16, zIndex: 0 }} />
+        <div className="flex-1" style={{ position: 'relative', zIndex: 1 }} />
+        {/* GEO-FEED pill: slightly larger, centered vertically in separator */}
+        <div className="border-[3px] border-black rounded-xl px-4 py-1.5 bg-white shadow-[3px_3px_0px_black]" style={{ position: 'relative', zIndex: 2 }}>
+          <span className="font-black text-[1.75rem] leading-none tracking-tight text-black whitespace-nowrap">GEO-FEED</span>
+        </div>
+        <div className="flex-1" style={{ position: 'relative', zIndex: 1 }} />
+      </div>
 
       {/* Horizontal filter top bar — only in tile mode when filterPanelMode === 'topbar' */}
       {filterPanelMode === 'topbar' && feedLayout === 'tiles' && (
         <div
           className="hidden md:flex items-center gap-2 flex-wrap px-3 py-2 bg-white"
           style={{
-            border: '5px dotted #000',
+            border: '5px solid #000',
             borderRadius: 12,
             position: filterPanelPinned ? 'sticky' : 'static',
             top: filterPanelPinned ? 4 : undefined,
@@ -2819,7 +2819,9 @@ export default function GeoPostView({ session }) {
           <aside ref={filterPanelInnerRef} style={{
             gridColumn: '1 / span 2',
             gridRow: filterPanelMode === 'topbar' ? '1 / span 2' : `${desktopPanelRow} / span 2`,
-            position: 'relative',
+            // In topbar mode: absolutely positioned (leaves grid flow → tiles fill cols 1-2, no blank gap)
+            // In panel mode: relative (participates in grid flow as leftmost tile)
+            position: filterPanelMode === 'topbar' ? 'absolute' : 'relative',
             zIndex: 20,
             willChange: 'transform, filter, opacity',
             visibility: filterPanelMode === 'topbar' ? 'hidden' : 'visible',
