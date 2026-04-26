@@ -277,7 +277,21 @@ export default function Home({ events = [], eventsLoading = false }) {
   }
 
   function handlePrevTrack() {
-    if (scWidgetRef.current && scReadyRef.current) scWidgetRef.current.prev();
+    if (!scWidgetRef.current || !scReadyRef.current) return;
+    scWidgetRef.current.getSounds(sounds => {
+      if (!sounds || sounds.length === 0) { scWidgetRef.current.prev(); return; }
+      if (sounds.length === 1) { scWidgetRef.current.skip(0); return; }
+      scWidgetRef.current.getCurrentSoundIndex(currentIdx => {
+        let prevIdx;
+        let attempts = 0;
+        do {
+          prevIdx = Math.floor(Math.random() * sounds.length);
+          attempts++;
+        } while (prevIdx === currentIdx && attempts < 20);
+        scWidgetRef.current.setShuffle(true);
+        scWidgetRef.current.skip(prevIdx);
+      });
+    });
   }
 
   function handleNextTrack() {
@@ -293,6 +307,7 @@ export default function Home({ events = [], eventsLoading = false }) {
           nextIdx = Math.floor(Math.random() * sounds.length);
           attempts++;
         } while (nextIdx === currentIdx && attempts < 20);
+        scWidgetRef.current.setShuffle(true);
         scWidgetRef.current.skip(nextIdx);
       });
     });
