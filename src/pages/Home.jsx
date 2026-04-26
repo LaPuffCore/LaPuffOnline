@@ -185,38 +185,26 @@ export default function Home({ events = [], eventsLoading = false }) {
   const CLOUT_URL = 'https://soundcloud.com/justin-lapuff/sets/clout-culling-games';
   const DIMES_URL = 'https://soundcloud.com/justin-lapuff/sets/dimes-square';
 
-  /**
-   * Switch to a playlist. Keeps the same iframe — uses widget.load() with
-   * auto_play:true so the callback fires reliably once the widget is ready.
-   * First call: widget must already exist (initialised in useEffect).
-   */
+  function _forceShuffleSkip(w) {
+    w.getSounds(sounds => {
+      if (sounds && sounds.length > 0) {
+        const idx = Math.floor(Math.random() * sounds.length);
+        w.skip(idx);
+        w.setShuffle(true);
+      }
+    });
+  }
+
   function _changePlaylist(url, modeKey) {
     const w = scWidgetRef.current;
     if (!w) return;
-    scReadyRef.current = false;
+    // Do NOT reset scReadyRef — the API bridge stays alive during load()
     loadedPlaylistRef.current = modeKey;
-    // auto_play:true — this call is within the user's click handler so
-    // the browser activation chain allows autoplay without a delay
     w.load(url, {
       auto_play: true,
-      hide_related: true,
-      show_comments: false,
-      show_user: false,
-      show_reposts: false,
-      show_teaser: false,
-      visual: false,
       callback: () => {
-        scReadyRef.current = true;
         w.setVolume(musicVolumeRef.current);
-        w.setShuffle(true);
-        // True shuffle: skip to random track once sounds are available
-        w.getSounds(sounds => {
-          if (sounds && sounds.length > 0) {
-            const idx = Math.floor(Math.random() * sounds.length);
-            w.skip(idx);
-            w.setShuffle(true); // re-arm after skip to persist for next/prev
-          }
-        });
+        _forceShuffleSkip(w);
       },
     });
   }
@@ -234,7 +222,6 @@ export default function Home({ events = [], eventsLoading = false }) {
         scReadyRef.current = true;
         widget.setVolume(musicVolumeRef.current);
         widget.setShuffle(true);
-        // Do NOT auto-play here; radio starts off by default
       });
       widget.bind(E.PLAY, () => {
         setIsMusicOn(true);
@@ -248,19 +235,11 @@ export default function Home({ events = [], eventsLoading = false }) {
         });
       });
       widget.bind(E.PAUSE,  () => setIsMusicOn(false));
-      // FINISH: re-arm shuffle then advance (bound once, never re-bound)
-      widget.bind(E.FINISH, () => {
-        const w = scWidgetRef.current;
-        if (!w) return;
-        w.setShuffle(true);
-        w.next();
-      });
+      // FINISH: advance to next (bound once, never re-bound to prevent doubling)
+      widget.bind(E.FINISH, () => { if (scWidgetRef.current) scWidgetRef.current.next(); });
     }
 
-    if (window.SC) {
-      initWidget();
-      return;
-    }
+    if (window.SC) { initWidget(); return; }
     const script = document.createElement('script');
     script.src = 'https://w.soundcloud.com/player/api.js';
     script.async = true;
@@ -283,9 +262,10 @@ export default function Home({ events = [], eventsLoading = false }) {
   function triggerCloutCullingGames() {
     setCurrentMode('clout');
     setIsMusicOn(true);
-    if (loadedPlaylistRef.current === 'clout' && scReadyRef.current && scWidgetRef.current) {
-      scWidgetRef.current.setShuffle(true);
-      scWidgetRef.current.play();
+    const w = scWidgetRef.current;
+    if (loadedPlaylistRef.current === 'clout' && w) {
+      w.play();
+      _forceShuffleSkip(w);
     } else {
       _changePlaylist(CLOUT_URL, 'clout');
     }
@@ -294,9 +274,10 @@ export default function Home({ events = [], eventsLoading = false }) {
   function triggerDimesRadio() {
     setCurrentMode('dimes');
     setIsMusicOn(true);
-    if (loadedPlaylistRef.current === 'dimes' && scReadyRef.current && scWidgetRef.current) {
-      scWidgetRef.current.setShuffle(true);
-      scWidgetRef.current.play();
+    const w = scWidgetRef.current;
+    if (loadedPlaylistRef.current === 'dimes' && w) {
+      w.play();
+      _forceShuffleSkip(w);
     } else {
       _changePlaylist(DIMES_URL, 'dimes');
     }
@@ -317,14 +298,13 @@ export default function Home({ events = [], eventsLoading = false }) {
   function handlePrevTrack() {
     const w = scWidgetRef.current;
     if (!w) return;
-    w.setShuffle(true);
+    w.prev();
     w.prev();
   }
 
   function handleNextTrack() {
     const w = scWidgetRef.current;
     if (!w) return;
-    w.setShuffle(true);
     w.next();
   }
 
