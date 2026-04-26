@@ -11,6 +11,29 @@ import Leaderboard from '../components/Leaderboard';
 import { getValidSession, signOut } from '../lib/supabaseAuth';
 import { useSiteTheme } from '../lib/theme';
 
+// Scrolls text only when it overflows its container
+function SmartMarquee({ text, className = '' }) {
+  const containerRef = useRef(null);
+  const textRef = useRef(null);
+  const [overflows, setOverflows] = useState(false);
+  useEffect(() => {
+    const container = containerRef.current;
+    const inner = textRef.current;
+    if (container && inner) {
+      setOverflows(inner.scrollWidth > container.clientWidth + 1);
+    }
+  }, [text]);
+  return (
+    <div ref={containerRef} className="overflow-hidden flex-1 min-w-0">
+      {overflows ? (
+        <span ref={textRef} className={`radio-marquee-inner ${className}`}>{text}</span>
+      ) : (
+        <span ref={textRef} className={className}>{text}</span>
+      )}
+    </div>
+  );
+}
+
 export default function Home({ events = [], eventsLoading = false }) {
   const { resolvedTheme } = useSiteTheme();
   const accentColor = resolvedTheme?.accentColor || '#7C3AED';
@@ -43,10 +66,11 @@ export default function Home({ events = [], eventsLoading = false }) {
   const scWidgetRef        = useRef(null);
   const scReadyRef         = useRef(false);
   const pendingPlayRef     = useRef(false);   // play queued before widget READY
-  const pendingSkipRef     = useRef(false);   // skip-first queued on radio start
-  const loadedPlaylistRef  = useRef('clout'); // which playlist is loaded in iframe
-  const musicVolumeRef     = useRef(80);      // stable ref for closure access
-  const mapAutoPlayedRef   = useRef(false);
+  const pendingSkipRef       = useRef(false);   // skip-first queued on radio start
+  const skipOnFirstPlayRef   = useRef(false);   // auto-next 100ms after first song plays
+  const loadedPlaylistRef    = useRef('clout'); // which playlist is loaded in iframe
+  const musicVolumeRef       = useRef(80);      // stable ref for closure access
+  const mapAutoPlayedRef     = useRef(false);
   const musicDesktopRef  = useRef(null);
   const musicMobileRef   = useRef(null);
 
@@ -197,6 +221,16 @@ export default function Home({ events = [], eventsLoading = false }) {
             });
           }
         });
+        // Auto-skip the first song of any new radio session for true shuffle
+        if (skipOnFirstPlayRef.current) {
+          skipOnFirstPlayRef.current = false;
+          setTimeout(() => {
+            if (scWidgetRef.current) {
+              scWidgetRef.current.setShuffle(true);
+              scWidgetRef.current.next();
+            }
+          }, 100);
+        }
       });
       widget.bind(window.SC.Widget.Events.PAUSE, () => { setIsMusicOn(false); });
       widget.bind(window.SC.Widget.Events.FINISH, () => { setIsMusicOn(false); });
@@ -240,6 +274,7 @@ export default function Home({ events = [], eventsLoading = false }) {
       pendingPlayRef.current = true;
       pendingSkipRef.current = true;
     }
+    skipOnFirstPlayRef.current = true;
   }
 
   function triggerDimesRadio() {
@@ -261,6 +296,7 @@ export default function Home({ events = [], eventsLoading = false }) {
       pendingPlayRef.current = true;
       pendingSkipRef.current = true;
     }
+    skipOnFirstPlayRef.current = true;
   }
 
   function stopMusic() {
@@ -358,10 +394,10 @@ export default function Home({ events = [], eventsLoading = false }) {
             <div className="relative hidden md:block" ref={musicDesktopRef}>
               <button
                 onClick={() => setShowMusicMenu(v => !v)}
-                className="w-9 h-9 md:w-10 md:h-10 flex items-center justify-center rounded-xl border-2 md:border-3 border-black bg-white shadow-[2px_2px_0px_black] md:shadow-[3px_3px_0px_black] transition-all hover:scale-105"
+                className={`w-9 h-9 md:w-10 md:h-10 flex items-center justify-center rounded-xl border-2 md:border-3 border-black bg-white shadow-[2px_2px_0px_black] md:shadow-[3px_3px_0px_black] transition-all hover:scale-105${isMusicOn ? ' radio-beat-btn' : ''}`}
                 title="Radio"
                 style={isMusicOn ? { borderColor: accentColor, boxShadow: `3px 3px 0px ${accentColor}`, color: accentColor } : {}}>
-                <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16" style={isMusicOn ? { filter: `drop-shadow(0 0 3px ${accentColor})` } : {}}>
+                <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16" className={isMusicOn ? 'radio-beat-icon' : ''} style={isMusicOn ? { filter: `drop-shadow(0 0 3px ${accentColor})` } : {}}>
                   <path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6z"/>
                 </svg>
               </button>
@@ -415,10 +451,8 @@ export default function Home({ events = [], eventsLoading = false }) {
                         {currentTrack.artwork && (
                           <img src={currentTrack.artwork} alt="" className="w-9 h-9 rounded-lg object-cover flex-shrink-0 border border-gray-200" />
                         )}
-                        <div className="flex-1 min-w-0 overflow-hidden">
-                          <div className="overflow-hidden">
-                            <span className="radio-marquee-inner font-black text-[10px] text-gray-800 leading-tight">{currentTrack.title}</span>
-                          </div>
+                        <div className="flex-1 min-w-0 overflow-hidden flex flex-col">
+                          <SmartMarquee text={currentTrack.title} className="font-black text-[10px] text-gray-800 leading-tight" />
                           <p className="font-bold text-[9px] text-gray-500 truncate leading-tight mt-0.5">{currentTrack.artist}</p>
                         </div>
                       </a>
@@ -526,10 +560,10 @@ export default function Home({ events = [], eventsLoading = false }) {
              <div className="relative" ref={musicMobileRef}>
                <button
                  onClick={() => setShowMusicMenu(v => !v)}
-                 className="w-9 h-9 flex items-center justify-center rounded-xl border-2 border-black bg-white shadow-[2px_2px_0px_black] transition-all flex-shrink-0"
+                 className={`w-9 h-9 flex items-center justify-center rounded-xl border-2 border-black bg-white shadow-[2px_2px_0px_black] transition-all flex-shrink-0${isMusicOn ? ' radio-beat-btn' : ''}`}
                  title="Radio"
                  style={isMusicOn ? { borderColor: accentColor, boxShadow: `2px 2px 0px ${accentColor}`, color: accentColor } : {}}>
-                 <svg viewBox="0 0 24 24" fill="currentColor" width="15" height="15" style={isMusicOn ? { filter: `drop-shadow(0 0 3px ${accentColor})` } : {}}>
+                 <svg viewBox="0 0 24 24" fill="currentColor" width="15" height="15" className={isMusicOn ? 'radio-beat-icon' : ''} style={isMusicOn ? { filter: `drop-shadow(0 0 3px ${accentColor})` } : {}}>
                    <path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6z"/>
                  </svg>
                </button>
@@ -585,10 +619,8 @@ export default function Home({ events = [], eventsLoading = false }) {
                          {currentTrack.artwork && (
                            <img src={currentTrack.artwork} alt="" className="w-9 h-9 rounded-lg object-cover flex-shrink-0 border border-gray-200" />
                          )}
-                         <div className="flex-1 min-w-0 overflow-hidden">
-                           <div className="overflow-hidden">
-                             <span className="radio-marquee-inner font-black text-[10px] text-gray-800 leading-tight">{currentTrack.title}</span>
-                           </div>
+                         <div className="flex-1 min-w-0 overflow-hidden flex flex-col">
+                           <SmartMarquee text={currentTrack.title} className="font-black text-[10px] text-gray-800 leading-tight" />
                            <p className="font-bold text-[9px] text-gray-500 truncate leading-tight mt-0.5">{currentTrack.artist}</p>
                          </div>
                        </a>
