@@ -16,13 +16,21 @@ function SmartMarquee({ text, className = '' }) {
   const containerRef = useRef(null);
   const textRef = useRef(null);
   const [overflows, setOverflows] = useState(false);
+
   useEffect(() => {
-    const container = containerRef.current;
-    const inner = textRef.current;
-    if (container && inner) {
-      setOverflows(inner.scrollWidth > container.clientWidth + 1);
-    }
+    const check = () => {
+      const container = containerRef.current;
+      const inner = textRef.current;
+      if (container && inner) setOverflows(inner.scrollWidth > container.clientWidth + 1);
+    };
+    check();
+    // Re-check after fonts/layout settle
+    const raf = requestAnimationFrame(check);
+    const ro = new ResizeObserver(check);
+    if (containerRef.current) ro.observe(containerRef.current);
+    return () => { cancelAnimationFrame(raf); ro.disconnect(); };
   }, [text]);
+
   return (
     <div ref={containerRef} className="overflow-hidden flex-1 min-w-0">
       {overflows ? (
@@ -187,8 +195,10 @@ export default function Home({ events = [], eventsLoading = false }) {
     if (!w) return;
     scReadyRef.current = false;
     loadedPlaylistRef.current = modeKey;
+    // Trigger play 200ms after load starts — user click counts as activation
+    setTimeout(() => { if (scWidgetRef.current) scWidgetRef.current.play(); }, 200);
     w.load(url, {
-      auto_play: true,
+      auto_play: false,
       hide_related: true,
       show_comments: false,
       show_user: false,
@@ -198,13 +208,13 @@ export default function Home({ events = [], eventsLoading = false }) {
       callback: () => {
         scReadyRef.current = true;
         w.setVolume(musicVolumeRef.current);
-        // True shuffle: skip to random track first, then enable shuffle for future nav
+        w.setShuffle(true);
+        // True shuffle: skip to random track once sounds are available
         w.getSounds(sounds => {
           if (sounds && sounds.length > 0) {
             const idx = Math.floor(Math.random() * sounds.length);
             w.skip(idx);
           }
-          w.setShuffle(true);
         });
       },
     });
@@ -299,11 +309,17 @@ export default function Home({ events = [], eventsLoading = false }) {
   }
 
   function handlePrevTrack() {
-    if (scWidgetRef.current) scWidgetRef.current.prev();
+    const w = scWidgetRef.current;
+    if (!w) return;
+    w.setShuffle(true);
+    w.prev();
   }
 
   function handleNextTrack() {
-    if (scWidgetRef.current) scWidgetRef.current.next();
+    const w = scWidgetRef.current;
+    if (!w) return;
+    w.setShuffle(true);
+    w.next();
   }
 
   function handleTogglePlayPause() {
