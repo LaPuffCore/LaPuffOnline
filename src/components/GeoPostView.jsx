@@ -523,8 +523,188 @@ const AlignLeftIcon   = () => <svg width="13" height="13" viewBox="0 0 16 16" fi
 const AlignCenterIcon = () => <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><rect x="1" y="2" width="14" height="2" rx="1"/><rect x="3" y="7" width="10" height="2" rx="1"/><rect x="2" y="12" width="12" height="2" rx="1"/></svg>;
 const AlignRightIcon  = () => <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><rect x="1" y="2" width="14" height="2" rx="1"/><rect x="5" y="7" width="10" height="2" rx="1"/><rect x="3" y="12" width="12" height="2" rx="1"/></svg>;
 
+// ── PostDetailPopup ───────────────────────────────────────────────────────────
+function PostDetailPopup({ post, postReactions, onReact, onOpenReactors, accentColor, onSelectTag, onClose, comments, onSubmitComment, session }) {
+  const { resolvedTheme } = useSiteTheme();
+  const bgColor = resolvedTheme?.pageBgColor || '#FAFAF8';
+  const surfaceBg = resolvedTheme?.surfaceBgColor || '#FFFFFF';
+  const bodyTextColor = resolvedTheme?.bodyTextColor || '#000000';
+
+  const [imgLoaded, setImgLoaded] = useState(false);
+  const [commentDraft, setCommentDraft] = useState('');
+  const [commentsExpanded, setCommentsExpanded] = useState(true);
+
+  const parsedContent = useMemo(() => {
+    try { return typeof post.content === 'string' ? JSON.parse(post.content) : (post.content || {}); } catch { return {}; }
+  }, [post.content]);
+  const postHtml = parsedContent.html || '';
+  const postTextColor = normalizeHexColor(parsedContent.textColor || '', bodyTextColor);
+  const postIsAnonymous = !post.user_id;
+  const statusStyle = post.is_participant
+    ? { background: '#00cc66', color: '#fff' }
+    : postIsAnonymous
+    ? { background: '#333', color: '#fff' }
+    : { background: '#ff4444', color: '#fff' };
+
+  const dateStr = post.created_at
+    ? new Date(post.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+    : '';
+  const timeStr = post.created_at
+    ? new Date(post.created_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+    : '';
+
+  const reactions = postReactions || [];
+  const reactionMap = {};
+  reactions.forEach(r => { reactionMap[r.emoji_text] = (reactionMap[r.emoji_text] || 0) + 1; });
+  const topEmojis = Object.entries(reactionMap).sort((a,b) => b[1]-a[1]);
+
+  const [imgRatio, setImgRatio] = useState(1);
+  const isNarrowImage = post.image_url && imgRatio < (9/16);
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.body.style.overflow = '';
+    };
+  }, [onClose]);
+
+  const locationLabel = (() => {
+    if (post.zip_code) return `📍 ${post.zip_code}${post.borough ? ' · ' + post.borough : ''}`;
+    if (post.borough) return `🏙 ${post.borough}`;
+    if (post.scope === 'nyc') return '🗽 NYC';
+    return '💻 Digital';
+  })();
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[100010] flex items-start justify-center"
+      style={{ overflowY: 'auto', background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)' }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div
+        className="relative my-8 mx-4 rounded-2xl border-3 border-black shadow-[8px_8px_0px_black] flex flex-col"
+        style={{ background: surfaceBg, width: '100%', maxWidth: 600, minWidth: 0 }}
+        onClick={e => e.stopPropagation()}
+      >
+        <button
+          onMouseDown={e => e.preventDefault()}
+          onClick={onClose}
+          className="absolute top-3 right-3 z-10 w-8 h-8 rounded-full bg-black text-white flex items-center justify-center font-black text-lg hover:scale-110 transition-transform"
+        >×</button>
+
+        {post.image_url && (
+          <div
+            className="relative w-full overflow-hidden rounded-t-2xl bg-black/5"
+            style={isNarrowImage
+              ? { aspectRatio: '9/16', maxHeight: 480 }
+              : { maxHeight: 520 }
+            }
+          >
+            <img
+              src={post.image_url}
+              alt="post"
+              className={`w-full object-contain transition-opacity duration-200 ${imgLoaded ? 'opacity-100' : 'opacity-0'}`}
+              style={{ display: 'block' }}
+              onLoad={(e) => {
+                try { setImgRatio(e.target.naturalWidth / e.target.naturalHeight); } catch {}
+                setImgLoaded(true);
+              }}
+            />
+            {!imgLoaded && <div className="absolute inset-0 animate-pulse bg-black/5" />}
+          </div>
+        )}
+
+        <div className="p-4 flex flex-col gap-3">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-black text-sm" style={{ color: bodyTextColor }}>
+              {postIsAnonymous ? '🎭 Anonymous' : post.username || 'Orbiter'}
+            </span>
+            <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full" style={statusStyle}>
+              ● {post.is_participant ? 'PARTICIPANT' : postIsAnonymous ? 'ANON' : 'ORBITER'}
+            </span>
+            <span className="text-xs ml-auto opacity-60" style={{ color: bodyTextColor }}>{dateStr} · {timeStr}</span>
+          </div>
+
+          <div
+            className="break-words [&>*]:m-0 [&>*]:p-0 text-sm"
+            style={{ color: postTextColor, lineHeight: 1.6, wordBreak: 'break-word' }}
+            dangerouslySetInnerHTML={{ __html: postHtml }}
+          />
+
+          <button
+            onMouseDown={e => e.preventDefault()}
+            onClick={() => { onSelectTag && onSelectTag({ scope: post.scope, borough: post.borough, zip_code: post.zip_code }); onClose(); }}
+            className="self-start px-2 py-0.5 rounded-full text-[10px] font-black border border-black bg-gray-100 hover:bg-gray-200"
+          >
+            {locationLabel}
+          </button>
+
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {topEmojis.map(([emoji, count]) => (
+              <button key={emoji} onMouseDown={e => e.preventDefault()} onClick={() => onReact(post.id, emoji)}
+                className="flex items-center gap-0.5 px-2 py-0.5 rounded-full border-2 border-black text-sm font-black hover:scale-105 transition-transform bg-gray-50">
+                {emoji}<span className="text-xs">{count}</span>
+              </button>
+            ))}
+            {topEmojis.length > 0 && (
+              <button onMouseDown={e => e.preventDefault()} onClick={() => onOpenReactors(post.id)}
+                className="px-2 py-0.5 rounded-full border-2 border-black text-[10px] font-black bg-gray-50 hover:bg-gray-100">…</button>
+            )}
+          </div>
+
+          <div className="border-t-2 border-black pt-3">
+            <button
+              onMouseDown={e => e.preventDefault()}
+              onClick={() => setCommentsExpanded(v => !v)}
+              className="text-xs font-black mb-2 hover:underline"
+              style={{ color: bodyTextColor }}
+            >
+              💬 Comments {commentsExpanded ? '▲' : '▼'}
+            </button>
+            {commentsExpanded && (
+              <div className="flex flex-col gap-2">
+                {(comments || []).map(c => (
+                  <div key={c.id} className="bg-gray-50 rounded-xl p-2 border border-gray-200">
+                    <div className="flex items-center gap-1 mb-1">
+                      <span className="text-[10px] font-black">{c.username || 'Orbiter'}</span>
+                      <span className="text-[9px] opacity-50 ml-auto">{c.created_at ? new Date(c.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric'}) : ''}</span>
+                    </div>
+                    <div className="text-xs" style={{ color: bodyTextColor }}>{c.text || c.content}</div>
+                  </div>
+                ))}
+                {(comments || []).length === 0 && (
+                  <p className="text-xs opacity-50 text-center py-2">No comments yet</p>
+                )}
+                <div className="flex gap-2 mt-1">
+                  <input
+                    value={commentDraft}
+                    onChange={e => setCommentDraft(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter' && commentDraft.trim()) { onSubmitComment(post.id, commentDraft.trim()); setCommentDraft(''); } }}
+                    placeholder="Add a comment..."
+                    className="flex-1 px-3 py-1.5 border-2 border-black rounded-lg text-xs font-black"
+                  />
+                  <button
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={() => { if (commentDraft.trim()) { onSubmitComment(post.id, commentDraft.trim()); setCommentDraft(''); } }}
+                    className="px-3 py-1.5 border-2 border-black rounded-lg text-xs font-black"
+                    style={{ background: accentColor, color: '#fff' }}
+                  >Post</button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 // ── PostCard ──────────────────────────────────────────────────────────────────
-function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, onSelectTag, zipHeatMap, boroughHeatMap, textScale = 1, imageScale = 1, imagePriority = false, isDesktopMasonry = false, gridUnitHeight = 0, commentCount = 0, commentsOpen = false, onToggleComments, commentsChildren }) {
+function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, onSelectTag, zipHeatMap, boroughHeatMap, textScale = 1, imageScale = 1, imagePriority = false, isDesktopMasonry = false, gridUnitHeight = 0, commentCount = 0, commentsOpen = false, onToggleComments, commentsChildren, onOpenPopup }) {
   const { resolvedTheme } = useSiteTheme();
   const theme = getPostVisualTheme(post, resolvedTheme);
   const date = new Date(post.created_at);
@@ -581,14 +761,48 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
   const isTallTile = hasImage && shape === 'portrait';
   const isLongTile = hasImage && shape === 'landscape';
   const columnSpan = isLongTile ? 4 : 2;
-  // Grid is bisected: each visual row = 2 grid half-rows.
-  // square/long = 2 half-rows (1 visual row), tall = 4 half-rows (2 visual rows), comments add 2 half-rows.
-  const rowSpan = (isTallTile ? 4 : 2) + (commentsOpen && isDesktopMasonry ? 2 : 0);
-  const maxTextLines = isTallTile ? 9 : hasImage ? 3 : 9;
+
+  // Advanced gridding with bisected half-rows
+  const plainTextLength = postHtml.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim().length;
+  const CHARS_PER_STD_LINE_2COL = 35;
+  const CHARS_PER_STD_LINE_4COL = 70;
+  const estLinesAt2col = Math.ceil(plainTextLength / CHARS_PER_STD_LINE_2COL);
+  const estLinesAt4col = Math.ceil(plainTextLength / CHARS_PER_STD_LINE_4COL);
+
+  let finalColSpan = columnSpan;
+  let finalRowSpan = isTallTile ? 4 : 2;
+
+  if (!hasImage) {
+    if (estLinesAt2col <= 5) {
+      finalRowSpan = 1;
+    } else if (estLinesAt2col > 20) {
+      finalColSpan = 4;
+      finalRowSpan = 2;
+    } else {
+      finalRowSpan = 2;
+    }
+  } else if (isTallTile) {
+    finalRowSpan = 4;
+  } else if (isLongTile) {
+    if (estLinesAt4col > 3) {
+      finalRowSpan = 6;
+    } else {
+      finalRowSpan = 2;
+    }
+  } else {
+    if (estLinesAt2col > 3) {
+      finalRowSpan = 6;
+    } else {
+      finalRowSpan = 2;
+    }
+  }
+
+  const rowSpan = finalRowSpan + (commentsOpen && isDesktopMasonry ? 2 : 0);
+  const maxTextLines = isTallTile ? 9 : (finalRowSpan >= 6) ? 6 : hasImage ? 3 : (finalRowSpan === 1 ? 5 : 9);
   // Fixed pixel budget: 16px (browser normal font) × 1.5 line-height × maxTextLines × slider scale
   const maxBudgetPx = Math.floor(16 * scale * textLineHeight) * maxTextLines;
   const tileGridStyle = {
-    gridColumn: `span ${columnSpan}`,
+    gridColumn: `span ${finalColSpan}`,
     gridRow: `span ${rowSpan}`,
   };
 
@@ -734,7 +948,9 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
             maxHeight: `${maxBudgetPx}px`,
             wordBreak: 'break-word',
             flexShrink: 0,
+            cursor: onOpenPopup ? 'pointer' : 'default',
           }}
+          onClick={() => onOpenPopup && onOpenPopup(post)}
           dangerouslySetInnerHTML={{ __html: postHtml }}
         />
 
@@ -1198,6 +1414,7 @@ export default function GeoPostView({ session }) {
   const [commentReactionsByComment, setCommentReactionsByComment] = useState({});
   const [openCommentsByPost, setOpenCommentsByPost] = useState({});
   const [commentReactorsModal, setCommentReactorsModal] = useState(null);
+  const [openPostPopup, setOpenPostPopup] = useState(null);
   const [currentProfile, setCurrentProfile] = useState(null);
   const [desktopPanelRow, setDesktopPanelRow] = useState(1);
   const [desktopUnitHeight, setDesktopUnitHeight] = useState(420);
@@ -1220,6 +1437,11 @@ export default function GeoPostView({ session }) {
   const desktopFilterRef = useRef(null);
   const filterPanelInnerRef = useRef(null);
   const panelRowRef = useRef(1);
+  const tileAnimatingRef = useRef(false);
+  const lastAppliedRowRef = useRef(1);
+  const bottomLockRef = useRef(false);
+  const canShowMoreRef = useRef(false);
+  const canShowLessRef = useRef(false);
   const rowStepRef = useRef(432);
   const scrollSettleTimerRef = useRef(null);
   const scaleButtonRef = useRef(null);
@@ -1249,6 +1471,19 @@ export default function GeoPostView({ session }) {
   const [fmtSize,      setFmtSize]      = useState(3);
   const [activeCoolFont, setActiveCoolFont] = useState(null);
   const [openToolbar,  setOpenToolbar]  = useState(null);
+  const [miniOpenToolbar, setMiniOpenToolbar] = useState(null);
+  const [miniPostFill, setMiniPostFill] = useState('');
+  const [miniPostOutline, setMiniPostOutline] = useState('');
+  const [miniPostShadow, setMiniPostShadow] = useState('');
+  const [miniTextColor, setMiniTextColor] = useState('#000000');
+  const [miniActiveCoolFont, setMiniActiveCoolFont] = useState(null);
+  const miniTxtColBtnRef = useRef(null);
+  const miniFillBtnRef = useRef(null);
+  const miniOutlineBtnRef = useRef(null);
+  const miniShadowBtnRef = useRef(null);
+  const miniEmojiBtnRef = useRef(null);
+  const miniListBtnRef = useRef(null);
+  const miniCoolBtnRef = useRef(null);
 
   // toolbar button refs (for PortalPopup positioning)
   const listBtnRef     = useRef(null);
@@ -1391,6 +1626,23 @@ export default function GeoPostView({ session }) {
     return () => { cancelled = true; };
   }, [session]);
 
+  // Restore main editor draft on mount
+  useEffect(() => {
+    const saved = localStorage.getItem('lapuff_createpost_draft');
+    if (saved && editorRef.current && !editorRef.current.innerHTML.trim()) {
+      editorRef.current.innerHTML = saved;
+    }
+  }, []);
+
+  // Restore quickpost draft when popup opens
+  useEffect(() => {
+    if (!quickPostOpen || !miniEditorRef.current) return;
+    const saved = localStorage.getItem('lapuff_quickpost_draft');
+    if (saved && !miniEditorRef.current.innerHTML.trim()) {
+      miniEditorRef.current.innerHTML = saved;
+    }
+  }, [quickPostOpen]);
+
   // ── selectionchange: B/I/U/size only (alignment managed in state) ─────────────
   useEffect(() => {
     const update = () => {
@@ -1461,6 +1713,9 @@ export default function GeoPostView({ session }) {
   };
   const focusEditor = () => editorRef.current?.focus();
   const execCmd = (cmd, val = null) => { focusEditor(); document.execCommand(cmd, false, val); };
+  const miniExecCmd = (cmd, val = null) => { miniEditorRef.current?.focus(); document.execCommand(cmd, false, val); };
+  const closeMiniToolbar = useCallback(() => setMiniOpenToolbar(null), []);
+  const openMiniTb = (name) => { setMiniOpenToolbar(prev => prev === name ? null : name); };
   const closeToolbar = useCallback(() => setOpenToolbar(null), []);
 
   const openTb = (name) => {
@@ -1597,6 +1852,7 @@ export default function GeoPostView({ session }) {
         user_id: session?.user?.id || null,
       }, session);
       if (editorRef.current) editorRef.current.innerHTML = '';
+      localStorage.removeItem('lapuff_createpost_draft');
       setImageFile(null); setImagePreview(null); setShowCheckin(false);
       await loadFeed();
     } catch (err) { setSubmitError(err.message || 'Failed to post.'); }
@@ -1851,6 +2107,8 @@ export default function GeoPostView({ session }) {
   const visiblePosts = filteredPosts.slice(0, visibleCount);
   const canShowMore  = visibleCount < filteredPosts.length;
   const canShowLess  = visibleCount > PAGE_SIZE;
+  canShowMoreRef.current = canShowMore;
+  canShowLessRef.current = canShowLess;
 
   useEffect(() => {
     const el = desktopFilterRef.current;
@@ -1916,6 +2174,18 @@ export default function GeoPostView({ session }) {
       el.style.filter = 'blur(0px)';
       el.style.opacity = '1';
     }));
+
+    // Animate tiles during panel movement
+    if (!tileAnimatingRef.current) {
+      tileAnimatingRef.current = true;
+      if (desktopGridRef.current) {
+        desktopGridRef.current.classList.add('geopost-tiles-animating');
+      }
+      setTimeout(() => {
+        tileAnimatingRef.current = false;
+        desktopGridRef.current?.classList.remove('geopost-tiles-animating');
+      }, 1200);
+    }
   }, []);
 
   useEffect(() => {
@@ -1934,27 +2204,57 @@ export default function GeoPostView({ session }) {
     const computeTargetRow = () => {
       if (typeof window === 'undefined' || window.innerWidth < 768) return 1;
       if (!desktopGridRef.current) return panelRowRef.current;
-      const scrollTop = scrollEl === window ? window.scrollY : scrollEl.scrollTop;
-      // Bisected grid: half-row = (desktopUnitHeight - 12) / 2 + 12 = desktopUnitHeight/2 + 6 px.
-      // Two half-rows (one full visual row) = desktopUnitHeight + 12 px — same as pre-bisection.
+
+      const scrollEl2 = scrollEl;
+      const scrollTop = scrollEl2 === window ? window.scrollY : scrollEl2.scrollTop;
+      const containerH = scrollEl2 === window ? window.innerHeight : scrollEl2.clientHeight;
       const halfRowPx = Math.max(1, (desktopUnitHeight - 12) / 2 + 12);
-      const fullVisualRowPx = halfRowPx * 2; // = desktopUnitHeight + 12
+      const fullVisualRowPx = halfRowPx * 2;
       rowStepRef.current = halfRowPx;
-      const relativeScroll = Math.max(0, scrollTop - gridOffsetCacheRef.current);
-      // Advance half-a-visual-row early; panel row always odd (aligned to visual row boundaries)
-      const visualRowIdx = Math.floor((relativeScroll + fullVisualRowPx * 0.5) / fullVisualRowPx);
-      const targetRow = Math.max(1, 1 + visualRowIdx * 2);
-      // Clamp to last valid odd row
+
+      const TOPBAR_H = 72;
+      const containerClientTop = scrollEl2 === window ? 0 : scrollEl2.getBoundingClientRect().top;
+
+      const visibleScrollTopInGrid = Math.max(0, scrollTop - gridOffsetCacheRef.current);
+
+      let visualRowIdx = Math.floor((visibleScrollTopInGrid + fullVisualRowPx * 0.5) / fullVisualRowPx);
+      let targetRow = Math.max(1, 1 + visualRowIdx * 2);
+
+      const getVisualPanelTop = (row) => {
+        return gridOffsetCacheRef.current + (row - 1) * halfRowPx - scrollTop + containerClientTop;
+      };
+
+      for (let safety = 0; safety < 10; safety++) {
+        const panelTop = getVisualPanelTop(targetRow);
+        if (panelTop >= TOPBAR_H) break;
+        targetRow = Math.max(1, targetRow + 2);
+      }
+
       const maxHalfRow = Math.max(1, Math.floor(desktopGridRef.current.scrollHeight / halfRowPx));
-      const maxOddRow = maxHalfRow % 2 === 1 ? maxHalfRow : Math.max(1, maxHalfRow - 1);
+      const maxOddRow = maxHalfRow % 2 === 0 ? maxHalfRow - 1 : maxHalfRow;
+
+      if (canShowMoreRef.current || canShowLessRef.current) {
+        const showMoreEl = desktopGridRef.current.querySelector('[data-show-more-bar]');
+        if (showMoreEl) {
+          const smRect = showMoreEl.getBoundingClientRect();
+          const viewportBottom = containerClientTop + containerH;
+          if (smRect.top < viewportBottom && smRect.bottom > containerClientTop) {
+            return Math.min(maxOddRow, maxOddRow);
+          }
+        }
+      }
+
       return Math.min(maxOddRow, targetRow);
     };
 
-    // Debounced: only fire 500ms after scrolling fully stops — no jitter, no chasing fast scroll
     const onScroll = () => {
       if (scrollSettleTimerRef.current) clearTimeout(scrollSettleTimerRef.current);
       scrollSettleTimerRef.current = setTimeout(() => {
-        applyPanelRow(computeTargetRow());
+        const target = computeTargetRow();
+        if (target !== lastAppliedRowRef.current) {
+          lastAppliedRowRef.current = target;
+          applyPanelRow(target);
+        }
       }, 500);
     };
 
@@ -1966,6 +2266,7 @@ export default function GeoPostView({ session }) {
 
     // Place panel immediately on mount/dep-change without animation
     const initialRow = computeTargetRow();
+    lastAppliedRowRef.current = initialRow;
     panelRowRef.current = initialRow;
     setDesktopPanelRow(initialRow);
     if (filterPanelInnerRef.current) {
@@ -2060,6 +2361,7 @@ export default function GeoPostView({ session }) {
         commentCount={commentCount}
         commentsOpen={!!openCommentsByPost[post.id]}
         onToggleComments={toggleComments}
+        onOpenPopup={(p) => setOpenPostPopup(p)}
         commentsChildren={
           <CommentSection
             post={post}
@@ -2079,6 +2381,13 @@ export default function GeoPostView({ session }) {
 
   return (
     <div className="w-full" ref={topAnchorRef}>
+      <style>{`
+        .geopost-tiles-animating > *:not(aside) {
+          transition: transform 1000ms cubic-bezier(0.16, 1, 0.3, 1), filter 800ms ease-out !important;
+          filter: blur(1.5px);
+        }
+        .geopost-tiles-animating > *:not(aside):hover { filter: none; }
+      `}</style>
       <div className="w-full max-w-7xl mx-auto px-3 pt-3">
         <div ref={createPostAreaRef} className="rounded-2xl border-3 border-black shadow-[4px_4px_0px_black]"
           style={{ background: surfaceBg, borderColor: postOutline || '#000' }}>
@@ -2108,6 +2417,7 @@ export default function GeoPostView({ session }) {
               outline: postOutline ? `3px solid ${postOutline}` : 'none',
               boxShadow: postShadow ? `5px 5px 0px ${postShadow}` : 'none',
             }}
+            onInput={() => { localStorage.setItem('lapuff_createpost_draft', editorRef.current?.innerHTML || ''); }}
             onKeyDown={e => {
               if (e.ctrlKey || e.metaKey) {
                 if (e.key === 'b') { e.preventDefault(); execCmd('bold'); }
@@ -2236,7 +2546,7 @@ export default function GeoPostView({ session }) {
 
         <div
           ref={desktopGridRef}
-          className="hidden md:grid gap-3 pb-2"
+          className="hidden md:grid gap-3"
           style={{
             '--image-scale': Math.max(0.5, Number(feedImageScale || 1)),
             gridAutoFlow: 'dense',
@@ -2247,6 +2557,8 @@ export default function GeoPostView({ session }) {
             // Prevent browser scroll-anchoring from jumping the scroll position when
             // the panel moves to a new row and tiles reflow around it.
             overflowAnchor: 'none',
+            overflow: 'hidden',
+            maxHeight: `${16 * Math.max(1, (desktopUnitHeight - 12) / 2) + 15 * 12}px`,
           }}
         >
           <aside ref={filterPanelInnerRef} style={{ gridColumn: '1 / span 2', gridRow: `${desktopPanelRow} / span 2`, position: 'relative', zIndex: 20, willChange: 'transform, filter, opacity' }}>
@@ -2382,21 +2694,21 @@ export default function GeoPostView({ session }) {
             </div>
           )}
 
-          {(canShowMore || canShowLess) && (
-            <div className="flex justify-center gap-3 pt-2 pb-4" style={{ gridColumn: '1 / -1', alignSelf: 'start' }}>
-              {canShowMore && (
-                <button onMouseDown={e => e.preventDefault()} onClick={() => setVisibleCount(v => v + PAGE_SIZE)} className="min-h-[32px] px-4 py-1.5 border-2 border-black rounded-full text-xs font-black bg-white shadow-[2px_2px_0px_black] hover:scale-105 transition-transform leading-tight text-center inline-flex items-center justify-center whitespace-nowrap">
-                  Show More ({filteredPosts.length - visibleCount} remaining)
-                </button>
-              )}
-              {canShowLess && (
-                <button onMouseDown={e => e.preventDefault()} onClick={() => setVisibleCount(PAGE_SIZE)} className="min-h-[32px] px-4 py-1.5 border-2 border-black rounded-full text-xs font-black bg-white shadow-[2px_2px_0px_black] hover:scale-105 transition-transform leading-tight text-center inline-flex items-center justify-center whitespace-nowrap">
-                  Show Less
-                </button>
-              )}
-            </div>
-          )}
         </div>
+        {(canShowMore || canShowLess) && (
+          <div data-show-more-bar className="hidden md:flex justify-center gap-3 pt-2 pb-1">
+            {canShowMore && (
+              <button onMouseDown={e => e.preventDefault()} onClick={() => setVisibleCount(v => v + PAGE_SIZE)} className="min-h-[32px] px-4 py-1.5 border-2 border-black rounded-full text-xs font-black bg-white shadow-[2px_2px_0px_black] hover:scale-105 transition-transform leading-tight text-center inline-flex items-center justify-center whitespace-nowrap">
+                Show More ({filteredPosts.length - visibleCount} remaining)
+              </button>
+            )}
+            {canShowLess && (
+              <button onMouseDown={e => e.preventDefault()} onClick={() => setVisibleCount(PAGE_SIZE)} className="min-h-[32px] px-4 py-1.5 border-2 border-black rounded-full text-xs font-black bg-white shadow-[2px_2px_0px_black] hover:scale-105 transition-transform leading-tight text-center inline-flex items-center justify-center whitespace-nowrap">
+                Show Less
+              </button>
+            )}
+          </div>
+        )}
 
         <div className="md:hidden">
           <section data-geopost-feed-scroll>
@@ -2567,12 +2879,29 @@ export default function GeoPostView({ session }) {
         document.body
       )}
 
+      {openPostPopup && (
+        <PostDetailPopup
+          post={openPostPopup}
+          postReactions={reactions[openPostPopup.id] || []}
+          onReact={handleReact}
+          onOpenReactors={(id) => setReactorsModal(id)}
+          accentColor={accentColor}
+          onSelectTag={handleSelectTag}
+          onClose={() => setOpenPostPopup(null)}
+          comments={commentsByPost[openPostPopup.id] || []}
+          onSubmitComment={submitCommentForPost}
+          session={session}
+        />
+      )}
       <ReactionListModal isOpen={!!reactorsModal} list={reactorsModal ? (reactions[reactorsModal] || []) : []} onClose={() => setReactorsModal(null)} />
       <ReactionListModal isOpen={!!commentReactorsModal} title="Comment Reactions" list={commentReactorsModal ? (commentReactionsByComment[commentReactorsModal] || []) : []} emojiField="emoji" onClose={() => setCommentReactorsModal(null)} />
 
       {/* Quick Post FAB — 2x size, square, more padding, full toolbar */}
       {fabVisible && createPortal(
         <>
+          {quickPostOpen && (
+            <div className="fixed inset-0 z-[99969]" onClick={() => setQuickPostOpen(false)} />
+          )}
           <button
             onMouseDown={e => e.preventDefault()}
             onClick={() => setQuickPostOpen(v => !v)}
@@ -2592,7 +2921,7 @@ export default function GeoPostView({ session }) {
           {quickPostOpen && (
             <div
               className="fixed z-[99971] bg-white rounded-2xl border-3 border-black shadow-[8px_8px_0px_black] flex flex-col"
-              style={{ bottom: 108, left: 36, width: 680, maxHeight: '72vh', opacity: fabOpacity }}
+              style={{ bottom: 108, left: 36, width: 680, maxHeight: '86vh', opacity: fabOpacity }}
             >
               {/* Header */}
               <div className="flex items-center justify-between px-4 py-2 border-b-2 border-black flex-shrink-0">
@@ -2617,38 +2946,80 @@ export default function GeoPostView({ session }) {
                 </button>
               </div>
 
-              {/* Mini toolbar */}
+              {/* Mini toolbar — full parity with main editor */}
               <div className="flex items-center gap-0.5 px-3 py-1.5 border-b-2 border-black flex-shrink-0 flex-wrap bg-gray-50">
-                {[
-                  { cmd: 'bold',      label: <b>B</b>,      title: 'Bold' },
-                  { cmd: 'italic',    label: <i>I</i>,      title: 'Italic' },
-                  { cmd: 'underline', label: <u>U</u>,      title: 'Underline' },
-                ].map(({ cmd, label, title }) => (
-                  <button key={cmd} title={title} onMouseDown={e => { e.preventDefault(); miniEditorRef.current?.focus(); document.execCommand(cmd, false, null); }}
-                    className="w-8 h-8 rounded font-black text-[12px] hover:bg-gray-200 flex items-center justify-center">
-                    {label}
-                  </button>
-                ))}
-                <div className="w-px h-5 bg-gray-300 mx-0.5" />
-                {['justifyLeft','justifyCenter','justifyRight'].map((cmd, i) => (
-                  <button key={cmd} title={cmd} onMouseDown={e => { e.preventDefault(); miniEditorRef.current?.focus(); document.execCommand(cmd, false, null); }}
-                    className="w-8 h-8 rounded text-[11px] hover:bg-gray-200 flex items-center justify-center font-black">
-                    {['≡','≡','≡'][i]}
-                  </button>
-                ))}
-                <div className="w-px h-5 bg-gray-300 mx-0.5" />
-                <button title="Font Smaller" onMouseDown={e => { e.preventDefault(); miniEditorRef.current?.focus(); document.execCommand('fontSize', false, String(Math.max(1, (parseInt(document.queryCommandValue('fontSize'))||3)-1))); }}
-                  className="w-8 h-8 rounded text-[10px] font-black hover:bg-gray-200 flex items-center justify-center">A↓</button>
-                <button title="Font Larger" onMouseDown={e => { e.preventDefault(); miniEditorRef.current?.focus(); document.execCommand('fontSize', false, String(Math.min(6, (parseInt(document.queryCommandValue('fontSize'))||3)+1))); }}
-                  className="w-8 h-8 rounded text-[10px] font-black hover:bg-gray-200 flex items-center justify-center">A↑</button>
-                <div className="w-px h-5 bg-gray-300 mx-0.5" />
-                <button title="Bullet list" onMouseDown={e => { e.preventDefault(); miniEditorRef.current?.focus(); document.execCommand('insertUnorderedList', false, null); }}
-                  className="w-8 h-8 rounded text-[11px] hover:bg-gray-200 flex items-center justify-center font-black">•≡</button>
-                <button title="Numbered list" onMouseDown={e => { e.preventDefault(); miniEditorRef.current?.focus(); document.execCommand('insertOrderedList', false, null); }}
-                  className="w-8 h-8 rounded text-[11px] hover:bg-gray-200 flex items-center justify-center font-black">1≡</button>
-                <div className="w-px h-5 bg-gray-300 mx-0.5" />
-                <button title="Clear formatting" onMouseDown={e => { e.preventDefault(); if (miniEditorRef.current) miniEditorRef.current.innerHTML = ''; }}
-                  className="w-8 h-8 rounded text-[11px] hover:bg-red-100 flex items-center justify-center font-black text-red-500">✕</button>
+                {tbBtn(false, e => { e.preventDefault(); miniExecCmd('undo'); }, '↩', 'Undo')}
+                {tbBtn(false, e => { e.preventDefault(); miniExecCmd('redo'); }, '↪', 'Redo')}
+                <Divider />
+                {tbBtn(false, e => { e.preventDefault(); miniExecCmd('bold'); }, <strong>B</strong>, 'Bold')}
+                {tbBtn(false, e => { e.preventDefault(); miniExecCmd('italic'); }, <em>I</em>, 'Italic')}
+                {tbBtn(false, e => { e.preventDefault(); miniExecCmd('underline'); }, <u>U</u>, 'Underline')}
+                <Divider />
+                {tbBtn(false, e => { e.preventDefault(); miniExecCmd('justifyLeft'); }, <AlignLeftIcon />, 'Align Left')}
+                {tbBtn(false, e => { e.preventDefault(); miniExecCmd('justifyCenter'); }, <AlignCenterIcon />, 'Align Center')}
+                {tbBtn(false, e => { e.preventDefault(); miniExecCmd('justifyRight'); }, <AlignRightIcon />, 'Align Right')}
+                <Divider />
+                {tbBtn(false, e => { e.preventDefault(); miniEditorRef.current?.focus(); document.execCommand('fontSize', false, String(Math.max(1, (parseInt(document.queryCommandValue('fontSize'))||3)-1))); }, <span className="text-[10px]">A↓</span>, 'Font Smaller')}
+                {tbBtn(false, e => { e.preventDefault(); miniEditorRef.current?.focus(); document.execCommand('fontSize', false, String(Math.min(6, (parseInt(document.queryCommandValue('fontSize'))||3)+1))); }, <span className="text-[10px]">A↑</span>, 'Font Larger')}
+                <Divider />
+                {tbBtn(false, e => { e.preventDefault(); openMiniTb('list'); }, <span className="text-[10px]">☰▾</span>, 'Lists', miniListBtnRef)}
+                <PortalPopup btnRef={miniListBtnRef} open={miniOpenToolbar === 'list'} onClose={closeMiniToolbar} minWidth={140}>
+                  <div className="bg-white border-3 border-black rounded-xl shadow-[4px_4px_0px_black] overflow-hidden">
+                    {[['bullet','• Bullets'],['number','1. Numbers'],['roman','I. Roman'],['remove','Remove']].map(([t, label]) => (
+                      <button key={t} onMouseDown={e => e.preventDefault()} onClick={() => { miniEditorRef.current?.focus(); if (t === 'bullet') document.execCommand('insertUnorderedList', false, null); else if (t === 'number') document.execCommand('insertOrderedList', false, null); else if (t === 'remove') { if (document.queryCommandState('insertUnorderedList')) document.execCommand('insertUnorderedList', false, null); else if (document.queryCommandState('insertOrderedList')) document.execCommand('insertOrderedList', false, null); } setMiniOpenToolbar(null); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100 whitespace-nowrap">{label}</button>
+                    ))}
+                  </div>
+                </PortalPopup>
+                {tbBtn(!!miniActiveCoolFont, e => { e.preventDefault(); openMiniTb('coolFont'); }, <span className="text-[10px]" style={miniActiveCoolFont ? { color: '#fff' } : {}}>Ψ▾</span>, 'Cool Font', miniCoolBtnRef)}
+                <PortalPopup btnRef={miniCoolBtnRef} open={miniOpenToolbar === 'coolFont'} onClose={closeMiniToolbar} minWidth={170}>
+                  <div className="bg-white border-3 border-black rounded-xl shadow-[4px_4px_0px_black] overflow-hidden" style={{ maxHeight: 300, overflowY: 'auto' }}>
+                    {miniActiveCoolFont && (
+                      <button onMouseDown={e => e.preventDefault()} onClick={() => { setMiniActiveCoolFont(null); setMiniOpenToolbar(null); }} className="w-full text-left px-3 py-1.5 text-[10px] font-black bg-gray-100 border-b border-gray-200">✕ Off</button>
+                    )}
+                    {ALL_COOL_FONTS.map(f => (
+                      <button key={f.key} onMouseDown={e => e.preventDefault()} onClick={() => {
+                        const sel = window.getSelection();
+                        if (sel && sel.toString().length > 0) { miniEditorRef.current?.focus(); document.execCommand('insertText', false, convertFont(toPlainText(sel.toString()), f.key)); setMiniActiveCoolFont(null); }
+                        else { setMiniActiveCoolFont(prev => prev === f.key ? null : f.key); }
+                        setMiniOpenToolbar(null);
+                      }} className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 whitespace-nowrap flex items-center gap-2" style={miniActiveCoolFont === f.key ? { background: accentColor + '22', color: accentColor } : {}}>
+                        <span className="font-black text-[10px] w-16 truncate">{f.label}</span>
+                        <span className="text-gray-500 text-[10px]">{f.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                </PortalPopup>
+                <Divider />
+                {tbBtn(miniOpenToolbar === 'textColor', e => { e.preventDefault(); openMiniTb('textColor'); }, <span style={{ borderBottom: `3px solid ${miniTextColor}`, fontWeight: 900, fontSize: 11, lineHeight: 1.1, paddingBottom: 1 }}>A</span>, 'Text Color', miniTxtColBtnRef)}
+                <PortalPopup btnRef={miniTxtColBtnRef} open={miniOpenToolbar === 'textColor'} onClose={closeMiniToolbar} minWidth={180}>
+                  <HexColorPicker value={miniTextColor} onChange={(color) => { miniEditorRef.current?.focus(); document.execCommand('foreColor', false, color); setMiniTextColor(color); setMiniOpenToolbar(null); }} onClose={closeMiniToolbar} />
+                </PortalPopup>
+                {tbBtn(!!miniPostFill || miniOpenToolbar === 'postFill', e => { e.preventDefault(); openMiniTb('postFill'); }, <span style={{ fontSize: 13 }}>🪣</span>, 'Post Fill Color', miniFillBtnRef)}
+                <PortalPopup btnRef={miniFillBtnRef} open={miniOpenToolbar === 'postFill'} onClose={closeMiniToolbar} minWidth={180}>
+                  <div className="bg-white border-3 border-black rounded-xl shadow-[4px_4px_0px_black] overflow-hidden">
+                    {miniPostFill && <button onMouseDown={e => e.preventDefault()} onClick={() => { setMiniPostFill(''); setMiniOpenToolbar(null); }} className="w-full text-left px-3 py-1.5 text-[10px] font-black bg-gray-100 border-b border-gray-200 hover:bg-gray-200">✕ Clear fill</button>}
+                    <div className="p-1"><HexColorPicker value={miniPostFill || '#ffffff'} onChange={c => setMiniPostFill(c)} onClose={closeMiniToolbar} /></div>
+                  </div>
+                </PortalPopup>
+                {tbBtn(!!miniPostOutline || miniOpenToolbar === 'postOutline', e => { e.preventDefault(); openMiniTb('postOutline'); }, <span style={{ fontSize: 10, border: `2px solid ${miniPostOutline || '#555'}`, padding: '0 2px', borderRadius: 2 }}>□</span>, 'Post Outline Color', miniOutlineBtnRef)}
+                <PortalPopup btnRef={miniOutlineBtnRef} open={miniOpenToolbar === 'postOutline'} onClose={closeMiniToolbar} minWidth={180} alignRight>
+                  <div className="bg-white border-3 border-black rounded-xl shadow-[4px_4px_0px_black] overflow-hidden">
+                    {miniPostOutline && <button onMouseDown={e => e.preventDefault()} onClick={() => { setMiniPostOutline(''); setMiniOpenToolbar(null); }} className="w-full text-left px-3 py-1.5 text-[10px] font-black bg-gray-100 border-b border-gray-200 hover:bg-gray-200">✕ Clear outline</button>}
+                    <div className="p-1"><HexColorPicker value={miniPostOutline || '#000000'} onChange={c => setMiniPostOutline(c)} onClose={closeMiniToolbar} /></div>
+                  </div>
+                </PortalPopup>
+                {tbBtn(!!miniPostShadow || miniOpenToolbar === 'postShadow', e => { e.preventDefault(); openMiniTb('postShadow'); }, <span style={{ fontSize: 10, textShadow: `2px 2px 0 ${miniPostShadow || '#555'}` }}>▦</span>, 'Post Shadow Color', miniShadowBtnRef)}
+                <PortalPopup btnRef={miniShadowBtnRef} open={miniOpenToolbar === 'postShadow'} onClose={closeMiniToolbar} minWidth={180} alignRight>
+                  <div className="bg-white border-3 border-black rounded-xl shadow-[4px_4px_0px_black] overflow-hidden">
+                    {miniPostShadow && <button onMouseDown={e => e.preventDefault()} onClick={() => { setMiniPostShadow(''); setMiniOpenToolbar(null); }} className="w-full text-left px-3 py-1.5 text-[10px] font-black bg-gray-100 border-b border-gray-200 hover:bg-gray-200">✕ Clear shadow</button>}
+                    <div className="p-1"><HexColorPicker value={miniPostShadow || '#000000'} onChange={c => setMiniPostShadow(c)} onClose={closeMiniToolbar} /></div>
+                  </div>
+                </PortalPopup>
+                {tbBtn(miniOpenToolbar === 'emoji', e => { e.preventDefault(); openMiniTb('emoji'); }, <span style={{ fontSize: 13 }}>😀</span>, 'Emoji', miniEmojiBtnRef)}
+                <PortalPopup btnRef={miniEmojiBtnRef} open={miniOpenToolbar === 'emoji'} onClose={closeMiniToolbar} minWidth={300} alignRight>
+                  <EmojiPicker embedded={true} compact={true} value="" onChange={e => { if (e) { miniEditorRef.current?.focus(); document.execCommand('insertText', false, e); setMiniOpenToolbar(null); } }} />
+                </PortalPopup>
+                {tbBtn(false, e => { e.preventDefault(); if (miniEditorRef.current) miniEditorRef.current.innerHTML = ''; }, '✕', 'Clear')}
               </div>
 
               {/* Editor */}
@@ -2658,6 +3029,7 @@ export default function GeoPostView({ session }) {
                 suppressContentEditableWarning
                 className="flex-1 px-4 py-3 text-sm border-0 outline-none overflow-y-auto"
                 style={{ minHeight: 160, overflowWrap: 'break-word' }}
+                onInput={() => { localStorage.setItem('lapuff_quickpost_draft', miniEditorRef.current?.innerHTML || ''); }}
               />
 
               {/* Bottom bar */}
@@ -2683,6 +3055,7 @@ export default function GeoPostView({ session }) {
                     await handlePost();
                     setQuickPostOpen(false);
                     if (miniEditorRef.current) miniEditorRef.current.innerHTML = '';
+                    localStorage.removeItem('lapuff_quickpost_draft');
                   }}
                   className="ml-auto px-5 py-1.5 border-2 border-black rounded-lg text-[12px] font-black text-white shadow-[2px_2px_0px_black]"
                   style={{ background: accentColor }}
@@ -2698,7 +3071,8 @@ export default function GeoPostView({ session }) {
 
       <button
         onClick={scrollToTop}
-        className="hidden md:flex fixed right-4 bottom-4 z-[200000] w-12 h-12 rounded-full bg-black text-white items-center justify-center hover:scale-110 transition-transform shadow-[2px_2px_0px_rgba(0,0,0,0.35)]"
+        className="hidden md:flex fixed z-[200000] bg-black text-white items-center justify-center hover:scale-105 active:scale-95 font-black shadow-[4px_4px_0px_rgba(0,0,0,0.35)]"
+        style={{ bottom: 36, right: 36, width: 56, height: 56, borderRadius: 14, fontSize: 22 }}
         aria-label="Back to top"
       >
         ▲
