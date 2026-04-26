@@ -29,3 +29,4 @@ dist-ssr
 
 .env
 .vite
+build_output.txt
