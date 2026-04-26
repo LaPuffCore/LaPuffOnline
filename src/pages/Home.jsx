@@ -13,31 +13,13 @@ import { useSiteTheme } from '../lib/theme';
 
 // Scrolls text only when it overflows its container
 function SmartMarquee({ text, className = '' }) {
-  const containerRef = useRef(null);
-  const textRef = useRef(null);
-  const [overflows, setOverflows] = useState(false);
-
-  useEffect(() => {
-    const check = () => {
-      const container = containerRef.current;
-      const inner = textRef.current;
-      if (container && inner) setOverflows(inner.scrollWidth > container.clientWidth + 1);
-    };
-    check();
-    // Re-check after fonts/layout settle
-    const raf = requestAnimationFrame(check);
-    const ro = new ResizeObserver(check);
-    if (containerRef.current) ro.observe(containerRef.current);
-    return () => { cancelAnimationFrame(raf); ro.disconnect(); };
-  }, [text]);
-
+  // Simple threshold: titles > 12 chars get marquee — no DOM measurement needed
+  const shouldMarquee = text && text.length > 12;
   return (
-    <div ref={containerRef} className="overflow-hidden flex-1 min-w-0">
-      {overflows ? (
-        <span ref={textRef} className={`radio-marquee-inner ${className}`}>{text}</span>
-      ) : (
-        <span ref={textRef} className={className}>{text}</span>
-      )}
+    <div className="overflow-hidden flex-1 min-w-0">
+      <span className={`${shouldMarquee ? 'radio-marquee-inner' : ''} ${className}`} style={shouldMarquee ? { display: 'inline-block', whiteSpace: 'nowrap' } : { display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        {text}
+      </span>
     </div>
   );
 }
@@ -200,11 +182,24 @@ export default function Home({ events = [], eventsLoading = false }) {
     if (!w) return;
     // Do NOT reset scReadyRef — the API bridge stays alive during load()
     loadedPlaylistRef.current = modeKey;
+    // Mute & play immediately to cash in the user's gesture token before network load
+    w.setVolume(0);
+    w.play();
     w.load(url, {
       auto_play: true,
       callback: () => {
-        w.setVolume(musicVolumeRef.current);
-        _forceShuffleSkip(w);
+        // 150ms buffer: ensures SC internal memory has swapped tracklist before getSounds
+        setTimeout(() => {
+          w.getSounds(sounds => {
+            if (sounds && sounds.length > 0) {
+              const idx = Math.floor(Math.random() * sounds.length);
+              w.skip(idx);
+              w.setShuffle(true);
+            }
+            w.setVolume(musicVolumeRef.current);
+            w.play();
+          });
+        }, 150);
       },
     });
   }
@@ -264,6 +259,7 @@ export default function Home({ events = [], eventsLoading = false }) {
     setIsMusicOn(true);
     const w = scWidgetRef.current;
     if (loadedPlaylistRef.current === 'clout' && w) {
+      w.setVolume(musicVolumeRef.current);
       w.play();
       _forceShuffleSkip(w);
     } else {
@@ -276,6 +272,7 @@ export default function Home({ events = [], eventsLoading = false }) {
     setIsMusicOn(true);
     const w = scWidgetRef.current;
     if (loadedPlaylistRef.current === 'dimes' && w) {
+      w.setVolume(musicVolumeRef.current);
       w.play();
       _forceShuffleSkip(w);
     } else {
@@ -298,7 +295,6 @@ export default function Home({ events = [], eventsLoading = false }) {
   function handlePrevTrack() {
     const w = scWidgetRef.current;
     if (!w) return;
-    w.prev();
     w.prev();
   }
 
