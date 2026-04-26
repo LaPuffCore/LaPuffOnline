@@ -211,7 +211,7 @@ export default function Home({ events = [], eventsLoading = false }) {
           w.setVolume(musicVolumeRef.current);
           w.play();
           setIsMusicOn(true);
-        }, 200);
+        }, 250); // 250ms for metadata stability (blueprint-aligned)
       },
     });
   }
