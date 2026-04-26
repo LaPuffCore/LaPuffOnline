@@ -592,7 +592,7 @@ function PostDetailPopup({ post, postReactions, onReact, onOpenReactors, accentC
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div
-        className="relative my-8 mx-4 rounded-2xl border-3 border-black shadow-[8px_8px_0px_black] flex flex-col"
+        className="relative my-8 mx-4 rounded-2xl border-3 border-black shadow-[8px_8px_0px_black] flex flex-col overflow-hidden"
         style={{ background: surfaceBg, width: '100%', maxWidth: 600, minWidth: 0 }}
         onClick={e => e.stopPropagation()}
       >
@@ -2663,100 +2663,101 @@ export default function GeoPostView({ session }) {
         title="Hold to peek at mosaic"
         aria-label="Peek at mosaic"
       >👁</button>
+      {/* Separator — inside mosaic wrapper, no px padding → spans full screen width */}
+      <div className="w-full flex items-center" style={{ position: 'relative', zIndex: 1, minHeight: 22, marginTop: 12 }}>
+        {/* Back-layer: full-width half-height ribbon extending edge-to-edge */}
+        <div className="absolute inset-0 border-y-[3px] border-black bg-white shadow-[4px_4px_0px_black]" style={{ zIndex: 0 }} />
+        <div className="flex-1 border-t-2 border-black" style={{ position: 'relative', zIndex: 1 }} />
+        {/* Front-layer: GEO-FEED pill, centered on ribbon */}
+        <div className="border-[3px] border-black rounded-xl px-3 py-0.5 bg-white shadow-[3px_3px_0px_black]" style={{ position: 'relative', zIndex: 2 }}>
+          <span className="font-black text-[1.5rem] leading-none tracking-tight text-black whitespace-nowrap">GEO-FEED</span>
+        </div>
+        <div className="flex-1 border-t-2 border-black" style={{ position: 'relative', zIndex: 1 }} />
+      </div>
       </div>{/* end mosaic section wrapper */}
 
-      <div className="w-full px-3 md:px-4">
-        <div className="flex items-center gap-2 mt-3 mb-4" style={{ position: 'relative', minHeight: 44 }}>
-          {/* Back-layer: full-width pill button containing the separator lines */}
-          <div className="absolute inset-0 rounded-xl border-3 border-black bg-white shadow-[5px_5px_0px_black]" style={{ zIndex: 0 }} />
-          {/* Separator lines — vertically centered inside back-layer */}
-          <div className="flex-1 border-t-2 border-black" style={{ position: 'relative', zIndex: 1 }} />
-          {/* Front-layer: GEO-FEED pill button on top */}
-          <div className="border-3 border-black rounded-xl px-3 py-1.5 bg-white shadow-[3px_3px_0px_black]" style={{ position: 'relative', zIndex: 2 }}>
-            <span className="font-black text-[1.5rem] leading-none tracking-tight text-black whitespace-nowrap">GEO-FEED</span>
+      {/* Horizontal filter top bar — full width, outside px-3 container so it can be sticky edge-to-edge */}
+      {filterPanelMode === 'topbar' && (
+        <div
+          className="hidden md:flex items-center gap-2 flex-wrap px-3 py-2 bg-white"
+          style={{
+            border: '5px dotted #000',
+            position: filterPanelPinned ? 'sticky' : 'static',
+            top: filterPanelPinned ? 0 : undefined,
+            zIndex: filterPanelPinned ? 50 : undefined,
+            borderRadius: filterPanelPinned ? 0 : 12,
+            marginBottom: filterPanelPinned ? 0 : 8,
+          }}
+        >
+          <input
+            value={searchQuery}
+            onChange={(e) => { setSearchQuery(e.target.value); setVisibleCount(PAGE_SIZE); }}
+            placeholder="Search..."
+            className="px-2 py-1 border-2 border-black rounded text-[11px] font-black"
+            style={{ minWidth: 140, maxWidth: 200 }}
+          />
+          <button onMouseDown={e => e.preventDefault()} onClick={() => setSortByTop(v => !v)} className={baseFB} style={sortByTop ? activeFS : {}}>🔥 Top</button>
+          <button onMouseDown={e => e.preventDefault()} onClick={() => { setLocTab('all'); setFilterBorough(''); setFilterZip(''); setOpenDropdown(null); }} className={baseFB} style={locTab === 'all' ? activeFS : {}}>🌀 All</button>
+
+          <div className="relative">
+            <button ref={boroughTriggerDesktopRef} onMouseDown={e => e.preventDefault()}
+              onClick={() => { if (locTab === 'borough' && filterBorough) { setLocTab('all'); setFilterBorough(''); setVisibleCount(PAGE_SIZE); } else { setOpenDropdown(p => p === 'borough' ? null : 'borough'); } }}
+              className={baseFB} style={locTab === 'borough' && filterBorough ? activeFS : {}}>
+              🏙 {locTab === 'borough' && filterBorough ? `${filterBorough} ×` : 'Borough ▾'}
+            </button>
+            <InlineDropdown open={openDropdown === 'borough'} onClose={() => setOpenDropdown(null)} triggerRef={boroughTriggerDesktopRef}>
+              {(locTab === 'borough' && filterBorough) && (<button onMouseDown={e=>{e.preventDefault();e.stopPropagation();}} onClick={() => { setLocTab('all'); setFilterBorough(''); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100 border-b border-gray-200 text-red-500">× Clear</button>)}
+              {BOROUGHS.map(b => (<button key={b} onMouseDown={e=>{e.preventDefault();e.stopPropagation();}} onClick={() => { setFilterBorough(b); setFilterZip(''); setLocTab('borough'); setFilterZipBoro(b); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100" style={filterBorough === b ? { background: accentColor+'22', color: accentColor } : {}}>{b}</button>))}
+            </InlineDropdown>
           </div>
-          <div className="flex-1 border-t-2 border-black" style={{ position: 'relative', zIndex: 1 }} />
+
+          <div className="relative">
+            <button ref={zipTriggerDesktopRef} onMouseDown={e => e.preventDefault()}
+              onClick={() => { if (locTab === 'zip' && filterZip) { setLocTab('all'); setFilterZip(''); setVisibleCount(PAGE_SIZE); } else { setOpenDropdown(p => p === 'zip' ? null : 'zip'); } }}
+              className={baseFB} style={locTab === 'zip' && filterZip ? activeFS : {}}>
+              📍 {locTab === 'zip' && filterZip ? `${filterZip} ×` : 'Zip ▾'}
+            </button>
+            <InlineDropdown open={openDropdown === 'zip'} onClose={() => setOpenDropdown(null)} triggerRef={zipTriggerDesktopRef}>
+              {(locTab === 'zip' && filterZip) && (<button onMouseDown={e=>{e.preventDefault();e.stopPropagation();}} onClick={() => { setLocTab('all'); setFilterZip(''); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100 border-b border-gray-200 text-red-500">× Clear</button>)}
+              <div className="p-2 border-b border-gray-200"><div className="flex gap-1 flex-wrap">{BOROUGHS.map(b => (<button key={b} onMouseDown={e=>{e.preventDefault();e.stopPropagation();}} onClick={() => setFilterZipBoro(b)} className="px-1.5 py-0.5 rounded text-[10px] font-black border border-black" style={filterZipBoro === b ? { background: accentColor, color: '#fff' } : {}}>{b.split(' ')[0]}</button>))}</div></div>
+              {zipList.map(z => (<button key={z.zip} onMouseDown={e=>{e.preventDefault();e.stopPropagation();}} onClick={() => { setFilterZip(z.zip); setFilterBorough(''); setLocTab('zip'); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1 text-xs font-semibold hover:bg-gray-100" style={filterZip === z.zip ? { background: accentColor+'22', color: accentColor } : {}}>{z.zip} <span className="text-[10px] text-gray-400">{z.name}</span></button>))}
+            </InlineDropdown>
+          </div>
+
+          <div className="relative">
+            <button ref={timeTriggerDesktopRef} onMouseDown={e => e.preventDefault()}
+              onClick={() => { if (timeFilter !== 'all') { setTimeFilter('all'); setVisibleCount(PAGE_SIZE); } else { setOpenDropdown(p => p === 'time' ? null : 'time'); } }}
+              className={baseFB} style={timeFilter !== 'all' ? activeFS : {}}>
+              {timeFilter !== 'all' ? `${timeLabel} ×` : `${timeLabel} ▾`}
+            </button>
+            <InlineDropdown open={openDropdown === 'time'} onClose={() => setOpenDropdown(null)} triggerRef={timeTriggerDesktopRef}>
+              {timeFilter !== 'all' && (<button onMouseDown={e=>{e.preventDefault();e.stopPropagation();}} onClick={() => { setTimeFilter('all'); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100 border-b border-gray-200 text-red-500">× Clear</button>)}
+              {TIME_OPTIONS.map(t => (<button key={t.key} onMouseDown={e=>{e.preventDefault();e.stopPropagation();}} onClick={() => { setTimeFilter(t.key); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100" style={timeFilter === t.key ? { background: accentColor+'22', color: accentColor } : {}}>{t.label}</button>))}
+            </InlineDropdown>
+          </div>
+
+          <div className="relative">
+            <button ref={statusTriggerDesktopRef} onMouseDown={e => e.preventDefault()}
+              onClick={() => { if (statusFilter !== 'all') { setStatusFilter('all'); setVisibleCount(PAGE_SIZE); } else { setOpenDropdown(p => p === 'status' ? null : 'status'); } }}
+              className={baseFB}
+              style={statusFilter === 'participant' ? { background: '#22c55e', color: '#fff', borderColor: '#22c55e' } : statusFilter === 'orbiter' ? { background: '#ef4444', color: '#fff', borderColor: '#ef4444' } : statusFilter === 'anonymous' ? { background: '#374151', color: '#fff', borderColor: '#374151' } : {}}>
+              {statusFilter === 'participant' ? 'Participant ×' : statusFilter === 'orbiter' ? 'Orbiter ×' : statusFilter === 'anonymous' ? 'Anonymous ×' : 'Status ▾'}
+            </button>
+            <InlineDropdown open={openDropdown === 'status'} onClose={() => setOpenDropdown(null)} alignRight triggerRef={statusTriggerDesktopRef}>
+              {statusFilter !== 'all' && (<button onMouseDown={e=>{e.preventDefault();e.stopPropagation();}} onClick={() => { setStatusFilter('all'); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100 border-b border-gray-200 text-red-500">× Clear</button>)}
+              {[['all','All'],['participant','Participant'],['orbiter','Orbiter'],['anonymous','Anonymous']].map(([k,l]) => (<button key={k} onMouseDown={e=>{e.preventDefault();e.stopPropagation();}} onClick={() => { setStatusFilter(k); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100" style={statusFilter === k ? { background: accentColor+'22', color: accentColor } : {}}>{l}</button>))}
+            </InlineDropdown>
+          </div>
+
+          <div className="flex items-center gap-1 ml-auto">
+            {/* ⬆️ returns to panel mode and fully resets panel state */}
+            <button onMouseDown={e => e.preventDefault()} onClick={() => { setFilterPanelMode('panel'); setFilterPanelPinned(false); setDesktopPanelRow(1); }} className={baseFB} style={activeFS} title="Return to side panel">⬆️</button>
+            <button onMouseDown={e => e.preventDefault()} onClick={() => setFilterPanelPinned(v => !v)} className={baseFB} style={filterPanelPinned ? activeFS : {}} title={filterPanelPinned ? 'Unpin top bar' : 'Pin top bar below topbar'}>📌</button>
+          </div>
         </div>
+      )}
 
-        {/* Horizontal filter top bar — shown when filterPanelMode === 'topbar' on desktop */}
-        {filterPanelMode === 'topbar' && (
-          <div
-              className={`hidden md:flex items-center gap-2 flex-wrap px-2 py-2 ${filterPanelPinned ? '' : 'mb-2 rounded-xl bg-white'}`}
-            style={{
-              border: '5px dotted #000',
-              position: filterPanelPinned ? 'sticky' : 'static',
-                top: filterPanelPinned ? 0 : undefined,
-              zIndex: filterPanelPinned ? 50 : undefined,
-                ...(filterPanelPinned ? { background: '#fff', borderRadius: 0, marginBottom: 0 } : {}),
-            }}
-          >
-            <input
-              value={searchQuery}
-              onChange={(e) => { setSearchQuery(e.target.value); setVisibleCount(PAGE_SIZE); }}
-              placeholder="Search..."
-              className="px-2 py-1 border-2 border-black rounded text-[11px] font-black"
-              style={{ minWidth: 140, maxWidth: 200 }}
-            />
-            <button onMouseDown={e => e.preventDefault()} onClick={() => setSortByTop(v => !v)} className={baseFB} style={sortByTop ? activeFS : {}}>🔥 Top</button>
-            <button onMouseDown={e => e.preventDefault()} onClick={() => { setLocTab('all'); setFilterBorough(''); setFilterZip(''); setOpenDropdown(null); }} className={baseFB} style={locTab === 'all' ? activeFS : {}}>🌀 All</button>
-
-            <div className="relative">
-              <button ref={boroughTriggerDesktopRef} onMouseDown={e => e.preventDefault()}
-                onClick={() => { if (locTab === 'borough' && filterBorough) { setLocTab('all'); setFilterBorough(''); setVisibleCount(PAGE_SIZE); } else { setOpenDropdown(p => p === 'borough' ? null : 'borough'); } }}
-                className={baseFB} style={locTab === 'borough' && filterBorough ? activeFS : {}}>
-                🏙 {locTab === 'borough' && filterBorough ? `${filterBorough} ×` : 'Borough ▾'}
-              </button>
-              <InlineDropdown open={openDropdown === 'borough'} onClose={() => setOpenDropdown(null)} triggerRef={boroughTriggerDesktopRef}>
-                {(locTab === 'borough' && filterBorough) && (<button onMouseDown={e=>{e.preventDefault();e.stopPropagation();}} onClick={() => { setLocTab('all'); setFilterBorough(''); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100 border-b border-gray-200 text-red-500">× Clear</button>)}
-                {BOROUGHS.map(b => (<button key={b} onMouseDown={e=>{e.preventDefault();e.stopPropagation();}} onClick={() => { setFilterBorough(b); setFilterZip(''); setLocTab('borough'); setFilterZipBoro(b); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100" style={filterBorough === b ? { background: accentColor+'22', color: accentColor } : {}}>{b}</button>))}
-              </InlineDropdown>
-            </div>
-
-            <div className="relative">
-              <button ref={zipTriggerDesktopRef} onMouseDown={e => e.preventDefault()}
-                onClick={() => { if (locTab === 'zip' && filterZip) { setLocTab('all'); setFilterZip(''); setVisibleCount(PAGE_SIZE); } else { setOpenDropdown(p => p === 'zip' ? null : 'zip'); } }}
-                className={baseFB} style={locTab === 'zip' && filterZip ? activeFS : {}}>
-                📍 {locTab === 'zip' && filterZip ? `${filterZip} ×` : 'Zip ▾'}
-              </button>
-              <InlineDropdown open={openDropdown === 'zip'} onClose={() => setOpenDropdown(null)} triggerRef={zipTriggerDesktopRef}>
-                {(locTab === 'zip' && filterZip) && (<button onMouseDown={e=>{e.preventDefault();e.stopPropagation();}} onClick={() => { setLocTab('all'); setFilterZip(''); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100 border-b border-gray-200 text-red-500">× Clear</button>)}
-                <div className="p-2 border-b border-gray-200"><div className="flex gap-1 flex-wrap">{BOROUGHS.map(b => (<button key={b} onMouseDown={e=>{e.preventDefault();e.stopPropagation();}} onClick={() => setFilterZipBoro(b)} className="px-1.5 py-0.5 rounded text-[10px] font-black border border-black" style={filterZipBoro === b ? { background: accentColor, color: '#fff' } : {}}>{b.split(' ')[0]}</button>))}</div></div>
-                {zipList.map(z => (<button key={z.zip} onMouseDown={e=>{e.preventDefault();e.stopPropagation();}} onClick={() => { setFilterZip(z.zip); setFilterBorough(''); setLocTab('zip'); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1 text-xs font-semibold hover:bg-gray-100" style={filterZip === z.zip ? { background: accentColor+'22', color: accentColor } : {}}>{z.zip} <span className="text-[10px] text-gray-400">{z.name}</span></button>))}
-              </InlineDropdown>
-            </div>
-
-            <div className="relative">
-              <button ref={timeTriggerDesktopRef} onMouseDown={e => e.preventDefault()}
-                onClick={() => { if (timeFilter !== 'all') { setTimeFilter('all'); setVisibleCount(PAGE_SIZE); } else { setOpenDropdown(p => p === 'time' ? null : 'time'); } }}
-                className={baseFB} style={timeFilter !== 'all' ? activeFS : {}}>
-                {timeFilter !== 'all' ? `${timeLabel} ×` : `${timeLabel} ▾`}
-              </button>
-              <InlineDropdown open={openDropdown === 'time'} onClose={() => setOpenDropdown(null)} triggerRef={timeTriggerDesktopRef}>
-                {timeFilter !== 'all' && (<button onMouseDown={e=>{e.preventDefault();e.stopPropagation();}} onClick={() => { setTimeFilter('all'); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100 border-b border-gray-200 text-red-500">× Clear</button>)}
-                {TIME_OPTIONS.map(t => (<button key={t.key} onMouseDown={e=>{e.preventDefault();e.stopPropagation();}} onClick={() => { setTimeFilter(t.key); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100" style={timeFilter === t.key ? { background: accentColor+'22', color: accentColor } : {}}>{t.label}</button>))}
-              </InlineDropdown>
-            </div>
-
-            <div className="relative">
-              <button ref={statusTriggerDesktopRef} onMouseDown={e => e.preventDefault()}
-                onClick={() => { if (statusFilter !== 'all') { setStatusFilter('all'); setVisibleCount(PAGE_SIZE); } else { setOpenDropdown(p => p === 'status' ? null : 'status'); } }}
-                className={baseFB}
-                style={statusFilter === 'participant' ? { background: '#22c55e', color: '#fff', borderColor: '#22c55e' } : statusFilter === 'orbiter' ? { background: '#ef4444', color: '#fff', borderColor: '#ef4444' } : statusFilter === 'anonymous' ? { background: '#374151', color: '#fff', borderColor: '#374151' } : {}}>
-                {statusFilter === 'participant' ? 'Participant ×' : statusFilter === 'orbiter' ? 'Orbiter ×' : statusFilter === 'anonymous' ? 'Anonymous ×' : 'Status ▾'}
-              </button>
-              <InlineDropdown open={openDropdown === 'status'} onClose={() => setOpenDropdown(null)} alignRight triggerRef={statusTriggerDesktopRef}>
-                {statusFilter !== 'all' && (<button onMouseDown={e=>{e.preventDefault();e.stopPropagation();}} onClick={() => { setStatusFilter('all'); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100 border-b border-gray-200 text-red-500">× Clear</button>)}
-                {[['all','All'],['participant','Participant'],['orbiter','Orbiter'],['anonymous','Anonymous']].map(([k,l]) => (<button key={k} onMouseDown={e=>{e.preventDefault();e.stopPropagation();}} onClick={() => { setStatusFilter(k); setOpenDropdown(null); setVisibleCount(PAGE_SIZE); }} className="w-full text-left px-3 py-1.5 text-xs font-black hover:bg-gray-100" style={statusFilter === k ? { background: accentColor+'22', color: accentColor } : {}}>{l}</button>))}
-              </InlineDropdown>
-            </div>
-
-            <div className="flex items-center gap-1 ml-auto">
-              <button onMouseDown={e => e.preventDefault()} onClick={() => { setFilterPanelMode('panel'); setFilterPanelPinned(false); setDesktopPanelRow(1); }} className={baseFB} style={activeFS} title="Return to side panel">⬆️</button>
-              <button onMouseDown={e => e.preventDefault()} onClick={() => setFilterPanelPinned(v => !v)} className={baseFB} style={filterPanelPinned ? activeFS : {}} title={filterPanelPinned ? 'Unpin top bar' : 'Pin top bar below topbar'}>📌</button>
-            </div>
-          </div>
-        )}
-
+      <div className="w-full px-3 md:px-4">
         <div ref={desktopGridRef} className="hidden md:grid gap-3"
           style={{
             '--image-scale': Math.max(0.5, Number(feedImageScale || 1)),
@@ -2766,12 +2767,21 @@ export default function GeoPostView({ session }) {
             overflowAnchor: 'none',
             // Clip at 16 half-rows when at initial page; expand when user presses Show More
             overflow: canShowLess ? 'visible' : 'hidden',
-                      maxHeight: canShowLess ? 'none' : `${24 * Math.max(1, (desktopUnitHeight - 12) / 2) + 23 * 12}px`,
+            maxHeight: canShowLess ? 'none' : `${16 * Math.max(1, (desktopUnitHeight - 12) / 2) + 15 * 12}px`,
           }}
         >
-          {/* Filter aside — only shown in 'panel' mode */}
-          {filterPanelMode === 'panel' && (
-          <aside ref={filterPanelInnerRef} style={{ gridColumn: '1 / span 2', gridRow: filterPanelPinned ? `${lastAppliedRowRef.current} / span 2` : `${desktopPanelRow} / span 2`, position: 'relative', zIndex: 20, willChange: 'transform, filter, opacity' }}>
+          {/* Filter aside — always in DOM on desktop.
+              In topbar mode: visibility:hidden + frozen at row 1 so tile grid never reflows.
+              In panel mode: visible, scroll-tracked to desktopPanelRow. */}
+          <aside ref={filterPanelInnerRef} style={{
+            gridColumn: '1 / span 2',
+            gridRow: filterPanelMode === 'topbar' ? '1 / span 2' : `${desktopPanelRow} / span 2`,
+            position: 'relative',
+            zIndex: 20,
+            willChange: 'transform, filter, opacity',
+            visibility: filterPanelMode === 'topbar' ? 'hidden' : 'visible',
+            pointerEvents: filterPanelMode === 'topbar' ? 'none' : undefined,
+          }}>
             <div ref={desktopFilterRef} className="rounded-2xl bg-white p-2" style={{ border: '5px dotted #000', boxShadow: 'none' }}>
               <div className="text-[10px] font-black text-center tracking-widest uppercase mb-1.5 opacity-60">Filter Panel</div>
               <input
@@ -2907,20 +2917,19 @@ export default function GeoPostView({ session }) {
                     Aa {scalePopupPos ? '▴' : '▾'}
                   </button>
                 </div>
-                {/* ⬆️ and 📌 buttons at bottom of panel */}
+                {/* ⬆️ button at bottom of panel — switches to topbar mode */}
                 <div className="flex items-center gap-1 mt-2 pt-2 border-t border-gray-200">
                   <button
                     onMouseDown={e => e.preventDefault()}
-                      onClick={() => setFilterPanelMode('topbar')}
+                    onClick={() => setFilterPanelMode('topbar')}
                     className={baseFB}
-                      style={{}}
+                    style={{}}
                     title="Switch to horizontal top bar"
                   >⬆️</button>
                 </div>
               </div>
             </div>
           </aside>
-          )}{/* end filterPanelMode === 'panel' */}
 
           {!loading && filteredPosts.length === 0 && (
             <div className="rounded-2xl border-3 border-black bg-white shadow-[4px_4px_0px_black] flex items-center justify-center" style={{ gridColumn: '3 / -1', gridRow: 'span 2' }}>
@@ -3189,7 +3198,7 @@ export default function GeoPostView({ session }) {
           </button>
           {quickPostOpen && (
             <div
-              className="fixed z-[99971] bg-white rounded-2xl border-3 border-black shadow-[8px_8px_0px_black] flex flex-col"
+              className="fixed z-[99971] bg-white rounded-2xl border-3 border-black shadow-[8px_8px_0px_black] flex flex-col overflow-hidden"
               style={{ bottom: 108, left: 36, width: 680, maxHeight: '86vh', opacity: fabOpacity }}
             >
               {/* Header */}
