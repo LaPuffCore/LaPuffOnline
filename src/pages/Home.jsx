@@ -211,7 +211,7 @@ export default function Home({ events = [], eventsLoading = false }) {
             w.play();
             setIsMusicOn(true);
           });
-        }, 200);
+        }, 250); // extra buffer for metadata stability
       },
     });
   }
@@ -316,8 +316,9 @@ export default function Home({ events = [], eventsLoading = false }) {
   function handleNextTrack() {
     const w = scWidgetRef.current;
     if (!w) return;
-    w.setShuffle(true); // re-assert shuffle before every manual next
+    w.setShuffle(true); // wake up API sequencer + re-assert shuffle
     w.next();
+    w.play();           // fallback if widget is in a "busy" state
     setIsMusicOn(true);
   }
 
