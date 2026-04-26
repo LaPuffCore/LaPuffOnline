@@ -301,6 +301,7 @@ html.lp-emoji-stain-active .lp-emoji {
   opacity: 0;
   animation: radio-ripple 1.8s ease-out infinite;
   pointer-events: none;
+  z-index: -1;
 }
 .radio-beat-btn::after {
   animation-delay: 0.9s;
