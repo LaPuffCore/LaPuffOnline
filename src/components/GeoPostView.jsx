@@ -1000,7 +1000,7 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
 
       {/* footer: flex-1 on no-image tiles so reactions can pin to bottom; flex-shrink-0 when image is present */}
       <div className="p-3" style={{ background: theme.fill, flex: hasImage ? '0 0 auto' : '1 1 auto', display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
-        <div className="flex items-center gap-1 mb-1 overflow-hidden" style={{ flexWrap: 'nowrap', minWidth: 0 }}>
+        <div className="flex items-center gap-1 mb-1 overflow-hidden" style={{ flexWrap: 'nowrap', minWidth: 0, flexShrink: 0 }}>
           {postIsAnonymous ? (
             <span className="font-black text-xs flex items-center gap-1 flex-shrink" style={{ color: theme.text, fontSize: `${12 * scale}px`, minWidth: 0, flexShrink: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}>
               <svg width="13" height="13" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ color: 'currentColor', flexShrink: 0 }}>
@@ -1036,7 +1036,8 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
             // Initial maxHeight set as budget; snap useEffect refines it to last complete line
             maxHeight: `${maxBudgetPx}px`,
             wordBreak: 'break-word',
-            flexShrink: 0,
+            flex: '0 0 auto',
+            minHeight: 0,
             cursor: onOpenPopup ? 'pointer' : 'default',
           }}
           onClick={() => onOpenPopup && onOpenPopup(post)}
@@ -1057,8 +1058,7 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
         {/* spacer pushes reaction/tag row to bottom of the tile */}
         <div style={{ flex: 1, minHeight: 4 }} />
 
-        <div className="flex items-center gap-1 flex-wrap">
-          {topEmojis.map(([emoji, count]) => (
+        <div className="flex items-center gap-1 flex-wrap" style={{ flexShrink: 0 }}>
             <button
               key={emoji}
               onMouseDown={(e) => e.preventDefault()}
@@ -2652,12 +2652,16 @@ export default function GeoPostView({ session }) {
       </div>{/* end mosaic section wrapper */}
 
       <div className="w-full px-3 md:px-4">
-        <div className="flex items-center gap-2 mt-3 mb-4">
-          <div className="flex-1 border-t-2 border-black" />
-          <div className="border-3 border-black rounded-xl px-4 py-2 bg-white shadow-[3px_3px_0px_black]">
-            <span className="font-black text-[2.25rem] leading-none tracking-tight text-black whitespace-nowrap">GEO-FEED</span>
+        <div className="flex items-center gap-2 mt-3 mb-4" style={{ position: 'relative', minHeight: 44 }}>
+          {/* Back-layer: full-width pill button containing the separator lines */}
+          <div className="absolute inset-0 rounded-xl border-3 border-black bg-white shadow-[5px_5px_0px_black]" style={{ zIndex: 0 }} />
+          {/* Separator lines — vertically centered inside back-layer */}
+          <div className="flex-1 border-t-2 border-black" style={{ position: 'relative', zIndex: 1 }} />
+          {/* Front-layer: GEO-FEED pill button on top */}
+          <div className="border-3 border-black rounded-xl px-3 py-1.5 bg-white shadow-[3px_3px_0px_black]" style={{ position: 'relative', zIndex: 2 }}>
+            <span className="font-black text-[1.5rem] leading-none tracking-tight text-black whitespace-nowrap">GEO-FEED</span>
           </div>
-          <div className="flex-1 border-t-2 border-black" />
+          <div className="flex-1 border-t-2 border-black" style={{ position: 'relative', zIndex: 1 }} />
         </div>
 
         {/* Horizontal filter top bar — shown when filterPanelMode === 'topbar' on desktop */}
@@ -2667,7 +2671,7 @@ export default function GeoPostView({ session }) {
             style={{
               border: '5px dotted #000',
               position: filterPanelPinned ? 'sticky' : 'static',
-              top: filterPanelPinned ? 72 : undefined,
+              top: filterPanelPinned ? 58 : undefined,
               zIndex: filterPanelPinned ? 50 : undefined,
             }}
           >
@@ -2738,7 +2742,7 @@ export default function GeoPostView({ session }) {
           </div>
         )}
 
-        <div className="hidden md:grid gap-3 px-3 md:px-4"
+        <div ref={desktopGridRef} className="hidden md:grid gap-3"
           style={{
             '--image-scale': Math.max(0.5, Number(feedImageScale || 1)),
             gridAutoFlow: 'dense',
