@@ -191,14 +191,14 @@ export default function Home({ events = [], eventsLoading = false }) {
       auto_play: true,
       show_artwork: false,
       callback: () => {
-        // B: Watchdog — if still paused after 1s, force play
+        // B: Watchdog — if still paused after 1.2s, force play
         const watchdog = setTimeout(() => {
           w.isPaused(paused => {
             if (paused) { w.play(); setIsMusicOn(true); }
           });
-        }, 1000);
+        }, 1200);
 
-        // C: 150ms buffer then shuffle-skip
+        // C: 200ms buffer then shuffle-skip
         setTimeout(() => {
           w.getSounds(sounds => {
             if (sounds && sounds.length > 0) {
@@ -211,7 +211,7 @@ export default function Home({ events = [], eventsLoading = false }) {
             w.play();
             setIsMusicOn(true);
           });
-        }, 150);
+        }, 200);
       },
     });
   }
@@ -308,7 +308,9 @@ export default function Home({ events = [], eventsLoading = false }) {
 
   function handlePrevTrack() {
     const w = scWidgetRef.current;
-    if (w) w.prev();
+    if (!w) return;
+    w.prev();
+    setIsMusicOn(true);
   }
 
   function handleNextTrack() {
@@ -316,6 +318,7 @@ export default function Home({ events = [], eventsLoading = false }) {
     if (!w) return;
     w.setShuffle(true); // re-assert shuffle before every manual next
     w.next();
+    setIsMusicOn(true);
   }
 
   function handleTogglePlayPause() {
