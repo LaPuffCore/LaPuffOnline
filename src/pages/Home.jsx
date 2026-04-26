@@ -173,6 +173,7 @@ export default function Home({ events = [], eventsLoading = false }) {
         const idx = Math.floor(Math.random() * sounds.length);
         w.skip(idx);
         w.setShuffle(true);
+        w.play(); // force-play after skip
       }
     });
   }
@@ -180,15 +181,24 @@ export default function Home({ events = [], eventsLoading = false }) {
   function _changePlaylist(url, modeKey) {
     const w = scWidgetRef.current;
     if (!w) return;
-    // Do NOT reset scReadyRef — the API bridge stays alive during load()
     loadedPlaylistRef.current = modeKey;
-    // Mute & play immediately to cash in the user's gesture token before network load
+
+    // A: Instant gesture unlock — mute+play cashes in the click token immediately
     w.setVolume(0);
     w.play();
+
     w.load(url, {
       auto_play: true,
+      show_artwork: false,
       callback: () => {
-        // 150ms buffer: ensures SC internal memory has swapped tracklist before getSounds
+        // B: Watchdog — if still paused after 1s, force play
+        const watchdog = setTimeout(() => {
+          w.isPaused(paused => {
+            if (paused) { w.play(); setIsMusicOn(true); }
+          });
+        }, 1000);
+
+        // C: 150ms buffer then shuffle-skip
         setTimeout(() => {
           w.getSounds(sounds => {
             if (sounds && sounds.length > 0) {
@@ -196,8 +206,10 @@ export default function Home({ events = [], eventsLoading = false }) {
               w.skip(idx);
               w.setShuffle(true);
             }
+            clearTimeout(watchdog);
             w.setVolume(musicVolumeRef.current);
             w.play();
+            setIsMusicOn(true);
           });
         }, 150);
       },
@@ -256,12 +268,13 @@ export default function Home({ events = [], eventsLoading = false }) {
 
   function triggerCloutCullingGames() {
     setCurrentMode('clout');
-    setIsMusicOn(true);
     const w = scWidgetRef.current;
     if (loadedPlaylistRef.current === 'clout' && w) {
-      w.setVolume(musicVolumeRef.current);
+      // Already on this station — shuffle-skip to new track
+      w.setShuffle(true);
+      w.next();
       w.play();
-      _forceShuffleSkip(w);
+      setIsMusicOn(true);
     } else {
       _changePlaylist(CLOUT_URL, 'clout');
     }
@@ -269,12 +282,13 @@ export default function Home({ events = [], eventsLoading = false }) {
 
   function triggerDimesRadio() {
     setCurrentMode('dimes');
-    setIsMusicOn(true);
     const w = scWidgetRef.current;
     if (loadedPlaylistRef.current === 'dimes' && w) {
-      w.setVolume(musicVolumeRef.current);
+      // Already on this station — shuffle-skip to new track
+      w.setShuffle(true);
+      w.next();
       w.play();
-      _forceShuffleSkip(w);
+      setIsMusicOn(true);
     } else {
       _changePlaylist(DIMES_URL, 'dimes');
     }
@@ -294,13 +308,13 @@ export default function Home({ events = [], eventsLoading = false }) {
 
   function handlePrevTrack() {
     const w = scWidgetRef.current;
-    if (!w) return;
-    w.prev();
+    if (w) w.prev();
   }
 
   function handleNextTrack() {
     const w = scWidgetRef.current;
     if (!w) return;
+    w.setShuffle(true); // re-assert shuffle before every manual next
     w.next();
   }
 
