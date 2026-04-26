@@ -35,16 +35,18 @@ export default function Home({ events = [], eventsLoading = false }) {
 
   // ── Ghost Music Player state ──────────────────────────────────────────────
   const [isMusicOn,     setIsMusicOn]     = useState(false);
-  const [currentMode,   setCurrentMode]   = useState(null); // 'clout' | null
+  const [currentMode,   setCurrentMode]   = useState(null); // 'clout' | 'dimes' | null
+  const [currentTrack,  setCurrentTrack]  = useState(null); // { title, artist, url }
   const [showMusicMenu, setShowMusicMenu] = useState(false);
   const [musicVolume,   setMusicVolume]   = useState(80);
-  const [hasVisitedMap, setHasVisitedMap] = useState(false); // gate music button visibility
-  const scIframeRef      = useRef(null);
-  const scWidgetRef      = useRef(null);
-  const scReadyRef       = useRef(false);
-  const pendingPlayRef   = useRef(false);  // play queued before widget READY
-  const musicVolumeRef   = useRef(80);    // stable ref for closure access
-  const mapAutoPlayedRef = useRef(false);
+  const scIframeRef        = useRef(null);
+  const scWidgetRef        = useRef(null);
+  const scReadyRef         = useRef(false);
+  const pendingPlayRef     = useRef(false);   // play queued before widget READY
+  const pendingSkipRef     = useRef(false);   // skip-first queued on radio start
+  const loadedPlaylistRef  = useRef('clout'); // which playlist is loaded in iframe
+  const musicVolumeRef     = useRef(80);      // stable ref for closure access
+  const mapAutoPlayedRef   = useRef(false);
   const musicDesktopRef  = useRef(null);
   const musicMobileRef   = useRef(null);
 
@@ -151,6 +153,20 @@ export default function Home({ events = [], eventsLoading = false }) {
   }
 
   // ── SoundCloud Widget API bootstrap ──────────────────────────────────────
+  const CLOUT_URL = 'https://soundcloud.com/justin-lapuff/sets/clout-culling-games';
+  const DIMES_URL = 'https://soundcloud.com/justin-lapuff/sets/dimes-square';
+
+  function _skipToRandom() {
+    setTimeout(() => {
+      if (!scWidgetRef.current || !scReadyRef.current) return;
+      scWidgetRef.current.getSounds(sounds => {
+        if (!sounds || sounds.length <= 1) return;
+        const nextIdx = Math.floor(Math.random() * sounds.length);
+        scWidgetRef.current.skip(nextIdx);
+      });
+    }, 800);
+  }
+
   useEffect(() => {
     function initWidget() {
       if (!scIframeRef.current || !window.SC) return;
@@ -164,6 +180,21 @@ export default function Home({ events = [], eventsLoading = false }) {
           widget.play();
           widget.setShuffle(true);
         }
+        if (pendingSkipRef.current) {
+          pendingSkipRef.current = false;
+          _skipToRandom();
+        }
+      });
+      widget.bind(window.SC.Widget.Events.PLAY, () => {
+        widget.getCurrentSound(sound => {
+          if (sound) {
+            setCurrentTrack({
+              title: sound.title || 'Unknown Track',
+              artist: sound.user?.username || '',
+              url: sound.permalink_url || '',
+            });
+          }
+        });
       });
     }
     if (window.SC) { initWidget(); return; }
@@ -190,10 +221,41 @@ export default function Home({ events = [], eventsLoading = false }) {
     setCurrentMode('clout');
     setIsMusicOn(true);
     if (scWidgetRef.current && scReadyRef.current) {
-      scWidgetRef.current.play();
-      scWidgetRef.current.setShuffle(true);
+      if (loadedPlaylistRef.current !== 'clout') {
+        loadedPlaylistRef.current = 'clout';
+        scReadyRef.current = false;
+        pendingPlayRef.current = true;
+        pendingSkipRef.current = true;
+        scWidgetRef.current.load(CLOUT_URL, { auto_play: true, show_comments: false, hide_related: true });
+      } else {
+        scWidgetRef.current.play();
+        scWidgetRef.current.setShuffle(true);
+        _skipToRandom();
+      }
     } else {
-      pendingPlayRef.current = true; // will fire when READY event arrives
+      pendingPlayRef.current = true;
+      pendingSkipRef.current = true;
+    }
+  }
+
+  function triggerDimesRadio() {
+    setCurrentMode('dimes');
+    setIsMusicOn(true);
+    if (scWidgetRef.current && scReadyRef.current) {
+      if (loadedPlaylistRef.current !== 'dimes') {
+        loadedPlaylistRef.current = 'dimes';
+        scReadyRef.current = false;
+        pendingPlayRef.current = true;
+        pendingSkipRef.current = true;
+        scWidgetRef.current.load(DIMES_URL, { auto_play: true, show_comments: false, hide_related: true });
+      } else {
+        scWidgetRef.current.play();
+        scWidgetRef.current.setShuffle(true);
+        _skipToRandom();
+      }
+    } else {
+      pendingPlayRef.current = true;
+      pendingSkipRef.current = true;
     }
   }
 
@@ -240,6 +302,10 @@ export default function Home({ events = [], eventsLoading = false }) {
       setIsMusicOn(true);
       if (scWidgetRef.current && scReadyRef.current) scWidgetRef.current.play();
       else pendingPlayRef.current = true;
+    } else if (currentMode === 'dimes') {
+      setIsMusicOn(true);
+      if (scWidgetRef.current && scReadyRef.current) scWidgetRef.current.play();
+      else pendingPlayRef.current = true;
     } else {
       triggerCloutCullingGames();
     }
@@ -248,7 +314,6 @@ export default function Home({ events = [], eventsLoading = false }) {
   function handleMapClick() {
     setView('map');
     setShowLeaderboard(false);
-    setHasVisitedMap(true);
     // Auto-play only first time ever — check localStorage
     const alreadyPlayed = localStorage.getItem('lapuff_music_firstplayed');
     if (!alreadyPlayed) {
@@ -293,8 +358,8 @@ export default function Home({ events = [], eventsLoading = false }) {
               <ParticipantDot />
             </button>
 
-            {/* Desktop Music Button — hugs right of orbiter/logo, only after visiting map */}
-            {hasVisitedMap && <div className="relative hidden md:block" ref={musicDesktopRef}>
+            {/* Desktop Music Button — always visible */}
+            <div className="relative hidden md:block" ref={musicDesktopRef}>
               <button
                 onClick={() => setShowMusicMenu(v => !v)}
                 className="w-9 h-9 md:w-10 md:h-10 flex items-center justify-center rounded-xl border-2 md:border-3 border-black bg-white shadow-[2px_2px_0px_black] md:shadow-[3px_3px_0px_black] transition-all hover:scale-105"
@@ -318,6 +383,14 @@ export default function Home({ events = [], eventsLoading = false }) {
                     {currentMode === 'clout' && isMusicOn && <span className="text-[8px] animate-pulse" style={{ color: accentColor }}>▶</span>}
                   </button>
                   <button
+                    onClick={() => { triggerDimesRadio(); setShowMusicMenu(false); }}
+                    className="w-full px-3 py-2 text-left text-xs font-black hover:bg-gray-50 flex items-center gap-2 border-b border-gray-100 transition-colors"
+                    style={currentMode === 'dimes' ? { color: accentColor } : {}}>
+                    <span>🎵</span>
+                    <span className="flex-1">Dimes Radio</span>
+                    {currentMode === 'dimes' && isMusicOn && <span className="text-[8px] animate-pulse" style={{ color: accentColor }}>▶</span>}
+                  </button>
+                  <button
                     onClick={() => { stopMusic(); setShowMusicMenu(false); }}
                     className="w-full px-3 py-2 text-left text-xs font-black hover:bg-gray-50 flex items-center gap-2 transition-colors"
                     style={!isMusicOn ? { color: accentColor } : { color: '#9ca3af' }}>
@@ -332,16 +405,25 @@ export default function Home({ events = [], eventsLoading = false }) {
                     </button>
                     <button onClick={handleNextTrack} title="Next" className="text-gray-400 hover:text-gray-900 transition-colors text-sm leading-none">⏭</button>
                   </div>
-                  <div className="px-3 pb-2.5 flex items-center gap-2">
+                  <div className="px-3 pb-1.5 flex items-center gap-2">
                     <span className="text-[11px] text-gray-400 flex-shrink-0">🔊</span>
                     <input type="range" min="0" max="100" value={musicVolume}
                       onChange={e => handleVolumeChange(Number(e.target.value))}
                       className="flex-1 h-1 cursor-pointer"
                       style={{ accentColor }} />
                   </div>
+                  {currentTrack && isMusicOn && (
+                    <div className="px-3 pb-3">
+                      <a href={currentTrack.url} target="_blank" rel="noopener noreferrer"
+                        className="block w-full px-2.5 py-2 rounded-xl border-2 border-gray-200 bg-gray-50 hover:bg-gray-100 hover:border-gray-400 transition-all cursor-pointer text-left no-underline">
+                        <p className="font-black text-[10px] text-gray-800 truncate leading-tight">{currentTrack.title}</p>
+                        <p className="font-bold text-[9px] text-gray-500 truncate leading-tight mt-0.5">{currentTrack.artist}</p>
+                      </a>
+                    </div>
+                  )}
                 </div>
               )}
-            </div>}
+            </div>
             </div>{/* end logo+music group */}
 
             {/* View Toggles — center */}
@@ -437,8 +519,8 @@ export default function Home({ events = [], eventsLoading = false }) {
           {/* Mobile Secondary Row: Music + Auth + Submit + Map Collapse */}
           <div className="flex md:hidden items-center justify-center gap-3 mt-2 pb-1">
 
-             {/* Mobile Music Button — only shown after user enters map */}
-             {hasVisitedMap && <div className="relative" ref={musicMobileRef}>
+             {/* Mobile Music Button — always visible */}
+             <div className="relative" ref={musicMobileRef}>
                <button
                  onClick={() => setShowMusicMenu(v => !v)}
                  className="w-9 h-9 flex items-center justify-center rounded-xl border-2 border-black bg-white shadow-[2px_2px_0px_black] transition-all flex-shrink-0"
@@ -462,6 +544,14 @@ export default function Home({ events = [], eventsLoading = false }) {
                      {currentMode === 'clout' && isMusicOn && <span className="text-[8px] animate-pulse" style={{ color: accentColor }}>▶</span>}
                    </button>
                    <button
+                     onClick={() => { triggerDimesRadio(); setShowMusicMenu(false); }}
+                     className="w-full px-3 py-2 text-left text-xs font-black hover:bg-gray-50 flex items-center gap-2 border-b border-gray-100 transition-colors"
+                     style={currentMode === 'dimes' ? { color: accentColor } : {}}>
+                     <span>🎵</span>
+                     <span className="flex-1">Dimes Radio</span>
+                     {currentMode === 'dimes' && isMusicOn && <span className="text-[8px] animate-pulse" style={{ color: accentColor }}>▶</span>}
+                   </button>
+                   <button
                      onClick={() => { stopMusic(); setShowMusicMenu(false); }}
                      className="w-full px-3 py-2 text-left text-xs font-black hover:bg-gray-50 flex items-center gap-2 transition-colors"
                      style={!isMusicOn ? { color: accentColor } : { color: '#9ca3af' }}>
@@ -478,16 +568,25 @@ export default function Home({ events = [], eventsLoading = false }) {
                      <button onClick={handleNextTrack} title="Next" className="text-gray-400 hover:text-gray-900 transition-colors text-sm leading-none">⏭</button>
                    </div>
                    {/* Volume slider */}
-                   <div className="px-3 pb-2.5 flex items-center gap-2">
+                   <div className="px-3 pb-1.5 flex items-center gap-2">
                      <span className="text-[11px] text-gray-400 flex-shrink-0">🔊</span>
                      <input type="range" min="0" max="100" value={musicVolume}
                        onChange={e => handleVolumeChange(Number(e.target.value))}
                        className="flex-1 h-1 cursor-pointer"
                        style={{ accentColor }} />
                    </div>
+                   {currentTrack && isMusicOn && (
+                     <div className="px-3 pb-3">
+                       <a href={currentTrack.url} target="_blank" rel="noopener noreferrer"
+                         className="block w-full px-2.5 py-2 rounded-xl border-2 border-gray-200 bg-gray-50 hover:bg-gray-100 hover:border-gray-400 transition-all cursor-pointer text-left no-underline">
+                         <p className="font-black text-[10px] text-gray-800 truncate leading-tight">{currentTrack.title}</p>
+                         <p className="font-bold text-[9px] text-gray-500 truncate leading-tight mt-0.5">{currentTrack.artist}</p>
+                       </a>
+                     </div>
+                   )}
                  </div>
                )}
-             </div>}
+             </div>
              {user ? (
                 <button onClick={() => setShowUserMenu(v => !v)}
                 className="w-[112px] bg-white rounded-full px-3 py-1.5 font-black text-[11px] shadow-[2px_2px_0px_#333] truncate text-center border-2 lp-accent-border lp-accent-color-text">
