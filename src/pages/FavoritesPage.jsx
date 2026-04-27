@@ -75,11 +75,13 @@ function FavoriteCard({ event, tzOffset, onOpen, onUnfavorite }) {
 
     sync();
     window.addEventListener('favoritesChanged', sync);
-    const unsubscribe = subscribeToFavoriteCount(event.id, (next) => {
-      if (!mounted) return;
-      setFavCount(next);
-      setTrend(getFavTrend(event.id));
-    });
+    const unsubscribe = (event._sample || event._auto)
+      ? () => {}
+      : subscribeToFavoriteCount(event.id, (next) => {
+          if (!mounted) return;
+          setFavCount(next);
+          setTrend(getFavTrend(event.id));
+        });
 
     return () => {
       mounted = false;

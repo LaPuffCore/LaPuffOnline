@@ -81,11 +81,14 @@ export default function EventTile({ event, onClick, onTagClick }) {
     window.addEventListener('favoritesChanged', syncState);
     
     // Listen for real-time count changes from other users/devices
-    const unsubscribe = subscribeToFavoriteCount(event.id, (newCount) => {
-      if (!mounted) return;
-      setFavCount(newCount);
-      setTrend(getFavTrend(event.id));
-    });
+    // Skip subscription for sample/auto events — they don't exist in the events table
+    const unsubscribe = (event._sample || event._auto)
+      ? () => {}
+      : subscribeToFavoriteCount(event.id, (newCount) => {
+          if (!mounted) return;
+          setFavCount(newCount);
+          setTrend(getFavTrend(event.id));
+        });
     
     return () => {
       mounted = false;

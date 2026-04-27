@@ -264,12 +264,18 @@ export async function submitGeoPost(payload, session = null) {
 export async function recordAnonAuthorInteraction(postId, deviceId) {
   if (!postId || !deviceId) return;
   try {
-    await fetch(`${SUPABASE_URL}/rest/v1/anon_device_interactions`, {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/anon_device_interactions`, {
       method: 'POST',
       headers: { ...baseHeaders, 'Prefer': 'return=minimal' },
       body: JSON.stringify({ target_id: postId, device_id: deviceId, interaction_type: 'author' }),
     });
-  } catch (e) { /* non-fatal */ }
+    if (!res.ok) {
+      const err = await res.text().catch(() => '');
+      console.error('[anon-author] Failed to record authorship:', res.status, err);
+    }
+  } catch (e) {
+    console.error('[anon-author] Network error recording authorship:', e?.message);
+  }
 }
 
 /**

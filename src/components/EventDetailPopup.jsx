@@ -143,10 +143,13 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
     window.addEventListener('favoritesChanged', syncFavorites);
     
     // Listen for real-time count changes from other users/devices
-    const unsubscribe = subscribeToFavoriteCount(event.id, (newCount) => {
-      setFavCount(newCount);
-      setTrend(getFavTrend(event.id));
-    });
+    // Skip subscription for sample/auto events — they don't exist in the events table
+    const unsubscribe = (event._sample || event._auto)
+      ? () => {}
+      : subscribeToFavoriteCount(event.id, (newCount) => {
+          setFavCount(newCount);
+          setTrend(getFavTrend(event.id));
+        });
     
     const handleKey = (e) => {
       if (e.key === 'Escape') onClose();

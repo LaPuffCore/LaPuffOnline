@@ -3093,6 +3093,12 @@ export default function GeoPostView({ session }) {
   useEffect(() => {
     if (!openPostPopup) return;
     const fetchForPopup = async () => {
+      // For sample posts, use local SAMPLE_COMMENTS directly — don't hit the DB
+      if (SAMPLE_POST_IDS.has(openPostPopup.id)) {
+        const sampleComments = SAMPLE_COMMENTS.filter((entry) => entry.post_id === openPostPopup.id);
+        setCommentsByPost(prev => ({ ...prev, [openPostPopup.id]: sampleComments }));
+        return;
+      }
       const comments = await fetchCommentsForPost(openPostPopup.id);
       setCommentsByPost(prev => ({ ...prev, [openPostPopup.id]: comments }));
     };
