@@ -1001,7 +1001,7 @@ function GeoPostMosaic({ posts, accentColor, opacity = 0.42, onTileClick = null 
 }
 
 // ── PostCard ──────────────────────────────────────────────────────────────────
-function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, onSelectTag, zipHeatMap, boroughHeatMap, textScale = 1, imageScale = 1, imagePriority = false, isDesktopMasonry = false, gridUnitHeight = 0, commentCount = 0, commentsOpen = false, onToggleComments, commentsChildren, onOpenPopup, onHide, isPinned = false, pinnedRow = null, pinnedCol = null, onTogglePin, onClickUsername, isDragging = false }) {
+function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, onSelectTag, zipHeatMap, boroughHeatMap, textScale = 1, imageScale = 1, imagePriority = false, isDesktopMasonry = false, gridUnitHeight = 0, commentCount = 0, commentsOpen = false, onToggleComments, commentsChildren, onOpenPopup, onHide, isPinned = false, pinnedRow = null, pinnedCol = null, userRow = null, userCol = null, dragTargetRow = null, dragTargetCol = null, onTogglePin, onClickUsername, isDragging = false }) {
   const { resolvedTheme } = useSiteTheme();
   const theme = getPostVisualTheme(post, resolvedTheme);
   const date = new Date(post.created_at);
@@ -1130,12 +1130,26 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
     return rootLinePx * maxTextLines;
   })();
 
-  // tileGridStyle: pinned tiles take absolute priority (ignore array shuffling entirely)
+  // tileGridStyle priority: drag target > pinned > user-positioned (soft-pin from drag) > comments-open frozen > default span
   const tileGridStyle = (() => {
+    // While being dragged, snap to live grid target so user sees exact landing zone.
+    if (isDragging && dragTargetRow != null && dragTargetCol != null) {
+      return {
+        gridRow: `${dragTargetRow} / span ${rowSpan}`,
+        gridColumn: `${dragTargetCol} / span ${finalColSpan}`,
+      };
+    }
     if (isPinned && pinnedRow != null && pinnedCol != null) {
       return {
         gridRow: `${pinnedRow} / span ${rowSpan}`,
         gridColumn: `${pinnedCol} / span ${finalColSpan}`,
+      };
+    }
+    // User-set position from prior drag — explicit grid placement, dense flow displaces neighbors around it.
+    if (userRow != null && userCol != null) {
+      return {
+        gridRow: `${userRow} / span ${rowSpan}`,
+        gridColumn: `${userCol} / span ${finalColSpan}`,
       };
     }
     if (commentsOpen && isDesktopMasonry && gridPositionRef.current.row != null) {
@@ -2383,12 +2397,16 @@ export default function GeoPostView({ session }) {
   // Pins/positions reset on every page load — no persistence (session-only)
   const [pinnedPostIds, setPinnedPostIds] = useState(() => new Set());
   const [pinnedPositions, setPinnedPositions] = useState(() => ({}));
+  // userPositions: per-tile soft-pin {col,row} written on drag-drop. Same explicit-grid mechanism as pinning,
+  // but no pin badge. Dragging again moves the tile. Resets on reload.
+  const [userPositions, setUserPositions] = useState(() => ({}));
+  // Live drag target {col,row} updated during mousemove for snap projection. Single source of truth
+  // for where the dragged tile (rendered in-grid at 50% opacity) appears during drag.
+  const [dragTarget, setDragTarget] = useState(null);
   const [hiddenPanelOpen, setHiddenPanelOpen] = useState(false);
   // Tile order resets on every page load — no persistence (session-only)
   const [customPostOrder, setCustomPostOrder] = useState(() => []);
   const [draggingId, setDraggingId] = useState(null);
-  const [dragHoverId, setDragHoverId] = useState(null);
-  const dragHoverIdRef = useRef(null); // sync mirror for reading in onMouseUp without stale closure
   const dragGhostRef = useRef(null);
   const visiblePostsRef = useRef([]);
   const orderedFilteredPostsRef = useRef([]);
@@ -3129,12 +3147,11 @@ export default function GeoPostView({ session }) {
     });
   }, [posts]);
 
-  // orderedFilteredPosts: applies committed order then live drag displacement so the grid
-  // shows accurate hole/projection as user drags (Gemini live-displacement architecture)
+  // orderedFilteredPosts: applies committed custom order. Drag positioning is now handled
+  // by explicit gridColumn/gridRow on each tile (userPositions/dragTarget), so no array splicing
+  // is needed during drag — CSS Grid's "explicit-first then dense fill" handles displacement.
   const orderedFilteredPosts = useMemo(() => {
     let baseOrder = [...filteredPosts];
-
-    // 1. Apply committed custom order
     if (customPostOrder.length > 0) {
       const orderMap = new Map(customPostOrder.map((id, i) => [id, i]));
       baseOrder.sort((a, b) => {
@@ -3143,26 +3160,8 @@ export default function GeoPostView({ session }) {
         return ai - bi;
       });
     }
-
-    // 2. Live drag displacement: quadrant slot insertion.
-    // _gpInsertSlot encodes which sub-slot of the target tile the mouse is on.
-    // Slot 0 = insert before target; slot N = punch into the Nth internal slot,
-    // forcing the dense grid to displace the large tile around the new entry.
-    if (draggingId && dragHoverId && draggingId !== dragHoverId) {
-      const draggedIdx = baseOrder.findIndex(p => p.id === draggingId);
-      let targetIdx  = baseOrder.findIndex(p => p.id === dragHoverId);
-      if (draggedIdx !== -1 && targetIdx !== -1) {
-        const [draggedItem] = baseOrder.splice(draggedIdx, 1);
-        // Re-find target after removal (index shifts if dragged was before target)
-        targetIdx = baseOrder.findIndex(p => p.id === dragHoverId);
-        const slotOffset = window._gpInsertSlot ?? 0;
-        const finalIdx   = Math.max(0, targetIdx + slotOffset);
-        baseOrder.splice(finalIdx, 0, draggedItem);
-      }
-    }
-
     return baseOrder;
-  }, [filteredPosts, customPostOrder, draggingId, dragHoverId]);
+  }, [filteredPosts, customPostOrder]);
 
   const visiblePosts = orderedFilteredPosts.filter(p => !hiddenPostIds.has(p.id)).slice(0, visibleCount);
   const canShowMore  = visibleCount < orderedFilteredPosts.length;
@@ -3171,7 +3170,6 @@ export default function GeoPostView({ session }) {
   canShowLessRef.current = canShowLess;
   visiblePostsRef.current = visiblePosts;
   orderedFilteredPostsRef.current = orderedFilteredPosts;
-  dragHoverIdRef.current = dragHoverId; // keep sync ref in step with state for onMouseUp
 
   useEffect(() => {
     // Only measure in tile mode — filter panel only exists in tile grid
@@ -3472,14 +3470,42 @@ export default function GeoPostView({ session }) {
     });
   }, []);
 
-  // Document-level drag handlers — GRID-AREA ARCHITECTURE
-  // ROOT CAUSE FIX: elementFromPoint returns the ghost div (z:200000) because
-  // pointer-events:none only affects mouse routing, NOT elementFromPoint.
-  // So the ghost was always blocking tile detection — displacement never fired.
-  // FIX: iterate all [data-post-id] elements using getBoundingClientRect() point-in-rect.
+  // Document-level drag handlers — GRID-COORDINATE SOFT-PIN ARCHITECTURE
+  // The dragged tile gets explicit gridColumn/gridRow during drag (snap projection at 50% opacity).
+  // Cursor-following 50% scale ghost shows what's being held. On drop, snap target is committed
+  // to userPositions — CSS Grid's "explicit-first then dense fill" handles all displacement natively.
   useEffect(() => {
     if (feedLayout !== 'tiles') return;
     const DRAG_THRESHOLD = 6;
+    const TOTAL_COLS = 14;
+
+    const computeSnapTarget = (clientX, clientY, ds) => {
+      const grid = desktopGridRef.current;
+      if (!grid) return null;
+      const gridRect = grid.getBoundingClientRect();
+      const cs = getComputedStyle(grid);
+      const colGap = parseFloat(cs.columnGap) || 12;
+      const rowGap = parseFloat(cs.rowGap) || 12;
+      const rowH   = parseFloat(cs.gridAutoRows) || 200;
+      const colW   = (gridRect.width - colGap * (TOTAL_COLS - 1)) / TOTAL_COLS;
+      const cellStrideX = colW + colGap;
+      const cellStrideY = rowH + rowGap;
+
+      const w = Math.max(2, parseInt(ds.outerEl?.dataset.w || '2', 10));
+      const h = Math.max(1, parseInt(ds.outerEl?.dataset.h || '1', 10));
+
+      // Center the dragged tile under the cursor, then snap left edge to even columns (0,2,4...).
+      // Tile width in px = w*colW + (w-1)*colGap; we want cursor at center of tile.
+      const tileWpx = w * colW + (w - 1) * colGap;
+      const tileHpx = h * rowH + (h - 1) * rowGap;
+      const xInGrid = clientX - gridRect.left - tileWpx / 2;
+      const yInGrid = clientY - gridRect.top  - tileHpx / 2;
+      let col = Math.round(xInGrid / (cellStrideX * 2)) * 2; // snap to even cols
+      let row = Math.round(yInGrid / cellStrideY);
+      col = Math.max(0, Math.min(col, TOTAL_COLS - w));
+      row = Math.max(0, row);
+      return { col: col + 1, row: row + 1 }; // CSS Grid is 1-indexed
+    };
 
     const onMouseMove = (e) => {
       const ds = window._gpDragState;
@@ -3497,12 +3523,10 @@ export default function GeoPostView({ session }) {
         document.body.style.cursor           = 'grabbing';
 
         const rect = ds.outerEl ? ds.outerEl.getBoundingClientRect() : null;
-        // Cursor offset so the ghost stays under the grab point at 50% scale
         ds.offsetX = rect ? e.clientX - rect.left : 0;
         ds.offsetY = rect ? e.clientY - rect.top  : 0;
 
-        // Ghost: 50% scale cursor-following clone at 50% opacity.
-        // The in-grid tile (rendered semi-transparent at its displaced position) shows landing spot.
+        // Floating ghost: 50% scale cursor-following clone at 50% opacity.
         const ghost = document.createElement('div');
         ghost.style.cssText = `
           position: fixed;
@@ -3530,48 +3554,16 @@ export default function GeoPostView({ session }) {
         dragGhostRef.current.style.top  = `${e.clientY - ds.offsetY}px`;
       }
 
-      // C. TILE DETECTION via getBoundingClientRect (NOT elementFromPoint — ghost blocks it).
-      // Iterate all tile elements directly; ghost is transparent to this check.
-      // 16ms throttle for displacement state update only — ghost movement above is unthrottled.
+      // C. COMPUTE SNAP TARGET on grid coords (16ms throttle for state updates only).
       if (window._gpLastMove && Date.now() - window._gpLastMove < 16) return;
       window._gpLastMove = Date.now();
 
-      const tileEls = document.querySelectorAll('[data-post-id]');
-      let foundId  = null;
-      let foundRect = null;
-      let foundEl   = null;
-
-      for (const el of tileEls) {
-        const id = el.dataset.postId;
-        if (id === ds.postId) continue;
-        if (pinnedPostIds.has(id)) continue;
-        const rect = el.getBoundingClientRect();
-        if (e.clientX >= rect.left && e.clientX <= rect.right &&
-            e.clientY >= rect.top  && e.clientY <= rect.bottom) {
-          foundId   = id;
-          foundRect = rect;
-          foundEl   = el;
-          break;
-        }
-      }
-
-      if (foundId && foundRect && foundEl) {
-        // Quadrant slot: treat every tile as a grid of 2-wide × 1-tall minimum slots.
-        // e.g. 8x2 tile → 4×2 = 8 slots; 2x1 tile → 1×1 = 1 slot (just before/after).
-        const tW = parseInt(foundEl.dataset.w) || 2;
-        const tH = parseInt(foundEl.dataset.h) || 1;
-        const hSlots = Math.max(1, tW / 2);  // horizontal slots (step = 2 cols = min span)
-        const vSlots = Math.max(1, tH);       // vertical slots (step = 1 row = min span)
-        const slotCol = Math.min(
-          Math.floor(((e.clientX - foundRect.left) / foundRect.width) * hSlots),
-          hSlots - 1
+      const target = computeSnapTarget(e.clientX, e.clientY, ds);
+      if (target) {
+        ds.lastTarget = target;
+        setDragTarget(prev =>
+          (prev && prev.col === target.col && prev.row === target.row) ? prev : target
         );
-        const slotRow = Math.min(
-          Math.floor(((e.clientY - foundRect.top) / foundRect.height) * vSlots),
-          vSlots - 1
-        );
-        window._gpInsertSlot = (slotRow * hSlots) + slotCol;
-        setDragHoverId(foundId);
       }
     };
 
@@ -3580,25 +3572,14 @@ export default function GeoPostView({ session }) {
       if (!ds) return;
 
       if (ds.active) {
-        // D. COMMIT or REVERT
-        const currentHoverId = dragHoverIdRef.current;
-        if (currentHoverId && currentHoverId !== ds.postId) {
-          setCustomPostOrder(() => orderedFilteredPostsRef.current.map(p => p.id));
-        }
-
-        // E. UPDATE PIN COORDINATES if user dragged a pinned tile
-        if (pinnedPostIds.has(ds.postId)) {
-          requestAnimationFrame(() => {
-            const el = document.querySelector(`[data-post-id="${ds.postId}"]`);
-            if (el) {
-              const cs = getComputedStyle(el);
-              const row = parseInt(cs.gridRowStart, 10);
-              const col = parseInt(cs.gridColumnStart, 10);
-              if (!isNaN(row) && !isNaN(col)) {
-                setPinnedPositions(p => ({ ...p, [ds.postId]: { row, col } }));
-              }
-            }
-          });
+        // D. COMMIT snap target to userPositions (or pinnedPositions if tile is pinned).
+        const target = ds.lastTarget;
+        if (target) {
+          if (pinnedPostIds.has(ds.postId)) {
+            setPinnedPositions(p => ({ ...p, [ds.postId]: target }));
+          } else {
+            setUserPositions(p => ({ ...p, [ds.postId]: target }));
+          }
         }
 
         if (dragGhostRef.current) { dragGhostRef.current.remove(); dragGhostRef.current = null; }
@@ -3607,12 +3588,9 @@ export default function GeoPostView({ session }) {
       document.body.style.userSelect       = '';
       document.body.style.webkitUserSelect = '';
       document.body.style.cursor           = '';
-      window._gpInsertSlot = null;
-      window._gpInsertSide = null;
-      window._gpDragSide   = null;
       window._gpLastMove   = 0;
       setDraggingId(null);
-      setDragHoverId(null);
+      setDragTarget(null);
       window._gpDragState = null;
     };
 
@@ -3632,9 +3610,6 @@ export default function GeoPostView({ session }) {
       document.removeEventListener('mouseleave', onMouseLeaveWindow);
       if (dragGhostRef.current) { dragGhostRef.current.remove(); dragGhostRef.current = null; }
       window._gpDragState  = null;
-      window._gpInsertSlot = null;
-      window._gpInsertSide = null;
-      window._gpDragSide   = null;
       window._gpLastMove   = 0;
       document.body.style.userSelect       = '';
       document.body.style.webkitUserSelect = '';
@@ -3676,6 +3651,10 @@ export default function GeoPostView({ session }) {
         isPinned={pinnedPostIds.has(post.id)}
         pinnedRow={pinnedPositions[post.id]?.row ?? null}
         pinnedCol={pinnedPositions[post.id]?.col ?? null}
+        userRow={userPositions[post.id]?.row ?? null}
+        userCol={userPositions[post.id]?.col ?? null}
+        dragTargetRow={draggingId === post.id ? dragTarget?.row ?? null : null}
+        dragTargetCol={draggingId === post.id ? dragTarget?.col ?? null : null}
         onTogglePin={togglePin}
         onClickUsername={handleClickUsername}
         isDragging={draggingId === post.id}
