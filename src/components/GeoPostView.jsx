@@ -964,7 +964,7 @@ function GeoPostMosaic({ posts, accentColor, opacity = 0.42, onTileClick = null 
 }
 
 // ── PostCard ──────────────────────────────────────────────────────────────────
-function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, onSelectTag, zipHeatMap, boroughHeatMap, textScale = 1, imageScale = 1, imagePriority = false, isDesktopMasonry = false, gridUnitHeight = 0, commentCount = 0, commentsOpen = false, onToggleComments, commentsChildren, onOpenPopup, onHide, isPinned = false, pinnedRow = null, pinnedCol = null, onTogglePin }) {
+function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, onSelectTag, zipHeatMap, boroughHeatMap, textScale = 1, imageScale = 1, imagePriority = false, isDesktopMasonry = false, gridUnitHeight = 0, commentCount = 0, commentsOpen = false, onToggleComments, commentsChildren, onOpenPopup, onHide, isPinned = false, pinnedRow = null, pinnedCol = null, onTogglePin, onClickUsername, isDragTarget = false }) {
   const { resolvedTheme } = useSiteTheme();
   const theme = getPostVisualTheme(post, resolvedTheme);
   const date = new Date(post.created_at);
@@ -1078,13 +1078,7 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
     : (finalRowSpan === 3) ? 4
     : hasImage ? 3
     : (finalRowSpan === 1) ? 4   // no-image 2w×1t half-tile: 4 lines
-    : (finalColSpan >= 4) ? (() => {
-        const stdLine = Math.floor(16 * scale * textLineHeight); // 24px at scale=1
-        if (isDesktopMasonry && gridUnitHeight > 120) {
-          return Math.max(6, Math.floor((gridUnitHeight - 110) / stdLine));
-        }
-        return 13; // fallback when gridUnitHeight not yet measured
-      })()
+    : (finalColSpan >= 4) ? 14   // no-image wide 4w×2t — 14 std lines = 336px budget
     : 12;                         // no-image normal 2w×2t
   // Fixed pixel budget: 16px (browser normal font) × 1.5 line-height × maxTextLines × slider scale
   const maxBudgetPx = Math.floor(16 * scale * textLineHeight) * maxTextLines;
@@ -1191,6 +1185,7 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
     <div
       ref={outerRef}
       className="group"
+      data-post-id={post.id}
       style={{
         ...tileGridStyle,
         position: 'relative',
@@ -1198,6 +1193,12 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
         flexDirection: 'column',
         height: '100%',
         overflow: 'visible',
+        cursor: onOpenPopup ? 'pointer' : 'default',
+      }}
+      onClick={(e) => { onOpenPopup && onOpenPopup(post); }}
+      onMouseDown={(e) => {
+        if (e.button !== 0) return;
+        window._gpDragState = { postId: post.id, startX: e.clientX, startY: e.clientY, active: false, outerEl: outerRef.current };
       }}
     >
       {/* Inner visual card — carries all visual styling */}
@@ -1214,6 +1215,7 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
           position: 'relative',
           overflow: 'hidden',
           minHeight: 0,
+          ...(isDragTarget ? { outline: '3px dashed #7c3aed' } : {}),
         }}
       >
       {post.image_url && !isSplitTile && (
@@ -1224,7 +1226,7 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
             ? { flex: (commentsOpen && finalRowSpan === 3 && commentCount > 0) ? '0 0 42%' : 1, minHeight: 80, position: 'relative', cursor: onOpenPopup ? 'pointer' : 'default' }
             : { height: 0, paddingBottom: shape === 'portrait' ? '110%' : isUltrawideTile ? '25%' : shape === 'landscape' ? '48%' : '72%', cursor: onOpenPopup ? 'pointer' : 'default' }
           }
-          onClick={() => onOpenPopup && onOpenPopup(post)}
+          onClick={e => e.stopPropagation()}
         >
           <img
             src={post.image_url}
@@ -1252,7 +1254,7 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
           {onTogglePin && (
             <button
               className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-10"
-              style={{ background: isPinned ? '#000' : 'rgba(0,0,0,0.7)' }}
+              style={{ background: isPinned ? accentColor : 'rgba(0,0,0,0.7)' }}
               onMouseDown={e => e.preventDefault()}
               onClick={(e) => {
                 e.stopPropagation();
@@ -1277,7 +1279,7 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
         <div
           className="relative overflow-hidden bg-black/5 flex-shrink-0"
           style={{ width: '40%', cursor: onOpenPopup ? 'pointer' : 'default', minHeight: 0 }}
-          onClick={() => onOpenPopup && onOpenPopup(post)}
+          onClick={e => e.stopPropagation()}
         >
           <img
             src={post.image_url}
@@ -1298,7 +1300,11 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
       <div className="p-3" style={{ background: theme.fill, flex: (hasImage && !isSplitTile) ? '0 0 auto' : '1 1 auto', display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
         <div className="flex items-center gap-1 mb-1 overflow-hidden" style={{ flexWrap: 'nowrap', minWidth: 0, flexShrink: 0 }}>
           {postIsAnonymous ? (
-            <span className="font-black text-xs flex items-center gap-1 flex-shrink" style={{ color: theme.text, fontSize: `${12 * scale}px`, minWidth: 0, flexShrink: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}>
+            <span
+              className="font-black text-xs flex items-center gap-1 flex-shrink cursor-pointer hover:underline"
+              style={{ color: theme.text, fontSize: `${12 * scale}px`, minWidth: 0, flexShrink: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}
+              onClick={(e) => { e.stopPropagation(); if (onClickUsername) onClickUsername(null); }}
+            >
               <svg width="13" height="13" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ color: 'currentColor', flexShrink: 0 }}>
                 <rect x="2" y="9" width="16" height="2.5" rx="1.25" fill="currentColor" />
                 <rect x="5" y="3" width="10" height="7" rx="1.5" fill="currentColor" />
@@ -1307,11 +1313,15 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
               Anonymous
             </span>
           ) : (
-            <span className="font-black text-xs" style={{ color: theme.text, fontSize: `${12 * scale}px`, minWidth: 0, flexShrink: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}>{post.username || 'Orbiter'}</span>
+            <span
+              className="font-black text-xs cursor-pointer hover:underline"
+              style={{ color: theme.text, fontSize: `${12 * scale}px`, minWidth: 0, flexShrink: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}
+              onClick={(e) => { e.stopPropagation(); if (onClickUsername) onClickUsername(post.username || null); }}
+            >{post.username || 'Orbiter'}</span>
           )}
 
           <span
-            onClick={() => onSelectTag && onSelectTag({ status: postIsAnonymous ? 'anonymous' : post.is_participant ? 'participant' : 'orbiter' })}
+            onClick={(e) => { e.stopPropagation(); onSelectTag && onSelectTag({ status: postIsAnonymous ? 'anonymous' : post.is_participant ? 'participant' : 'orbiter' }); }}
             className="text-[9px] font-black px-1.5 py-0.5 rounded-full cursor-pointer"
             style={{ ...statusStyle, fontSize: `${9 * scale}px`, flexShrink: 0, whiteSpace: 'nowrap' }}
           >
@@ -1336,7 +1346,6 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
             minHeight: 0,
             cursor: onOpenPopup ? 'pointer' : 'default',
           }}
-          onClick={() => onOpenPopup && onOpenPopup(post)}
           dangerouslySetInnerHTML={{ __html: postHtml }}
         />
 
@@ -1360,7 +1369,7 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
             <button
               key={emoji}
               onMouseDown={(e) => e.preventDefault()}
-              onClick={() => onReact(post.id, emoji)}
+              onClick={(e) => { e.stopPropagation(); onReact(post.id, emoji); }}
               className="flex items-center gap-0.5 px-2 py-0.5 rounded-full border-2 text-xs font-black hover:scale-105 transition-transform"
               style={post.post_fill ? { ...outlineButtonStyle, fontSize: `${11 * scale}px` } : { borderColor: '#000', backgroundColor: '#f3f4f6', color: '#000', fontSize: `${11 * scale}px` }}
             >
@@ -1371,7 +1380,8 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
           <button
             ref={qepBtnRef}
             onMouseDown={(e) => e.preventDefault()}
-            onClick={() => {
+            onClick={(e) => {
+              e.stopPropagation();
               if (qepAnchorRect) { setQepAnchorRect(null); return; }
               const rect = qepBtnRef.current.getBoundingClientRect();
               setQepAnchorRect({ top: rect.top, left: rect.left, bottom: rect.bottom });
@@ -1385,7 +1395,7 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
           {(postReactions?.length > 0) && (
             <button
               onMouseDown={(e) => e.preventDefault()}
-              onClick={() => onOpenReactors(post.id)}
+              onClick={(e) => { e.stopPropagation(); onOpenReactors(post.id); }}
               className="px-2 py-0.5 rounded-full border-2 text-[10px] font-black hover:scale-105 transition-transform"
               style={post.post_fill ? { ...outlineButtonStyle, fontSize: `${10 * scale}px` } : { borderColor: '#000', backgroundColor: '#f3f4f6', color: '#000', fontSize: `${10 * scale}px` }}
             >
@@ -1395,14 +1405,14 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
 
           <button
             onMouseDown={(e) => e.preventDefault()}
-            onClick={() => onToggleComments && onToggleComments(post.id)}
+            onClick={(e) => { e.stopPropagation(); onToggleComments && onToggleComments(post.id); }}
             className="px-2 py-0.5 rounded-full border-2 text-[10px] font-black hover:scale-105 transition-transform"
             style={post.post_fill ? { ...outlineButtonStyle, fontSize: `${10 * scale}px` } : { borderColor: '#000', backgroundColor: '#f3f4f6', color: '#000', fontSize: `${10 * scale}px` }}
           >
             💬 {commentCount}
           </button>
 
-          <div className="ml-auto flex items-center gap-1">
+          <div className="ml-auto flex items-center gap-1" onClick={e => e.stopPropagation()}>
             {post.scope === 'zip' && post.borough && (
               <span
                 onClick={() => onSelectTag && onSelectTag({ ...post, scope: 'borough' })}
@@ -1475,7 +1485,7 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
           {onHide && (
             <button
               className="absolute w-6 h-6 rounded-full bg-black/70 text-white text-xs font-black flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black z-20 flex-shrink-0"
-              style={{ top: 0, left: 0, transform: 'translate(-50%, -50%)' }}
+              style={{ top: 0, left: 0, transform: 'translate(-30%, -30%)' }}
               onMouseDown={e => e.preventDefault()}
               onClick={(e) => { e.stopPropagation(); onHide(post.id); }}
               title="Hide this post"
@@ -1484,7 +1494,7 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
           {onTogglePin && (
             <button
               className="absolute w-6 h-6 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-20 flex-shrink-0 text-white text-xs"
-              style={{ top: 0, right: 0, transform: 'translate(50%, -50%)', background: isPinned ? '#000' : 'rgba(0,0,0,0.7)' }}
+              style={{ top: 0, right: 0, transform: 'translate(30%, -30%)', background: isPinned ? accentColor : 'rgba(0,0,0,0.7)' }}
               onMouseDown={e => e.preventDefault()}
               onClick={(e) => {
                 e.stopPropagation();
@@ -1737,7 +1747,11 @@ function InlineDropdown({ open, onClose, children, alignRight = false, className
     if (!open) return;
     const h = e => {
       if (triggerRef?.current?.contains(e.target)) return;
-      if (ref.current && !ref.current.contains(e.target)) onClose();
+      if (ref.current && ref.current.contains(e.target)) return;
+      // Bounding rect fallback: scrollbar clicks may have e.target = body but cursor inside dropdown
+      const rect = ref.current?.getBoundingClientRect();
+      if (rect && e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom) return;
+      onClose();
     };
     const t = setTimeout(() => document.addEventListener('mousedown', h), 50);
     return () => { clearTimeout(t); document.removeEventListener('mousedown', h); };
@@ -2293,9 +2307,22 @@ export default function GeoPostView({ session }) {
     try { return new Set(JSON.parse(localStorage.getItem('lapuff_hidden_posts') || '[]')); }
     catch { return new Set(); }
   });
-  const [pinnedPostIds, setPinnedPostIds] = useState(new Set());
-  const [pinnedPositions, setPinnedPositions] = useState({});
+  const [pinnedPostIds, setPinnedPostIds] = useState(() => {
+    try { return new Set(JSON.parse(localStorage.getItem('lapuff_pinned_posts') || '[]')); } catch { return new Set(); }
+  });
+  const [pinnedPositions, setPinnedPositions] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('lapuff_pinned_positions') || '{}'); } catch { return {}; }
+  });
   const [hiddenPanelOpen, setHiddenPanelOpen] = useState(false);
+  // Drag-to-reorder state (Change 7)
+  const [customPostOrder, setCustomPostOrder] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('lapuff_post_order') || '[]'); } catch { return []; }
+  });
+  const [draggingId, setDraggingId] = useState(null);
+  const [dragOverIdx, setDragOverIdx] = useState(null);
+  const dragOverIdxRef = useRef(null);
+  const visiblePostsRef = useRef([]);
+  const orderedFilteredPostsRef = useRef([]);
   const hiddenBtnRef = useRef(null);
   // Feed layout: 'tiles' = bento masonry, 'list' = simple sidebar + stacked feed (from b10941b)
   const [feedLayout, setFeedLayout] = useState(() => {
@@ -2996,8 +3023,9 @@ export default function GeoPostView({ session }) {
   const searchTokens = normalizedQuery ? normalizedQuery.split(' ') : [];
 
   const filteredPosts = useMemo(() => {
+    const baseQuery = normalizedQuery ? normalizedQuery.trim() : '';
     if (!normalizedQuery) return posts;
-    return posts.filter((p) => {
+    const matched = posts.filter((p) => {
       let parsedContent = {};
       if (p.content && typeof p.content === 'object') parsedContent = p.content;
       else if (typeof p.content === 'string') {
@@ -3013,13 +3041,42 @@ export default function GeoPostView({ session }) {
       const haystack = `${contentText} ${username} ${borough} ${zip} ${scope} ${status} nyc digital`;
       return searchTokens.every((token) => haystack.includes(token));
     });
+    // Sort: exact username match first, then rest in original order
+    if (baseQuery.length > 1) {
+      const exact = matched.filter(p => normalizeSearchText(p.username || '') === baseQuery);
+      const rest = matched.filter(p => normalizeSearchText(p.username || '') !== baseQuery);
+      return [...exact, ...rest];
+    }
+    return matched;
   }, [posts, normalizedQuery, searchTokens]);
 
-  const visiblePosts = filteredPosts.filter(p => !hiddenPostIds.has(p.id)).slice(0, visibleCount);
-  const canShowMore  = visibleCount < filteredPosts.length;
+  // Merge new post IDs into custom order when posts change (Change 7)
+  useEffect(() => {
+    setCustomPostOrder(prev => {
+      const known = new Set(prev);
+      const newIds = posts.map(p => p.id).filter(id => !known.has(id));
+      if (newIds.length === 0) return prev;
+      return [...prev, ...newIds];
+    });
+  }, [posts]);
+
+  const orderedFilteredPosts = useMemo(() => {
+    if (customPostOrder.length === 0) return filteredPosts;
+    const orderMap = new Map(customPostOrder.map((id, i) => [id, i]));
+    return [...filteredPosts].sort((a, b) => {
+      const ai = orderMap.has(a.id) ? orderMap.get(a.id) : Infinity;
+      const bi = orderMap.has(b.id) ? orderMap.get(b.id) : Infinity;
+      return ai - bi;
+    });
+  }, [filteredPosts, customPostOrder]);
+
+  const visiblePosts = orderedFilteredPosts.filter(p => !hiddenPostIds.has(p.id)).slice(0, visibleCount);
+  const canShowMore  = visibleCount < orderedFilteredPosts.length;
   const canShowLess  = visibleCount > PAGE_SIZE;
   canShowMoreRef.current = canShowMore;
   canShowLessRef.current = canShowLess;
+  visiblePostsRef.current = visiblePosts;
+  orderedFilteredPostsRef.current = orderedFilteredPosts;
 
   useEffect(() => {
     // Only measure in tile mode — filter panel only exists in tile grid
@@ -3275,6 +3332,15 @@ export default function GeoPostView({ session }) {
     }
   };
 
+  const handleClickUsername = useCallback((username) => {
+    if (!username) {
+      setStatusFilter('anonymous');
+    } else {
+      setSearchQuery(username);
+    }
+    setVisibleCount(PAGE_SIZE);
+  }, []);
+
   const hidePost = (postId) => {
     setHiddenPostIds(prev => {
       const next = new Set(prev);
@@ -3312,8 +3378,105 @@ export default function GeoPostView({ session }) {
     });
   }, []);
 
-  const scrollToTop = () => {
-    topAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  // Persist pinnedPostIds (Change 8)
+  useEffect(() => {
+    try { localStorage.setItem('lapuff_pinned_posts', JSON.stringify([...pinnedPostIds])); } catch {}
+  }, [pinnedPostIds]);
+
+  useEffect(() => {
+    try { localStorage.setItem('lapuff_pinned_positions', JSON.stringify(pinnedPositions)); } catch {}
+  }, [pinnedPositions]);
+
+  // Persist customPostOrder (Change 7)
+  useEffect(() => {
+    try { localStorage.setItem('lapuff_post_order', JSON.stringify(customPostOrder)); } catch {}
+  }, [customPostOrder]);
+
+  // Document-level drag handlers for tile reorder (Change 7)
+  useEffect(() => {
+    if (feedLayout !== 'tiles') return;
+    const DRAG_THRESHOLD = 6;
+
+    const onMouseMove = (e) => {
+      const ds = window._gpDragState;
+      if (!ds) return;
+      const dx = e.clientX - ds.startX;
+      const dy = e.clientY - ds.startY;
+      if (!ds.active && Math.sqrt(dx * dx + dy * dy) < DRAG_THRESHOLD) return;
+
+      if (!ds.active) {
+        ds.active = true;
+        setDraggingId(ds.postId);
+        if (ds.outerEl) {
+          ds.outerEl.style.opacity = '0.5';
+          ds.outerEl.style.zIndex = '999';
+          ds.outerEl.style.pointerEvents = 'none';
+        }
+      }
+
+      const grid = desktopGridRef.current;
+      if (!grid) return;
+      const tiles = Array.from(grid.querySelectorAll('[data-post-id]'));
+      let closestIdx = -1;
+      let closestDist = Infinity;
+      tiles.forEach((tile, idx) => {
+        const rect = tile.getBoundingClientRect();
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        const dist = Math.abs(e.clientX - cx) + Math.abs(e.clientY - cy);
+        if (dist < closestDist) { closestDist = dist; closestIdx = idx; }
+      });
+      dragOverIdxRef.current = closestIdx;
+      setDragOverIdx(closestIdx);
+    };
+
+    const onMouseUp = () => {
+      const ds = window._gpDragState;
+      if (!ds) return;
+
+      if (ds.active) {
+        const draggedId = ds.postId;
+
+        if (ds.outerEl) {
+          ds.outerEl.style.opacity = '';
+          ds.outerEl.style.zIndex = '';
+          ds.outerEl.style.pointerEvents = '';
+          ds.outerEl.style.transform = 'scale(0.96)';
+          setTimeout(() => { if (ds.outerEl) ds.outerEl.style.transform = ''; }, 200);
+        }
+
+        const currentDragOverIdx = dragOverIdxRef.current;
+        setDragOverIdx(null);
+        dragOverIdxRef.current = null;
+        setDraggingId(null);
+
+        if (currentDragOverIdx !== null && currentDragOverIdx >= 0) {
+          setCustomPostOrder(prev => {
+            const current = prev.length > 0 ? [...prev] : orderedFilteredPostsRef.current.map(p => p.id);
+            const withoutDragged = current.filter(id => id !== draggedId);
+            const targetPost = visiblePostsRef.current[currentDragOverIdx];
+            if (!targetPost || targetPost.id === draggedId) return current;
+            const targetPos = withoutDragged.indexOf(targetPost.id);
+            if (targetPos === -1) return current;
+            withoutDragged.splice(targetPos, 0, draggedId);
+            return withoutDragged;
+          });
+        }
+      }
+
+      window._gpDragState = null;
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+    return () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      window._gpDragState = null;
+    };
+  }, [feedLayout]);
+
+  const scrollToTop = () => {    topAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -3348,6 +3511,8 @@ export default function GeoPostView({ session }) {
         pinnedRow={pinnedPositions[post.id]?.row ?? null}
         pinnedCol={pinnedPositions[post.id]?.col ?? null}
         onTogglePin={togglePin}
+        onClickUsername={handleClickUsername}
+        isDragTarget={draggingId && dragOverIdx !== null && visiblePostsRef.current[dragOverIdxRef.current]?.id === post.id}
         commentsChildren={
           <CommentSection
             post={post}
@@ -3972,7 +4137,7 @@ export default function GeoPostView({ session }) {
             </div>
           </aside>
 
-          {!loading && filteredPosts.length === 0 && (
+          {!loading && orderedFilteredPosts.length === 0 && (
             <div className="rounded-2xl border-3 border-black bg-white shadow-[4px_4px_0px_black] flex items-center justify-center" style={{ gridColumn: '3 / -1', gridRow: 'span 2' }}>
               <div className="text-center py-8 px-4">
                 <div className="text-4xl mb-2">🌀</div>
@@ -3994,7 +4159,7 @@ export default function GeoPostView({ session }) {
           <div data-show-more-bar className="hidden md:flex justify-center gap-3 pt-2 pb-1">
             {canShowMore && (
               <button onMouseDown={e => e.preventDefault()} onClick={() => setVisibleCount(v => v + PAGE_SIZE)} className="min-h-[32px] px-4 py-1.5 border-2 border-black rounded-full text-xs font-black bg-white shadow-[2px_2px_0px_black] hover:scale-105 transition-transform leading-tight text-center inline-flex items-center justify-center whitespace-nowrap">
-                Show More ({filteredPosts.length - visibleCount} remaining)
+                Show More ({orderedFilteredPosts.length - visibleCount} remaining)
               </button>
             )}
             {canShowLess && (
@@ -4097,7 +4262,7 @@ export default function GeoPostView({ session }) {
                   <p className="text-sm text-gray-400 font-semibold">Loading...</p>
                 </div>
               )}
-              {!loading && filteredPosts.length === 0 && (
+              {!loading && orderedFilteredPosts.length === 0 && (
                 <div className="rounded-2xl border-3 border-black bg-white shadow-[4px_4px_0px_black] text-center py-8 px-4">
                   <div className="text-4xl mb-2">🌀</div>
                   <p className="font-black text-gray-500">Nothing here yet! Be the first!</p>
@@ -4112,7 +4277,7 @@ export default function GeoPostView({ session }) {
                 <div className="flex justify-center gap-3 pt-3 pb-1">
                   {canShowMore && (
                     <button onMouseDown={e => e.preventDefault()} onClick={() => setVisibleCount(v => v + PAGE_SIZE)} className="min-h-[32px] px-4 py-1.5 border-2 border-black rounded-full text-xs font-black bg-white shadow-[2px_2px_0px_black] hover:scale-105 transition-transform">
-                      Show More ({filteredPosts.length - visibleCount} remaining)
+                      Show More ({orderedFilteredPosts.length - visibleCount} remaining)
                     </button>
                   )}
                   {canShowLess && (
@@ -4277,21 +4442,21 @@ export default function GeoPostView({ session }) {
             </div>
 
             <div className={`transition-opacity duration-200 ${loading ? 'opacity-35' : 'opacity-100'}`}>
-              {filteredPosts.length === 0 && !loading && (
+              {orderedFilteredPosts.length === 0 && !loading && (
                 <div className="text-center py-8">
                   <div className="text-4xl mb-2">🌀</div>
                   <p className="font-black text-gray-500">Nothing here yet! Be the first!</p>
                 </div>
               )}
 
-              {filteredPosts.length > 0 && (
+              {orderedFilteredPosts.length > 0 && (
                 <div className="flex flex-col gap-3 pb-8">
                   {visiblePosts.map((post, index) => renderFeedPostCard(post, index))}
                   {(canShowMore || canShowLess) && (
                     <div className="flex justify-center gap-3 pt-2 pb-2">
                       {canShowMore && (
                         <button onMouseDown={e => e.preventDefault()} onClick={() => setVisibleCount(v => v + PAGE_SIZE)} className="min-h-[32px] px-4 py-1.5 border-2 border-black rounded-full text-xs font-black bg-white shadow-[2px_2px_0px_black] hover:scale-105 transition-transform leading-tight text-center inline-flex items-center justify-center whitespace-nowrap">
-                          Show More ({filteredPosts.length - visibleCount} remaining)
+                          Show More ({orderedFilteredPosts.length - visibleCount} remaining)
                         </button>
                       )}
                       {canShowLess && (
