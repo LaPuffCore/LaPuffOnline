@@ -964,7 +964,7 @@ function GeoPostMosaic({ posts, accentColor, opacity = 0.42, onTileClick = null 
 }
 
 // ── PostCard ──────────────────────────────────────────────────────────────────
-function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, onSelectTag, zipHeatMap, boroughHeatMap, textScale = 1, imageScale = 1, imagePriority = false, isDesktopMasonry = false, gridUnitHeight = 0, commentCount = 0, commentsOpen = false, onToggleComments, commentsChildren, onOpenPopup, onHide }) {
+function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, onSelectTag, zipHeatMap, boroughHeatMap, textScale = 1, imageScale = 1, imagePriority = false, isDesktopMasonry = false, gridUnitHeight = 0, commentCount = 0, commentsOpen = false, onToggleComments, commentsChildren, onOpenPopup, onHide, isPinned = false, pinnedRow = null, pinnedCol = null, onTogglePin }) {
   const { resolvedTheme } = useSiteTheme();
   const theme = getPostVisualTheme(post, resolvedTheme);
   const date = new Date(post.created_at);
@@ -980,6 +980,8 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
   const [imgLoaded, setImgLoaded] = useState(false);
   const [isTextOverflowing, setIsTextOverflowing] = useState(false);
   const textBlockRef = useRef(null);
+  const outerRef = useRef(null);
+  const gridPositionRef = useRef({ row: null, col: null });
   // content can be a JSONB object or, rarely, a double-encoded JSON string
   const parsedContent = (() => {
     const c = post.content;
@@ -1076,14 +1078,51 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
     : (finalRowSpan === 3) ? 4
     : hasImage ? 3
     : (finalRowSpan === 1) ? 4   // no-image 2w×1t half-tile: 4 lines
-    : (finalColSpan >= 4) ? 13   // no-image wide 4w×2t
+    : (finalColSpan >= 4) ? (() => {
+        const stdLine = Math.floor(16 * scale * textLineHeight); // 24px at scale=1
+        if (isDesktopMasonry && gridUnitHeight > 120) {
+          return Math.max(6, Math.floor((gridUnitHeight - 110) / stdLine));
+        }
+        return 13; // fallback when gridUnitHeight not yet measured
+      })()
     : 12;                         // no-image normal 2w×2t
   // Fixed pixel budget: 16px (browser normal font) × 1.5 line-height × maxTextLines × slider scale
   const maxBudgetPx = Math.floor(16 * scale * textLineHeight) * maxTextLines;
-  const tileGridStyle = {
-    gridColumn: `span ${finalColSpan}`,
-    gridRow: `span ${rowSpan}`,
-  };
+
+  // tileGridStyle: lock position when commentsOpen or isPinned
+  const tileGridStyle = (() => {
+    if (commentsOpen && isDesktopMasonry && gridPositionRef.current.row != null) {
+      return {
+        gridRow: `${gridPositionRef.current.row} / span ${rowSpan}`,
+        gridColumn: gridPositionRef.current.col != null
+          ? `${gridPositionRef.current.col} / span ${finalColSpan}`
+          : `span ${finalColSpan}`,
+      };
+    }
+    if (isPinned && pinnedRow != null) {
+      return {
+        gridRow: `${pinnedRow} / span ${rowSpan}`,
+        gridColumn: pinnedCol != null ? `${pinnedCol} / span ${finalColSpan}` : `span ${finalColSpan}`,
+      };
+    }
+    return {
+      gridColumn: `span ${finalColSpan}`,
+      gridRow: `span ${rowSpan}`,
+    };
+  })();
+
+  // Continuously capture live grid position when tile is in its natural (non-open) state
+  useLayoutEffect(() => {
+    if (!commentsOpen && !isPinned && isDesktopMasonry && outerRef.current) {
+      const cs = getComputedStyle(outerRef.current);
+      const row = parseInt(cs.gridRowStart, 10);
+      const col = parseInt(cs.gridColumnStart, 10);
+      gridPositionRef.current = {
+        row: Number.isFinite(row) ? row : null,
+        col: Number.isFinite(col) ? col : null,
+      };
+    }
+  });
 
   useEffect(() => {
     if (!imgModalOpen) return undefined;
@@ -1150,35 +1189,39 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
 
   return (
     <div
-      className="rounded-2xl border-3 overflow-hidden group"
+      ref={outerRef}
+      className="group"
       style={{
-        background: theme.fill,
-        borderColor: theme.outline,
-        boxShadow: `4px 4px 0px ${theme.shadow}`,
-        height: '100%',
-        display: 'flex',
-        // Split tile: row layout (image left, content right)
-        flexDirection: isSplitTile ? 'row' : 'column',
-        transition: 'transform 2000ms cubic-bezier(0.16, 1, 0.3, 1)',
-        position: 'relative',
         ...tileGridStyle,
+        position: 'relative',
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+        overflow: 'visible',
       }}
     >
-      {/* Hide button for no-image tiles — top-left corner, visible on tile hover */}
-      {!hasImage && onHide && (
-        <button
-          className="absolute top-1.5 left-1.5 w-6 h-6 rounded-full bg-black/70 text-white text-xs font-black flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black z-10 flex-shrink-0"
-          onMouseDown={e => e.preventDefault()}
-          onClick={(e) => { e.stopPropagation(); onHide(post.id); }}
-          title="Hide this post"
-        >✕</button>
-      )}
+      {/* Inner visual card — carries all visual styling */}
+      <div
+        className="rounded-2xl border-3 overflow-hidden"
+        style={{
+          background: theme.fill,
+          borderColor: theme.outline,
+          boxShadow: `4px 4px 0px ${theme.shadow}`,
+          flex: 1,
+          display: 'flex',
+          flexDirection: isSplitTile ? 'row' : 'column',
+          transition: 'transform 2000ms cubic-bezier(0.16, 1, 0.3, 1)',
+          position: 'relative',
+          overflow: 'hidden',
+          minHeight: 0,
+        }}
+      >
       {post.image_url && !isSplitTile && (
         // flex: 1 — image grows elastically to fill all remaining tile space the footer doesn't claim.
         <div
           className="relative w-full overflow-hidden bg-black/5 group"
           style={isDesktopMasonry
-            ? { flex: 1, minHeight: 80, position: 'relative', cursor: onOpenPopup ? 'pointer' : 'default' }
+            ? { flex: (commentsOpen && finalRowSpan === 3 && commentCount > 0) ? '0 0 42%' : 1, minHeight: 80, position: 'relative', cursor: onOpenPopup ? 'pointer' : 'default' }
             : { height: 0, paddingBottom: shape === 'portrait' ? '110%' : isUltrawideTile ? '25%' : shape === 'landscape' ? '48%' : '72%', cursor: onOpenPopup ? 'pointer' : 'default' }
           }
           onClick={() => onOpenPopup && onOpenPopup(post)}
@@ -1204,6 +1247,27 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
               onClick={(e) => { e.stopPropagation(); onHide(post.id); }}
               title="Hide this post"
             >✕</button>
+          )}
+          {/* Pin button: top-right of image */}
+          {onTogglePin && (
+            <button
+              className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-10"
+              style={{ background: isPinned ? '#000' : 'rgba(0,0,0,0.7)' }}
+              onMouseDown={e => e.preventDefault()}
+              onClick={(e) => {
+                e.stopPropagation();
+                const el = outerRef.current;
+                if (el && !isPinned) {
+                  const cs = getComputedStyle(el);
+                  const row = parseInt(cs.gridRowStart, 10);
+                  const col = parseInt(cs.gridColumnStart, 10);
+                  onTogglePin(post.id, Number.isFinite(row) ? row : null, Number.isFinite(col) ? col : null);
+                } else {
+                  onTogglePin(post.id, null, null);
+                }
+              }}
+              title={isPinned ? 'Unpin tile' : 'Pin tile in place'}
+            >📌</button>
           )}
         </div>
       )}
@@ -1403,6 +1467,42 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
           document.body
         )}
       </div>
+      </div>{/* end inner visual card */}
+
+      {/* No-image tiles ONLY: corner buttons outside the inner card */}
+      {!hasImage && (
+        <>
+          {onHide && (
+            <button
+              className="absolute w-6 h-6 rounded-full bg-black/70 text-white text-xs font-black flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black z-20 flex-shrink-0"
+              style={{ top: 0, left: 0, transform: 'translate(-50%, -50%)' }}
+              onMouseDown={e => e.preventDefault()}
+              onClick={(e) => { e.stopPropagation(); onHide(post.id); }}
+              title="Hide this post"
+            >✕</button>
+          )}
+          {onTogglePin && (
+            <button
+              className="absolute w-6 h-6 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-20 flex-shrink-0 text-white text-xs"
+              style={{ top: 0, right: 0, transform: 'translate(50%, -50%)', background: isPinned ? '#000' : 'rgba(0,0,0,0.7)' }}
+              onMouseDown={e => e.preventDefault()}
+              onClick={(e) => {
+                e.stopPropagation();
+                const el = outerRef.current;
+                if (el && !isPinned) {
+                  const cs = getComputedStyle(el);
+                  const row = parseInt(cs.gridRowStart, 10);
+                  const col = parseInt(cs.gridColumnStart, 10);
+                  onTogglePin(post.id, Number.isFinite(row) ? row : null, Number.isFinite(col) ? col : null);
+                } else {
+                  onTogglePin(post.id, null, null);
+                }
+              }}
+              title={isPinned ? 'Unpin tile' : 'Pin tile in place'}
+            >📌</button>
+          )}
+        </>
+      )}
 
       {imgModalOpen && (
         <div className="fixed inset-x-0 top-[72px] bottom-0 z-[100000] overflow-y-auto">
@@ -2193,6 +2293,8 @@ export default function GeoPostView({ session }) {
     try { return new Set(JSON.parse(localStorage.getItem('lapuff_hidden_posts') || '[]')); }
     catch { return new Set(); }
   });
+  const [pinnedPostIds, setPinnedPostIds] = useState(new Set());
+  const [pinnedPositions, setPinnedPositions] = useState({});
   const [hiddenPanelOpen, setHiddenPanelOpen] = useState(false);
   const hiddenBtnRef = useRef(null);
   // Feed layout: 'tiles' = bento masonry, 'list' = simple sidebar + stacked feed (from b10941b)
@@ -3194,6 +3296,22 @@ export default function GeoPostView({ session }) {
     localStorage.removeItem('lapuff_hidden_posts');
   };
 
+  const togglePin = useCallback((postId, row, col) => {
+    setPinnedPostIds(prev => {
+      const next = new Set(prev);
+      if (next.has(postId)) {
+        next.delete(postId);
+        setPinnedPositions(p => { const n = { ...p }; delete n[postId]; return n; });
+      } else {
+        next.add(postId);
+        if (row != null && col != null) {
+          setPinnedPositions(p => ({ ...p, [postId]: { row, col } }));
+        }
+      }
+      return next;
+    });
+  }, []);
+
   const scrollToTop = () => {
     topAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -3226,6 +3344,10 @@ export default function GeoPostView({ session }) {
         onToggleComments={toggleComments}
         onOpenPopup={(p) => setOpenPostPopup(p)}
         onHide={hidePost}
+        isPinned={pinnedPostIds.has(post.id)}
+        pinnedRow={pinnedPositions[post.id]?.row ?? null}
+        pinnedCol={pinnedPositions[post.id]?.col ?? null}
+        onTogglePin={togglePin}
         commentsChildren={
           <CommentSection
             post={post}
@@ -3599,9 +3721,9 @@ export default function GeoPostView({ session }) {
             position: filterPanelPinned ? 'sticky' : 'static',
             top: filterPanelPinned ? 4 : undefined,
             zIndex: filterPanelPinned ? 50 : undefined,
-            marginLeft: filterPanelPinned ? 16 : undefined,
-            marginRight: filterPanelPinned ? 16 : undefined,
-            marginBottom: filterPanelPinned ? 4 : 12,
+            marginLeft: 16,
+            marginRight: 16,
+            marginBottom: 4,
           }}
         >
           <input
