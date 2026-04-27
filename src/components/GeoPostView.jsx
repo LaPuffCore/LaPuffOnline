@@ -11,6 +11,7 @@ import {
   fetchCommentsForPost, submitPostComment, fetchCommentReactions,
   upsertCommentReaction, removeCommentReaction, fetchProfileForGeoPost,
   syncSampleGeoPostsToSupabase, syncSampleGeoCommentsToSupabase,
+  recordAnonAuthorInteraction, deleteGeoPost,
 } from '../lib/supabase';
 import { uploadToOracleCloud, isOciConfigured } from '../lib/oracleStorage';
 import { NYC_ZIP_FEATURES } from '../lib/nycZipGeoJSON';
@@ -731,7 +732,7 @@ function PostDetailPopup({ post, postReactions, onReact, onOpenReactors, accentC
 
         {post.image_url && (
           <div
-            className="relative w-full bg-black/5 rounded-t-2xl overflow-hidden"
+            className="relative w-full bg-black/5 rounded-t-[13px] overflow-hidden"
             style={{ isolation: 'isolate', transform: 'translateZ(0)' }}
           >
             <img
@@ -1001,7 +1002,7 @@ function GeoPostMosaic({ posts, accentColor, opacity = 0.42, onTileClick = null 
 }
 
 // ── PostCard ──────────────────────────────────────────────────────────────────
-function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, onSelectTag, zipHeatMap, boroughHeatMap, textScale = 1, imageScale = 1, imagePriority = false, isDesktopMasonry = false, gridUnitHeight = 0, commentCount = 0, commentsOpen = false, onToggleComments, commentsChildren, onOpenPopup, onHide, isPinned = false, pinnedRow = null, pinnedCol = null, userRow = null, userCol = null, dragTargetRow = null, dragTargetCol = null, onTogglePin, onClickUsername, isDragging = false }) {
+function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, onSelectTag, zipHeatMap, boroughHeatMap, textScale = 1, imageScale = 1, imagePriority = false, isDesktopMasonry = false, gridUnitHeight = 0, commentCount = 0, commentsOpen = false, onToggleComments, commentsChildren, onOpenPopup, onHide, isOwner = false, onDelete, isPinned = false, pinnedRow = null, pinnedCol = null, userRow = null, userCol = null, dragTargetRow = null, dragTargetCol = null, onTogglePin, onClickUsername, isDragging = false }) {
   const { resolvedTheme } = useSiteTheme();
   const theme = getPostVisualTheme(post, resolvedTheme);
   const date = new Date(post.created_at);
@@ -1279,6 +1280,8 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
         style={{
           borderColor: theme.outline,
           boxShadow: `4px 4px 0px ${theme.shadow}`,
+          background: theme.fill,
+          backgroundClip: 'padding-box',
           flex: 1,
           display: 'flex',
           position: 'relative',
@@ -1323,14 +1326,18 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
             onClick={() => {}}
           />
           {!imgLoaded && <div className="absolute inset-0 animate-pulse bg-black/5" />}
-          {/* Hide button: appears on image hover */}
-          {onHide && (
+          {/* Hide button — or DELETE button when current device/user owns this post */}
+          {(onHide || (isOwner && onDelete)) && (
             <button
               className="absolute top-1.5 left-1.5 w-6 h-6 rounded-full bg-black/70 text-white text-xs font-black flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black z-10"
               onMouseDown={e => e.preventDefault()}
-              onClick={(e) => { e.stopPropagation(); onHide(post.id); }}
-              title="Hide this post"
-            >✕</button>
+              onClick={(e) => {
+                e.stopPropagation();
+                if (isOwner && onDelete) onDelete(post.id);
+                else onHide && onHide(post.id);
+              }}
+              title={isOwner ? 'Delete this post' : 'Hide this post'}
+            >{isOwner ? '🗑' : '✕'}</button>
           )}
           {/* Pin button: top-right of image */}
           {onTogglePin && (
@@ -1567,14 +1574,18 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
       {/* No-image tiles ONLY: corner buttons outside the inner card */}
       {!hasImage && (
         <>
-          {onHide && (
+          {(onHide || (isOwner && onDelete)) && (
             <button
               className="absolute w-6 h-6 rounded-full bg-black/70 text-white text-xs font-black flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black z-[9999] flex-shrink-0"
               style={{ top: 0, left: 0, transform: 'translate(-30%, -30%)' }}
               onMouseDown={e => e.preventDefault()}
-              onClick={(e) => { e.stopPropagation(); onHide(post.id); }}
-              title="Hide this post"
-            >✕</button>
+              onClick={(e) => {
+                e.stopPropagation();
+                if (isOwner && onDelete) onDelete(post.id);
+                else onHide && onHide(post.id);
+              }}
+              title={isOwner ? 'Delete this post' : 'Hide this post'}
+            >{isOwner ? '🗑' : '✕'}</button>
           )}
           {onTogglePin && (
             <button
@@ -2853,7 +2864,7 @@ export default function GeoPostView({ session }) {
           ? await uploadToOracleCloud(imageFile)
           : await uploadGeoPostImage(imageFile, session);
       }
-      await submitGeoPost({
+      const newRow = await submitGeoPost({
         content: { html, textColor },
         image_url,
         scope: editorScope,
@@ -2868,6 +2879,19 @@ export default function GeoPostView({ session }) {
         post_approved,
         user_id: session?.user?.id || null,
       }, session);
+      // If posting anonymously: record device-author interaction so RLS lets us delete it later,
+      // and cache locally so the X→delete UI appears for this device only.
+      if (!session?.user?.id && newRow?.id) {
+        try {
+          const mod = await import('../lib/deviceId.js');
+          const deviceId = await mod.getDeviceId();
+          if (deviceId) await recordAnonAuthorInteraction(newRow.id, deviceId);
+        } catch (e) { /* non-fatal */ }
+        setMyAnonPostIds(prev => {
+          if (prev.has(newRow.id)) return prev;
+          const next = new Set(prev); next.add(newRow.id); persistMyAnonPosts(next); return next;
+        });
+      }
       if (editorRef.current) editorRef.current.innerHTML = '';
       localStorage.removeItem('lapuff_createpost_draft');
       setImageFile(null); setImagePreview(null); setShowCheckin(false);
@@ -3455,6 +3479,55 @@ export default function GeoPostView({ session }) {
     localStorage.removeItem('lapuff_hidden_posts');
   };
 
+  // Anonymous-author tracking — local cache of post ids this device authored anonymously.
+  // Used to show the delete affordance only on this device's anon posts.
+  const [myAnonPostIds, setMyAnonPostIds] = useState(() => {
+    try { return new Set(JSON.parse(localStorage.getItem('lapuff_my_anon_posts') || '[]')); }
+    catch { return new Set(); }
+  });
+  const persistMyAnonPosts = (set) => {
+    try { localStorage.setItem('lapuff_my_anon_posts', JSON.stringify([...set])); } catch {}
+  };
+
+  const isPostOwnedByMe = useCallback((post) => {
+    if (!post) return false;
+    if (post._sample) return false;
+    if (session?.user?.id && post.user_id && post.user_id === session.user.id) return true;
+    if (!post.user_id && myAnonPostIds.has(post.id)) return true;
+    return false;
+  }, [session, myAnonPostIds]);
+
+  // Delete confirmation modal state
+  const [deleteConfirmId, setDeleteConfirmId] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
+
+  const requestDeletePost = useCallback((postId) => {
+    setDeleteConfirmId(postId);
+  }, []);
+
+  const confirmDeletePost = useCallback(async () => {
+    const postId = deleteConfirmId;
+    if (!postId) return;
+    setDeletingId(postId);
+    try {
+      let deviceId = null;
+      try { const mod = await import('../lib/deviceId.js'); deviceId = await mod.getDeviceId(); } catch {}
+      await deleteGeoPost(postId, session, deviceId);
+      // Optimistic local removal
+      setPosts(prev => prev.filter(p => p.id !== postId));
+      setMyAnonPostIds(prev => {
+        if (!prev.has(postId)) return prev;
+        const next = new Set(prev); next.delete(postId); persistMyAnonPosts(next); return next;
+      });
+      setDeleteConfirmId(null);
+    } catch (err) {
+      console.warn('Delete failed', err);
+      alert('Could not delete post: ' + (err?.message || 'unknown error'));
+    } finally {
+      setDeletingId(null);
+    }
+  }, [deleteConfirmId, session]);
+
   const togglePin = useCallback((postId, row, col) => {
     setPinnedPostIds(prev => {
       const next = new Set(prev);
@@ -3648,6 +3721,8 @@ export default function GeoPostView({ session }) {
         onToggleComments={toggleComments}
         onOpenPopup={(p) => setOpenPostPopup(p)}
         onHide={hidePost}
+        isOwner={isPostOwnedByMe(post)}
+        onDelete={requestDeletePost}
         isPinned={pinnedPostIds.has(post.id)}
         pinnedRow={pinnedPositions[post.id]?.row ?? null}
         pinnedCol={pinnedPositions[post.id]?.col ?? null}
@@ -4110,7 +4185,8 @@ export default function GeoPostView({ session }) {
       {/* Height-clamp wrapper: clips at 16 half-rows when collapsed; expands on Show More.
           Grid itself stays overflow:visible so corner buttons on edge tiles are never clipped. */}
       <div style={{
-        overflow: canShowLess ? 'visible' : 'hidden',
+        overflow: canShowLess ? 'visible' : 'clip',
+        overflowClipMargin: '40px',
         maxHeight: canShowLess ? 'none' : `${16 * Math.max(1, (desktopUnitHeight - 12) / 2) + 15 * 12}px`,
         position: 'relative',
       }}>
@@ -4669,6 +4745,38 @@ export default function GeoPostView({ session }) {
       )}
       <ReactionListModal isOpen={!!reactorsModal} list={reactorsModal ? (reactions[reactorsModal] || []) : []} onClose={() => setReactorsModal(null)} />
       <ReactionListModal isOpen={!!commentReactorsModal} title="Comment Reactions" list={commentReactorsModal ? (commentReactionsByComment[commentReactorsModal] || []) : []} emojiField="emoji" onClose={() => setCommentReactorsModal(null)} />
+
+      {/* Delete-post confirmation modal — owner only */}
+      {deleteConfirmId && createPortal(
+        <div
+          className="fixed inset-0 z-[100020] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+          onClick={() => deletingId ? null : setDeleteConfirmId(null)}
+        >
+          <div
+            className="bg-white rounded-2xl border-3 border-black shadow-[8px_8px_0px_black] p-5 max-w-sm w-full flex flex-col gap-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="text-center">
+              <div className="text-3xl mb-1">🗑</div>
+              <div className="font-black text-base">Delete this post?</div>
+              <div className="text-xs text-gray-600 mt-1">This cannot be undone.</div>
+            </div>
+            <div className="flex gap-2">
+              <button
+                disabled={!!deletingId}
+                onClick={() => setDeleteConfirmId(null)}
+                className="flex-1 py-2 rounded-xl border-3 border-black font-black text-sm bg-white hover:bg-gray-100 disabled:opacity-50"
+              >No</button>
+              <button
+                disabled={!!deletingId}
+                onClick={confirmDeletePost}
+                className="flex-1 py-2 rounded-xl border-3 border-black font-black text-sm bg-red-500 text-white hover:bg-red-600 disabled:opacity-50"
+              >{deletingId ? 'Deleting…' : 'Yes, delete'}</button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
 
       {/* Quick Post FAB — 2x size, square, more padding, full toolbar */}
       {fabVisible && createPortal(

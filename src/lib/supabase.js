@@ -258,6 +258,47 @@ export async function submitGeoPost(payload, session = null) {
 }
 
 /**
+ * Record an anonymous-author interaction so the device can later delete its own post via RLS.
+ * Best-effort — failure is non-fatal (user simply can't delete from a different device).
+ */
+export async function recordAnonAuthorInteraction(postId, deviceId) {
+  if (!postId || !deviceId) return;
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/anon_device_interactions`, {
+      method: 'POST',
+      headers: { ...baseHeaders, 'Prefer': 'return=minimal' },
+      body: JSON.stringify({ target_id: postId, device_id: deviceId, interaction_type: 'author' }),
+    });
+  } catch (e) { /* non-fatal */ }
+}
+
+/**
+ * Delete a geopost. Server-side RLS enforces ownership.
+ * - Signed-in: requires session; auth.uid() must match post.user_id.
+ * - Anonymous: requires deviceId; row must exist in anon_device_interactions
+ *   (interaction_type='author', target_id=postId, device_id=deviceId).
+ * Sends x-device-id header so PostgREST exposes it via current_setting('request.headers').
+ */
+export async function deleteGeoPost(postId, session = null, deviceId = null) {
+  const headers = { ...baseHeaders };
+  if (session?.access_token) {
+    headers['Authorization'] = `Bearer ${session.access_token}`;
+  }
+  if (deviceId) {
+    headers['x-device-id'] = deviceId;
+  }
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/geoposts?id=eq.${encodeURIComponent(postId)}`,
+    { method: 'DELETE', headers }
+  );
+  if (!res.ok) {
+    const err = await res.text().catch(() => '');
+    throw new Error(err || `Delete failed (${res.status})`);
+  }
+  return true;
+}
+
+/**
  * Add an emoji reaction to a post.
  * Requires a signed-in session to award points (trigger fires).
  * Anonymous calls pass session=null — reaction stored but no points.
