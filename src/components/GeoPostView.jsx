@@ -1233,6 +1233,8 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
       ref={outerRef}
       className="group"
       data-post-id={post.id}
+      data-w={finalColSpan}
+      data-h={finalRowSpan}
       style={{
         ...tileGridStyle,
         position: 'relative',
@@ -3142,9 +3144,10 @@ export default function GeoPostView({ session }) {
       });
     }
 
-    // 2. Live drag displacement: directional insertion (before or after target)
-    // _gpInsertSide tracks which half of the target tile the mouse is on.
-    // This forces large tiles to be displaced when a small tile hovers their left/right half.
+    // 2. Live drag displacement: quadrant slot insertion.
+    // _gpInsertSlot encodes which sub-slot of the target tile the mouse is on.
+    // Slot 0 = insert before target; slot N = punch into the Nth internal slot,
+    // forcing the dense grid to displace the large tile around the new entry.
     if (draggingId && dragHoverId && draggingId !== dragHoverId) {
       const draggedIdx = baseOrder.findIndex(p => p.id === draggingId);
       let targetIdx  = baseOrder.findIndex(p => p.id === dragHoverId);
@@ -3152,7 +3155,8 @@ export default function GeoPostView({ session }) {
         const [draggedItem] = baseOrder.splice(draggedIdx, 1);
         // Re-find target after removal (index shifts if dragged was before target)
         targetIdx = baseOrder.findIndex(p => p.id === dragHoverId);
-        const finalIdx = window._gpInsertSide === 'after' ? targetIdx + 1 : targetIdx;
+        const slotOffset = window._gpInsertSlot ?? 0;
+        const finalIdx   = Math.max(0, targetIdx + slotOffset);
         baseOrder.splice(finalIdx, 0, draggedItem);
       }
     }
@@ -3468,10 +3472,16 @@ export default function GeoPostView({ session }) {
     });
   }, []);
 
-  // Document-level drag handlers — live displacement architecture (Gemini)
+  // Document-level drag handlers — GRID-AREA ARCHITECTURE
+  // ROOT CAUSE FIX: elementFromPoint returns the ghost div (z:200000) because
+  // pointer-events:none only affects mouse routing, NOT elementFromPoint.
+  // So the ghost was always blocking tile detection — displacement never fired.
+  // FIX: iterate all [data-post-id] elements using getBoundingClientRect() point-in-rect.
   useEffect(() => {
     if (feedLayout !== 'tiles') return;
     const DRAG_THRESHOLD = 6;
+    const GRID_COLS = 14;  // must match gridTemplateColumns: repeat(14, ...)
+    const GRID_GAP  = 12;  // must match gap-3 (12px) on the grid container
 
     const onMouseMove = (e) => {
       const ds = window._gpDragState;
@@ -3480,64 +3490,112 @@ export default function GeoPostView({ session }) {
       const dy = e.clientY - ds.startY;
       if (!ds.active && Math.sqrt(dx * dx + dy * dy) < DRAG_THRESHOLD) return;
 
-      // A. INITIALIZE DRAG & BUILD GHOST
+      // A. INITIALIZE DRAG
       if (!ds.active) {
         ds.active = true;
         setDraggingId(ds.postId);
-        document.body.style.userSelect = 'none';
+        document.body.style.userSelect       = 'none';
         document.body.style.webkitUserSelect = 'none';
-        document.body.style.cursor = 'grabbing';
+        document.body.style.cursor           = 'grabbing';
 
-        const rect = ds.outerEl ? ds.outerEl.getBoundingClientRect() : null;
-        // Full-size grab point offset; scale(0.5, center center) keeps visual centered around same point
-        ds.offsetX = rect ? e.clientX - rect.left : 0;
-        ds.offsetY = rect ? e.clientY - rect.top  : 0;
+        // Read dragging tile's actual rendered span from computed style ("span N" strings).
+        // Do this at init so we never read stale React state inside the closure.
+        const tileCs    = ds.outerEl ? getComputedStyle(ds.outerEl) : null;
+        const colEndStr = tileCs?.gridColumnEnd ?? '';
+        const rowEndStr = tileCs?.gridRowEnd    ?? '';
+        ds.colSpan = colEndStr.includes('span')
+          ? (parseInt(colEndStr.replace(/[^0-9]/g, '')) || 2) : 2;
+        ds.rowSpan = rowEndStr.includes('span')
+          ? (parseInt(rowEndStr.replace(/[^0-9]/g, '')) || 1) : 1;
 
-        const ghost = document.createElement('div');
+        // Read row height fresh from grid's own computed style — avoids stale closure.
+        const gridEl  = desktopGridRef.current;
+        const gridCs  = gridEl ? getComputedStyle(gridEl) : null;
+        ds.gridRowH   = parseFloat(gridCs?.gridAutoRows) || 204;
+
+        // Compute gap-aware column width for pixel-perfect ghost snapping.
+        const gridRect = gridEl?.getBoundingClientRect();
+        ds.pureColW = gridRect
+          ? (gridRect.width - (GRID_COLS - 1) * GRID_GAP) / GRID_COLS
+          : 100;
+
+        // Ghost: full-size grid-snapping placement indicator.
+        // Shows WHERE the tile will land (dashed rectangle), not what was grabbed.
+        const ghostW = ds.colSpan * ds.pureColW + (ds.colSpan - 1) * GRID_GAP;
+        const ghostH = ds.rowSpan * ds.gridRowH + (ds.rowSpan - 1) * GRID_GAP;
+        const ghost  = document.createElement('div');
         ghost.style.cssText = `
-          position: fixed; left: ${rect ? rect.left : e.clientX}px; top: ${rect ? rect.top : e.clientY}px;
-          width: ${rect ? rect.width : 200}px; height: ${rect ? rect.height : 200}px;
-          opacity: 0.9; pointer-events: none; z-index: 200000;
-          border-radius: 16px; overflow: hidden;
-          box-shadow: 0 15px 45px rgba(0,0,0,0.5);
-          transform: scale(0.5); transform-origin: center center;
+          position: fixed;
+          left: ${gridRect ? gridRect.left : e.clientX}px;
+          top:  ${gridRect ? gridRect.top  : e.clientY}px;
+          width: ${ghostW}px; height: ${ghostH}px;
+          background: rgba(124,58,237,0.15);
+          border: 3px dashed rgba(124,58,237,0.6);
+          border-radius: 16px;
+          pointer-events: none;
+          z-index: 200000;
+          box-sizing: border-box;
+          transition: left 0.07s ease, top 0.07s ease;
         `;
-        const innerCard = ds.outerEl ? ds.outerEl.querySelector('.rounded-2xl') : null;
-        if (innerCard) {
-          const clone = innerCard.cloneNode(true);
-          clone.style.cssText = 'width:100%;height:100%;position:absolute;inset:0;border-radius:16px;overflow:hidden;pointer-events:none;';
-          ghost.appendChild(clone);
-        }
         document.body.appendChild(ghost);
         dragGhostRef.current = ghost;
       }
 
-      // B. MOVE GHOST WITH CURSOR
-      if (dragGhostRef.current) {
-        dragGhostRef.current.style.left = `${e.clientX - ds.offsetX}px`;
-        dragGhostRef.current.style.top  = `${e.clientY - ds.offsetY}px`;
+      // B. SNAP GHOST TO GRID AREA UNDER CURSOR
+      if (dragGhostRef.current && desktopGridRef.current) {
+        const gridRect   = desktopGridRef.current.getBoundingClientRect();
+        const cellStride = ds.pureColW + GRID_GAP;
+        const rowStride  = ds.gridRowH + GRID_GAP;
+        const rawCol     = Math.floor((e.clientX - gridRect.left) / cellStride);
+        const gridCol    = Math.min(Math.max(0, rawCol), GRID_COLS - ds.colSpan);
+        const rawRow     = Math.floor((e.clientY - gridRect.top) / rowStride);
+        const gridRow    = Math.max(0, rawRow);
+        dragGhostRef.current.style.left = `${gridRect.left + gridCol * cellStride}px`;
+        dragGhostRef.current.style.top  = `${gridRect.top  + gridRow * rowStride}px`;
       }
 
-      // C. AREA-BASED DISPLACEMENT: 16ms throttle to prevent flooding React state
-      // elementFromPoint looks at pixels literally under cursor — full tile area triggers,
-      // not just tile borders. The left/right 50% split determines before/after insertion.
+      // C. TILE DETECTION via getBoundingClientRect (NOT elementFromPoint — ghost blocks it).
+      // Iterate all tile elements directly; ghost is transparent to this check.
+      // 16ms throttle for displacement state update only — ghost movement above is unthrottled.
       if (window._gpLastMove && Date.now() - window._gpLastMove < 16) return;
       window._gpLastMove = Date.now();
 
-      const elementUnderMouse = document.elementFromPoint(e.clientX, e.clientY);
-      const targetTile = elementUnderMouse?.closest('[data-post-id]');
-      const targetId = targetTile?.dataset.postId;
+      const tileEls = document.querySelectorAll('[data-post-id]');
+      let foundId  = null;
+      let foundRect = null;
+      let foundEl   = null;
 
-      if (targetId && targetId !== ds.postId) {
-        // Skip pinned tiles — they can't be displaced
-        if (!pinnedPostIds.has(targetId)) {
-          // Determine left vs right half: forces the array to insert before/after the target,
-          // making larger tiles vacate their row to accommodate any size tile
-          const rect = targetTile.getBoundingClientRect();
-          window._gpInsertSide = (e.clientX - rect.left) > (rect.width / 2) ? 'after' : 'before';
-          setDragHoverId(targetId);
+      for (const el of tileEls) {
+        const id = el.dataset.postId;
+        if (id === ds.postId) continue;
+        if (pinnedPostIds.has(id)) continue;
+        const rect = el.getBoundingClientRect();
+        if (e.clientX >= rect.left && e.clientX <= rect.right &&
+            e.clientY >= rect.top  && e.clientY <= rect.bottom) {
+          foundId   = id;
+          foundRect = rect;
+          foundEl   = el;
+          break;
         }
-        // If hovering a pinned tile, keep last valid dragHoverId (ghost slides around it)
+      }
+
+      if (foundId && foundRect && foundEl) {
+        // Quadrant slot: treat every tile as a grid of 2-wide × 1-tall minimum slots.
+        // e.g. 8x2 tile → 4×2 = 8 slots; 2x1 tile → 1×1 = 1 slot (just before/after).
+        const tW = parseInt(foundEl.dataset.w) || 2;
+        const tH = parseInt(foundEl.dataset.h) || 1;
+        const hSlots = Math.max(1, tW / 2);  // horizontal slots (step = 2 cols = min span)
+        const vSlots = Math.max(1, tH);       // vertical slots (step = 1 row = min span)
+        const slotCol = Math.min(
+          Math.floor(((e.clientX - foundRect.left) / foundRect.width) * hSlots),
+          hSlots - 1
+        );
+        const slotRow = Math.min(
+          Math.floor(((e.clientY - foundRect.top) / foundRect.height) * vSlots),
+          vSlots - 1
+        );
+        window._gpInsertSlot = (slotRow * hSlots) + slotCol;
+        setDragHoverId(foundId);
       }
     };
 
@@ -3547,13 +3605,10 @@ export default function GeoPostView({ session }) {
 
       if (ds.active) {
         // D. COMMIT or REVERT
-        // dragHoverId holds the current hover post id from state — read from ref for sync access
         const currentHoverId = dragHoverIdRef.current;
         if (currentHoverId && currentHoverId !== ds.postId) {
-          // Commit: freeze the live-displaced array order into customPostOrder
           setCustomPostOrder(() => orderedFilteredPostsRef.current.map(p => p.id));
         }
-        // If no hover target → customPostOrder unchanged → array reverts to pre-drag on state clear
 
         // E. UPDATE PIN COORDINATES if user dragged a pinned tile
         if (pinnedPostIds.has(ds.postId)) {
@@ -3570,16 +3625,16 @@ export default function GeoPostView({ session }) {
           });
         }
 
-        // Remove ghost
         if (dragGhostRef.current) { dragGhostRef.current.remove(); dragGhostRef.current = null; }
       }
 
-      document.body.style.userSelect = '';
+      document.body.style.userSelect       = '';
       document.body.style.webkitUserSelect = '';
-      document.body.style.cursor = '';
+      document.body.style.cursor           = '';
+      window._gpInsertSlot = null;
       window._gpInsertSide = null;
-      window._gpDragSide = null;
-      window._gpLastMove = 0;
+      window._gpDragSide   = null;
+      window._gpLastMove   = 0;
       setDraggingId(null);
       setDragHoverId(null);
       window._gpDragState = null;
@@ -3600,13 +3655,14 @@ export default function GeoPostView({ session }) {
       document.removeEventListener('mouseup', onMouseUp);
       document.removeEventListener('mouseleave', onMouseLeaveWindow);
       if (dragGhostRef.current) { dragGhostRef.current.remove(); dragGhostRef.current = null; }
-      window._gpDragState = null;
+      window._gpDragState  = null;
+      window._gpInsertSlot = null;
       window._gpInsertSide = null;
-      window._gpDragSide = null;
-      window._gpLastMove = 0;
-      document.body.style.userSelect = '';
+      window._gpDragSide   = null;
+      window._gpLastMove   = 0;
+      document.body.style.userSelect       = '';
       document.body.style.webkitUserSelect = '';
-      document.body.style.cursor = '';
+      document.body.style.cursor           = '';
     };
   }, [feedLayout, pinnedPostIds]);
 
