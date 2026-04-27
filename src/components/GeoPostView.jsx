@@ -1221,9 +1221,10 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
         height: '100%',
         overflow: 'visible',
         cursor: onOpenPopup ? 'pointer' : 'default',
-        // Invisible placeholder while dragging: stays in DOM to hold grid space
-        opacity: isDragging ? 0 : 1,
+        // Ghost projection: 50% opacity + slight grayscale so user sees landing spot
+        opacity: isDragging ? 0.5 : 1,
         pointerEvents: isDragging ? 'none' : 'auto',
+        filter: isDragging ? 'grayscale(20%)' : 'none',
       }}
       onClick={(e) => { onOpenPopup && onOpenPopup(post); }}
       onMouseDown={(e) => {
