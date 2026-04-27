@@ -716,9 +716,9 @@ function PostDetailPopup({ post, postReactions, onReact, onOpenReactors, accentC
           >×</button>
         )}
 
-        {/* Card: overflow-hidden on image popups; overflow-visible on no-image so corner X clears */}
+        {/* Card: always overflow-hidden so inner content rounds to border-radius. X button is outside card so it's unaffected. */}
         <div
-          className={`rounded-2xl border-3 border-black shadow-[8px_8px_0px_black] flex flex-col${post.image_url ? ' overflow-hidden' : ''}`}
+          className="rounded-2xl border-3 border-black shadow-[8px_8px_0px_black] flex flex-col overflow-hidden"
           style={{ background: surfaceBg, width: '100%', transform: 'translateZ(0)', isolation: 'isolate' }}
         >
           {post.image_url && (
@@ -3480,8 +3480,6 @@ export default function GeoPostView({ session }) {
   useEffect(() => {
     if (feedLayout !== 'tiles') return;
     const DRAG_THRESHOLD = 6;
-    const GRID_COLS = 14;  // must match gridTemplateColumns: repeat(14, ...)
-    const GRID_GAP  = 12;  // must match gap-3 (12px) on the grid container
 
     const onMouseMove = (e) => {
       const ds = window._gpDragState;
@@ -3498,60 +3496,38 @@ export default function GeoPostView({ session }) {
         document.body.style.webkitUserSelect = 'none';
         document.body.style.cursor           = 'grabbing';
 
-        // Read dragging tile's actual rendered span from computed style ("span N" strings).
-        // Do this at init so we never read stale React state inside the closure.
-        const tileCs    = ds.outerEl ? getComputedStyle(ds.outerEl) : null;
-        const colEndStr = tileCs?.gridColumnEnd ?? '';
-        const rowEndStr = tileCs?.gridRowEnd    ?? '';
-        ds.colSpan = colEndStr.includes('span')
-          ? (parseInt(colEndStr.replace(/[^0-9]/g, '')) || 2) : 2;
-        ds.rowSpan = rowEndStr.includes('span')
-          ? (parseInt(rowEndStr.replace(/[^0-9]/g, '')) || 1) : 1;
+        const rect = ds.outerEl ? ds.outerEl.getBoundingClientRect() : null;
+        // Cursor offset so the ghost stays under the grab point at 50% scale
+        ds.offsetX = rect ? e.clientX - rect.left : 0;
+        ds.offsetY = rect ? e.clientY - rect.top  : 0;
 
-        // Read row height fresh from grid's own computed style — avoids stale closure.
-        const gridEl  = desktopGridRef.current;
-        const gridCs  = gridEl ? getComputedStyle(gridEl) : null;
-        ds.gridRowH   = parseFloat(gridCs?.gridAutoRows) || 204;
-
-        // Compute gap-aware column width for pixel-perfect ghost snapping.
-        const gridRect = gridEl?.getBoundingClientRect();
-        ds.pureColW = gridRect
-          ? (gridRect.width - (GRID_COLS - 1) * GRID_GAP) / GRID_COLS
-          : 100;
-
-        // Ghost: full-size grid-snapping placement indicator.
-        // Shows WHERE the tile will land (dashed rectangle), not what was grabbed.
-        const ghostW = ds.colSpan * ds.pureColW + (ds.colSpan - 1) * GRID_GAP;
-        const ghostH = ds.rowSpan * ds.gridRowH + (ds.rowSpan - 1) * GRID_GAP;
-        const ghost  = document.createElement('div');
+        // Ghost: 50% scale cursor-following clone at 50% opacity.
+        // The in-grid tile (rendered semi-transparent at its displaced position) shows landing spot.
+        const ghost = document.createElement('div');
         ghost.style.cssText = `
           position: fixed;
-          left: ${gridRect ? gridRect.left : e.clientX}px;
-          top:  ${gridRect ? gridRect.top  : e.clientY}px;
-          width: ${ghostW}px; height: ${ghostH}px;
-          background: rgba(124,58,237,0.15);
-          border: 3px dashed rgba(124,58,237,0.6);
-          border-radius: 16px;
-          pointer-events: none;
-          z-index: 200000;
-          box-sizing: border-box;
-          transition: left 0.07s ease, top 0.07s ease;
+          left: ${rect ? rect.left : e.clientX}px;
+          top:  ${rect ? rect.top  : e.clientY}px;
+          width: ${rect ? rect.width : 200}px; height: ${rect ? rect.height : 200}px;
+          opacity: 0.5; pointer-events: none; z-index: 200000;
+          border-radius: 16px; overflow: hidden;
+          box-shadow: 0 15px 45px rgba(0,0,0,0.5);
+          transform: scale(0.5); transform-origin: center center;
         `;
+        const innerCard = ds.outerEl ? ds.outerEl.querySelector('.rounded-2xl') : null;
+        if (innerCard) {
+          const clone = innerCard.cloneNode(true);
+          clone.style.cssText = 'width:100%;height:100%;position:absolute;inset:0;border-radius:16px;overflow:hidden;pointer-events:none;';
+          ghost.appendChild(clone);
+        }
         document.body.appendChild(ghost);
         dragGhostRef.current = ghost;
       }
 
-      // B. SNAP GHOST TO GRID AREA UNDER CURSOR
-      if (dragGhostRef.current && desktopGridRef.current) {
-        const gridRect   = desktopGridRef.current.getBoundingClientRect();
-        const cellStride = ds.pureColW + GRID_GAP;
-        const rowStride  = ds.gridRowH + GRID_GAP;
-        const rawCol     = Math.floor((e.clientX - gridRect.left) / cellStride);
-        const gridCol    = Math.min(Math.max(0, rawCol), GRID_COLS - ds.colSpan);
-        const rawRow     = Math.floor((e.clientY - gridRect.top) / rowStride);
-        const gridRow    = Math.max(0, rawRow);
-        dragGhostRef.current.style.left = `${gridRect.left + gridCol * cellStride}px`;
-        dragGhostRef.current.style.top  = `${gridRect.top  + gridRow * rowStride}px`;
+      // B. MOVE GHOST WITH CURSOR (unthrottled for smooth tracking)
+      if (dragGhostRef.current) {
+        dragGhostRef.current.style.left = `${e.clientX - ds.offsetX}px`;
+        dragGhostRef.current.style.top  = `${e.clientY - ds.offsetY}px`;
       }
 
       // C. TILE DETECTION via getBoundingClientRect (NOT elementFromPoint — ghost blocks it).
@@ -4152,6 +4128,13 @@ export default function GeoPostView({ session }) {
       <div className="w-full px-3 md:px-4">
         {/* ── TILE / BENTO MODE ── */}
         {feedLayout === 'tiles' && (<>
+      {/* Height-clamp wrapper: clips at 16 half-rows when collapsed; expands on Show More.
+          Grid itself stays overflow:visible so corner buttons on edge tiles are never clipped. */}
+      <div style={{
+        overflow: canShowLess ? 'visible' : 'hidden',
+        maxHeight: canShowLess ? 'none' : `${16 * Math.max(1, (desktopUnitHeight - 12) / 2) + 15 * 12}px`,
+        position: 'relative',
+      }}>
         <div ref={desktopGridRef} className="hidden md:grid gap-3 mt-3"
           style={{
             '--image-scale': Math.max(0.5, Number(feedImageScale || 1)),
@@ -4161,9 +4144,7 @@ export default function GeoPostView({ session }) {
             gridTemplateColumns: 'repeat(14, minmax(0, 1fr))',
             gridAutoRows: `${Math.max(1, (desktopUnitHeight - 12) / 2)}px`,
             overflowAnchor: 'none',
-            // Clip at 16 half-rows when at initial page; expand when user presses Show More
-            overflow: canShowLess ? 'visible' : 'hidden',
-            maxHeight: canShowLess ? 'none' : `${16 * Math.max(1, (desktopUnitHeight - 12) / 2) + 15 * 12}px`,
+            overflow: 'visible',
           }}
         >
           {/* Filter aside — always in DOM on desktop.
@@ -4347,6 +4328,7 @@ export default function GeoPostView({ session }) {
           )}
 
         </div>
+        </div>{/* end height-clamp wrapper */}
         {(canShowMore || canShowLess) && (
           <div data-show-more-bar className="hidden md:flex justify-center gap-3 pt-2 pb-1">
             {canShowMore && (
