@@ -980,7 +980,7 @@ function GeoPostMosaic({ posts, accentColor, opacity = 0.42, onTileClick = null 
 }
 
 // ── PostCard ──────────────────────────────────────────────────────────────────
-function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, onSelectTag, zipHeatMap, boroughHeatMap, textScale = 1, imageScale = 1, imagePriority = false, isDesktopMasonry = false, gridUnitHeight = 0, commentCount = 0, commentsOpen = false, onToggleComments, commentsChildren, onOpenPopup, onHide, isPinned = false, pinnedRow = null, pinnedCol = null, onTogglePin, onClickUsername, isDragTarget = false }) {
+function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, onSelectTag, zipHeatMap, boroughHeatMap, textScale = 1, imageScale = 1, imagePriority = false, isDesktopMasonry = false, gridUnitHeight = 0, commentCount = 0, commentsOpen = false, onToggleComments, commentsChildren, onOpenPopup, onHide, isPinned = false, pinnedRow = null, pinnedCol = null, onTogglePin, onClickUsername, isDragTarget = false, draggedPost = null }) {
   const { resolvedTheme } = useSiteTheme();
   const theme = getPostVisualTheme(post, resolvedTheme);
   const date = new Date(post.created_at);
@@ -1240,9 +1240,22 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
           position: 'relative',
           overflow: 'hidden',
           minHeight: 0,
-          ...(isDragTarget ? { outline: '3px dashed #7c3aed' } : {}),
+          ...(isDragTarget ? { outline: `3px dashed ${accentColor}`, outlineOffset: '2px' } : {}),
         }}
       >
+      {/* In-grid ghost overlay: shows dragged post preview at drop position */}
+      {isDragTarget && draggedPost && (
+        <div
+          className="absolute inset-0 z-40 flex flex-col items-center justify-center gap-1 rounded-2xl pointer-events-none"
+          style={{
+            background: 'rgba(124,58,237,0.18)',
+            backdropFilter: 'blur(1px)',
+          }}
+        >
+          <span style={{ fontSize: '2rem', opacity: 0.85 }}>{draggedPost.content?.fillColor ? '📌' : (draggedPost.representative_emoji || draggedPost.content?.html ? '📝' : '📌')}</span>
+          <span style={{ fontSize: '0.7rem', fontWeight: 800, color: accentColor, opacity: 0.9 }}>Drop here</span>
+        </div>
+      )}
       {post.image_url && !isSplitTile && (
         // flex: 1 — image grows elastically to fill all remaining tile space the footer doesn't claim.
         <div
@@ -1284,7 +1297,12 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
               onClick={(e) => {
                 e.stopPropagation();
                 if (!isPinned) {
-                  const { row, col } = gridPositionRef.current;
+                  const el = outerRef.current;
+                  const cs = el ? getComputedStyle(el) : null;
+                  const csRow = cs ? parseInt(cs.gridRowStart, 10) : NaN;
+                  const csCol = cs ? parseInt(cs.gridColumnStart, 10) : NaN;
+                  const row = Number.isFinite(csRow) ? csRow : gridPositionRef.current.row;
+                  const col = Number.isFinite(csCol) ? csCol : gridPositionRef.current.col;
                   onTogglePin(post.id, row, col);
                 } else {
                   onTogglePin(post.id, null, null);
@@ -1521,7 +1539,12 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
               onClick={(e) => {
                 e.stopPropagation();
                 if (!isPinned) {
-                  const { row, col } = gridPositionRef.current;
+                  const el = outerRef.current;
+                  const cs = el ? getComputedStyle(el) : null;
+                  const csRow = cs ? parseInt(cs.gridRowStart, 10) : NaN;
+                  const csCol = cs ? parseInt(cs.gridColumnStart, 10) : NaN;
+                  const row = Number.isFinite(csRow) ? csRow : gridPositionRef.current.row;
+                  const col = Number.isFinite(csCol) ? csCol : gridPositionRef.current.col;
                   onTogglePin(post.id, row, col);
                 } else {
                   onTogglePin(post.id, null, null);
@@ -2326,17 +2349,12 @@ export default function GeoPostView({ session }) {
     try { return new Set(JSON.parse(localStorage.getItem('lapuff_hidden_posts') || '[]')); }
     catch { return new Set(); }
   });
-  const [pinnedPostIds, setPinnedPostIds] = useState(() => {
-    try { return new Set(JSON.parse(localStorage.getItem('lapuff_pinned_posts') || '[]')); } catch { return new Set(); }
-  });
-  const [pinnedPositions, setPinnedPositions] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('lapuff_pinned_positions') || '{}'); } catch { return {}; }
-  });
+  // Pins/positions reset on every page load — no persistence (session-only)
+  const [pinnedPostIds, setPinnedPostIds] = useState(() => new Set());
+  const [pinnedPositions, setPinnedPositions] = useState(() => ({}));
   const [hiddenPanelOpen, setHiddenPanelOpen] = useState(false);
-  // Drag-to-reorder state (Change 7)
-  const [customPostOrder, setCustomPostOrder] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('lapuff_post_order') || '[]'); } catch { return []; }
-  });
+  // Tile order resets on every page load — no persistence (session-only)
+  const [customPostOrder, setCustomPostOrder] = useState(() => []);
   const [draggingId, setDraggingId] = useState(null);
   const [dragOverIdx, setDragOverIdx] = useState(null);
   const dragOverIdxRef = useRef(null);
@@ -2374,6 +2392,7 @@ export default function GeoPostView({ session }) {
   const canShowLessRef = useRef(false);
   const rowStepRef = useRef(432);
   const scrollSettleTimerRef = useRef(null);
+  const lastApplyTimeRef = useRef(0); // cooldown: prevent bounce from rapid re-apply
   const scaleButtonRef = useRef(null);
   // Cached distance from scroll-container top to grid top — computed once on mount / resize,
   // NOT on every scroll event. Recalculating on scroll is wrong because the grid reflowing
@@ -3241,8 +3260,11 @@ export default function GeoPostView({ session }) {
     const onScroll = () => {
       if (scrollSettleTimerRef.current) clearTimeout(scrollSettleTimerRef.current);
       scrollSettleTimerRef.current = setTimeout(() => {
+        // Cooldown: don't recompute within 1.5s of last panel placement to prevent bounce
+        if (Date.now() - lastApplyTimeRef.current < 1500) return;
         const target = computeTargetRow();
         if (target !== lastAppliedRowRef.current) {
+          lastApplyTimeRef.current = Date.now();
           lastAppliedRowRef.current = target;
           applyPanelRow(target);
         }
@@ -3258,6 +3280,7 @@ export default function GeoPostView({ session }) {
     // Place panel immediately on mount/dep-change without animation
     const initialRow = computeTargetRow();
     lastAppliedRowRef.current = initialRow;
+    lastApplyTimeRef.current = Date.now(); // reset cooldown on effect rerun so scroll can pick up normally
     panelRowRef.current = initialRow;
     setDesktopPanelRow(initialRow);
     if (filterPanelInnerRef.current) {
@@ -3389,27 +3412,12 @@ export default function GeoPostView({ session }) {
         setPinnedPositions(p => { const n = { ...p }; delete n[postId]; return n; });
       } else {
         next.add(postId);
-        if (row != null && col != null) {
-          setPinnedPositions(p => ({ ...p, [postId]: { row, col } }));
-        }
+        // Always save position — both row and col must be valid to lock the tile
+        setPinnedPositions(p => ({ ...p, [postId]: { row, col } }));
       }
       return next;
     });
   }, []);
-
-  // Persist pinnedPostIds (Change 8)
-  useEffect(() => {
-    try { localStorage.setItem('lapuff_pinned_posts', JSON.stringify([...pinnedPostIds])); } catch {}
-  }, [pinnedPostIds]);
-
-  useEffect(() => {
-    try { localStorage.setItem('lapuff_pinned_positions', JSON.stringify(pinnedPositions)); } catch {}
-  }, [pinnedPositions]);
-
-  // Persist customPostOrder (Change 7)
-  useEffect(() => {
-    try { localStorage.setItem('lapuff_post_order', JSON.stringify(customPostOrder)); } catch {}
-  }, [customPostOrder]);
 
   // Document-level drag handlers for tile reorder (Change 7)
   useEffect(() => {
@@ -3590,6 +3598,10 @@ export default function GeoPostView({ session }) {
         onTogglePin={togglePin}
         onClickUsername={handleClickUsername}
         isDragTarget={draggingId && dragOverIdx !== null && visiblePostsRef.current[dragOverIdxRef.current]?.id === post.id}
+        draggedPost={draggingId && dragOverIdx !== null && visiblePostsRef.current[dragOverIdxRef.current]?.id === post.id
+          ? visiblePostsRef.current.find(p => p.id === draggingId) ?? null
+          : null
+        }
         commentsChildren={
           <CommentSection
             post={post}
