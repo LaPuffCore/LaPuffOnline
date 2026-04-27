@@ -474,9 +474,15 @@ export async function getFavoriteCount(eventId) {
 
 const favCountSubscriptions = new Map(); // eventId -> { unsubscribe, callback }
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export function subscribeToFavoriteCount(eventId, callback) {
   const id = normalizeEventId(eventId);
-  
+
+  // Skip Realtime subscription for non-UUID IDs (e.g. legacy sample events)
+  // — passing non-UUID values into a filter against a uuid column crashes PostgREST.
+  if (!UUID_REGEX.test(id)) return () => {};
+
   // Reuse existing subscription if present
   if (favCountSubscriptions.has(id)) {
     const existing = favCountSubscriptions.get(id);

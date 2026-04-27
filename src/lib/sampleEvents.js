@@ -5,7 +5,7 @@ import { SAMPLE_MODE } from './sampleConfig';
 const ALL_SAMPLE_EVENTS = [
   // ── PAST EVENTS (5) — visible in archive mode for archive/review testing ──
   {
-    id: 'sample-1',
+    id: '00000000-0000-4000-a000-000000000001',
     name: 'NYC Botanical Gardens',
     event_name: 'The Orchid Show: Mr. Flower Fantastic\'s Concrete Jungle',
     price_category: '$$',
@@ -31,7 +31,7 @@ const ALL_SAMPLE_EVENTS = [
     afters_lng: -73.88812,
   },
   {
-    id: 'sample-2',
+    id: '00000000-0000-4000-a000-000000000002',
     name: 'The Metropolitan Museum of Art',
     event_name: 'Raphael: Sublime Poetry at the Met',
     price_category: '$$$',
@@ -54,7 +54,7 @@ const ALL_SAMPLE_EVENTS = [
     afters_lng: -73.96482,
   },
   {
-    id: 'sample-3',
+    id: '00000000-0000-4000-a000-000000000003',
     name: 'Edge NYC',
     event_name: 'Bridgerton Candlelight Evenings at Edge',
     price_category: '$$$',
@@ -77,7 +77,7 @@ const ALL_SAMPLE_EVENTS = [
     afters_lng: -74.00912,
   },
   {
-    id: 'sample-4',
+    id: '00000000-0000-4000-a000-000000000004',
     name: 'Beacon Theatre',
     event_name: 'Love Rocks NYC Benefit Concert',
     price_category: '$$$',
@@ -100,7 +100,7 @@ const ALL_SAMPLE_EVENTS = [
     afters_lng: -73.98159,
   },
   {
-    id: 'sample-5',
+    id: '00000000-0000-4000-a000-000000000005',
     name: 'Madison Square Garden',
     event_name: 'Big East Basketball Tournament',
     price_category: '$$$',
@@ -125,7 +125,7 @@ const ALL_SAMPLE_EVENTS = [
 
   // ── FUTURE EVENTS (25) — future-dated for active map density and heatmap testing ──
   {
-    id: 'sample-6',
+    id: '00000000-0000-4000-a000-000000000006',
     name: 'Union Square',
     event_name: 'Earth Day Grand Market & Maker Fair',
     price_category: 'free',
@@ -148,7 +148,7 @@ const ALL_SAMPLE_EVENTS = [
     afters_lng: -73.99482,
   },
   {
-    id: 'sample-7',
+    id: '00000000-0000-4000-a000-000000000007',
     name: 'The High Line',
     event_name: 'High Line Sunday Sunset Series',
     price_category: 'free',
@@ -171,7 +171,7 @@ const ALL_SAMPLE_EVENTS = [
     afters_lng: -74.0085,
   },
   {
-    id: 'sample-8',
+    id: '00000000-0000-4000-a000-000000000008',
     name: 'MoMA',
     event_name: 'MoMA After Dark: AI & The Future of Art',
     price_category: '$$',
@@ -194,7 +194,7 @@ const ALL_SAMPLE_EVENTS = [
     afters_lng: -73.99043,
   },
   {
-    id: 'sample-9',
+    id: '00000000-0000-4000-a000-000000000009',
     name: 'Rockefeller Center',
     event_name: 'Rockefeller Plaza Summer Concert Series Kickoff',
     price_category: 'free',
@@ -217,7 +217,7 @@ const ALL_SAMPLE_EVENTS = [
     afters_lng: -73.97725,
   },
   {
-    id: 'sample-10',
+    id: '00000000-0000-4000-a000-000000000010',
     name: 'Times Square',
     event_name: 'Times Square Street Arts Festival',
     price_category: 'free',
@@ -240,7 +240,7 @@ const ALL_SAMPLE_EVENTS = [
     afters_lng: -74.00854,
   },
   {
-    id: 'sample-11',
+    id: '00000000-0000-4000-a000-000000000011',
     name: 'Lincoln Center',
     event_name: 'Lincoln Center Out of Doors: Rooftop Film Night',
     price_category: 'free',
@@ -263,7 +263,7 @@ const ALL_SAMPLE_EVENTS = [
     afters_lng: -73.98138,
   },
   {
-    id: 'sample-12',
+    id: '00000000-0000-4000-a000-000000000012',
     name: 'Chelsea Market',
     event_name: 'Chelsea Market International Food Crawl',
     price_category: '$',
@@ -286,7 +286,7 @@ const ALL_SAMPLE_EVENTS = [
     afters_lng: -74.00285,
   },
   {
-    id: 'sample-13',
+    id: '00000000-0000-4000-a000-000000000013',
     name: 'Washington Square Park',
     event_name: 'Washington Square Jazz & Blues Night',
     price_category: 'free',
@@ -309,7 +309,7 @@ const ALL_SAMPLE_EVENTS = [
     afters_lng: -73.99997,
   },
   {
-    id: 'sample-14',
+    id: '00000000-0000-4000-a000-000000000014',
     name: 'Brooklyn Museum',
     event_name: 'First Saturday: Afrofuturism Edition',
     price_category: 'free',
@@ -332,7 +332,7 @@ const ALL_SAMPLE_EVENTS = [
     afters_lng: -73.96018,
   },
   {
-    id: 'sample-15',
+    id: '00000000-0000-4000-a000-000000000015',
     name: 'Prospect Park',
     event_name: 'Prospect Park Summer Concert Series',
     price_category: 'free',
@@ -355,7 +355,7 @@ const ALL_SAMPLE_EVENTS = [
     afters_lng: -73.99044,
   },
   {
-    id: 'sample-16',
+    id: '00000000-0000-4000-a000-000000000016',
     name: 'DUMBO',
     event_name: 'DUMBO Arts Festival: Under the Bridge',
     price_category: 'free',
@@ -378,7 +378,7 @@ const ALL_SAMPLE_EVENTS = [
     afters_lng: -73.99854,
   },
   {
-    id: 'sample-17',
+    id: '00000000-0000-4000-a000-000000000017',
     name: 'Barclays Center',
     event_name: 'Barclays After Dark: Comedy Night',
     price_category: '$$',
@@ -401,7 +401,7 @@ const ALL_SAMPLE_EVENTS = [
     afters_lng: -73.96976,
   },
   {
-    id: 'sample-18',
+    id: '00000000-0000-4000-a000-000000000018',
     name: 'Williamsburg',
     event_name: 'Williamsburg Indie Music & Art Showcase',
     price_category: '$',
@@ -424,7 +424,7 @@ const ALL_SAMPLE_EVENTS = [
     afters_lng: -73.95731,
   },
   {
-    id: 'sample-19',
+    id: '00000000-0000-4000-a000-000000000019',
     name: 'Flushing Night Market',
     event_name: 'Flushing Night Market: Summer Opening',
     price_category: '$',
@@ -447,7 +447,7 @@ const ALL_SAMPLE_EVENTS = [
     afters_lng: -73.82976,
   },
   {
-    id: 'sample-20',
+    id: '00000000-0000-4000-a000-000000000020',
     name: 'Astoria Park',
     event_name: 'Astoria Park Jazz & Wine Festival',
     price_category: '$',
@@ -470,7 +470,7 @@ const ALL_SAMPLE_EVENTS = [
     afters_lng: -73.93153,
   },
   {
-    id: 'sample-21',
+    id: '00000000-0000-4000-a000-000000000021',
     name: 'MoMA PS1',
     event_name: 'MoMA PS1 Warm Up Summer Series',
     price_category: '$',
@@ -493,7 +493,7 @@ const ALL_SAMPLE_EVENTS = [
     afters_lng: -73.94449,
   },
   {
-    id: 'sample-22',
+    id: '00000000-0000-4000-a000-000000000022',
     name: 'Jackson Heights',
     event_name: 'Jackson Heights International Food Festival',
     price_category: 'free',
@@ -516,7 +516,7 @@ const ALL_SAMPLE_EVENTS = [
     afters_lng: -73.88459,
   },
   {
-    id: 'sample-23',
+    id: '00000000-0000-4000-a000-000000000023',
     name: 'Yankee Stadium',
     event_name: 'Bronx Summer Block Party at Yankee Stadium',
     price_category: '$',
@@ -539,7 +539,7 @@ const ALL_SAMPLE_EVENTS = [
     afters_lng: -73.92704,
   },
   {
-    id: 'sample-24',
+    id: '00000000-0000-4000-a000-000000000024',
     name: 'Bronx Zoo',
     event_name: 'Bronx Zoo: Wild Conservation Night Safari',
     price_category: '$$',
@@ -562,7 +562,7 @@ const ALL_SAMPLE_EVENTS = [
     afters_lng: -73.88304,
   },
   {
-    id: 'sample-25',
+    id: '00000000-0000-4000-a000-000000000025',
     name: 'Bronx Night Market',
     event_name: 'Bronx Night Market: Taste of the Bronx',
     price_category: '$',
@@ -585,7 +585,7 @@ const ALL_SAMPLE_EVENTS = [
     afters_lng: -73.91432,
   },
   {
-    id: 'sample-26',
+    id: '00000000-0000-4000-a000-000000000026',
     name: 'Staten Island Ferry',
     event_name: 'Staten Island Ferry Music Festival',
     price_category: 'free',
@@ -608,7 +608,7 @@ const ALL_SAMPLE_EVENTS = [
     afters_lng: -74.07643,
   },
   {
-    id: 'sample-27',
+    id: '00000000-0000-4000-a000-000000000027',
     name: 'Snug Harbor',
     event_name: 'Snug Harbor Midsummer Music Festival',
     price_category: '$',
@@ -631,7 +631,7 @@ const ALL_SAMPLE_EVENTS = [
     afters_lng: -74.0734,
   },
   {
-    id: 'sample-28',
+    id: '00000000-0000-4000-a000-000000000028',
     name: 'Hudson Yards',
     event_name: 'Hudson Yards Summer Nights Gala',
     price_category: '$$$',
@@ -654,7 +654,7 @@ const ALL_SAMPLE_EVENTS = [
     afters_lng: -73.99134,
   },
   {
-    id: 'sample-29',
+    id: '00000000-0000-4000-a000-000000000029',
     name: 'Central Park',
     event_name: 'Central Park SummerStage: Grand Finale',
     price_category: 'free',
@@ -677,7 +677,7 @@ const ALL_SAMPLE_EVENTS = [
     afters_lng: -73.95368,
   },
   {
-    id: 'sample-30',
+    id: '00000000-0000-4000-a000-000000000030',
     name: 'Industry City',
     event_name: 'Industry City Maker Faire & Tech Expo',
     price_category: '$',

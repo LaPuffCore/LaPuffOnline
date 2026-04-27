@@ -280,7 +280,7 @@ export async function recordAnonAuthorInteraction(postId, deviceId) {
  * Sends x-device-id header so PostgREST exposes it via current_setting('request.headers').
  */
 export async function deleteGeoPost(postId, session = null, deviceId = null) {
-  const headers = { ...baseHeaders };
+  const headers = { ...baseHeaders, 'Prefer': 'return=representation' };
   if (session?.access_token) {
     headers['Authorization'] = `Bearer ${session.access_token}`;
   }
@@ -294,6 +294,11 @@ export async function deleteGeoPost(postId, session = null, deviceId = null) {
   if (!res.ok) {
     const err = await res.text().catch(() => '');
     throw new Error(err || `Delete failed (${res.status})`);
+  }
+  // Verify that at least one row was actually deleted (RLS may silently block it)
+  const deleted = await res.json().catch(() => []);
+  if (!Array.isArray(deleted) || deleted.length === 0) {
+    throw new Error('Post not found or you do not have permission to delete it.');
   }
   return true;
 }
@@ -478,6 +483,8 @@ export async function syncSampleGeoPostsToSupabase(samplePosts = [], session = n
     post_outline: p.post_outline || null,
     scope: p.scope || 'digital',
     post_shadow: p.post_shadow || null,
+    tile_shape: p.tile_shape || 'square',
+    shape_size: p.shape_size || 'medium',
     created_at: p.created_at,
   }));
   const res = await fetch(`${SUPABASE_URL}/rest/v1/geoposts`, {

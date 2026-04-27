@@ -289,7 +289,8 @@ function buildSamplePosts() {
 
     const isParticipant = statusMode === 0;
     const isAnonymous = statusMode === 2;
-    const userId = null;
+    // Give non-anonymous sample posts a deterministic fake user_id (valid UUID format)
+    const userId = isAnonymous ? null : `00000000-0000-4000-c000-${String(idx).padStart(12, '0')}`;
     const username = isAnonymous ? 'anonymous' : `sample_user_${idx}`;
 
     const fill = SAMPLE_FILL_COLORS[i % SAMPLE_FILL_COLORS.length];
