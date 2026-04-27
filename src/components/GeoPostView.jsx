@@ -700,16 +700,25 @@ function PostDetailPopup({ post, postReactions, onReact, onOpenReactors, accentC
       style={{ overflowY: 'auto', background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)' }}
       onClick={(e) => { if (e.target === e.currentTarget && !popupQepRect) onClose(); }}
     >
+      {/* Outer wrapper: position:relative, no overflow so X button can overflow the corner */}
       <div
-        className="relative my-8 mx-4 rounded-2xl border-3 border-black shadow-[8px_8px_0px_black] flex flex-col overflow-hidden"
-        style={{ background: surfaceBg, width: '100%', maxWidth: popupMaxWidth, minWidth: 0, transform: 'translateZ(0)', isolation: 'isolate' }}
+        className="relative my-8 mx-4"
+        style={{ width: '100%', maxWidth: popupMaxWidth, minWidth: 0 }}
         onClick={e => e.stopPropagation()}
       >
+        {/* X button positioned OUTSIDE the overflow:hidden card — overflows top-right corner */}
         <button
           onMouseDown={e => e.preventDefault()}
           onClick={onClose}
-          className="absolute top-3 right-3 z-10 w-8 h-8 rounded-full bg-black text-white flex items-center justify-center font-black text-lg hover:scale-110 transition-transform"
+          className="absolute w-8 h-8 rounded-full bg-black text-white flex items-center justify-center font-black text-lg hover:scale-110 transition-transform"
+          style={{ top: -10, right: -10, zIndex: 100011 }}
         >×</button>
+
+        {/* Card: overflow-hidden is here, X button is a sibling so it's not clipped */}
+        <div
+          className="rounded-2xl border-3 border-black shadow-[8px_8px_0px_black] flex flex-col overflow-hidden"
+          style={{ background: surfaceBg, width: '100%', transform: 'translateZ(0)', isolation: 'isolate' }}
+        >
 
         {post.image_url && (
           <div
@@ -874,7 +883,8 @@ function PostDetailPopup({ post, postReactions, onReact, onOpenReactors, accentC
             )}
           </div>
         </div>
-      </div>
+        </div>{/* end inner card */}
+      </div>{/* end outer wrapper */}
 
       {/* Quick emoji picker for popup — z above the popup itself */}
       {popupQepRect && createPortal(
@@ -997,6 +1007,7 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
   const [imgModalOpen, setImgModalOpen] = useState(false);
   const [imgLoaded, setImgLoaded] = useState(false);
   const [isTextOverflowing, setIsTextOverflowing] = useState(false);
+  const [tileHovered, setTileHovered] = useState(false);
   const textBlockRef = useRef(null);
   const outerRef = useRef(null);
   const gridPositionRef = useRef({ row: null, col: null });
@@ -1220,12 +1231,16 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
         flexDirection: 'column',
         height: '100%',
         overflow: 'visible',
+        // Elevate entire tile on hover so corner buttons float above neighboring tiles
+        zIndex: tileHovered ? 9999 : 1,
         cursor: onOpenPopup ? 'pointer' : 'default',
         // Ghost projection: 50% opacity + slight grayscale so user sees landing spot
         opacity: isDragging ? 0.5 : 1,
         pointerEvents: isDragging ? 'none' : 'auto',
         filter: isDragging ? 'grayscale(20%)' : 'none',
       }}
+      onMouseEnter={() => setTileHovered(true)}
+      onMouseLeave={() => setTileHovered(false)}
       onClick={(e) => { onOpenPopup && onOpenPopup(post); }}
       onMouseDown={(e) => {
         if (e.button !== 0) return;
@@ -1271,7 +1286,7 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
           <img
             src={post.image_url}
             alt="post"
-            className={`absolute inset-0 block w-full h-full object-cover select-none transition-opacity duration-200 ${imgLoaded ? 'opacity-100' : 'opacity-0'}`}
+            className={`absolute inset-0 block w-full h-full object-cover select-none pointer-events-none transition-opacity duration-200 ${imgLoaded ? 'opacity-100' : 'opacity-0'}`}
             loading={imagePriority ? 'eager' : 'lazy'}
             decoding="async"
             draggable={false}
@@ -3118,15 +3133,18 @@ export default function GeoPostView({ session }) {
       });
     }
 
-    // 2. Live drag displacement: remove dragged item from its spot, insert at hover target
-    // This makes the grid show exactly how it will look when dropped — the dragged tile
-    // stays in DOM (invisible, opacity:0) as a placeholder at its live projected position
+    // 2. Live drag displacement: directional insertion (before or after target)
+    // _gpDragSide tracks which half of the target tile the mouse is on.
+    // This forces large tiles to be displaced when a small tile hovers their left/right half.
     if (draggingId && dragHoverId && draggingId !== dragHoverId) {
       const draggedIdx = baseOrder.findIndex(p => p.id === draggingId);
-      const targetIdx  = baseOrder.findIndex(p => p.id === dragHoverId);
+      let targetIdx  = baseOrder.findIndex(p => p.id === dragHoverId);
       if (draggedIdx !== -1 && targetIdx !== -1) {
         const [draggedItem] = baseOrder.splice(draggedIdx, 1);
-        baseOrder.splice(targetIdx, 0, draggedItem);
+        // Re-find target after removal (index shifts if dragged was before target)
+        targetIdx = baseOrder.findIndex(p => p.id === dragHoverId);
+        const finalIdx = window._gpDragSide === 'after' ? targetIdx + 1 : targetIdx;
+        baseOrder.splice(finalIdx, 0, draggedItem);
       }
     }
 
@@ -3459,6 +3477,7 @@ export default function GeoPostView({ session }) {
         setDraggingId(ds.postId);
         document.body.style.userSelect = 'none';
         document.body.style.webkitUserSelect = 'none';
+        document.body.style.cursor = 'grabbing';
 
         const rect = ds.outerEl ? ds.outerEl.getBoundingClientRect() : null;
         ds.offsetX = rect ? e.clientX - rect.left : 0;
@@ -3499,6 +3518,10 @@ export default function GeoPostView({ session }) {
       if (targetId && targetId !== ds.postId) {
         // Skip pinned tiles — they can't be displaced
         if (!pinnedPostIds.has(targetId)) {
+          // Directional insertion: detect left vs right half of the target tile
+          // so small tiles can displace large tiles precisely (Gemini)
+          const rect = targetTile.getBoundingClientRect();
+          window._gpDragSide = (e.clientX - rect.left) > (rect.width / 2) ? 'after' : 'before';
           setDragHoverId(targetId);
         }
         // If hovering a pinned tile, keep last valid dragHoverId (ghost "slides" around it)
@@ -3540,20 +3563,33 @@ export default function GeoPostView({ session }) {
 
       document.body.style.userSelect = '';
       document.body.style.webkitUserSelect = '';
+      document.body.style.cursor = '';
+      window._gpDragSide = null;
       setDraggingId(null);
       setDragHoverId(null);
       window._gpDragState = null;
     };
 
+    // Safety net: if mouse leaves the window while dragging, clean up so ghost doesn't get stuck
+    const onMouseLeaveWindow = (e) => {
+      if (e.relatedTarget === null && window._gpDragState?.active) {
+        onMouseUp();
+      }
+    };
+
     document.addEventListener('mousemove', onMouseMove);
     document.addEventListener('mouseup', onMouseUp);
+    document.addEventListener('mouseleave', onMouseLeaveWindow);
     return () => {
       document.removeEventListener('mousemove', onMouseMove);
       document.removeEventListener('mouseup', onMouseUp);
+      document.removeEventListener('mouseleave', onMouseLeaveWindow);
       if (dragGhostRef.current) { dragGhostRef.current.remove(); dragGhostRef.current = null; }
       window._gpDragState = null;
+      window._gpDragSide = null;
       document.body.style.userSelect = '';
       document.body.style.webkitUserSelect = '';
+      document.body.style.cursor = '';
     };
   }, [feedLayout, pinnedPostIds]);
 
