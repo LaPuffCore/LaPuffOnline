@@ -195,14 +195,17 @@ export default function Home({ events = [], eventsLoading = false }) {
     playlistQueueRef.current = indices;
     queuePointerRef.current  = 0;
 
-    // Everything below runs in one synchronous block — gesture token never expires
+    // skip() claims the gesture token immediately (synchronous postMessage)
     activeW.skip(indices[0]);
     activeW.setVolume(musicVolumeRef.current);
-    activeW.play();
-    setIsMusicOn(true);
 
-    // Release the startup guard after skip()'s cold PAUSE has had time to fire
-    setTimeout(() => { isStartingRef.current = false; }, 1000);
+    // 50ms lets the cold widget process the skip before play() is sent;
+    // still well within the browser's gesture-token window
+    setTimeout(() => {
+      activeW.play();
+      setIsMusicOn(true);
+      setTimeout(() => { isStartingRef.current = false; }, 1000);
+    }, 50);
   }
 
   // Initialise BOTH widgets independently on mount
