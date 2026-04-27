@@ -2350,6 +2350,80 @@ function ShapeModeView({ posts, postReactions, onReact, onSelectTag, accentColor
   );
 }
 
+// ── GRID DRAG HELPERS (module-level, used by GeoPostView drag logic) ─────────
+const GRID_TOTAL_COLS = 14;
+
+/** Compute approximate tile span from post data (mirrors PostCard sizing logic). */
+function getTileSpanFromPost(post) {
+  const hasImage = Boolean(post?.image_url);
+  const shape = post?.tile_shape || 'square';
+  const plainLen = ((post?.content?.html || '')).replace(/<[^>]+>/g, '').length;
+  const isLong  = shape === 'landscape';
+  const isTall  = shape === 'portrait';
+  const isUltra = shape === 'ultrawide';
+  let w = isLong ? 4 : isUltra ? 8 : 2;
+  let h = 2;
+  if (!hasImage) {
+    const estLines = Math.ceil(plainLen / 35);
+    if (estLines <= 5) h = 1;
+    else if (estLines > 20) { w = 4; h = 2; }
+    else h = 2;
+  } else if (isUltra) {
+    h = 2;
+  } else if (isTall) {
+    h = 4;
+  } else if (isLong) {
+    h = Math.ceil(plainLen / 70) > 3 ? 3 : 2;
+  } else {
+    // square
+    const estLines = Math.ceil(plainLen / 35);
+    if (estLines > 15) { w = 6; h = 2; }
+    else if (estLines > 3) h = 3;
+    else h = 2;
+  }
+  return { w, h };
+}
+
+/** Do two grid rectangles overlap? All 1-indexed CSS Grid coords. */
+function gridZonesOverlap(c1, r1, w1, h1, c2, r2, w2, h2) {
+  return c1 < c2 + w2 && c1 + w1 > c2 && r1 < r2 + h2 && r1 + h1 > r2;
+}
+
+/** Check if placing a w×h tile at (col,row) would overlap any blocked zone. */
+function isGridZoneBlocked(col, row, w, h, blocked) {
+  return blocked.some(b => gridZonesOverlap(col, row, w, h, b.col, b.row, b.w, b.h));
+}
+
+/**
+ * Find the nearest valid grid slot at an odd column (1,3,5…) that doesn't overlap blocked zones.
+ * Expands outward in a spiral, stepping by 2 columns to maintain even-width alignment.
+ */
+function findNearestValidGridSlot(col, row, w, h, blocked) {
+  const clampC = (c) => {
+    const max = GRID_TOTAL_COLS - w + 1;
+    let x = Math.max(1, Math.min(c, max));
+    if (x % 2 === 0) x = Math.max(1, x - 1); // keep at odd 1-indexed position
+    return x;
+  };
+  if (!isGridZoneBlocked(col, row, w, h, blocked)) return { col, row };
+  for (let radius = 1; radius <= 40; radius++) {
+    const candidates = [];
+    for (let dc = -radius; dc <= radius; dc++) {
+      for (let dr = -radius; dr <= radius; dr++) {
+        if (Math.abs(dc) !== radius && Math.abs(dr) !== radius) continue; // ring only
+        const nc = clampC(col + dc * 2);
+        const nr = Math.max(1, row + dr);
+        candidates.push({ col: nc, row: nr });
+      }
+    }
+    candidates.sort((a, b) => (Math.abs(a.col - col) + Math.abs(a.row - row)) - (Math.abs(b.col - col) + Math.abs(b.row - row)));
+    for (const c of candidates) {
+      if (!isGridZoneBlocked(c.col, c.row, w, h, blocked)) return c;
+    }
+  }
+  return { col, row: row + 30 }; // extreme fallback: push far down
+}
+
 // ── GeoPostView ───────────────────────────────────────────────────────────────
 export default function GeoPostView({ session }) {
   const { resolvedTheme } = useSiteTheme();
@@ -2421,6 +2495,12 @@ export default function GeoPostView({ session }) {
   const dragGhostRef = useRef(null);
   const visiblePostsRef = useRef([]);
   const orderedFilteredPostsRef = useRef([]);
+  // Refs for blocked-zone logic — kept in sync each render so drag closure can read current values
+  const pinnedPositionsRef  = useRef({});
+  const userPositionsRef    = useRef({});
+  const desktopPanelRowRef  = useRef(1);
+  const filterPanelModeRef  = useRef('panel');
+  const pinnedPostIdsRef    = useRef(new Set());
   const hiddenBtnRef = useRef(null);
   // Feed layout: 'tiles' = bento masonry, 'list' = simple sidebar + stacked feed (from b10941b)
   const [feedLayout, setFeedLayout] = useState(() => {
@@ -3194,6 +3274,12 @@ export default function GeoPostView({ session }) {
   canShowLessRef.current = canShowLess;
   visiblePostsRef.current = visiblePosts;
   orderedFilteredPostsRef.current = orderedFilteredPosts;
+  // Keep blocked-zone refs current every render
+  pinnedPositionsRef.current = pinnedPositions;
+  userPositionsRef.current   = userPositions;
+  desktopPanelRowRef.current = desktopPanelRow;
+  filterPanelModeRef.current = filterPanelMode;
+  pinnedPostIdsRef.current   = pinnedPostIds;
 
   useEffect(() => {
     // Only measure in tile mode — filter panel only exists in tile grid
@@ -3552,6 +3638,43 @@ export default function GeoPostView({ session }) {
     const DRAG_THRESHOLD = 6;
     const TOTAL_COLS = 14;
 
+    const buildBlockedZones = (excludePostId) => {
+      const blocked = [];
+      // 1. Filter panel (when in-grid panel mode — not floating topbar)
+      if (filterPanelModeRef.current !== 'topbar') {
+        blocked.push({ col: 1, row: desktopPanelRowRef.current, w: 2, h: 2 });
+      }
+      // 2. Build span map from DOM data attributes for all visible tiles
+      const grid = desktopGridRef.current;
+      const spanMap = {};
+      if (grid) {
+        grid.querySelectorAll('[data-post-id]').forEach(el => {
+          const id = el.dataset.postId;
+          if (id) spanMap[id] = {
+            w: Math.max(2, parseInt(el.dataset.w || '2', 10)),
+            h: Math.max(1, parseInt(el.dataset.h || '1', 10)),
+          };
+        });
+      }
+      // 3. Pinned tiles
+      const pinPos = pinnedPositionsRef.current;
+      for (const id of pinnedPostIdsRef.current) {
+        if (id === excludePostId) continue;
+        const pos = pinPos[id];
+        if (!pos) continue;
+        const span = spanMap[id] || { w: 2, h: 2 };
+        blocked.push({ col: pos.col, row: pos.row, w: span.w, h: span.h });
+      }
+      // 4. User-positioned tiles (soft-pinned by prior drag)
+      for (const [id, pos] of Object.entries(userPositionsRef.current)) {
+        if (id === excludePostId) continue;
+        if (pinnedPostIdsRef.current.has(id)) continue; // already counted above
+        const span = spanMap[id] || { w: 2, h: 2 };
+        blocked.push({ col: pos.col, row: pos.row, w: span.w, h: span.h });
+      }
+      return blocked;
+    };
+
     const computeSnapTarget = (clientX, clientY, ds) => {
       const grid = desktopGridRef.current;
       if (!grid) return null;
@@ -3577,7 +3700,12 @@ export default function GeoPostView({ session }) {
       let row = Math.round(yInGrid / cellStrideY);
       col = Math.max(0, Math.min(col, TOTAL_COLS - w));
       row = Math.max(0, row);
-      return { col: col + 1, row: row + 1 }; // CSS Grid is 1-indexed
+      const rawCol = col + 1; // CSS Grid is 1-indexed
+      const rawRow = row + 1;
+
+      // Deflect away from pinned tiles, filter panel, and other explicit-placed tiles
+      const blocked = buildBlockedZones(ds.postId);
+      return findNearestValidGridSlot(rawCol, rawRow, w, h, blocked);
     };
 
     const onMouseMove = (e) => {
@@ -3646,7 +3774,39 @@ export default function GeoPostView({ session }) {
 
       if (ds.active) {
         // D. COMMIT snap target to userPositions (or pinnedPositions if tile is pinned).
-        const target = ds.lastTarget;
+        // Re-validate against blocked zones one final time before committing.
+        let target = ds.lastTarget;
+        if (target) {
+          const grid = desktopGridRef.current;
+          const spanMap = {};
+          if (grid) {
+            grid.querySelectorAll('[data-post-id]').forEach(el => {
+              const id = el.dataset.postId;
+              if (id) spanMap[id] = {
+                w: Math.max(2, parseInt(el.dataset.w || '2', 10)),
+                h: Math.max(1, parseInt(el.dataset.h || '1', 10)),
+              };
+            });
+          }
+          const span = spanMap[ds.postId] || { w: 2, h: 2 };
+          const blocked = [];
+          if (filterPanelModeRef.current !== 'topbar') {
+            blocked.push({ col: 1, row: desktopPanelRowRef.current, w: 2, h: 2 });
+          }
+          for (const id of pinnedPostIdsRef.current) {
+            if (id === ds.postId) continue;
+            const pos = pinnedPositionsRef.current[id];
+            if (!pos) continue;
+            blocked.push({ col: pos.col, row: pos.row, ...(spanMap[id] || { w: 2, h: 2 }) });
+          }
+          for (const [id, pos] of Object.entries(userPositionsRef.current)) {
+            if (id === ds.postId || pinnedPostIdsRef.current.has(id)) continue;
+            blocked.push({ col: pos.col, row: pos.row, ...(spanMap[id] || { w: 2, h: 2 }) });
+          }
+          if (isGridZoneBlocked(target.col, target.row, span.w, span.h, blocked)) {
+            target = findNearestValidGridSlot(target.col, target.row, span.w, span.h, blocked);
+          }
+        }
         if (target) {
           if (pinnedPostIds.has(ds.postId)) {
             setPinnedPositions(p => ({ ...p, [ds.postId]: target }));
@@ -3689,6 +3849,64 @@ export default function GeoPostView({ session }) {
       document.body.style.cursor           = '';
     };
   }, [feedLayout, pinnedPostIds]);
+
+  // Post-settle overlap audit: whenever the panel moves, pins change, or user-positions change,
+  // evict any userPositions entries that now conflict with pinned tiles or the filter panel.
+  // This covers cascading conflicts (e.g., panel scrolls onto a user-placed tile).
+  useEffect(() => {
+    if (feedLayout !== 'tiles') return;
+    const grid = desktopGridRef.current;
+    const spanMap = {};
+    if (grid) {
+      grid.querySelectorAll('[data-post-id]').forEach(el => {
+        const id = el.dataset.postId;
+        if (id) spanMap[id] = {
+          w: Math.max(2, parseInt(el.dataset.w || '2', 10)),
+          h: Math.max(1, parseInt(el.dataset.h || '1', 10)),
+        };
+      });
+    }
+    // Build permanent blocked zones: filter panel + pinned tiles only
+    const permanentBlocked = [];
+    if (filterPanelMode !== 'topbar') {
+      permanentBlocked.push({ col: 1, row: desktopPanelRow, w: 2, h: 2 });
+    }
+    for (const id of pinnedPostIds) {
+      const pos = pinnedPositions[id];
+      if (!pos) continue;
+      const span = spanMap[id] || { w: 2, h: 2 };
+      permanentBlocked.push({ col: pos.col, row: pos.row, w: span.w, h: span.h });
+    }
+    // Find user-positioned tiles that now overlap permanent blocked zones
+    const toRemove = [];
+    for (const [id, pos] of Object.entries(userPositions)) {
+      const span = spanMap[id] || { w: 2, h: 2 };
+      if (isGridZoneBlocked(pos.col, pos.row, span.w, span.h, permanentBlocked)) {
+        toRemove.push(id);
+      }
+    }
+    // Also check user-positioned tiles against each other (mutual overlap = remove both, let CSS grid reflow)
+    const userEntries = Object.entries(userPositions);
+    for (let i = 0; i < userEntries.length; i++) {
+      for (let j = i + 1; j < userEntries.length; j++) {
+        const [id1, pos1] = userEntries[i];
+        const [id2, pos2] = userEntries[j];
+        if (toRemove.includes(id1) || toRemove.includes(id2)) continue;
+        const s1 = spanMap[id1] || { w: 2, h: 2 };
+        const s2 = spanMap[id2] || { w: 2, h: 2 };
+        if (gridZonesOverlap(pos1.col, pos1.row, s1.w, s1.h, pos2.col, pos2.row, s2.w, s2.h)) {
+          toRemove.push(id2); // evict the second one (id1 was placed first in iteration order)
+        }
+      }
+    }
+    if (toRemove.length > 0) {
+      setUserPositions(prev => {
+        const next = { ...prev };
+        toRemove.forEach(id => delete next[id]);
+        return next;
+      });
+    }
+  }, [userPositions, pinnedPositions, pinnedPostIds, desktopPanelRow, filterPanelMode, feedLayout]);
 
   const scrollToTop = () => {    topAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     window.scrollTo({ top: 0, behavior: 'smooth' });
