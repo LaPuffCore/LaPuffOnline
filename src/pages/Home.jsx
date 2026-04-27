@@ -166,8 +166,9 @@ export default function Home({ events = [], eventsLoading = false }) {
     setIsMusicOn(true);
   }
 
-  // Start a station: pause the other, instant play on already-loaded iframe,
-  // then getSounds → Fisher-Yates → skip(indices[0])
+  // Start a station: pause the other, play at full volume synchronously with
+  // the click (unlocks the browser audio context on cold start), then snap to
+  // a shuffled track in the background via getSounds callback.
   function startStation(modeKey) {
     const activeW   = modeKey === 'clout' ? scWidgetCloutRef.current : scWidgetDimesRef.current;
     const inactiveW = modeKey === 'clout' ? scWidgetDimesRef.current : scWidgetCloutRef.current;
@@ -180,10 +181,12 @@ export default function Home({ events = [], eventsLoading = false }) {
 
     if (inactiveW) inactiveW.pause();
 
-    // Instant gesture — iframe already loaded, play() is synchronous with click
-    activeW.setVolume(0);
+    // Play at full volume immediately — synchronous with gesture, unlocks audio context
+    activeW.setVolume(musicVolumeRef.current);
     activeW.play();
+    setIsMusicOn(true);
 
+    // Snap to a random track in the background (audio is already legally playing)
     activeW.getSounds(sounds => {
       if (!sounds || sounds.length === 0) return;
       const indices = Array.from({ length: sounds.length }, (_, i) => i);
@@ -194,9 +197,6 @@ export default function Home({ events = [], eventsLoading = false }) {
       playlistQueueRef.current = indices;
       queuePointerRef.current  = 0;
       activeW.skip(indices[0]);
-      activeW.setVolume(musicVolumeRef.current);
-      activeW.play();
-      setIsMusicOn(true);
     });
   }
 
