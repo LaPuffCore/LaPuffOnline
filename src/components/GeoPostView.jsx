@@ -1229,6 +1229,7 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
       onClick={(e) => { onOpenPopup && onOpenPopup(post); }}
       onMouseDown={(e) => {
         if (e.button !== 0) return;
+        e.preventDefault(); // block browser native drag/select so our handler takes priority
         window._gpDragState = { postId: post.id, startX: e.clientX, startY: e.clientY, active: false, outerEl: outerRef.current };
       }}
     >
@@ -1246,7 +1247,7 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
       >
       {/* Content wrapper — overflow:hidden separated from border to eliminate corner pixel bleed */}
       <div
-        className="overflow-hidden rounded-[13px]"
+        className="overflow-clip rounded-[13px]"
         style={{
           background: theme.fill,
           flex: 1,
@@ -1254,7 +1255,6 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
           flexDirection: isSplitTile ? 'row' : 'column',
           transition: 'transform 2000ms cubic-bezier(0.16, 1, 0.3, 1)',
           position: 'relative',
-          overflow: 'hidden',
           minHeight: 0,
         }}
       >
@@ -1271,9 +1271,11 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
           <img
             src={post.image_url}
             alt="post"
-            className={`absolute inset-0 block w-full h-full object-cover transition-opacity duration-200 ${imgLoaded ? 'opacity-100' : 'opacity-0'}`}
+            className={`absolute inset-0 block w-full h-full object-cover select-none transition-opacity duration-200 ${imgLoaded ? 'opacity-100' : 'opacity-0'}`}
             loading={imagePriority ? 'eager' : 'lazy'}
             decoding="async"
+            draggable={false}
+            onDragStart={(e) => e.preventDefault()}
             onLoad={(e) => {
               try { setImgRatio(e.target.naturalWidth / e.target.naturalHeight); } catch {}
               setImgLoaded(true);
@@ -3487,21 +3489,20 @@ export default function GeoPostView({ session }) {
         dragGhostRef.current.style.top  = `${e.clientY - ds.offsetY}px`;
       }
 
-      // C. FIND HOVER TARGET (closest tile that isn't the dragged tile itself)
-      const grid = desktopGridRef.current;
-      if (!grid) return;
-      const tiles = Array.from(grid.querySelectorAll('[data-post-id]'));
-      let closestId = null;
-      let closestDist = Infinity;
-      tiles.forEach((tile) => {
-        if (tile.dataset.postId === ds.postId) return; // skip self (invisible placeholder)
-        const rect = tile.getBoundingClientRect();
-        const cx = rect.left + rect.width / 2;
-        const cy = rect.top  + rect.height / 2;
-        const dist = Math.abs(e.clientX - cx) + Math.abs(e.clientY - cy);
-        if (dist < closestDist) { closestDist = dist; closestId = tile.dataset.postId; }
-      });
-      if (closestId) setDragHoverId(closestId);
+      // C. STABLE DISPLACEMENT: find tile physically under the mouse cursor
+      // elementFromPoint is immune to center-recalculation jitter — it just reads
+      // whatever pixel is currently at the mouse position, no distance math needed.
+      const elementUnderMouse = document.elementFromPoint(e.clientX, e.clientY);
+      const targetTile = elementUnderMouse?.closest('[data-post-id]');
+      const targetId = targetTile?.dataset.postId;
+
+      if (targetId && targetId !== ds.postId) {
+        // Skip pinned tiles — they can't be displaced
+        if (!pinnedPostIds.has(targetId)) {
+          setDragHoverId(targetId);
+        }
+        // If hovering a pinned tile, keep last valid dragHoverId (ghost "slides" around it)
+      }
     };
 
     const onMouseUp = () => {
