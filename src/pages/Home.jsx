@@ -65,6 +65,12 @@ export default function Home({ events = [], eventsLoading = false }) {
   const playlistQueueRef   = useRef([]); 
   const queuePointerRef    = useRef(0);  
 
+  // Pre-armed track indices fetched on READY (eliminates async gap during click)
+  const cloutArmedIndicesRef = useRef([]);
+  const dimesArmedIndicesRef = useRef([]);
+  // Guards against spurious PAUSE event that w.skip() fires on a cold widget
+  const isStartingRef        = useRef(false);
+
   const CLOUT_URL = 'https://soundcloud.com/justin-lapuff/sets/clout-culling-games';
   const DIMES_URL = 'https://soundcloud.com/justin-lapuff/sets/dimes-square';
 
@@ -166,38 +172,37 @@ export default function Home({ events = [], eventsLoading = false }) {
     setIsMusicOn(true);
   }
 
-  // Start a station: pause the other, play at full volume synchronously with
-  // the click (unlocks the browser audio context on cold start), then snap to
-  // a shuffled track in the background via getSounds callback.
+  // Start a station: uses pre-armed indices from READY so the entire click handler
+  // is synchronous — no async gap that can let the browser's gesture token expire.
   function startStation(modeKey) {
-    const activeW   = modeKey === 'clout' ? scWidgetCloutRef.current : scWidgetDimesRef.current;
-    const inactiveW = modeKey === 'clout' ? scWidgetDimesRef.current : scWidgetCloutRef.current;
+    const activeW      = modeKey === 'clout' ? scWidgetCloutRef.current : scWidgetDimesRef.current;
+    const inactiveW    = modeKey === 'clout' ? scWidgetDimesRef.current : scWidgetCloutRef.current;
+    const armedIndices = modeKey === 'clout' ? cloutArmedIndicesRef.current : dimesArmedIndicesRef.current;
     if (!activeW) return;
 
+    isStartingRef.current = true;
     loadedPlaylistRef.current = modeKey;
     setCurrentMode(modeKey);
-    playlistQueueRef.current = [];
-    queuePointerRef.current  = 0;
 
     if (inactiveW) inactiveW.pause();
 
-    // Play at full volume immediately — synchronous with gesture, unlocks audio context
+    // Shuffle the pre-fetched index list synchronously — no callback, no wait
+    let indices = armedIndices.length > 0 ? [...armedIndices] : [0];
+    for (let i = indices.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [indices[i], indices[j]] = [indices[j], indices[i]];
+    }
+    playlistQueueRef.current = indices;
+    queuePointerRef.current  = 0;
+
+    // Everything below runs in one synchronous block — gesture token never expires
+    activeW.skip(indices[0]);
     activeW.setVolume(musicVolumeRef.current);
     activeW.play();
     setIsMusicOn(true);
 
-    // Snap to a random track in the background (audio is already legally playing)
-    activeW.getSounds(sounds => {
-      if (!sounds || sounds.length === 0) return;
-      const indices = Array.from({ length: sounds.length }, (_, i) => i);
-      for (let i = indices.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [indices[i], indices[j]] = [indices[j], indices[i]];
-      }
-      playlistQueueRef.current = indices;
-      queuePointerRef.current  = 0;
-      activeW.skip(indices[0]);
-    });
+    // Release the startup guard after skip()'s cold PAUSE has had time to fire
+    setTimeout(() => { isStartingRef.current = false; }, 1000);
   }
 
   // Initialise BOTH widgets independently on mount
@@ -208,7 +213,17 @@ export default function Home({ events = [], eventsLoading = false }) {
       const w = window.SC.Widget(iframe);
       widgetRefTarget.current = w;
       const E = window.SC.Widget.Events;
-      w.bind(E.READY, () => w.setVolume(musicVolumeRef.current));
+      w.bind(E.READY, () => {
+        w.setVolume(musicVolumeRef.current);
+        // Pre-fetch track list so startStation can shuffle synchronously on click
+        w.getSounds(sounds => {
+          if (sounds && sounds.length > 0) {
+            const indices = Array.from({ length: sounds.length }, (_, i) => i);
+            if (modeKey === 'clout') cloutArmedIndicesRef.current = indices;
+            else dimesArmedIndicesRef.current = indices;
+          }
+        });
+      });
       w.bind(E.PLAY, () => {
         if (loadedPlaylistRef.current === modeKey) {
           setIsMusicOn(true);
@@ -222,7 +237,10 @@ export default function Home({ events = [], eventsLoading = false }) {
           });
         }
       });
-      w.bind(E.PAUSE,  () => { if (loadedPlaylistRef.current === modeKey) setIsMusicOn(false); });
+      w.bind(E.PAUSE,  () => {
+        // Ignore the spurious PAUSE that w.skip() fires on a cold widget during startup
+        if (loadedPlaylistRef.current === modeKey && !isStartingRef.current) setIsMusicOn(false);
+      });
       w.bind(E.FINISH, () => { if (loadedPlaylistRef.current === modeKey) advanceQueue(1); });
     }
 
