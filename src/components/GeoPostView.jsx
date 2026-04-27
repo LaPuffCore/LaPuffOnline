@@ -616,7 +616,7 @@ const AlignCenterIcon = () => <svg width="13" height="13" viewBox="0 0 16 16" fi
 const AlignRightIcon  = () => <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><rect x="1" y="2" width="14" height="2" rx="1"/><rect x="5" y="7" width="10" height="2" rx="1"/><rect x="3" y="12" width="12" height="2" rx="1"/></svg>;
 
 // ── PostDetailPopup ───────────────────────────────────────────────────────────
-function PostDetailPopup({ post, postReactions, onReact, onOpenReactors, accentColor, onSelectTag, onClose, comments, onSubmitComment, session }) {
+function PostDetailPopup({ post, postReactions, onReact, onOpenReactors, accentColor, onSelectTag, onClose, comments, onSubmitComment, session, onClickUsername }) {
   const { resolvedTheme } = useSiteTheme();
   const bgColor = resolvedTheme?.pageBgColor || '#FAFAF8';
   const surfaceBg = resolvedTheme?.surfaceBgColor || '#FFFFFF';
@@ -631,7 +631,7 @@ function PostDetailPopup({ post, postReactions, onReact, onOpenReactors, accentC
 
   const [imgLoaded, setImgLoaded] = useState(false);
   const [commentDraft, setCommentDraft] = useState('');
-  const [commentsExpanded, setCommentsExpanded] = useState(true);
+  const [commentsExpanded, setCommentsExpanded] = useState(false);
   const [popupQepRect, setPopupQepRect] = useState(null);
   const popupQepBtnRef = useRef(null);
 
@@ -640,7 +640,7 @@ function PostDetailPopup({ post, postReactions, onReact, onOpenReactors, accentC
   }, [post.content]);
   const postHtml = parsedContent.html || '';
   const postTextColor = normalizeHexColor(parsedContent.textColor || '', bodyTextColor);
-  const postIsAnonymous = !post.user_id;
+  const postIsAnonymous = isAnonymousAuthor(post);
   const statusStyle = post.is_participant
     ? { background: '#00cc66', color: '#fff' }
     : postIsAnonymous
@@ -660,11 +660,14 @@ function PostDetailPopup({ post, postReactions, onReact, onOpenReactors, accentC
   const topEmojis = Object.entries(reactionMap).sort((a,b) => b[1]-a[1]);
 
   const [imgRatio, setImgRatio] = useState(1);
-  // tall = portrait (ratio < 0.95): expand popup downward to show full image
-  // wide = landscape (ratio > 1.2): use full popup width, image fills naturally
-  // square (~1:1): square display
-  const isTallPopupImage = post.image_url && imgRatio < 0.95 && imgRatio > 0;
-  const isWidePopupImage = post.image_url && imgRatio > 1.2;
+
+  const popupMaxWidth = (() => {
+    if (!post.image_url || !imgLoaded) return 640;
+    if (imgRatio < 0.85) return 480;
+    if (imgRatio <= 1.25) return 560;
+    if (imgRatio <= 2.5) return Math.min(Math.round((window?.innerWidth ?? 800) * 0.9), Math.round(480 + (imgRatio - 1.25) * 300));
+    return Math.min(Math.round((window?.innerWidth ?? 900) * 0.95), 900);
+  })();
 
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') { if (popupQepRect) { setPopupQepRect(null); } else { onClose(); } } };
@@ -697,7 +700,7 @@ function PostDetailPopup({ post, postReactions, onReact, onOpenReactors, accentC
     >
       <div
         className="relative my-8 mx-4 rounded-2xl border-3 border-black shadow-[8px_8px_0px_black] flex flex-col overflow-hidden"
-        style={{ background: surfaceBg, width: '100%', maxWidth: isWidePopupImage ? '95vw' : 600, minWidth: 0, transform: 'translateZ(0)', isolation: 'isolate' }}
+        style={{ background: surfaceBg, width: '100%', maxWidth: popupMaxWidth, minWidth: 0, transform: 'translateZ(0)', isolation: 'isolate' }}
         onClick={e => e.stopPropagation()}
       >
         <button
@@ -709,44 +712,32 @@ function PostDetailPopup({ post, postReactions, onReact, onOpenReactors, accentC
         {post.image_url && (
           <div
             className="relative w-full bg-black/5 rounded-t-2xl overflow-hidden"
-            style={{
-              isolation: 'isolate',
-              transform: 'translateZ(0)',
-              // Tall portrait: no height cap — let image dictate full height
-              // Wide landscape: let width be 100%, height auto — shows whole image
-              // Square: fixed square aspect
-              ...(isTallPopupImage
-                ? {}
-                : isWidePopupImage
-                ? { maxHeight: '60vh' }
-                : { aspectRatio: '1 / 1', maxHeight: 600 }),
-            }}
+            style={{ isolation: 'isolate', transform: 'translateZ(0)' }}
           >
             <img
               src={post.image_url}
               alt="post"
-              className={`w-full transition-opacity duration-200 ${imgLoaded ? 'opacity-100' : 'opacity-0'}`}
-              style={{
-                display: 'block',
-                // Tall: full natural height, no cropping
-                // Wide: fit within container width, no overflow
-                // Square: cover the square area
-                objectFit: isTallPopupImage ? 'contain' : isWidePopupImage ? 'contain' : 'cover',
-                height: isTallPopupImage ? 'auto' : isWidePopupImage ? '100%' : '100%',
-                maxHeight: isTallPopupImage ? 'none' : undefined,
-              }}
+              className={`w-full block transition-opacity duration-200 ${imgLoaded ? 'opacity-100' : 'opacity-0'}`}
+              style={{ display: 'block', height: 'auto', objectFit: 'contain', maxHeight: '85vh' }}
               onLoad={(e) => {
                 try { setImgRatio(e.target.naturalWidth / e.target.naturalHeight); } catch {}
                 setImgLoaded(true);
               }}
             />
-            {!imgLoaded && <div className="absolute inset-0 animate-pulse bg-black/5" />}
+            {!imgLoaded && <div className="absolute inset-0 animate-pulse bg-black/5" style={{ minHeight: 200 }} />}
           </div>
         )}
 
         <div className="p-4 flex flex-col gap-3" style={{ backgroundColor: fillBg }}>
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-black text-sm" style={{ color: chromeText }}>
+            <span
+              className="font-black text-sm cursor-pointer hover:underline"
+              style={{ color: chromeText }}
+              onClick={() => {
+                if (onClickUsername) onClickUsername(postIsAnonymous ? null : (post.username || null));
+                onClose();
+              }}
+            >
               {postIsAnonymous ? '🎭 Anonymous' : post.username || 'Orbiter'}
             </span>
             <span
@@ -810,29 +801,54 @@ function PostDetailPopup({ post, postReactions, onReact, onOpenReactors, accentC
             </button>
             {commentsExpanded && (
               <div className="flex flex-col gap-2">
-                {(comments || []).map(c => {
-                  const cIsAnon = !c.user_id && (!c.username || c.username === 'anonymous');
-                  const cStatusStyle = c.is_participant
-                    ? { background: '#00cc66', color: '#fff' }
-                    : cIsAnon
-                    ? { background: '#333', color: '#fff' }
-                    : { background: '#ff4444', color: '#fff' };
-                  const cStatusLabel = c.is_participant ? 'PARTICIPANT' : cIsAnon ? 'ANON' : 'ORBITER';
-                  return (
-                    <div key={c.id} className="rounded-xl p-2" style={{ background: chromeBg, border: `1px solid ${chromeBorder}` }}>
-                      <div className="flex items-center gap-1 mb-1 flex-wrap">
-                        <span className="text-[10px] font-black" style={{ color: chromeText }}>{cIsAnon ? '🎭 Anonymous' : c.username || 'Orbiter'}</span>
-                        <span
-                          className="text-[8px] font-black px-1 py-0.5 rounded-full cursor-pointer hover:opacity-75"
-                          style={cStatusStyle}
-                          onClick={() => { onSelectTag && onSelectTag({ status: cIsAnon ? 'anonymous' : c.is_participant ? 'participant' : 'orbiter' }); onClose(); }}
-                        >● {cStatusLabel}</span>
-                        <span className="text-[9px] opacity-50 ml-auto" style={{ color: chromeText }}>{c.created_at ? new Date(c.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric'}) : ''}</span>
+                {(() => {
+                  const sortedComments = (() => {
+                    if (!comments || comments.length === 0) return [];
+                    const topLevel = comments.filter(c => !c.parent_id).sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
+                    const replies = comments.filter(c => c.parent_id);
+                    const result = [];
+                    topLevel.forEach(parent => {
+                      result.push(parent);
+                      replies.filter(r => r.parent_id === parent.id)
+                             .sort((a,b) => new Date(a.created_at) - new Date(b.created_at))
+                             .forEach(r => result.push(r));
+                    });
+                    replies.filter(r => !topLevel.find(p => p.id === r.parent_id)).forEach(r => result.push(r));
+                    return result;
+                  })();
+                  return sortedComments.map(c => {
+                    const cIsAnon = !c.user_id && (!c.username || c.username === 'anonymous');
+                    const cStatusStyle = c.is_participant
+                      ? { background: '#00cc66', color: '#fff' }
+                      : cIsAnon
+                      ? { background: '#333', color: '#fff' }
+                      : { background: '#ff4444', color: '#fff' };
+                    const cStatusLabel = c.is_participant ? 'PARTICIPANT' : cIsAnon ? 'ANON' : 'ORBITER';
+                    return (
+                      <div
+                        key={c.id}
+                        className="rounded-xl p-2"
+                        style={{
+                          background: chromeBg,
+                          border: `1px solid ${chromeBorder}`,
+                          marginLeft: c.parent_id ? 24 : 0,
+                          borderLeft: c.parent_id ? `3px solid ${accentColor}40` : undefined,
+                        }}
+                      >
+                        <div className="flex items-center gap-1 mb-1 flex-wrap">
+                          <span className="text-[10px] font-black" style={{ color: chromeText }}>{cIsAnon ? '🎭 Anonymous' : c.username || 'Orbiter'}</span>
+                          <span
+                            className="text-[8px] font-black px-1 py-0.5 rounded-full cursor-pointer hover:opacity-75"
+                            style={cStatusStyle}
+                            onClick={() => { onSelectTag && onSelectTag({ status: cIsAnon ? 'anonymous' : c.is_participant ? 'participant' : 'orbiter' }); onClose(); }}
+                          >● {cStatusLabel}</span>
+                          <span className="text-[9px] opacity-50 ml-auto" style={{ color: chromeText }}>{c.created_at ? new Date(c.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric'}) : ''}</span>
+                        </div>
+                        <div className="text-xs" style={{ color: chromeText }}>{c.text || c.content}</div>
                       </div>
-                      <div className="text-xs" style={{ color: chromeText }}>{c.text || c.content}</div>
-                    </div>
-                  );
-                })}
+                    );
+                  });
+                })()}
                 {(comments || []).length === 0 && (
                   <p className="text-xs opacity-50 text-center py-2" style={{ color: chromeText }}>No comments yet</p>
                 )}
@@ -861,7 +877,7 @@ function PostDetailPopup({ post, postReactions, onReact, onOpenReactors, accentC
       {/* Quick emoji picker for popup — z above the popup itself */}
       {popupQepRect && createPortal(
         <>
-          <div className="fixed inset-0 z-[100015]" onClick={(e) => { e.stopPropagation(); setPopupQepRect(null); }} />
+          <div className="fixed inset-0 z-[100015]" onClick={(e) => { e.stopPropagation(); e.preventDefault(); setPopupQepRect(null); }} />
           <div
             className="fixed z-[100016]"
             style={popupQepRect.top > window.innerHeight * 0.5
@@ -4511,6 +4527,7 @@ export default function GeoPostView({ session }) {
           comments={commentsByPost[openPostPopup.id] || []}
           onSubmitComment={submitCommentForPost}
           session={session}
+          onClickUsername={handleClickUsername}
         />
       )}
       <ReactionListModal isOpen={!!reactorsModal} list={reactorsModal ? (reactions[reactorsModal] || []) : []} onClose={() => setReactorsModal(null)} />
