@@ -3489,12 +3489,9 @@ export default function GeoPostView({ session }) {
         document.body.style.cursor = 'grabbing';
 
         const rect = ds.outerEl ? ds.outerEl.getBoundingClientRect() : null;
-        // When ghost is scaled 0.5, rendered size is half; offset by half the grab point
-        // so cursor stays near the center of the mini ghost
-        const rawOffX = rect ? e.clientX - rect.left : 0;
-        const rawOffY = rect ? e.clientY - rect.top  : 0;
-        ds.offsetX = rawOffX * 0.5;
-        ds.offsetY = rawOffY * 0.5;
+        // Full-size grab point offset; scale(0.5, center center) keeps visual centered around same point
+        ds.offsetX = rect ? e.clientX - rect.left : 0;
+        ds.offsetY = rect ? e.clientY - rect.top  : 0;
 
         const ghost = document.createElement('div');
         ghost.style.cssText = `
@@ -3503,7 +3500,7 @@ export default function GeoPostView({ session }) {
           opacity: 0.9; pointer-events: none; z-index: 200000;
           border-radius: 16px; overflow: hidden;
           box-shadow: 0 15px 45px rgba(0,0,0,0.5);
-          transform: scale(0.5); transform-origin: top left;
+          transform: scale(0.5); transform-origin: center center;
         `;
         const innerCard = ds.outerEl ? ds.outerEl.querySelector('.rounded-2xl') : null;
         if (innerCard) {
@@ -4102,9 +4099,9 @@ export default function GeoPostView({ session }) {
         <div ref={desktopGridRef} className="hidden md:grid gap-3 mt-3"
           style={{
             '--image-scale': Math.max(0.5, Number(feedImageScale || 1)),
-            // During active drag: use 'row' flow (respects array order, no hole-filling).
-            // At rest: 'dense' fills gaps from pinned/filter panel placements.
-            gridAutoFlow: draggingId ? 'row' : 'dense',
+            // Keep dense always — prevents holes in layout. Array order controls placement,
+            // dense packs gaps left by pinned/filter panel placements.
+            gridAutoFlow: 'dense',
             gridTemplateColumns: 'repeat(14, minmax(0, 1fr))',
             gridAutoRows: `${Math.max(1, (desktopUnitHeight - 12) / 2)}px`,
             overflowAnchor: 'none',
