@@ -1096,8 +1096,17 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
     : (finalRowSpan === 1) ? 4   // no-image 2w×1t half-tile: 4 lines
     : (finalColSpan >= 4) ? 14   // no-image wide 4w×2t — 14 std lines = 336px budget
     : 12;                         // no-image normal 2w×2t
-  // Fixed pixel budget: 16px (browser normal font) × 1.5 line-height × maxTextLines × slider scale
-  const maxBudgetPx = Math.floor(16 * scale * textLineHeight) * maxTextLines;
+  // Pixel budget per line at actual rendered font (0.875rem * 16 = 14px, ×1.5 lineHeight = 21px).
+  // For the wide no-image tile (4w×2t) the user calibrated to exactly 14 visible lines = 294px.
+  // Other tiles use the root 16px font baseline (24px/line) which matches their existing appearance.
+  const maxBudgetPx = (() => {
+    const rootLinePx = Math.floor(16 * scale * textLineHeight); // 24px at scale=1
+    if (finalColSpan >= 4 && !hasImage) {
+      const actualLinePx = Math.floor(textFontSizeRem * 16 * scale * textLineHeight); // 21px at scale=1
+      return actualLinePx * maxTextLines; // 21 × 14 = 294px
+    }
+    return rootLinePx * maxTextLines;
+  })();
 
   // tileGridStyle: lock position when commentsOpen or isPinned
   const tileGridStyle = (() => {
@@ -1274,12 +1283,9 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
               onMouseDown={e => e.preventDefault()}
               onClick={(e) => {
                 e.stopPropagation();
-                const el = outerRef.current;
-                if (el && !isPinned) {
-                  const cs = getComputedStyle(el);
-                  const row = parseInt(cs.gridRowStart, 10);
-                  const col = parseInt(cs.gridColumnStart, 10);
-                  onTogglePin(post.id, Number.isFinite(row) ? row : null, Number.isFinite(col) ? col : null);
+                if (!isPinned) {
+                  const { row, col } = gridPositionRef.current;
+                  onTogglePin(post.id, row, col);
                 } else {
                   onTogglePin(post.id, null, null);
                 }
@@ -1514,12 +1520,9 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
               onMouseDown={e => e.preventDefault()}
               onClick={(e) => {
                 e.stopPropagation();
-                const el = outerRef.current;
-                if (el && !isPinned) {
-                  const cs = getComputedStyle(el);
-                  const row = parseInt(cs.gridRowStart, 10);
-                  const col = parseInt(cs.gridColumnStart, 10);
-                  onTogglePin(post.id, Number.isFinite(row) ? row : null, Number.isFinite(col) ? col : null);
+                if (!isPinned) {
+                  const { row, col } = gridPositionRef.current;
+                  onTogglePin(post.id, row, col);
                 } else {
                   onTogglePin(post.id, null, null);
                 }
@@ -3072,7 +3075,7 @@ export default function GeoPostView({ session }) {
       const known = new Set(prev);
       const newIds = posts.map(p => p.id).filter(id => !known.has(id));
       if (newIds.length === 0) return prev;
-      return [...prev, ...newIds];
+      return [...newIds, ...prev]; // prepend so new posts appear at top
     });
   }, [posts]);
 
@@ -3423,11 +3426,51 @@ export default function GeoPostView({ session }) {
       if (!ds.active) {
         ds.active = true;
         setDraggingId(ds.postId);
+
+        // Prevent text selection while dragging
+        document.body.style.userSelect = 'none';
+        document.body.style.webkitUserSelect = 'none';
+
+        // Capture offset so ghost follows from where user grabbed
+        const rect = ds.outerEl ? ds.outerEl.getBoundingClientRect() : null;
+        ds.offsetX = rect ? (e.clientX - rect.left) : 0;
+        ds.offsetY = rect ? (e.clientY - rect.top)  : 0;
+
+        // Build ghost clone: copy inner visual card into a fixed-position container
         if (ds.outerEl) {
-          ds.outerEl.style.opacity = '0.5';
-          ds.outerEl.style.zIndex = '999';
+          const ghost = document.createElement('div');
+          ghost.style.cssText = [
+            `position: fixed`,
+            `left: ${rect ? rect.left : e.clientX}px`,
+            `top:  ${rect ? rect.top  : e.clientY}px`,
+            `width: ${rect ? rect.width : 200}px`,
+            `height: ${rect ? rect.height : 200}px`,
+            `opacity: 0.72`,
+            `pointer-events: none`,
+            `z-index: 10000`,
+            `border-radius: 16px`,
+            `overflow: hidden`,
+            `box-shadow: 8px 8px 0px rgba(0,0,0,0.3)`,
+          ].join(';');
+          const innerCard = ds.outerEl.querySelector('.rounded-2xl');
+          if (innerCard) {
+            const clone = innerCard.cloneNode(true);
+            clone.style.cssText = 'width:100%;height:100%;position:absolute;inset:0;border-radius:16px;overflow:hidden;';
+            ghost.appendChild(clone);
+          }
+          document.body.appendChild(ghost);
+          ds.ghost = ghost;
+
+          // Fade + disable pointer events on source tile
+          ds.outerEl.style.opacity = '0.3';
           ds.outerEl.style.pointerEvents = 'none';
         }
+      }
+
+      // Move ghost with cursor
+      if (ds.ghost) {
+        ds.ghost.style.left = `${e.clientX - ds.offsetX}px`;
+        ds.ghost.style.top  = `${e.clientY - ds.offsetY}px`;
       }
 
       const grid = desktopGridRef.current;
@@ -3453,13 +3496,23 @@ export default function GeoPostView({ session }) {
       if (ds.active) {
         const draggedId = ds.postId;
 
+        // Remove ghost
+        if (ds.ghost) {
+          ds.ghost.remove();
+          ds.ghost = null;
+        }
+
+        // Restore source tile with rebound animation
         if (ds.outerEl) {
           ds.outerEl.style.opacity = '';
-          ds.outerEl.style.zIndex = '';
           ds.outerEl.style.pointerEvents = '';
           ds.outerEl.style.transform = 'scale(0.96)';
           setTimeout(() => { if (ds.outerEl) ds.outerEl.style.transform = ''; }, 200);
         }
+
+        // Restore text selection
+        document.body.style.userSelect = '';
+        document.body.style.webkitUserSelect = '';
 
         const currentDragOverIdx = dragOverIdxRef.current;
         setDragOverIdx(null);
@@ -3478,6 +3531,10 @@ export default function GeoPostView({ session }) {
             return withoutDragged;
           });
         }
+      } else {
+        // Clean up even for non-active drag attempts
+        document.body.style.userSelect = '';
+        document.body.style.webkitUserSelect = '';
       }
 
       window._gpDragState = null;
@@ -3488,7 +3545,11 @@ export default function GeoPostView({ session }) {
     return () => {
       document.removeEventListener('mousemove', onMouseMove);
       document.removeEventListener('mouseup', onMouseUp);
+      // Clean up any lingering ghost on unmount
+      if (window._gpDragState?.ghost) window._gpDragState.ghost.remove();
       window._gpDragState = null;
+      document.body.style.userSelect = '';
+      document.body.style.webkitUserSelect = '';
     };
   }, [feedLayout]);
 
