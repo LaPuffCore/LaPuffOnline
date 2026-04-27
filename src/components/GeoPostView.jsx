@@ -665,8 +665,10 @@ function PostDetailPopup({ post, postReactions, onReact, onOpenReactors, accentC
     if (!post.image_url || !imgLoaded) return 640;
     if (imgRatio < 0.85) return 480;
     if (imgRatio <= 1.25) return 560;
-    if (imgRatio <= 2.5) return Math.min(Math.round((window?.innerWidth ?? 800) * 0.9), Math.round(480 + (imgRatio - 1.25) * 300));
-    return Math.min(Math.round((window?.innerWidth ?? 900) * 0.95), 900);
+    // Horizontal images: scale 150% to give them more screen presence
+    const screenW = window?.innerWidth ?? 900;
+    const base = Math.min(Math.round(screenW * 0.9), Math.round(480 + (imgRatio - 1.25) * 300));
+    return Math.min(Math.round(base * 1.5), Math.round(screenW * 0.98));
   })();
 
   useEffect(() => {
@@ -1226,13 +1228,24 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
         window._gpDragState = { postId: post.id, startX: e.clientX, startY: e.clientY, active: false, outerEl: outerRef.current };
       }}
     >
-      {/* Inner visual card — carries all visual styling */}
+      {/* Inner visual card — border wrapper (no overflow:hidden to prevent corner pixel bleed) */}
       <div
-        className="rounded-2xl border-3 overflow-hidden"
+        className="rounded-2xl border-3"
         style={{
-          background: theme.fill,
           borderColor: theme.outline,
           boxShadow: `4px 4px 0px ${theme.shadow}`,
+          flex: 1,
+          display: 'flex',
+          position: 'relative',
+          minHeight: 0,
+          ...(isDragTarget ? { outline: `3px dashed ${accentColor}`, outlineOffset: '2px' } : {}),
+        }}
+      >
+      {/* Content wrapper — overflow:hidden separated from border to eliminate corner pixel bleed */}
+      <div
+        className="overflow-hidden rounded-[13px]"
+        style={{
+          background: theme.fill,
           flex: 1,
           display: 'flex',
           flexDirection: isSplitTile ? 'row' : 'column',
@@ -1240,7 +1253,6 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
           position: 'relative',
           overflow: 'hidden',
           minHeight: 0,
-          ...(isDragTarget ? { outline: `3px dashed ${accentColor}`, outlineOffset: '2px' } : {}),
         }}
       >
       {/* In-grid ghost overlay: shows dragged post preview at drop position */}
@@ -1264,7 +1276,7 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
             ? { flex: (commentsOpen && finalRowSpan === 3 && commentCount > 0) ? '0 0 42%' : 1, minHeight: 80, position: 'relative', cursor: onOpenPopup ? 'pointer' : 'default' }
             : { height: 0, paddingBottom: shape === 'portrait' ? '110%' : isUltrawideTile ? '25%' : shape === 'landscape' ? '48%' : '72%', cursor: onOpenPopup ? 'pointer' : 'default' }
           }
-          onClick={e => e.stopPropagation()}
+          onClick={() => onOpenPopup && onOpenPopup(post)}
         >
           <img
             src={post.image_url}
@@ -1517,14 +1529,15 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
           document.body
         )}
       </div>
-      </div>{/* end inner visual card */}
+      </div>{/* end content wrapper */}
+      </div>{/* end border wrapper */}
 
       {/* No-image tiles ONLY: corner buttons outside the inner card */}
       {!hasImage && (
         <>
           {onHide && (
             <button
-              className="absolute w-6 h-6 rounded-full bg-black/70 text-white text-xs font-black flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black z-20 flex-shrink-0"
+              className="absolute w-6 h-6 rounded-full bg-black/70 text-white text-xs font-black flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black z-[9999] flex-shrink-0"
               style={{ top: 0, left: 0, transform: 'translate(-30%, -30%)' }}
               onMouseDown={e => e.preventDefault()}
               onClick={(e) => { e.stopPropagation(); onHide(post.id); }}
@@ -1533,7 +1546,7 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
           )}
           {onTogglePin && (
             <button
-              className="absolute w-6 h-6 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-20 flex-shrink-0 text-white text-xs"
+              className="absolute w-6 h-6 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-[9999] flex-shrink-0 text-white text-xs"
               style={{ top: 0, right: 0, transform: 'translate(30%, -30%)', background: isPinned ? accentColor : 'rgba(0,0,0,0.7)' }}
               onMouseDown={e => e.preventDefault()}
               onClick={(e) => {
@@ -2392,7 +2405,6 @@ export default function GeoPostView({ session }) {
   const canShowLessRef = useRef(false);
   const rowStepRef = useRef(432);
   const scrollSettleTimerRef = useRef(null);
-  const lastApplyTimeRef = useRef(0); // cooldown: prevent bounce from rapid re-apply
   const scaleButtonRef = useRef(null);
   // Cached distance from scroll-container top to grid top — computed once on mount / resize,
   // NOT on every scroll event. Recalculating on scroll is wrong because the grid reflowing
@@ -3260,11 +3272,8 @@ export default function GeoPostView({ session }) {
     const onScroll = () => {
       if (scrollSettleTimerRef.current) clearTimeout(scrollSettleTimerRef.current);
       scrollSettleTimerRef.current = setTimeout(() => {
-        // Cooldown: don't recompute within 1.5s of last panel placement to prevent bounce
-        if (Date.now() - lastApplyTimeRef.current < 1500) return;
         const target = computeTargetRow();
         if (target !== lastAppliedRowRef.current) {
-          lastApplyTimeRef.current = Date.now();
           lastAppliedRowRef.current = target;
           applyPanelRow(target);
         }
@@ -3280,7 +3289,6 @@ export default function GeoPostView({ session }) {
     // Place panel immediately on mount/dep-change without animation
     const initialRow = computeTargetRow();
     lastAppliedRowRef.current = initialRow;
-    lastApplyTimeRef.current = Date.now(); // reset cooldown on effect rerun so scroll can pick up normally
     panelRowRef.current = initialRow;
     setDesktopPanelRow(initialRow);
     if (filterPanelInnerRef.current) {
