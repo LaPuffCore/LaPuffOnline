@@ -982,7 +982,7 @@ function GeoPostMosaic({ posts, accentColor, opacity = 0.42, onTileClick = null 
 }
 
 // ── PostCard ──────────────────────────────────────────────────────────────────
-function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, onSelectTag, zipHeatMap, boroughHeatMap, textScale = 1, imageScale = 1, imagePriority = false, isDesktopMasonry = false, gridUnitHeight = 0, commentCount = 0, commentsOpen = false, onToggleComments, commentsChildren, onOpenPopup, onHide, isPinned = false, pinnedRow = null, pinnedCol = null, onTogglePin, onClickUsername, isDragTarget = false, draggedPost = null }) {
+function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, onSelectTag, zipHeatMap, boroughHeatMap, textScale = 1, imageScale = 1, imagePriority = false, isDesktopMasonry = false, gridUnitHeight = 0, commentCount = 0, commentsOpen = false, onToggleComments, commentsChildren, onOpenPopup, onHide, isPinned = false, pinnedRow = null, pinnedCol = null, onTogglePin, onClickUsername, isDragging = false }) {
   const { resolvedTheme } = useSiteTheme();
   const theme = getPostVisualTheme(post, resolvedTheme);
   const date = new Date(post.created_at);
@@ -1110,20 +1110,20 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
     return rootLinePx * maxTextLines;
   })();
 
-  // tileGridStyle: lock position when commentsOpen or isPinned
+  // tileGridStyle: pinned tiles take absolute priority (ignore array shuffling entirely)
   const tileGridStyle = (() => {
+    if (isPinned && pinnedRow != null && pinnedCol != null) {
+      return {
+        gridRow: `${pinnedRow} / span ${rowSpan}`,
+        gridColumn: `${pinnedCol} / span ${finalColSpan}`,
+      };
+    }
     if (commentsOpen && isDesktopMasonry && gridPositionRef.current.row != null) {
       return {
         gridRow: `${gridPositionRef.current.row} / span ${rowSpan}`,
         gridColumn: gridPositionRef.current.col != null
           ? `${gridPositionRef.current.col} / span ${finalColSpan}`
           : `span ${finalColSpan}`,
-      };
-    }
-    if (isPinned && pinnedRow != null) {
-      return {
-        gridRow: `${pinnedRow} / span ${rowSpan}`,
-        gridColumn: pinnedCol != null ? `${pinnedCol} / span ${finalColSpan}` : `span ${finalColSpan}`,
       };
     }
     return {
@@ -1221,6 +1221,9 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
         height: '100%',
         overflow: 'visible',
         cursor: onOpenPopup ? 'pointer' : 'default',
+        // Invisible placeholder while dragging: stays in DOM to hold grid space
+        opacity: isDragging ? 0 : 1,
+        pointerEvents: isDragging ? 'none' : 'auto',
       }}
       onClick={(e) => { onOpenPopup && onOpenPopup(post); }}
       onMouseDown={(e) => {
@@ -1238,7 +1241,6 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
           display: 'flex',
           position: 'relative',
           minHeight: 0,
-          ...(isDragTarget ? { outline: `3px dashed ${accentColor}`, outlineOffset: '2px' } : {}),
         }}
       >
       {/* Content wrapper — overflow:hidden separated from border to eliminate corner pixel bleed */}
@@ -1255,19 +1257,6 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
           minHeight: 0,
         }}
       >
-      {/* In-grid ghost overlay: shows dragged post preview at drop position */}
-      {isDragTarget && draggedPost && (
-        <div
-          className="absolute inset-0 z-40 flex flex-col items-center justify-center gap-1 rounded-2xl pointer-events-none"
-          style={{
-            background: 'rgba(124,58,237,0.18)',
-            backdropFilter: 'blur(1px)',
-          }}
-        >
-          <span style={{ fontSize: '2rem', opacity: 0.85 }}>{draggedPost.content?.fillColor ? '📌' : (draggedPost.representative_emoji || draggedPost.content?.html ? '📝' : '📌')}</span>
-          <span style={{ fontSize: '0.7rem', fontWeight: 800, color: accentColor, opacity: 0.9 }}>Drop here</span>
-        </div>
-      )}
       {post.image_url && !isSplitTile && (
         // flex: 1 — image grows elastically to fill all remaining tile space the footer doesn't claim.
         <div
@@ -2369,8 +2358,9 @@ export default function GeoPostView({ session }) {
   // Tile order resets on every page load — no persistence (session-only)
   const [customPostOrder, setCustomPostOrder] = useState(() => []);
   const [draggingId, setDraggingId] = useState(null);
-  const [dragOverIdx, setDragOverIdx] = useState(null);
-  const dragOverIdxRef = useRef(null);
+  const [dragHoverId, setDragHoverId] = useState(null);
+  const dragHoverIdRef = useRef(null); // sync mirror for reading in onMouseUp without stale closure
+  const dragGhostRef = useRef(null);
   const visiblePostsRef = useRef([]);
   const orderedFilteredPostsRef = useRef([]);
   const hiddenBtnRef = useRef(null);
@@ -3110,15 +3100,35 @@ export default function GeoPostView({ session }) {
     });
   }, [posts]);
 
+  // orderedFilteredPosts: applies committed order then live drag displacement so the grid
+  // shows accurate hole/projection as user drags (Gemini live-displacement architecture)
   const orderedFilteredPosts = useMemo(() => {
-    if (customPostOrder.length === 0) return filteredPosts;
-    const orderMap = new Map(customPostOrder.map((id, i) => [id, i]));
-    return [...filteredPosts].sort((a, b) => {
-      const ai = orderMap.has(a.id) ? orderMap.get(a.id) : Infinity;
-      const bi = orderMap.has(b.id) ? orderMap.get(b.id) : Infinity;
-      return ai - bi;
-    });
-  }, [filteredPosts, customPostOrder]);
+    let baseOrder = [...filteredPosts];
+
+    // 1. Apply committed custom order
+    if (customPostOrder.length > 0) {
+      const orderMap = new Map(customPostOrder.map((id, i) => [id, i]));
+      baseOrder.sort((a, b) => {
+        const ai = orderMap.has(a.id) ? orderMap.get(a.id) : Infinity;
+        const bi = orderMap.has(b.id) ? orderMap.get(b.id) : Infinity;
+        return ai - bi;
+      });
+    }
+
+    // 2. Live drag displacement: remove dragged item from its spot, insert at hover target
+    // This makes the grid show exactly how it will look when dropped — the dragged tile
+    // stays in DOM (invisible, opacity:0) as a placeholder at its live projected position
+    if (draggingId && dragHoverId && draggingId !== dragHoverId) {
+      const draggedIdx = baseOrder.findIndex(p => p.id === draggingId);
+      const targetIdx  = baseOrder.findIndex(p => p.id === dragHoverId);
+      if (draggedIdx !== -1 && targetIdx !== -1) {
+        const [draggedItem] = baseOrder.splice(draggedIdx, 1);
+        baseOrder.splice(targetIdx, 0, draggedItem);
+      }
+    }
+
+    return baseOrder;
+  }, [filteredPosts, customPostOrder, draggingId, dragHoverId]);
 
   const visiblePosts = orderedFilteredPosts.filter(p => !hiddenPostIds.has(p.id)).slice(0, visibleCount);
   const canShowMore  = visibleCount < orderedFilteredPosts.length;
@@ -3127,6 +3137,7 @@ export default function GeoPostView({ session }) {
   canShowLessRef.current = canShowLess;
   visiblePostsRef.current = visiblePosts;
   orderedFilteredPostsRef.current = orderedFilteredPosts;
+  dragHoverIdRef.current = dragHoverId; // keep sync ref in step with state for onMouseUp
 
   useEffect(() => {
     // Only measure in tile mode — filter panel only exists in tile grid
@@ -3427,7 +3438,7 @@ export default function GeoPostView({ session }) {
     });
   }, []);
 
-  // Document-level drag handlers for tile reorder (Change 7)
+  // Document-level drag handlers — live displacement architecture (Gemini)
   useEffect(() => {
     if (feedLayout !== 'tiles') return;
     const DRAG_THRESHOLD = 6;
@@ -3439,70 +3450,57 @@ export default function GeoPostView({ session }) {
       const dy = e.clientY - ds.startY;
       if (!ds.active && Math.sqrt(dx * dx + dy * dy) < DRAG_THRESHOLD) return;
 
+      // A. INITIALIZE DRAG & BUILD GHOST
       if (!ds.active) {
         ds.active = true;
         setDraggingId(ds.postId);
-
-        // Prevent text selection while dragging
         document.body.style.userSelect = 'none';
         document.body.style.webkitUserSelect = 'none';
 
-        // Capture offset so ghost follows from where user grabbed
         const rect = ds.outerEl ? ds.outerEl.getBoundingClientRect() : null;
-        ds.offsetX = rect ? (e.clientX - rect.left) : 0;
-        ds.offsetY = rect ? (e.clientY - rect.top)  : 0;
+        ds.offsetX = rect ? e.clientX - rect.left : 0;
+        ds.offsetY = rect ? e.clientY - rect.top  : 0;
 
-        // Build ghost clone: copy inner visual card into a fixed-position container
-        if (ds.outerEl) {
-          const ghost = document.createElement('div');
-          ghost.style.cssText = [
-            `position: fixed`,
-            `left: ${rect ? rect.left : e.clientX}px`,
-            `top:  ${rect ? rect.top  : e.clientY}px`,
-            `width: ${rect ? rect.width : 200}px`,
-            `height: ${rect ? rect.height : 200}px`,
-            `opacity: 0.72`,
-            `pointer-events: none`,
-            `z-index: 10000`,
-            `border-radius: 16px`,
-            `overflow: hidden`,
-            `box-shadow: 8px 8px 0px rgba(0,0,0,0.3)`,
-          ].join(';');
-          const innerCard = ds.outerEl.querySelector('.rounded-2xl');
-          if (innerCard) {
-            const clone = innerCard.cloneNode(true);
-            clone.style.cssText = 'width:100%;height:100%;position:absolute;inset:0;border-radius:16px;overflow:hidden;';
-            ghost.appendChild(clone);
-          }
-          document.body.appendChild(ghost);
-          ds.ghost = ghost;
-
-          // Fade + disable pointer events on source tile
-          ds.outerEl.style.opacity = '0.3';
-          ds.outerEl.style.pointerEvents = 'none';
+        const ghost = document.createElement('div');
+        ghost.style.cssText = `
+          position: fixed; left: ${rect ? rect.left : e.clientX}px; top: ${rect ? rect.top : e.clientY}px;
+          width: ${rect ? rect.width : 200}px; height: ${rect ? rect.height : 200}px;
+          opacity: 0.85; pointer-events: none; z-index: 10000;
+          border-radius: 16px; overflow: hidden;
+          box-shadow: 12px 12px 24px rgba(0,0,0,0.4);
+          transform: scale(1.02); transition: transform 0.1s;
+        `;
+        const innerCard = ds.outerEl ? ds.outerEl.querySelector('.rounded-2xl') : null;
+        if (innerCard) {
+          const clone = innerCard.cloneNode(true);
+          clone.style.cssText = 'width:100%;height:100%;position:absolute;inset:0;border-radius:16px;overflow:hidden;pointer-events:none;';
+          ghost.appendChild(clone);
         }
+        document.body.appendChild(ghost);
+        dragGhostRef.current = ghost;
       }
 
-      // Move ghost with cursor
-      if (ds.ghost) {
-        ds.ghost.style.left = `${e.clientX - ds.offsetX}px`;
-        ds.ghost.style.top  = `${e.clientY - ds.offsetY}px`;
+      // B. MOVE GHOST WITH CURSOR
+      if (dragGhostRef.current) {
+        dragGhostRef.current.style.left = `${e.clientX - ds.offsetX}px`;
+        dragGhostRef.current.style.top  = `${e.clientY - ds.offsetY}px`;
       }
 
+      // C. FIND HOVER TARGET (closest tile that isn't the dragged tile itself)
       const grid = desktopGridRef.current;
       if (!grid) return;
       const tiles = Array.from(grid.querySelectorAll('[data-post-id]'));
-      let closestIdx = -1;
+      let closestId = null;
       let closestDist = Infinity;
-      tiles.forEach((tile, idx) => {
+      tiles.forEach((tile) => {
+        if (tile.dataset.postId === ds.postId) return; // skip self (invisible placeholder)
         const rect = tile.getBoundingClientRect();
         const cx = rect.left + rect.width / 2;
-        const cy = rect.top + rect.height / 2;
+        const cy = rect.top  + rect.height / 2;
         const dist = Math.abs(e.clientX - cx) + Math.abs(e.clientY - cy);
-        if (dist < closestDist) { closestDist = dist; closestIdx = idx; }
+        if (dist < closestDist) { closestDist = dist; closestId = tile.dataset.postId; }
       });
-      dragOverIdxRef.current = closestIdx;
-      setDragOverIdx(closestIdx);
+      if (closestId) setDragHoverId(closestId);
     };
 
     const onMouseUp = () => {
@@ -3510,49 +3508,38 @@ export default function GeoPostView({ session }) {
       if (!ds) return;
 
       if (ds.active) {
-        const draggedId = ds.postId;
-
-        // Remove ghost
-        if (ds.ghost) {
-          ds.ghost.remove();
-          ds.ghost = null;
+        // D. COMMIT or REVERT
+        // dragHoverId holds the current hover post id from state — read from ref for sync access
+        const currentHoverId = dragHoverIdRef.current;
+        if (currentHoverId && currentHoverId !== ds.postId) {
+          // Commit: freeze the live-displaced array order into customPostOrder
+          setCustomPostOrder(() => orderedFilteredPostsRef.current.map(p => p.id));
         }
+        // If no hover target → customPostOrder unchanged → array reverts to pre-drag on state clear
 
-        // Restore source tile with rebound animation
-        if (ds.outerEl) {
-          ds.outerEl.style.opacity = '';
-          ds.outerEl.style.pointerEvents = '';
-          ds.outerEl.style.transform = 'scale(0.96)';
-          setTimeout(() => { if (ds.outerEl) ds.outerEl.style.transform = ''; }, 200);
-        }
-
-        // Restore text selection
-        document.body.style.userSelect = '';
-        document.body.style.webkitUserSelect = '';
-
-        const currentDragOverIdx = dragOverIdxRef.current;
-        setDragOverIdx(null);
-        dragOverIdxRef.current = null;
-        setDraggingId(null);
-
-        if (currentDragOverIdx !== null && currentDragOverIdx >= 0) {
-          setCustomPostOrder(prev => {
-            const current = prev.length > 0 ? [...prev] : orderedFilteredPostsRef.current.map(p => p.id);
-            const withoutDragged = current.filter(id => id !== draggedId);
-            const targetPost = visiblePostsRef.current[currentDragOverIdx];
-            if (!targetPost || targetPost.id === draggedId) return current;
-            const targetPos = withoutDragged.indexOf(targetPost.id);
-            if (targetPos === -1) return current;
-            withoutDragged.splice(targetPos, 0, draggedId);
-            return withoutDragged;
+        // E. UPDATE PIN COORDINATES if user dragged a pinned tile
+        if (pinnedPostIds.has(ds.postId)) {
+          requestAnimationFrame(() => {
+            const el = document.querySelector(`[data-post-id="${ds.postId}"]`);
+            if (el) {
+              const cs = getComputedStyle(el);
+              const row = parseInt(cs.gridRowStart, 10);
+              const col = parseInt(cs.gridColumnStart, 10);
+              if (!isNaN(row) && !isNaN(col)) {
+                setPinnedPositions(p => ({ ...p, [ds.postId]: { row, col } }));
+              }
+            }
           });
         }
-      } else {
-        // Clean up even for non-active drag attempts
-        document.body.style.userSelect = '';
-        document.body.style.webkitUserSelect = '';
+
+        // Remove ghost
+        if (dragGhostRef.current) { dragGhostRef.current.remove(); dragGhostRef.current = null; }
       }
 
+      document.body.style.userSelect = '';
+      document.body.style.webkitUserSelect = '';
+      setDraggingId(null);
+      setDragHoverId(null);
       window._gpDragState = null;
     };
 
@@ -3561,13 +3548,12 @@ export default function GeoPostView({ session }) {
     return () => {
       document.removeEventListener('mousemove', onMouseMove);
       document.removeEventListener('mouseup', onMouseUp);
-      // Clean up any lingering ghost on unmount
-      if (window._gpDragState?.ghost) window._gpDragState.ghost.remove();
+      if (dragGhostRef.current) { dragGhostRef.current.remove(); dragGhostRef.current = null; }
       window._gpDragState = null;
       document.body.style.userSelect = '';
       document.body.style.webkitUserSelect = '';
     };
-  }, [feedLayout]);
+  }, [feedLayout, pinnedPostIds]);
 
   const scrollToTop = () => {    topAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -3605,11 +3591,7 @@ export default function GeoPostView({ session }) {
         pinnedCol={pinnedPositions[post.id]?.col ?? null}
         onTogglePin={togglePin}
         onClickUsername={handleClickUsername}
-        isDragTarget={draggingId && dragOverIdx !== null && visiblePostsRef.current[dragOverIdxRef.current]?.id === post.id}
-        draggedPost={draggingId && dragOverIdx !== null && visiblePostsRef.current[dragOverIdxRef.current]?.id === post.id
-          ? visiblePostsRef.current.find(p => p.id === draggingId) ?? null
-          : null
-        }
+        isDragging={draggingId === post.id}
         commentsChildren={
           <CommentSection
             post={post}
