@@ -3053,6 +3053,11 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
   const squareRowScale = (tileShape === 'square' && containerW > 56)
     ? containerW / (containerW - 56)
     : 1;
+  // Live-readable refs so the scroll effect closure always sees current values.
+  const tileShapeRef = useRef(tileShape);
+  tileShapeRef.current = tileShape;
+  const squareRowScaleRef = useRef(squareRowScale);
+  squareRowScaleRef.current = squareRowScale;
 
   const [listScaleOpen, setListScaleOpen] = useState(false);
   const createPostAreaRef = useRef(null);
@@ -3938,7 +3943,11 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
       const scrollEl2 = scrollEl;
       const scrollTop = scrollEl2 === window ? window.scrollY : scrollEl2.scrollTop;
       const containerH = scrollEl2 === window ? window.innerHeight : scrollEl2.clientHeight;
-      const halfRowPx = Math.max(1, (desktopUnitHeight - 12) / 2 + 12);
+      const isSquareMode = tileShapeRef.current === 'square';
+      const baseRowHeight = Math.max(1, (desktopUnitHeight - 12) / 2);
+      const scaledRowHeight = isSquareMode ? baseRowHeight * squareRowScaleRef.current : baseRowHeight;
+      const rowGap = isSquareMode ? 0 : 12;
+      const halfRowPx = Math.max(1, scaledRowHeight + rowGap);
       const fullVisualRowPx = halfRowPx * 2;
       rowStepRef.current = halfRowPx;
 
@@ -4046,6 +4055,39 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
   }, [feedLayout, tileViewKey]);
 
   // Additive resume removed — restoring 2dffe83 panel logic verbatim.
+
+  // When the user swaps square↔round, the grid layout changes but no scroll
+  // event fires, so the panel stays frozen. Re-measure gridOffset and nudge
+  // the scroll handler to recompute the target row.
+  useEffect(() => {
+    let raf1 = requestAnimationFrame(() => {
+      let raf2;
+      raf2 = requestAnimationFrame(() => {
+        if (!desktopGridRef.current) return;
+        const scrollEl = findScrollParent(desktopGridRef.current);
+        const scrollTop = scrollEl === window ? window.scrollY : scrollEl.scrollTop;
+        const containerClientTop = scrollEl === window ? 0 : scrollEl.getBoundingClientRect().top;
+        const gridClientTop = desktopGridRef.current.getBoundingClientRect().top;
+        gridOffsetCacheRef.current = gridClientTop - containerClientTop + scrollTop;
+        // Do NOT reset panelRowRef here — it must equal the panel's actual current
+        // grid row so that applyPanelRow's FLIP delta is correct.
+        // Only reset the sentinel so applyPanelRow fires even if target == current row.
+        lastAppliedRowRef.current = -1;
+        if (filterPanelInnerRef.current) {
+          filterPanelInnerRef.current.style.transition = 'none';
+          filterPanelInnerRef.current.style.transform = 'translateY(0)';
+          filterPanelInnerRef.current.style.filter = 'blur(0)';
+          filterPanelInnerRef.current.style.opacity = '1';
+        }
+        // Nudge the existing scroll handler to recompute target row from current scroll
+        try { (scrollEl === window ? window : scrollEl).dispatchEvent(new Event('scroll')); } catch {}
+      });
+    });
+    return () => {
+      cancelAnimationFrame(raf1);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tileShape]);
 
 
   // FAB visibility: fade in as create-post area scrolls away
