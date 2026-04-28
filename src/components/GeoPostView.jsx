@@ -3062,15 +3062,6 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
     ? containerW / (containerW - 56)
     : 1;
 
-  // Mutable refs mirror tileShape + squareRowScale so the scroll listener's
-  // computeTargetRow closure can read the LIVE active-mode geometry without
-  // needing to re-bind on every shape/scale change. Fixes filter-panel desync
-  // when swapping square↔round after tiles are pinned/moved.
-  const tileShapeRef = useRef(tileShape);
-  tileShapeRef.current = tileShape;
-  const squareRowScaleRef = useRef(squareRowScale);
-  squareRowScaleRef.current = squareRowScale;
-
   const [listScaleOpen, setListScaleOpen] = useState(false);
   const createPostAreaRef = useRef(null);
   const [fabOpacity, setFabOpacity] = useState(0);
@@ -4073,34 +4064,7 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [feedLayout, tileViewKey]);
 
-  // Additive resume (restored from eb86130): after a square↔round swap,
-  // scrollTop hasn't changed, so the scroll listener never fires on its own.
-  // Reset tracking refs + recompute grid offset + synthesize a scroll event
-  // so computeTargetRow runs against the new geometry and the panel snaps
-  // to its standard left-side row. Only when ⬆️ is off (panel mode).
-  useEffect(() => {
-    if (typeof window === 'undefined' || window.innerWidth < 768) return;
-    if (feedLayout !== 'tiles') return;
-    if (filterPanelMode !== 'panel') return;
-    let raf2 = 0;
-    const raf1 = requestAnimationFrame(() => {
-      raf2 = requestAnimationFrame(() => {
-        if (!desktopGridRef.current) return;
-        const scrollEl = findScrollParent(desktopGridRef.current);
-        const scrollTop = scrollEl === window ? window.scrollY : scrollEl.scrollTop;
-        const containerClientTop = scrollEl === window ? 0 : scrollEl.getBoundingClientRect().top;
-        const gridClientTop = desktopGridRef.current.getBoundingClientRect().top;
-        gridOffsetCacheRef.current = gridClientTop - containerClientTop + scrollTop;
-        lastAppliedRowRef.current = -1; // sentinel forces next applyPanelRow to fire
-        try { (scrollEl === window ? window : scrollEl).dispatchEvent(new Event('scroll')); } catch {}
-      });
-    });
-    return () => {
-      cancelAnimationFrame(raf1);
-      if (raf2) cancelAnimationFrame(raf2);
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tileShape]);
+  // Additive resume removed — restoring 2dffe83 panel logic verbatim.
 
   // Dual-coord mode swap (Option C):
   // When user toggles between rounded ↔ square, restore the active pinned/user
