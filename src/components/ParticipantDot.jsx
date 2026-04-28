@@ -82,8 +82,14 @@ export default function ParticipantDot({ onStatusChange }) {
     const startedAt = Date.now();
 
     progressTimerRef.current = setInterval(() => {
-      setProgress(prev => (prev >= 92 ? prev : prev + Math.floor(Math.random() * 8 + 2)));
-    }, 140);
+      // Smoothly approach 95% asymptotically over the expected ping window (~3s)
+      // so the bar visibly fills throughout the check rather than jumping or stalling.
+      setProgress(prev => {
+        if (prev >= 95) return 95;
+        const remaining = 95 - prev;
+        return prev + Math.max(0.4, remaining * 0.05);
+      });
+    }, 90);
 
     let nextStatus = null;
     let finalResultType = 'warning';
@@ -151,7 +157,7 @@ export default function ParticipantDot({ onStatusChange }) {
     if (isOffline) {
       return 'You are currently in Offline cache mode. Reconnect to upgrade with a one-time private location ping.';
     }
-    return 'Would you like to upgrade from Orbiter with a one time and private location ping?';
+    return "Would you like to upgrade from Orbiter to Participant with a one time private double blind location ping that no human will ever see? If within NYC it will be accepted and you will have Participant status for 24hrs to check into events for clout points and geo-post with the Participant tag";
   }
 
   function renderResult() {

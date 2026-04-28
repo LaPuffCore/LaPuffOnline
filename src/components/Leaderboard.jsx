@@ -6,9 +6,9 @@ import { useSiteTheme } from '../lib/theme';
 import { Trophy, Zap, ChevronRight, ChevronLeft, X } from 'lucide-react';
 
 // ============================================================
-// SAMPLE_MODE — set to false when done developing
+// SAMPLE_MODE — set to false to use live Supabase data
 // ============================================================
-export const SAMPLE_MODE = true;
+export const SAMPLE_MODE = false;
 
 /** * @typedef {Object} LeaderboardUser
  * @property {string} username
@@ -58,37 +58,69 @@ export default function Leaderboard({ onClose }) {
   useEffect(() => {
     async function fetchLeaders() {
       if (SAMPLE_MODE) {
-        const sortedMocks = [...MOCK_USERS].sort((a, b) => b.clout_points - a.clout_points);
+        const sortedMocks = [...MOCK_USERS].sort((a, b) => b.clout_points - a.clout_points)
+          .map(u => ({ ...u, rank_change: 0, isPlaceholder: false }));
         setAllUsers(sortedMocks);
-        // Initialize position change tracking (new users = neutral dash)
         const changes = {};
-        sortedMocks.forEach((user) => {
-          changes[user.username] = 'neutral';
-        });
+        sortedMocks.forEach((user) => { changes[user.username] = 'neutral'; });
         setPositionChanges(changes);
         setLoading(false);
         return;
       }
 
       try {
+        // Live fetch: only authenticated profiles that the server has ranked.
+        // `current_rank` is populated by the `refresh_leaderboard_live()` SQL function,
+        // which inner-joins auth.users so ghost/sample profile rows are excluded.
         const { data, error } = await supabase
           .from('profiles')
-          .select('username, clout_points, home_zip, bio')
+          .select('username, clout_points, home_zip, rank_change_24h, current_rank')
+          .not('current_rank', 'is', null)
           .order('clout_points', { ascending: false })
           .limit(50);
 
         if (error) throw error;
-        const newUsers = data || [];
-        setAllUsers(newUsers);
-        
-        // Initialize position change tracking (new users = neutral dash)
+
+        const liveUsers = (data || []).map(u => ({
+          username: u.username || 'Anonymous',
+          clout_points: typeof u.clout_points === 'number' ? u.clout_points : 0,
+          home_zip: u.home_zip || '[----]',
+          rank_change: u.rank_change_24h || 0,
+          isPlaceholder: false,
+        }));
+
+        // Pad to exactly 50 rows with [null] placeholders
+        const paddedUsers = [
+          ...liveUsers,
+          ...Array.from({ length: Math.max(0, 50 - liveUsers.length) }, () => ({
+            username: '[null]',
+            clout_points: '[null]',
+            home_zip: '[null]',
+            rank_change: 0,
+            isPlaceholder: true,
+          })),
+        ];
+
+        setAllUsers(paddedUsers);
+
+        // Position-change tracking driven by server-side rank_change_24h
         const changes = {};
-        newUsers.forEach((user) => {
-          changes[user.username] = 'neutral';
+        liveUsers.forEach((user) => {
+          if (user.rank_change > 0) changes[user.username] = 'up';
+          else if (user.rank_change < 0) changes[user.username] = 'down';
+          else changes[user.username] = 'neutral';
         });
         setPositionChanges(changes);
       } catch (err) {
         console.error("Leaderboard Sync Error:", err);
+        // On failure show 50 null placeholders so the UI grid stays intact
+        setAllUsers(Array.from({ length: 50 }, () => ({
+          username: '[null]',
+          clout_points: '[null]',
+          home_zip: '[null]',
+          rank_change: 0,
+          isPlaceholder: true,
+        })));
       } finally {
         setLoading(false);
       }
@@ -186,42 +218,63 @@ export default function Leaderboard({ onClose }) {
           (() => {
             const rank = startIndex + index + 1;
             const tier = tierFromRank(rank);
-            const rowKey = `${currentPage}-${user.username}`;
+            const isPlaceholder = !!user.isPlaceholder;
+            const rowKey = `${currentPage}-${index}-${user.username}`;
             const active = activeRow === rowKey;
-            const isSignedInUser = signedInUser === user.username;
+            const isSignedInUser = !isPlaceholder && signedInUser === user.username;
             const posChange = positionChanges[user.username] || 'neutral';
-            
-            // If signed-in user, always show as hovered
-            const shouldShowActive = active || isSignedInUser;
+            const rankDelta = typeof user.rank_change === 'number' ? user.rank_change : 0;
+
+            // Placeholder rows never show as "active"; only hover-glitch
+            const shouldShowActive = !isPlaceholder && (active || isSignedInUser);
 
             const getTrackingIcon = () => {
-              if (posChange === 'up') return <span className="text-green-600 font-black">▲</span>;
-              if (posChange === 'down') return <span className="text-red-600 font-black">▼</span>;
+              if (isPlaceholder) return <span className="text-gray-400 font-black">−</span>;
+              if (posChange === 'up') {
+                return (
+                  <span className="flex items-center gap-0.5 text-green-600 font-black leading-none">
+                    <span>▲</span>
+                    {rankDelta !== 0 && <span className="text-[8px]">{Math.abs(rankDelta)}</span>}
+                  </span>
+                );
+              }
+              if (posChange === 'down') {
+                return (
+                  <span className="flex items-center gap-0.5 text-red-600 font-black leading-none">
+                    <span>▼</span>
+                    {rankDelta !== 0 && <span className="text-[8px]">{Math.abs(rankDelta)}</span>}
+                  </span>
+                );
+              }
               return <span className="text-blue-500 font-black">−</span>;
             };
 
             return (
           <div
-            key={user.username}
+            key={rowKey}
             onMouseEnter={() => { if (!isMobile) setActiveRow(rowKey); }}
             onMouseLeave={() => { if (!isMobile && !isSignedInUser) setActiveRow(null); }}
             onTouchStart={() => { if (isMobile) setActiveRow(rowKey); }}
             onClick={() => { if (isMobile) setActiveRow(prev => prev === rowKey ? null : rowKey); }}
-            className={`px-2.5 py-2 md:p-3 grid grid-cols-[16px_20px_1fr_auto_62px] md:grid-cols-[16px_20px_1fr_auto_72px] items-center gap-2 transition-all duration-200 ${shouldShowActive ? tierActiveRowClass(tier, isSignedInUser) : 'hover:bg-violet-50'}`}
+            className={`px-2.5 py-2 md:p-3 grid grid-cols-[16px_20px_1fr_auto_62px] md:grid-cols-[16px_20px_1fr_auto_72px] items-center gap-2 transition-all duration-200 ${shouldShowActive ? tierActiveRowClass(tier, isSignedInUser) : (isPlaceholder ? '' : 'hover:bg-violet-50')}`}
           >
             {/* Tracking column */}
             <span className="text-xs font-black w-4 h-4 flex items-center justify-center">
               {getTrackingIcon()}
             </span>
 
-            <span className={`font-black text-[10px] md:text-[11px] w-5 ${shouldShowActive ? 'text-white/85' : 'text-gray-400'}`}>{rank}</span>
+            <span className={`font-black text-[10px] md:text-[11px] w-5 ${shouldShowActive ? 'text-white/85' : (isPlaceholder ? 'text-gray-300' : 'text-gray-400')}`}>{rank}</span>
 
             <div className="min-w-0">
               <p
-                className={`relative font-extrabold text-[12px] md:text-sm leading-none uppercase tracking-[0.06em] truncate ${shouldShowActive ? `chroma-glitch ${tierActiveTextClass(tier)}` : 'text-black'}`}
+                className={`relative font-extrabold text-[12px] md:text-sm leading-none uppercase tracking-[0.06em] truncate ${
+                  isPlaceholder
+                    ? `${active ? 'null-glitch' : ''} text-gray-300`
+                    : (shouldShowActive ? `chroma-glitch ${tierActiveTextClass(tier)}` : 'text-black')
+                }`}
                 style={{
                   fontFamily: "'Orbitron','Rajdhani','Audiowide',monospace",
-                  textShadow: tierShadow(tier, shouldShowActive),
+                  textShadow: isPlaceholder ? 'none' : tierShadow(tier, shouldShowActive),
                   transform: shouldShowActive ? 'translateX(0.2px)' : 'none',
                 }}
               >
@@ -229,13 +282,15 @@ export default function Leaderboard({ onClose }) {
               </p>
             </div>
 
-            <div className={`flex items-center gap-1.5 px-2 py-1 rounded-lg border justify-self-end ${shouldShowActive ? 'bg-black/25 border-white/25' : 'bg-gray-100 border-black/5'}`}>
-              <Zap className="w-3 h-3 text-yellow-500 fill-yellow-500" />
-              <span className={`font-black text-xs md:text-sm ${shouldShowActive ? 'text-white' : 'text-black'}`}>{user.clout_points.toLocaleString()}</span>
+            <div className={`flex items-center gap-1.5 px-2 py-1 rounded-lg border justify-self-end ${shouldShowActive ? 'bg-black/25 border-white/25' : (isPlaceholder ? 'bg-gray-50 border-gray-200' : 'bg-gray-100 border-black/5')}`}>
+              <Zap className={`w-3 h-3 ${isPlaceholder ? 'text-gray-300 fill-gray-300' : 'text-yellow-500 fill-yellow-500'}`} />
+              <span className={`font-black text-xs md:text-sm ${shouldShowActive ? 'text-white' : (isPlaceholder ? 'text-gray-300' : 'text-black')}`}>
+                {isPlaceholder ? '[null]' : (typeof user.clout_points === 'number' ? user.clout_points.toLocaleString() : user.clout_points)}
+              </span>
             </div>
 
-            <div className={`justify-self-end text-[10px] md:text-[11px] font-black ${shouldShowActive ? 'text-white/90' : 'text-gray-600'}`}>
-              {user.home_zip ? user.home_zip : <span className="italic font-bold">[NULL]</span>}
+            <div className={`justify-self-end text-[10px] md:text-[11px] font-black ${shouldShowActive ? 'text-white/90' : (isPlaceholder ? 'text-gray-300' : 'text-gray-600')}`}>
+              {isPlaceholder ? '[null]' : (user.home_zip ? user.home_zip : <span className="italic font-bold">[----]</span>)}
             </div>
           </div>
             );
@@ -273,6 +328,19 @@ export default function Leaderboard({ onClose }) {
           60% { transform: translateX(-0.4px); }
           80% { transform: translateX(0.5px); }
           100% { transform: translateX(0); }
+        }
+
+        .null-glitch {
+          animation: null-glitch-anim 420ms steps(2, end) infinite;
+          color: #4B5563 !important;
+        }
+        @keyframes null-glitch-anim {
+          0% { transform: translateX(0); color: #6B7280; }
+          20% { transform: translateX(-0.6px); color: #4B5563; }
+          40% { transform: translateX(0.7px); color: #374151; }
+          60% { transform: translateX(-0.4px); color: #4B5563; }
+          80% { transform: translateX(0.5px); color: #6B7280; }
+          100% { transform: translateX(0); color: #4B5563; }
         }
         
         .animated-flames {

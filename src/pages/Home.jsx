@@ -544,7 +544,7 @@ export default function Home({ events = [], eventsLoading = false }) {
                 {user ? (
                   <div className="relative">
                     <button onClick={() => setShowUserMenu(v => !v)}
-                      className="w-[112px] bg-white rounded-full px-3.5 py-1.5 font-black text-xs transition-all hover:scale-105 shadow-[2px_2px_0px_black] truncate text-center border-2 border-black text-black"
+                      className="w-[112px] bg-white rounded-full px-3.5 py-1.5 font-black text-xs transition-all hover:scale-105 shadow-[2px_2px_0px_black] truncate text-center border-2 lp-accent-border lp-accent-color-text"
                       style={showUserMenu ? { backgroundColor: accentColor, color: '#000', borderColor: '#000' } : {}}
                       onMouseEnter={e => { e.currentTarget.style.backgroundColor = accentColor; e.currentTarget.style.color = '#000'; e.currentTarget.style.borderColor = '#000'; }}
                       onMouseLeave={e => { if (!showUserMenu) { e.currentTarget.style.backgroundColor = ''; e.currentTarget.style.color = ''; e.currentTarget.style.borderColor = ''; } }}>
@@ -653,7 +653,7 @@ export default function Home({ events = [], eventsLoading = false }) {
             </div>
             {user ? (
               <button onClick={() => setShowUserMenu(v => !v)}
-                className="w-[112px] bg-white rounded-full px-3 py-1.5 font-black text-[11px] shadow-[2px_2px_0px_black] truncate text-center border-2 border-black text-black transition-all hover:scale-105"
+                className="w-[112px] bg-white rounded-full px-3 py-1.5 font-black text-[11px] shadow-[2px_2px_0px_black] truncate text-center border-2 lp-accent-border lp-accent-color-text transition-all hover:scale-105"
                 style={showUserMenu ? { backgroundColor: accentColor, color: '#000', borderColor: '#000' } : {}}
                 onMouseEnter={e => { e.currentTarget.style.backgroundColor = accentColor; e.currentTarget.style.color = '#000'; e.currentTarget.style.borderColor = '#000'; }}
                 onMouseLeave={e => { if (!showUserMenu) { e.currentTarget.style.backgroundColor = ''; e.currentTarget.style.color = ''; e.currentTarget.style.borderColor = ''; } }}>

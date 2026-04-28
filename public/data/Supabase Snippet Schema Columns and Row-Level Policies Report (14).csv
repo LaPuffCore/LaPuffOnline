@@ -1225,10 +1225,10 @@ geopost_feed,VIEW (Virtual),total_comments,bigint,YES,null,NO RLS / PUBLIC OR VI
             count(*) AS total_comments
            FROM post_comments
           GROUP BY post_comments.post_id) cm ON ((p.id = cm.post_id)));"
-anon_device_interactions,BASE TABLE (Physical),device_id,text,NO,null,NO RLS / PUBLIC OR VIEW,null
-anon_device_interactions,BASE TABLE (Physical),target_id,uuid,NO,null,NO RLS / PUBLIC OR VIEW,null
-anon_device_interactions,BASE TABLE (Physical),interaction_type,text,NO,null,NO RLS / PUBLIC OR VIEW,null
-anon_device_interactions,BASE TABLE (Physical),created_at,timestamp with time zone,YES,now(),NO RLS / PUBLIC OR VIEW,null
+anon_device_interactions,BASE TABLE (Physical),device_id,text,NO,null,COMMAND: INSERT | POLICY: Allow anon to record authorship | USING:  | CHECK: (interaction_type = 'author'::text),null
+anon_device_interactions,BASE TABLE (Physical),target_id,uuid,NO,null,COMMAND: INSERT | POLICY: Allow anon to record authorship | USING:  | CHECK: (interaction_type = 'author'::text),null
+anon_device_interactions,BASE TABLE (Physical),interaction_type,text,NO,null,COMMAND: INSERT | POLICY: Allow anon to record authorship | USING:  | CHECK: (interaction_type = 'author'::text),null
+anon_device_interactions,BASE TABLE (Physical),created_at,timestamp with time zone,YES,now(),COMMAND: INSERT | POLICY: Allow anon to record authorship | USING:  | CHECK: (interaction_type = 'author'::text),null
 auto_events,BASE TABLE (Physical),id,uuid,NO,gen_random_uuid(),"COMMAND: SELECT | POLICY: Anyone can read approved auto events | USING: (is_approved = true) | CHECK: ",null
 auto_events,BASE TABLE (Physical),event_name,text,NO,null,"COMMAND: SELECT | POLICY: Anyone can read approved auto events | USING: (is_approved = true) | CHECK: ",null
 auto_events,BASE TABLE (Physical),description,text,YES,null,"COMMAND: SELECT | POLICY: Anyone can read approved auto events | USING: (is_approved = true) | CHECK: ",null
@@ -1257,31 +1257,31 @@ clout_ledger,BASE TABLE (Physical),created_at,timestamp with time zone,YES,now()
 clout_ledger,BASE TABLE (Physical),event_id,uuid,YES,null,"COMMAND: SELECT | POLICY: Users can view own ledger | USING: (auth.uid() = user_id) | CHECK: ",null
 clout_ledger,BASE TABLE (Physical),checkin_type,text,YES,null,"COMMAND: SELECT | POLICY: Users can view own ledger | USING: (auth.uid() = user_id) | CHECK: ",null
 clout_ledger,BASE TABLE (Physical),geopost_id,uuid,YES,null,"COMMAND: SELECT | POLICY: Users can view own ledger | USING: (auth.uid() = user_id) | CHECK: ",null
-comment_reactions,BASE TABLE (Physical),id,uuid,NO,gen_random_uuid(),"COMMAND: INSERT | POLICY: Allow public insert on comment rxns | USING:  | CHECK: true
+comment_reactions,BASE TABLE (Physical),id,uuid,NO,gen_random_uuid(),"COMMAND: DELETE | POLICY: Allow public delete on comment rxns | USING: true | CHECK: 
 ---
-COMMAND: SELECT | POLICY: Allow public select on comment rxns | USING: true | CHECK: 
+COMMAND: INSERT | POLICY: Allow public insert on comment rxns | USING:  | CHECK: true
 ---
-COMMAND: DELETE | POLICY: Allow public delete on comment rxns | USING: true | CHECK: ",null
-comment_reactions,BASE TABLE (Physical),comment_id,uuid,NO,null,"COMMAND: INSERT | POLICY: Allow public insert on comment rxns | USING:  | CHECK: true
+COMMAND: SELECT | POLICY: Allow public select on comment rxns | USING: true | CHECK: ",null
+comment_reactions,BASE TABLE (Physical),comment_id,uuid,NO,null,"COMMAND: DELETE | POLICY: Allow public delete on comment rxns | USING: true | CHECK: 
 ---
-COMMAND: SELECT | POLICY: Allow public select on comment rxns | USING: true | CHECK: 
+COMMAND: INSERT | POLICY: Allow public insert on comment rxns | USING:  | CHECK: true
 ---
-COMMAND: DELETE | POLICY: Allow public delete on comment rxns | USING: true | CHECK: ",null
-comment_reactions,BASE TABLE (Physical),user_id,uuid,YES,null,"COMMAND: INSERT | POLICY: Allow public insert on comment rxns | USING:  | CHECK: true
+COMMAND: SELECT | POLICY: Allow public select on comment rxns | USING: true | CHECK: ",null
+comment_reactions,BASE TABLE (Physical),user_id,uuid,YES,null,"COMMAND: DELETE | POLICY: Allow public delete on comment rxns | USING: true | CHECK: 
 ---
-COMMAND: SELECT | POLICY: Allow public select on comment rxns | USING: true | CHECK: 
+COMMAND: INSERT | POLICY: Allow public insert on comment rxns | USING:  | CHECK: true
 ---
-COMMAND: DELETE | POLICY: Allow public delete on comment rxns | USING: true | CHECK: ",null
-comment_reactions,BASE TABLE (Physical),emoji,text,NO,null,"COMMAND: INSERT | POLICY: Allow public insert on comment rxns | USING:  | CHECK: true
+COMMAND: SELECT | POLICY: Allow public select on comment rxns | USING: true | CHECK: ",null
+comment_reactions,BASE TABLE (Physical),emoji,text,NO,null,"COMMAND: DELETE | POLICY: Allow public delete on comment rxns | USING: true | CHECK: 
 ---
-COMMAND: SELECT | POLICY: Allow public select on comment rxns | USING: true | CHECK: 
+COMMAND: INSERT | POLICY: Allow public insert on comment rxns | USING:  | CHECK: true
 ---
-COMMAND: DELETE | POLICY: Allow public delete on comment rxns | USING: true | CHECK: ",null
-comment_reactions,BASE TABLE (Physical),created_at,timestamp with time zone,NO,"timezone('utc'::text, now())","COMMAND: INSERT | POLICY: Allow public insert on comment rxns | USING:  | CHECK: true
+COMMAND: SELECT | POLICY: Allow public select on comment rxns | USING: true | CHECK: ",null
+comment_reactions,BASE TABLE (Physical),created_at,timestamp with time zone,NO,"timezone('utc'::text, now())","COMMAND: DELETE | POLICY: Allow public delete on comment rxns | USING: true | CHECK: 
 ---
-COMMAND: SELECT | POLICY: Allow public select on comment rxns | USING: true | CHECK: 
+COMMAND: INSERT | POLICY: Allow public insert on comment rxns | USING:  | CHECK: true
 ---
-COMMAND: DELETE | POLICY: Allow public delete on comment rxns | USING: true | CHECK: ",null
+COMMAND: SELECT | POLICY: Allow public select on comment rxns | USING: true | CHECK: ",null
 event_attendance,BASE TABLE (Physical),id,uuid,NO,gen_random_uuid(),COMMAND: INSERT | POLICY: Only signed-in users can check in | USING:  | CHECK: (auth.uid() = user_id),null
 event_attendance,BASE TABLE (Physical),user_id,uuid,NO,null,COMMAND: INSERT | POLICY: Only signed-in users can check in | USING:  | CHECK: (auth.uid() = user_id),null
 event_attendance,BASE TABLE (Physical),event_id,uuid,NO,null,COMMAND: INSERT | POLICY: Only signed-in users can check in | USING:  | CHECK: (auth.uid() = user_id),null
@@ -1291,156 +1291,156 @@ event_attendance,BASE TABLE (Physical),created_at,timestamp with time zone,YES,n
 event_attendance,BASE TABLE (Physical),checkin_type,text,YES,'main'::text,COMMAND: INSERT | POLICY: Only signed-in users can check in | USING:  | CHECK: (auth.uid() = user_id),null
 event_favorites,BASE TABLE (Physical),user_id,uuid,NO,null,"COMMAND: INSERT | POLICY: Authenticated users can insert own favorites | USING:  | CHECK: (auth.uid() = user_id)
 ---
-COMMAND: ALL | POLICY: favorites_own_all | USING: (auth.uid() = user_id) | CHECK: 
----
 COMMAND: SELECT | POLICY: Anyone can read event_favorites | USING: true | CHECK: 
 ---
-COMMAND: DELETE | POLICY: Authenticated users can delete own favorites | USING: (auth.uid() = user_id) | CHECK: ",null
+COMMAND: DELETE | POLICY: Authenticated users can delete own favorites | USING: (auth.uid() = user_id) | CHECK: 
+---
+COMMAND: ALL | POLICY: favorites_own_all | USING: (auth.uid() = user_id) | CHECK: ",null
 event_favorites,BASE TABLE (Physical),event_id,uuid,NO,null,"COMMAND: INSERT | POLICY: Authenticated users can insert own favorites | USING:  | CHECK: (auth.uid() = user_id)
 ---
-COMMAND: ALL | POLICY: favorites_own_all | USING: (auth.uid() = user_id) | CHECK: 
----
 COMMAND: SELECT | POLICY: Anyone can read event_favorites | USING: true | CHECK: 
 ---
-COMMAND: DELETE | POLICY: Authenticated users can delete own favorites | USING: (auth.uid() = user_id) | CHECK: ",null
-events,BASE TABLE (Physical),id,uuid,NO,gen_random_uuid(),"COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
+COMMAND: DELETE | POLICY: Authenticated users can delete own favorites | USING: (auth.uid() = user_id) | CHECK: 
 ---
-COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+COMMAND: ALL | POLICY: favorites_own_all | USING: (auth.uid() = user_id) | CHECK: ",null
+events,BASE TABLE (Physical),id,uuid,NO,gen_random_uuid(),"COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
 ---
-COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: ",null
-events,BASE TABLE (Physical),created_at,timestamp with time zone,YES,now(),"COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
----
-COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
 ---
 COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: ",null
-events,BASE TABLE (Physical),name,text,NO,null,"COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
+events,BASE TABLE (Physical),created_at,timestamp with time zone,YES,now(),"COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
 ---
-COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
----
-COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: ",null
-events,BASE TABLE (Physical),event_name,text,NO,null,"COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
----
-COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
 ---
 COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: ",null
-events,BASE TABLE (Physical),price_category,text,YES,null,"COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
+events,BASE TABLE (Physical),name,text,NO,null,"COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
 ---
-COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
----
-COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: ",null
-events,BASE TABLE (Physical),location_data,jsonb,NO,null,"COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
----
-COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
 ---
 COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: ",null
-events,BASE TABLE (Physical),event_date,date,NO,null,"COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
+events,BASE TABLE (Physical),event_name,text,NO,null,"COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
 ---
-COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
----
-COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: ",null
-events,BASE TABLE (Physical),event_time_utc,timestamp with time zone,NO,null,"COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
----
-COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
 ---
 COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: ",null
-events,BASE TABLE (Physical),relevant_links,ARRAY,YES,null,"COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
+events,BASE TABLE (Physical),price_category,text,YES,null,"COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
 ---
-COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
----
-COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: ",null
-events,BASE TABLE (Physical),description,character varying,YES,null,"COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
----
-COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
 ---
 COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: ",null
-events,BASE TABLE (Physical),photos,ARRAY,YES,null,"COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
+events,BASE TABLE (Physical),location_data,jsonb,NO,null,"COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
 ---
-COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
----
-COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: ",null
-events,BASE TABLE (Physical),representative_emoji,character varying,YES,null,"COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
----
-COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
 ---
 COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: ",null
-events,BASE TABLE (Physical),hex_color,character varying,YES,null,"COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
+events,BASE TABLE (Physical),event_date,date,NO,null,"COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
 ---
-COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
----
-COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: ",null
-events,BASE TABLE (Physical),is_approved,boolean,YES,false,"COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
----
-COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
 ---
 COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: ",null
-events,BASE TABLE (Physical),user_id,uuid,YES,auth.uid(),"COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
+events,BASE TABLE (Physical),event_time_utc,timestamp with time zone,NO,null,"COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
 ---
-COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
----
-COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: ",null
-events,BASE TABLE (Physical),zip_code,text,YES,null,"COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
----
-COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
 ---
 COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: ",null
-events,BASE TABLE (Physical),fav_count,integer,YES,0,"COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
+events,BASE TABLE (Physical),relevant_links,ARRAY,YES,null,"COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
 ---
-COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
----
-COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: ",null
-events,BASE TABLE (Physical),trend_threshold_count,integer,NO,0,"COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
----
-COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
 ---
 COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: ",null
-events,BASE TABLE (Physical),trend_window_peak_count,integer,NO,0,"COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
+events,BASE TABLE (Physical),description,character varying,YES,null,"COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
 ---
-COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
----
-COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: ",null
-events,BASE TABLE (Physical),trend_window_started_at,timestamp with time zone,NO,now(),"COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
----
-COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
 ---
 COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: ",null
-events,BASE TABLE (Physical),lat,double precision,YES,null,"COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
+events,BASE TABLE (Physical),photos,ARRAY,YES,null,"COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
 ---
-COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
----
-COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: ",null
-events,BASE TABLE (Physical),lng,double precision,YES,null,"COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
----
-COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
 ---
 COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: ",null
-events,BASE TABLE (Physical),event_time_utc_end,timestamp with time zone,YES,null,"COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
+events,BASE TABLE (Physical),representative_emoji,character varying,YES,null,"COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
 ---
-COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
----
-COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: ",null
-events,BASE TABLE (Physical),afters_address,text,YES,null,"COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
----
-COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
 ---
 COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: ",null
-events,BASE TABLE (Physical),afters_lat,double precision,YES,null,"COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
+events,BASE TABLE (Physical),hex_color,character varying,YES,null,"COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
 ---
-COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
----
-COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: ",null
-events,BASE TABLE (Physical),afters_lng,double precision,YES,null,"COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
----
-COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
 ---
 COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: ",null
-events,BASE TABLE (Physical),tile_shape,text,YES,'square'::text,"COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
+events,BASE TABLE (Physical),is_approved,boolean,YES,false,"COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
 ---
-COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
 ---
 COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: ",null
-events,BASE TABLE (Physical),shape_size,text,YES,'medium'::text,"COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
+events,BASE TABLE (Physical),user_id,uuid,YES,auth.uid(),"COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
 ---
-COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
+---
+COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: ",null
+events,BASE TABLE (Physical),zip_code,text,YES,null,"COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
+---
+COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: ",null
+events,BASE TABLE (Physical),fav_count,integer,YES,0,"COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
+---
+COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: ",null
+events,BASE TABLE (Physical),trend_threshold_count,integer,NO,0,"COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
+---
+COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: ",null
+events,BASE TABLE (Physical),trend_window_peak_count,integer,NO,0,"COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
+---
+COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: ",null
+events,BASE TABLE (Physical),trend_window_started_at,timestamp with time zone,NO,now(),"COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
+---
+COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: ",null
+events,BASE TABLE (Physical),lat,double precision,YES,null,"COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
+---
+COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: ",null
+events,BASE TABLE (Physical),lng,double precision,YES,null,"COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
+---
+COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: ",null
+events,BASE TABLE (Physical),event_time_utc_end,timestamp with time zone,YES,null,"COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
+---
+COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: ",null
+events,BASE TABLE (Physical),afters_address,text,YES,null,"COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
+---
+COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: ",null
+events,BASE TABLE (Physical),afters_lat,double precision,YES,null,"COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
+---
+COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: ",null
+events,BASE TABLE (Physical),afters_lng,double precision,YES,null,"COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
+---
+COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: ",null
+events,BASE TABLE (Physical),tile_shape,text,YES,'square'::text,"COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
+---
+COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: ",null
+events,BASE TABLE (Physical),shape_size,text,YES,'medium'::text,"COMMAND: INSERT | POLICY: Enable insert for everyone | USING:  | CHECK: true
+---
+COMMAND: SELECT | POLICY: events_select_public | USING: true | CHECK: 
 ---
 COMMAND: SELECT | POLICY: Enable read access for all users | USING: true | CHECK: ",null
 favorite_point_contributions,BASE TABLE (Physical),id,uuid,NO,gen_random_uuid(),"COMMAND: SELECT | POLICY: Users can read own contributions | USING: (auth.uid() = user_id) | CHECK: 
@@ -1455,172 +1455,172 @@ COMMAND: INSERT | POLICY: Service role can insert contributions | USING:  | CHEC
 favorite_point_contributions,BASE TABLE (Physical),contributed_at,timestamp without time zone,YES,now(),"COMMAND: SELECT | POLICY: Users can read own contributions | USING: (auth.uid() = user_id) | CHECK: 
 ---
 COMMAND: INSERT | POLICY: Service role can insert contributions | USING:  | CHECK: true",null
-geoposts,BASE TABLE (Physical),id,uuid,NO,uuid_generate_v4(),"COMMAND: SELECT | POLICY: Allow public select access | USING: true | CHECK: 
+geoposts,BASE TABLE (Physical),id,uuid,NO,uuid_generate_v4(),"COMMAND: DELETE | POLICY: Delete own posts - Signed In or Anonymous | USING: (((auth.uid() IS NOT NULL) AND (auth.uid() = user_id)) OR ((user_id IS NULL) AND (EXISTS ( SELECT 1
+   FROM anon_device_interactions
+  WHERE ((anon_device_interactions.target_id = geoposts.id) AND (anon_device_interactions.device_id = ((current_setting('request.headers'::text, true))::json ->> 'x-device-id'::text)) AND (anon_device_interactions.interaction_type = 'author'::text)))))) | CHECK: 
 ---
 COMMAND: INSERT | POLICY: Allow public insert access | USING:  | CHECK: true
 ---
-COMMAND: DELETE | POLICY: Delete own posts - Signed In or Anonymous | USING: (((auth.uid() IS NOT NULL) AND (auth.uid() = user_id)) OR ((user_id IS NULL) AND (EXISTS ( SELECT 1
+COMMAND: SELECT | POLICY: Allow public select access | USING: true | CHECK: ",null
+geoposts,BASE TABLE (Physical),user_id,uuid,YES,auth.uid(),"COMMAND: DELETE | POLICY: Delete own posts - Signed In or Anonymous | USING: (((auth.uid() IS NOT NULL) AND (auth.uid() = user_id)) OR ((user_id IS NULL) AND (EXISTS ( SELECT 1
    FROM anon_device_interactions
-  WHERE ((anon_device_interactions.target_id = geoposts.id) AND (anon_device_interactions.device_id = ((current_setting('request.headers'::text, true))::json ->> 'x-device-id'::text)) AND (anon_device_interactions.interaction_type = 'author'::text)))))) | CHECK: ",null
-geoposts,BASE TABLE (Physical),user_id,uuid,YES,auth.uid(),"COMMAND: SELECT | POLICY: Allow public select access | USING: true | CHECK: 
+  WHERE ((anon_device_interactions.target_id = geoposts.id) AND (anon_device_interactions.device_id = ((current_setting('request.headers'::text, true))::json ->> 'x-device-id'::text)) AND (anon_device_interactions.interaction_type = 'author'::text)))))) | CHECK: 
 ---
 COMMAND: INSERT | POLICY: Allow public insert access | USING:  | CHECK: true
 ---
-COMMAND: DELETE | POLICY: Delete own posts - Signed In or Anonymous | USING: (((auth.uid() IS NOT NULL) AND (auth.uid() = user_id)) OR ((user_id IS NULL) AND (EXISTS ( SELECT 1
+COMMAND: SELECT | POLICY: Allow public select access | USING: true | CHECK: ",null
+geoposts,BASE TABLE (Physical),content,jsonb,NO,null,"COMMAND: DELETE | POLICY: Delete own posts - Signed In or Anonymous | USING: (((auth.uid() IS NOT NULL) AND (auth.uid() = user_id)) OR ((user_id IS NULL) AND (EXISTS ( SELECT 1
    FROM anon_device_interactions
-  WHERE ((anon_device_interactions.target_id = geoposts.id) AND (anon_device_interactions.device_id = ((current_setting('request.headers'::text, true))::json ->> 'x-device-id'::text)) AND (anon_device_interactions.interaction_type = 'author'::text)))))) | CHECK: ",null
-geoposts,BASE TABLE (Physical),content,jsonb,NO,null,"COMMAND: SELECT | POLICY: Allow public select access | USING: true | CHECK: 
+  WHERE ((anon_device_interactions.target_id = geoposts.id) AND (anon_device_interactions.device_id = ((current_setting('request.headers'::text, true))::json ->> 'x-device-id'::text)) AND (anon_device_interactions.interaction_type = 'author'::text)))))) | CHECK: 
 ---
 COMMAND: INSERT | POLICY: Allow public insert access | USING:  | CHECK: true
 ---
-COMMAND: DELETE | POLICY: Delete own posts - Signed In or Anonymous | USING: (((auth.uid() IS NOT NULL) AND (auth.uid() = user_id)) OR ((user_id IS NULL) AND (EXISTS ( SELECT 1
+COMMAND: SELECT | POLICY: Allow public select access | USING: true | CHECK: ",null
+geoposts,BASE TABLE (Physical),image_url,text,YES,null,"COMMAND: DELETE | POLICY: Delete own posts - Signed In or Anonymous | USING: (((auth.uid() IS NOT NULL) AND (auth.uid() = user_id)) OR ((user_id IS NULL) AND (EXISTS ( SELECT 1
    FROM anon_device_interactions
-  WHERE ((anon_device_interactions.target_id = geoposts.id) AND (anon_device_interactions.device_id = ((current_setting('request.headers'::text, true))::json ->> 'x-device-id'::text)) AND (anon_device_interactions.interaction_type = 'author'::text)))))) | CHECK: ",null
-geoposts,BASE TABLE (Physical),image_url,text,YES,null,"COMMAND: SELECT | POLICY: Allow public select access | USING: true | CHECK: 
+  WHERE ((anon_device_interactions.target_id = geoposts.id) AND (anon_device_interactions.device_id = ((current_setting('request.headers'::text, true))::json ->> 'x-device-id'::text)) AND (anon_device_interactions.interaction_type = 'author'::text)))))) | CHECK: 
 ---
 COMMAND: INSERT | POLICY: Allow public insert access | USING:  | CHECK: true
 ---
-COMMAND: DELETE | POLICY: Delete own posts - Signed In or Anonymous | USING: (((auth.uid() IS NOT NULL) AND (auth.uid() = user_id)) OR ((user_id IS NULL) AND (EXISTS ( SELECT 1
+COMMAND: SELECT | POLICY: Allow public select access | USING: true | CHECK: ",null
+geoposts,BASE TABLE (Physical),zip_code,text,YES,null,"COMMAND: DELETE | POLICY: Delete own posts - Signed In or Anonymous | USING: (((auth.uid() IS NOT NULL) AND (auth.uid() = user_id)) OR ((user_id IS NULL) AND (EXISTS ( SELECT 1
    FROM anon_device_interactions
-  WHERE ((anon_device_interactions.target_id = geoposts.id) AND (anon_device_interactions.device_id = ((current_setting('request.headers'::text, true))::json ->> 'x-device-id'::text)) AND (anon_device_interactions.interaction_type = 'author'::text)))))) | CHECK: ",null
-geoposts,BASE TABLE (Physical),zip_code,text,YES,null,"COMMAND: SELECT | POLICY: Allow public select access | USING: true | CHECK: 
+  WHERE ((anon_device_interactions.target_id = geoposts.id) AND (anon_device_interactions.device_id = ((current_setting('request.headers'::text, true))::json ->> 'x-device-id'::text)) AND (anon_device_interactions.interaction_type = 'author'::text)))))) | CHECK: 
 ---
 COMMAND: INSERT | POLICY: Allow public insert access | USING:  | CHECK: true
 ---
-COMMAND: DELETE | POLICY: Delete own posts - Signed In or Anonymous | USING: (((auth.uid() IS NOT NULL) AND (auth.uid() = user_id)) OR ((user_id IS NULL) AND (EXISTS ( SELECT 1
+COMMAND: SELECT | POLICY: Allow public select access | USING: true | CHECK: ",null
+geoposts,BASE TABLE (Physical),borough,text,YES,null,"COMMAND: DELETE | POLICY: Delete own posts - Signed In or Anonymous | USING: (((auth.uid() IS NOT NULL) AND (auth.uid() = user_id)) OR ((user_id IS NULL) AND (EXISTS ( SELECT 1
    FROM anon_device_interactions
-  WHERE ((anon_device_interactions.target_id = geoposts.id) AND (anon_device_interactions.device_id = ((current_setting('request.headers'::text, true))::json ->> 'x-device-id'::text)) AND (anon_device_interactions.interaction_type = 'author'::text)))))) | CHECK: ",null
-geoposts,BASE TABLE (Physical),borough,text,YES,null,"COMMAND: SELECT | POLICY: Allow public select access | USING: true | CHECK: 
+  WHERE ((anon_device_interactions.target_id = geoposts.id) AND (anon_device_interactions.device_id = ((current_setting('request.headers'::text, true))::json ->> 'x-device-id'::text)) AND (anon_device_interactions.interaction_type = 'author'::text)))))) | CHECK: 
 ---
 COMMAND: INSERT | POLICY: Allow public insert access | USING:  | CHECK: true
 ---
-COMMAND: DELETE | POLICY: Delete own posts - Signed In or Anonymous | USING: (((auth.uid() IS NOT NULL) AND (auth.uid() = user_id)) OR ((user_id IS NULL) AND (EXISTS ( SELECT 1
+COMMAND: SELECT | POLICY: Allow public select access | USING: true | CHECK: ",null
+geoposts,BASE TABLE (Physical),is_participant,boolean,YES,false,"COMMAND: DELETE | POLICY: Delete own posts - Signed In or Anonymous | USING: (((auth.uid() IS NOT NULL) AND (auth.uid() = user_id)) OR ((user_id IS NULL) AND (EXISTS ( SELECT 1
    FROM anon_device_interactions
-  WHERE ((anon_device_interactions.target_id = geoposts.id) AND (anon_device_interactions.device_id = ((current_setting('request.headers'::text, true))::json ->> 'x-device-id'::text)) AND (anon_device_interactions.interaction_type = 'author'::text)))))) | CHECK: ",null
-geoposts,BASE TABLE (Physical),is_participant,boolean,YES,false,"COMMAND: SELECT | POLICY: Allow public select access | USING: true | CHECK: 
+  WHERE ((anon_device_interactions.target_id = geoposts.id) AND (anon_device_interactions.device_id = ((current_setting('request.headers'::text, true))::json ->> 'x-device-id'::text)) AND (anon_device_interactions.interaction_type = 'author'::text)))))) | CHECK: 
 ---
 COMMAND: INSERT | POLICY: Allow public insert access | USING:  | CHECK: true
 ---
-COMMAND: DELETE | POLICY: Delete own posts - Signed In or Anonymous | USING: (((auth.uid() IS NOT NULL) AND (auth.uid() = user_id)) OR ((user_id IS NULL) AND (EXISTS ( SELECT 1
+COMMAND: SELECT | POLICY: Allow public select access | USING: true | CHECK: ",null
+geoposts,BASE TABLE (Physical),post_approved,boolean,YES,true,"COMMAND: DELETE | POLICY: Delete own posts - Signed In or Anonymous | USING: (((auth.uid() IS NOT NULL) AND (auth.uid() = user_id)) OR ((user_id IS NULL) AND (EXISTS ( SELECT 1
    FROM anon_device_interactions
-  WHERE ((anon_device_interactions.target_id = geoposts.id) AND (anon_device_interactions.device_id = ((current_setting('request.headers'::text, true))::json ->> 'x-device-id'::text)) AND (anon_device_interactions.interaction_type = 'author'::text)))))) | CHECK: ",null
-geoposts,BASE TABLE (Physical),post_approved,boolean,YES,true,"COMMAND: SELECT | POLICY: Allow public select access | USING: true | CHECK: 
+  WHERE ((anon_device_interactions.target_id = geoposts.id) AND (anon_device_interactions.device_id = ((current_setting('request.headers'::text, true))::json ->> 'x-device-id'::text)) AND (anon_device_interactions.interaction_type = 'author'::text)))))) | CHECK: 
 ---
 COMMAND: INSERT | POLICY: Allow public insert access | USING:  | CHECK: true
 ---
-COMMAND: DELETE | POLICY: Delete own posts - Signed In or Anonymous | USING: (((auth.uid() IS NOT NULL) AND (auth.uid() = user_id)) OR ((user_id IS NULL) AND (EXISTS ( SELECT 1
+COMMAND: SELECT | POLICY: Allow public select access | USING: true | CHECK: ",null
+geoposts,BASE TABLE (Physical),created_at,timestamp with time zone,YES,now(),"COMMAND: DELETE | POLICY: Delete own posts - Signed In or Anonymous | USING: (((auth.uid() IS NOT NULL) AND (auth.uid() = user_id)) OR ((user_id IS NULL) AND (EXISTS ( SELECT 1
    FROM anon_device_interactions
-  WHERE ((anon_device_interactions.target_id = geoposts.id) AND (anon_device_interactions.device_id = ((current_setting('request.headers'::text, true))::json ->> 'x-device-id'::text)) AND (anon_device_interactions.interaction_type = 'author'::text)))))) | CHECK: ",null
-geoposts,BASE TABLE (Physical),created_at,timestamp with time zone,YES,now(),"COMMAND: SELECT | POLICY: Allow public select access | USING: true | CHECK: 
+  WHERE ((anon_device_interactions.target_id = geoposts.id) AND (anon_device_interactions.device_id = ((current_setting('request.headers'::text, true))::json ->> 'x-device-id'::text)) AND (anon_device_interactions.interaction_type = 'author'::text)))))) | CHECK: 
 ---
 COMMAND: INSERT | POLICY: Allow public insert access | USING:  | CHECK: true
 ---
-COMMAND: DELETE | POLICY: Delete own posts - Signed In or Anonymous | USING: (((auth.uid() IS NOT NULL) AND (auth.uid() = user_id)) OR ((user_id IS NULL) AND (EXISTS ( SELECT 1
+COMMAND: SELECT | POLICY: Allow public select access | USING: true | CHECK: ",null
+geoposts,BASE TABLE (Physical),scope,text,NO,'digital'::text,"COMMAND: DELETE | POLICY: Delete own posts - Signed In or Anonymous | USING: (((auth.uid() IS NOT NULL) AND (auth.uid() = user_id)) OR ((user_id IS NULL) AND (EXISTS ( SELECT 1
    FROM anon_device_interactions
-  WHERE ((anon_device_interactions.target_id = geoposts.id) AND (anon_device_interactions.device_id = ((current_setting('request.headers'::text, true))::json ->> 'x-device-id'::text)) AND (anon_device_interactions.interaction_type = 'author'::text)))))) | CHECK: ",null
-geoposts,BASE TABLE (Physical),scope,text,NO,'digital'::text,"COMMAND: SELECT | POLICY: Allow public select access | USING: true | CHECK: 
+  WHERE ((anon_device_interactions.target_id = geoposts.id) AND (anon_device_interactions.device_id = ((current_setting('request.headers'::text, true))::json ->> 'x-device-id'::text)) AND (anon_device_interactions.interaction_type = 'author'::text)))))) | CHECK: 
 ---
 COMMAND: INSERT | POLICY: Allow public insert access | USING:  | CHECK: true
 ---
-COMMAND: DELETE | POLICY: Delete own posts - Signed In or Anonymous | USING: (((auth.uid() IS NOT NULL) AND (auth.uid() = user_id)) OR ((user_id IS NULL) AND (EXISTS ( SELECT 1
+COMMAND: SELECT | POLICY: Allow public select access | USING: true | CHECK: ",null
+geoposts,BASE TABLE (Physical),post_fill,text,YES,null,"COMMAND: DELETE | POLICY: Delete own posts - Signed In or Anonymous | USING: (((auth.uid() IS NOT NULL) AND (auth.uid() = user_id)) OR ((user_id IS NULL) AND (EXISTS ( SELECT 1
    FROM anon_device_interactions
-  WHERE ((anon_device_interactions.target_id = geoposts.id) AND (anon_device_interactions.device_id = ((current_setting('request.headers'::text, true))::json ->> 'x-device-id'::text)) AND (anon_device_interactions.interaction_type = 'author'::text)))))) | CHECK: ",null
-geoposts,BASE TABLE (Physical),post_fill,text,YES,null,"COMMAND: SELECT | POLICY: Allow public select access | USING: true | CHECK: 
+  WHERE ((anon_device_interactions.target_id = geoposts.id) AND (anon_device_interactions.device_id = ((current_setting('request.headers'::text, true))::json ->> 'x-device-id'::text)) AND (anon_device_interactions.interaction_type = 'author'::text)))))) | CHECK: 
 ---
 COMMAND: INSERT | POLICY: Allow public insert access | USING:  | CHECK: true
 ---
-COMMAND: DELETE | POLICY: Delete own posts - Signed In or Anonymous | USING: (((auth.uid() IS NOT NULL) AND (auth.uid() = user_id)) OR ((user_id IS NULL) AND (EXISTS ( SELECT 1
+COMMAND: SELECT | POLICY: Allow public select access | USING: true | CHECK: ",null
+geoposts,BASE TABLE (Physical),post_outline,text,YES,null,"COMMAND: DELETE | POLICY: Delete own posts - Signed In or Anonymous | USING: (((auth.uid() IS NOT NULL) AND (auth.uid() = user_id)) OR ((user_id IS NULL) AND (EXISTS ( SELECT 1
    FROM anon_device_interactions
-  WHERE ((anon_device_interactions.target_id = geoposts.id) AND (anon_device_interactions.device_id = ((current_setting('request.headers'::text, true))::json ->> 'x-device-id'::text)) AND (anon_device_interactions.interaction_type = 'author'::text)))))) | CHECK: ",null
-geoposts,BASE TABLE (Physical),post_outline,text,YES,null,"COMMAND: SELECT | POLICY: Allow public select access | USING: true | CHECK: 
+  WHERE ((anon_device_interactions.target_id = geoposts.id) AND (anon_device_interactions.device_id = ((current_setting('request.headers'::text, true))::json ->> 'x-device-id'::text)) AND (anon_device_interactions.interaction_type = 'author'::text)))))) | CHECK: 
 ---
 COMMAND: INSERT | POLICY: Allow public insert access | USING:  | CHECK: true
 ---
-COMMAND: DELETE | POLICY: Delete own posts - Signed In or Anonymous | USING: (((auth.uid() IS NOT NULL) AND (auth.uid() = user_id)) OR ((user_id IS NULL) AND (EXISTS ( SELECT 1
+COMMAND: SELECT | POLICY: Allow public select access | USING: true | CHECK: ",null
+geoposts,BASE TABLE (Physical),post_shadow,text,YES,null,"COMMAND: DELETE | POLICY: Delete own posts - Signed In or Anonymous | USING: (((auth.uid() IS NOT NULL) AND (auth.uid() = user_id)) OR ((user_id IS NULL) AND (EXISTS ( SELECT 1
    FROM anon_device_interactions
-  WHERE ((anon_device_interactions.target_id = geoposts.id) AND (anon_device_interactions.device_id = ((current_setting('request.headers'::text, true))::json ->> 'x-device-id'::text)) AND (anon_device_interactions.interaction_type = 'author'::text)))))) | CHECK: ",null
-geoposts,BASE TABLE (Physical),post_shadow,text,YES,null,"COMMAND: SELECT | POLICY: Allow public select access | USING: true | CHECK: 
+  WHERE ((anon_device_interactions.target_id = geoposts.id) AND (anon_device_interactions.device_id = ((current_setting('request.headers'::text, true))::json ->> 'x-device-id'::text)) AND (anon_device_interactions.interaction_type = 'author'::text)))))) | CHECK: 
 ---
 COMMAND: INSERT | POLICY: Allow public insert access | USING:  | CHECK: true
 ---
-COMMAND: DELETE | POLICY: Delete own posts - Signed In or Anonymous | USING: (((auth.uid() IS NOT NULL) AND (auth.uid() = user_id)) OR ((user_id IS NULL) AND (EXISTS ( SELECT 1
+COMMAND: SELECT | POLICY: Allow public select access | USING: true | CHECK: ",null
+geoposts,BASE TABLE (Physical),tile_shape,text,YES,'square'::text,"COMMAND: DELETE | POLICY: Delete own posts - Signed In or Anonymous | USING: (((auth.uid() IS NOT NULL) AND (auth.uid() = user_id)) OR ((user_id IS NULL) AND (EXISTS ( SELECT 1
    FROM anon_device_interactions
-  WHERE ((anon_device_interactions.target_id = geoposts.id) AND (anon_device_interactions.device_id = ((current_setting('request.headers'::text, true))::json ->> 'x-device-id'::text)) AND (anon_device_interactions.interaction_type = 'author'::text)))))) | CHECK: ",null
-geoposts,BASE TABLE (Physical),tile_shape,text,YES,'square'::text,"COMMAND: SELECT | POLICY: Allow public select access | USING: true | CHECK: 
+  WHERE ((anon_device_interactions.target_id = geoposts.id) AND (anon_device_interactions.device_id = ((current_setting('request.headers'::text, true))::json ->> 'x-device-id'::text)) AND (anon_device_interactions.interaction_type = 'author'::text)))))) | CHECK: 
 ---
 COMMAND: INSERT | POLICY: Allow public insert access | USING:  | CHECK: true
 ---
-COMMAND: DELETE | POLICY: Delete own posts - Signed In or Anonymous | USING: (((auth.uid() IS NOT NULL) AND (auth.uid() = user_id)) OR ((user_id IS NULL) AND (EXISTS ( SELECT 1
+COMMAND: SELECT | POLICY: Allow public select access | USING: true | CHECK: ",null
+geoposts,BASE TABLE (Physical),shape_size,text,YES,'medium'::text,"COMMAND: DELETE | POLICY: Delete own posts - Signed In or Anonymous | USING: (((auth.uid() IS NOT NULL) AND (auth.uid() = user_id)) OR ((user_id IS NULL) AND (EXISTS ( SELECT 1
    FROM anon_device_interactions
-  WHERE ((anon_device_interactions.target_id = geoposts.id) AND (anon_device_interactions.device_id = ((current_setting('request.headers'::text, true))::json ->> 'x-device-id'::text)) AND (anon_device_interactions.interaction_type = 'author'::text)))))) | CHECK: ",null
-geoposts,BASE TABLE (Physical),shape_size,text,YES,'medium'::text,"COMMAND: SELECT | POLICY: Allow public select access | USING: true | CHECK: 
+  WHERE ((anon_device_interactions.target_id = geoposts.id) AND (anon_device_interactions.device_id = ((current_setting('request.headers'::text, true))::json ->> 'x-device-id'::text)) AND (anon_device_interactions.interaction_type = 'author'::text)))))) | CHECK: 
 ---
 COMMAND: INSERT | POLICY: Allow public insert access | USING:  | CHECK: true
 ---
-COMMAND: DELETE | POLICY: Delete own posts - Signed In or Anonymous | USING: (((auth.uid() IS NOT NULL) AND (auth.uid() = user_id)) OR ((user_id IS NULL) AND (EXISTS ( SELECT 1
-   FROM anon_device_interactions
-  WHERE ((anon_device_interactions.target_id = geoposts.id) AND (anon_device_interactions.device_id = ((current_setting('request.headers'::text, true))::json ->> 'x-device-id'::text)) AND (anon_device_interactions.interaction_type = 'author'::text)))))) | CHECK: ",null
-gm_messages,BASE TABLE (Physical),id,uuid,NO,gen_random_uuid(),"COMMAND: SELECT | POLICY: Enable select for admins | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
+COMMAND: SELECT | POLICY: Allow public select access | USING: true | CHECK: ",null
+gm_messages,BASE TABLE (Physical),id,uuid,NO,gen_random_uuid(),"COMMAND: SELECT | POLICY: GM: Read System Messages | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
 ---
-COMMAND: SELECT | POLICY: GM: Read System Messages | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
+COMMAND: INSERT | POLICY: Enable insert for all users | USING:  | CHECK: true
 ---
-COMMAND: INSERT | POLICY: Enable insert for all users | USING:  | CHECK: true",null
-gm_messages,BASE TABLE (Physical),created_at,timestamp with time zone,YES,now(),"COMMAND: SELECT | POLICY: Enable select for admins | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
+COMMAND: SELECT | POLICY: Enable select for admins | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: ",null
+gm_messages,BASE TABLE (Physical),created_at,timestamp with time zone,YES,now(),"COMMAND: SELECT | POLICY: GM: Read System Messages | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
 ---
-COMMAND: SELECT | POLICY: GM: Read System Messages | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
+COMMAND: INSERT | POLICY: Enable insert for all users | USING:  | CHECK: true
 ---
-COMMAND: INSERT | POLICY: Enable insert for all users | USING:  | CHECK: true",null
-gm_messages,BASE TABLE (Physical),user_id,uuid,YES,null,"COMMAND: SELECT | POLICY: Enable select for admins | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
+COMMAND: SELECT | POLICY: Enable select for admins | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: ",null
+gm_messages,BASE TABLE (Physical),user_id,uuid,YES,null,"COMMAND: SELECT | POLICY: GM: Read System Messages | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
 ---
-COMMAND: SELECT | POLICY: GM: Read System Messages | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
+COMMAND: INSERT | POLICY: Enable insert for all users | USING:  | CHECK: true
 ---
-COMMAND: INSERT | POLICY: Enable insert for all users | USING:  | CHECK: true",null
-gm_messages,BASE TABLE (Physical),device_id,text,NO,null,"COMMAND: SELECT | POLICY: Enable select for admins | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
+COMMAND: SELECT | POLICY: Enable select for admins | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: ",null
+gm_messages,BASE TABLE (Physical),device_id,text,NO,null,"COMMAND: SELECT | POLICY: GM: Read System Messages | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
 ---
-COMMAND: SELECT | POLICY: GM: Read System Messages | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
+COMMAND: INSERT | POLICY: Enable insert for all users | USING:  | CHECK: true
 ---
-COMMAND: INSERT | POLICY: Enable insert for all users | USING:  | CHECK: true",null
-gm_messages,BASE TABLE (Physical),sender_name,text,YES,null,"COMMAND: SELECT | POLICY: Enable select for admins | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
+COMMAND: SELECT | POLICY: Enable select for admins | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: ",null
+gm_messages,BASE TABLE (Physical),sender_name,text,YES,null,"COMMAND: SELECT | POLICY: GM: Read System Messages | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
 ---
-COMMAND: SELECT | POLICY: GM: Read System Messages | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
+COMMAND: INSERT | POLICY: Enable insert for all users | USING:  | CHECK: true
 ---
-COMMAND: INSERT | POLICY: Enable insert for all users | USING:  | CHECK: true",null
-gm_messages,BASE TABLE (Physical),subject_title,text,YES,null,"COMMAND: SELECT | POLICY: Enable select for admins | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
+COMMAND: SELECT | POLICY: Enable select for admins | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: ",null
+gm_messages,BASE TABLE (Physical),subject_title,text,YES,null,"COMMAND: SELECT | POLICY: GM: Read System Messages | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
 ---
-COMMAND: SELECT | POLICY: GM: Read System Messages | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
+COMMAND: INSERT | POLICY: Enable insert for all users | USING:  | CHECK: true
 ---
-COMMAND: INSERT | POLICY: Enable insert for all users | USING:  | CHECK: true",null
-gm_messages,BASE TABLE (Physical),content,text,NO,null,"COMMAND: SELECT | POLICY: Enable select for admins | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
+COMMAND: SELECT | POLICY: Enable select for admins | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: ",null
+gm_messages,BASE TABLE (Physical),content,text,NO,null,"COMMAND: SELECT | POLICY: GM: Read System Messages | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
 ---
-COMMAND: SELECT | POLICY: GM: Read System Messages | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
+COMMAND: INSERT | POLICY: Enable insert for all users | USING:  | CHECK: true
 ---
-COMMAND: INSERT | POLICY: Enable insert for all users | USING:  | CHECK: true",null
-gm_messages,BASE TABLE (Physical),metadata,jsonb,YES,'{}'::jsonb,"COMMAND: SELECT | POLICY: Enable select for admins | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
+COMMAND: SELECT | POLICY: Enable select for admins | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: ",null
+gm_messages,BASE TABLE (Physical),metadata,jsonb,YES,'{}'::jsonb,"COMMAND: SELECT | POLICY: GM: Read System Messages | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
 ---
-COMMAND: SELECT | POLICY: GM: Read System Messages | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
+COMMAND: INSERT | POLICY: Enable insert for all users | USING:  | CHECK: true
 ---
-COMMAND: INSERT | POLICY: Enable insert for all users | USING:  | CHECK: true",null
-gm_messages,BASE TABLE (Physical),is_read,boolean,YES,false,"COMMAND: SELECT | POLICY: Enable select for admins | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
+COMMAND: SELECT | POLICY: Enable select for admins | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: ",null
+gm_messages,BASE TABLE (Physical),is_read,boolean,YES,false,"COMMAND: SELECT | POLICY: GM: Read System Messages | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
 ---
-COMMAND: SELECT | POLICY: GM: Read System Messages | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
+COMMAND: INSERT | POLICY: Enable insert for all users | USING:  | CHECK: true
 ---
-COMMAND: INSERT | POLICY: Enable insert for all users | USING:  | CHECK: true",null
-gm_messages,BASE TABLE (Physical),archived,boolean,YES,false,"COMMAND: SELECT | POLICY: Enable select for admins | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
+COMMAND: SELECT | POLICY: Enable select for admins | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: ",null
+gm_messages,BASE TABLE (Physical),archived,boolean,YES,false,"COMMAND: SELECT | POLICY: GM: Read System Messages | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
 ---
-COMMAND: SELECT | POLICY: GM: Read System Messages | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: 
+COMMAND: INSERT | POLICY: Enable insert for all users | USING:  | CHECK: true
 ---
-COMMAND: INSERT | POLICY: Enable insert for all users | USING:  | CHECK: true",null
+COMMAND: SELECT | POLICY: Enable select for admins | USING: (auth.uid() = 'a6630d04-ffbf-4ac6-bfd2-c1035776056a'::uuid) | CHECK: ",null
 point_contributions,BASE TABLE (Physical),id,uuid,NO,gen_random_uuid(),NO RLS / PUBLIC OR VIEW,null
 point_contributions,BASE TABLE (Physical),user_id,uuid,NO,null,NO RLS / PUBLIC OR VIEW,null
 point_contributions,BASE TABLE (Physical),entity_id,uuid,NO,null,NO RLS / PUBLIC OR VIEW,null
 point_contributions,BASE TABLE (Physical),contribution_type,text,NO,null,NO RLS / PUBLIC OR VIEW,null
 point_contributions,BASE TABLE (Physical),created_at,timestamp with time zone,YES,now(),NO RLS / PUBLIC OR VIEW,null
-post_clout_given,BASE TABLE (Physical),user_id,uuid,NO,null,"COMMAND: ALL | POLICY: System can manage post clout tracking | USING: (auth.uid() = user_id) | CHECK: 
+post_clout_given,BASE TABLE (Physical),user_id,uuid,NO,null,"COMMAND: SELECT | POLICY: Users can view own given clout | USING: (auth.uid() = user_id) | CHECK: 
 ---
-COMMAND: SELECT | POLICY: Users can view own given clout | USING: (auth.uid() = user_id) | CHECK: ",null
-post_clout_given,BASE TABLE (Physical),post_id,uuid,NO,null,"COMMAND: ALL | POLICY: System can manage post clout tracking | USING: (auth.uid() = user_id) | CHECK: 
+COMMAND: ALL | POLICY: System can manage post clout tracking | USING: (auth.uid() = user_id) | CHECK: ",null
+post_clout_given,BASE TABLE (Physical),post_id,uuid,NO,null,"COMMAND: SELECT | POLICY: Users can view own given clout | USING: (auth.uid() = user_id) | CHECK: 
 ---
-COMMAND: SELECT | POLICY: Users can view own given clout | USING: (auth.uid() = user_id) | CHECK: ",null
+COMMAND: ALL | POLICY: System can manage post clout tracking | USING: (auth.uid() = user_id) | CHECK: ",null
 post_comments,BASE TABLE (Physical),id,uuid,NO,gen_random_uuid(),"COMMAND: INSERT | POLICY: Allow public insert on comments | USING:  | CHECK: true
 ---
 COMMAND: SELECT | POLICY: Allow public select on comments | USING: true | CHECK: ",null
