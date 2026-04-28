@@ -4202,14 +4202,32 @@ export default function GeoPostView({ session }) {
            font-size or padding — that shrinks the panel's intrinsic height,
            which is what desktopUnitHeight is measured from, which in turn
            halves every tile's row height. Border-radius is killed by the
-           global rule. */
+           global rule. Override the dotted border so it matches tile style
+           (solid 5px black) and constrain overflow so internal buttons/
+           dropdowns can't push the grid cell wider → no horizontal scrollbar. */
         html.lp-square-mode .gp-filter-panel {
           box-shadow: none !important;
+          border: 5px solid #000 !important;
+          overflow: hidden !important;
+          max-width: 100% !important;
+          box-sizing: border-box !important;
         }
-        /* Topbar filter bar: collapse the gap between bar and grid */
+        /* The filter <aside> wrapper itself — clamp width so it can't bleed
+           outside its 2-col grid cell. */
+        html.lp-square-mode .gp-tile-grid > aside {
+          max-width: 100% !important;
+          overflow: hidden !important;
+        }
+        /* Topbar filter bar: collapse the gap between bar and grid AND between
+           bar and geofeed separator above. Border kept solid for tile-style match. */
         html.lp-square-mode .gp-topbar-filter {
           margin: 0 !important;
           border-radius: 0 !important;
+          border-width: 5px !important;
+          border-style: solid !important;
+          border-color: #000 !important;
+          width: 100% !important;
+          box-sizing: border-box !important;
         }
         /* (Pill positioning handled inline in JSX with top:26 + translateY(-100%)
            so pill bottom edge sits exactly at line button bottom.)             */
