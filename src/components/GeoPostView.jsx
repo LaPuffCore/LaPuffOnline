@@ -1212,9 +1212,10 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
       // Comments expansion (+2) is still allowed since it only extends the bottom edge, not the anchor.
       const frozenW = pinnedW ?? finalColSpan;
       const frozenH = (pinnedH ?? finalRowSpan) + (commentsOpen && isDesktopMasonry ? 2 : 0);
+      // gridArea is the most explicit CSS Grid anchor — overrides any auto-flow attempt.
+      // Format: row-start / col-start / row-end / col-end
       return {
-        gridRow: `${pinnedRow} / span ${frozenH}`,
-        gridColumn: `${pinnedCol} / span ${frozenW}`,
+        gridArea: `${pinnedRow} / ${pinnedCol} / ${pinnedRow + frozenH} / ${pinnedCol + frozenW}`,
       };
     }
     // User-set position from prior drag — explicit grid placement, dense flow displaces neighbors around it.
@@ -1422,14 +1423,27 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
                 e.stopPropagation();
                 if (!isPinned) {
                   const el = outerRef.current;
-                  const cs = el ? getComputedStyle(el) : null;
-                  const csRow = cs ? parseInt(cs.gridRowStart, 10) : NaN;
-                  const csCol = cs ? parseInt(cs.gridColumnStart, 10) : NaN;
-                  const row = Number.isFinite(csRow) ? csRow : gridPositionRef.current.row;
-                  const col = Number.isFinite(csCol) ? csCol : gridPositionRef.current.col;
+                  // Robust coord derivation: use bounding rects + grid cell stride. Reliable
+                  // even when getComputedStyle returns "auto" (auto-flowed tiles).
+                  const grid = el?.parentElement;
+                  let row = null, col = null;
+                  if (el && grid) {
+                    const gRect = grid.getBoundingClientRect();
+                    const eRect = el.getBoundingClientRect();
+                    const gcs = getComputedStyle(grid);
+                    const colGap = parseFloat(gcs.columnGap) || 12;
+                    const rowGap = parseFloat(gcs.rowGap) || 12;
+                    const rowH = parseFloat(gcs.gridAutoRows) || 200;
+                    const TOTAL_COLS = 14;
+                    const colW = (gRect.width - colGap * (TOTAL_COLS - 1)) / TOTAL_COLS;
+                    col = Math.round((eRect.left - gRect.left) / (colW + colGap)) + 1;
+                    row = Math.round((eRect.top - gRect.top) / (rowH + rowGap)) + 1;
+                    if (!Number.isFinite(col) || col < 1) col = null;
+                    if (!Number.isFinite(row) || row < 1) row = null;
+                  }
                   // Read current DOM-computed span to freeze it at pin time
                   const w = Math.max(2, parseInt(el?.dataset.w || '2', 10));
-                  const h = Math.max(1, parseInt(el?.dataset.h || '1', 10));
+                  const h = Math.max(1, parseInt(el?.dataset.h || '2', 10));
                   onTogglePin(post.id, row, col, w, h);
                 } else {
                   onTogglePin(post.id, null, null, null, null);
@@ -1672,14 +1686,25 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
                 e.stopPropagation();
                 if (!isPinned) {
                   const el = outerRef.current;
-                  const cs = el ? getComputedStyle(el) : null;
-                  const csRow = cs ? parseInt(cs.gridRowStart, 10) : NaN;
-                  const csCol = cs ? parseInt(cs.gridColumnStart, 10) : NaN;
-                  const row = Number.isFinite(csRow) ? csRow : gridPositionRef.current.row;
-                  const col = Number.isFinite(csCol) ? csCol : gridPositionRef.current.col;
+                  const grid = el?.parentElement;
+                  let row = null, col = null;
+                  if (el && grid) {
+                    const gRect = grid.getBoundingClientRect();
+                    const eRect = el.getBoundingClientRect();
+                    const gcs = getComputedStyle(grid);
+                    const colGap = parseFloat(gcs.columnGap) || 12;
+                    const rowGap = parseFloat(gcs.rowGap) || 12;
+                    const rowH = parseFloat(gcs.gridAutoRows) || 200;
+                    const TOTAL_COLS = 14;
+                    const colW = (gRect.width - colGap * (TOTAL_COLS - 1)) / TOTAL_COLS;
+                    col = Math.round((eRect.left - gRect.left) / (colW + colGap)) + 1;
+                    row = Math.round((eRect.top - gRect.top) / (rowH + rowGap)) + 1;
+                    if (!Number.isFinite(col) || col < 1) col = null;
+                    if (!Number.isFinite(row) || row < 1) row = null;
+                  }
                   // Read current DOM-computed span to freeze it at pin time
                   const w = Math.max(2, parseInt(el?.dataset.w || '2', 10));
-                  const h = Math.max(1, parseInt(el?.dataset.h || '1', 10));
+                  const h = Math.max(1, parseInt(el?.dataset.h || '2', 10));
                   onTogglePin(post.id, row, col, w, h);
                 } else {
                   onTogglePin(post.id, null, null, null, null);
@@ -3738,9 +3763,19 @@ export default function GeoPostView({ session }) {
         next.delete(postId);
         setPinnedPositions(p => { const n = { ...p }; delete n[postId]; return n; });
       } else {
+        // Hard guard: reject pin if we don't have valid grid coords. Without explicit row/col
+        // the tile would render with auto-flow and DRIFT whenever the filter panel scrolls.
+        const safeRow = Number.isFinite(row) && row >= 1 ? row : null;
+        const safeCol = Number.isFinite(col) && col >= 1 ? col : null;
+        if (safeRow == null || safeCol == null) {
+          console.warn('[GeoPost] Pin rejected — invalid grid coords', { postId, row, col });
+          return prev;
+        }
         next.add(postId);
         // Store full position + span so the tile is completely frozen regardless of image/text reflow
-        setPinnedPositions(p => ({ ...p, [postId]: { row, col, w: w ?? 2, h: h ?? 1 } }));
+        const safeW = Number.isFinite(w) && w >= 1 ? w : 2;
+        const safeH = Number.isFinite(h) && h >= 1 ? h : 2;
+        setPinnedPositions(p => ({ ...p, [postId]: { row: safeRow, col: safeCol, w: safeW, h: safeH } }));
       }
       return next;
     });
