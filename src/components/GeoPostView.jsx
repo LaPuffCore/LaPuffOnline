@@ -944,6 +944,59 @@ function GeoPostMosaic({ posts, accentColor, opacity = 0.42, onTileClick = null 
     return result;
   }, [imagePosts, TOTAL]);
 
+  // Reveal animation: each tile's index becomes "visible" in row-major order
+  // as its image loads. Globe placeholders cascade in last automatically.
+  const [visibleSet, setVisibleSet] = useState(() => new Set());
+  const nextRevealRef = useRef(0); // pointer to the next tile index pending reveal
+
+  // Reset on tiles change (e.g. feed reload)
+  useEffect(() => {
+    nextRevealRef.current = 0;
+    setVisibleSet(new Set());
+  }, [tiles]);
+
+  // Reveal the next tile in sequence (or many, if some at the head are placeholders).
+  const advanceReveals = () => {
+    setVisibleSet(prev => {
+      const next = new Set(prev);
+      // Walk forward from the cursor, revealing every consecutive index that's
+      // either a placeholder or an already-loaded image.
+      let i = nextRevealRef.current;
+      while (i < TOTAL && (tiles[i] === null || next.has(`pre-${i}`))) {
+        next.add(i);
+        i++;
+      }
+      nextRevealRef.current = i;
+      return next;
+    });
+  };
+
+  // After mount, immediately advance through any leading placeholders so we don't wait on them.
+  useEffect(() => { advanceReveals(); /* eslint-disable-next-line */ }, [tiles]);
+
+  // Schedule a final cascade: after a short timeout, fill any remaining tiles
+  // (covers slow or failed image loads so the mosaic completes).
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setVisibleSet(prev => {
+        const next = new Set(prev);
+        for (let i = 0; i < TOTAL; i++) next.add(i);
+        return next;
+      });
+    }, 2500);
+    return () => clearTimeout(t);
+  }, [tiles]);
+
+  const handleImgLoad = (idx) => {
+    setVisibleSet(prev => {
+      const next = new Set(prev);
+      next.add(`pre-${idx}`); // mark image-ready
+      return next;
+    });
+    // Try to advance the row-major reveal cursor
+    setTimeout(advanceReveals, 0);
+  };
+
   return (
     <div
       className="absolute inset-0 overflow-hidden"
@@ -961,42 +1014,55 @@ function GeoPostMosaic({ posts, accentColor, opacity = 0.42, onTileClick = null 
           imageRendering: 'pixelated',
         }}
       >
-        {tiles.map((post, idx) => (
-          <div
-            key={idx}
-            style={{ overflow: 'hidden', aspectRatio: '1 / 1', width: '100%', cursor: (onTileClick && post) ? 'pointer' : 'default' }}
-            onClick={onTileClick && post ? () => onTileClick(post) : undefined}
-            title={onTileClick && post ? (post.content?.html?.replace(/<[^>]+>/g, '').slice(0, 60) || 'View post') : undefined}
-          >
-            {post ? (
-              <img
-                src={post.image_url}
-                alt=""
-                loading="lazy"
-                width={56}
-                height={56}
-                style={{
+        {tiles.map((post, idx) => {
+          const visible = visibleSet.has(idx);
+          return (
+            <div
+              key={idx}
+              style={{
+                overflow: 'hidden',
+                aspectRatio: '1 / 1',
+                width: '100%',
+                cursor: (onTileClick && post) ? 'pointer' : 'default',
+                opacity: visible ? 1 : 0,
+                transform: visible ? 'scale(1)' : 'scale(0.85)',
+                transition: 'opacity 240ms ease-out, transform 240ms ease-out',
+              }}
+              onClick={onTileClick && post ? () => onTileClick(post) : undefined}
+              title={onTileClick && post ? (post.content?.html?.replace(/<[^>]+>/g, '').slice(0, 60) || 'View post') : undefined}
+            >
+              {post ? (
+                <img
+                  src={post.image_url}
+                  alt=""
+                  loading="lazy"
+                  width={56}
+                  height={56}
+                  onLoad={() => handleImgLoad(idx)}
+                  onError={() => handleImgLoad(idx)}
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    objectFit: 'cover',
+                    display: 'block',
+                    imageRendering: 'pixelated',
+                  }}
+                />
+              ) : (
+                <div style={{
                   width: '100%',
                   height: '100%',
-                  objectFit: 'cover',
-                  display: 'block',
-                  imageRendering: 'pixelated',
-                }}
-              />
-            ) : (
-              <div style={{
-                width: '100%',
-                height: '100%',
-                background: '#1a6bbf',
-                border: '0.5px solid rgba(0,0,0,0.3)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: '1.2rem',
-              }}>🌍</div>
-            )}
-          </div>
-        ))}
+                  background: '#1a6bbf',
+                  border: '0.5px solid rgba(0,0,0,0.3)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '1.2rem',
+                }}>🌍</div>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -1285,6 +1351,7 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
         className="rounded-2xl border-3 gp-tile-card"
         style={{
           borderColor: theme.outline,
+          '--gp-border': theme.outline,
           boxShadow: `4px 4px 0px ${theme.shadow}`,
           background: theme.fill,
           backgroundClip: 'padding-box',
@@ -4046,17 +4113,19 @@ export default function GeoPostView({ session }) {
           transition: transform 1000ms cubic-bezier(0.16, 1, 0.3, 1) !important;
         }
         /* ─── SQUARE MODE ─── flush tiles, no rounded corners site-wide ─── */
-        /* Tiles always have the radius/shadow transition in both directions */
         .gp-tile-card {
           transition: border-radius 450ms cubic-bezier(0.22, 1, 0.36, 1),
                       box-shadow 450ms ease,
-                      margin 450ms cubic-bezier(0.22, 1, 0.36, 1) !important;
+                      border-color 300ms ease !important;
         }
         .gp-tile-card-inner {
           transition: border-radius 450ms cubic-bezier(0.22, 1, 0.36, 1) !important;
         }
         .gp-tile-grid {
           transition: gap 450ms cubic-bezier(0.22, 1, 0.36, 1);
+        }
+        .gp-tile-area {
+          transition: padding 450ms cubic-bezier(0.22, 1, 0.36, 1);
         }
         /* Square-mode global: zero out border-radius on every element + simple fade */
         html.lp-square-mode,
@@ -4068,16 +4137,37 @@ export default function GeoPostView({ session }) {
         html.lp-square-mode *::after {
           border-radius: 0 !important;
         }
-        /* Tile-specific: kill drop shadow and pull the grid to gap:0 */
+        /* Tile-specific: kill drop shadow, gap:0, no negative margin needed.
+           Border becomes inward inset shadow so neighbors share a single 3px
+           edge with NO overlap. The actual <div> border is hidden. */
         html.lp-square-mode .gp-tile-grid { gap: 0 !important; }
+        html.lp-square-mode .gp-tile-area { padding-left: 0 !important; padding-right: 0 !important; }
         html.lp-square-mode .gp-tile-card {
+          border-color: transparent !important;
+          box-shadow: inset 0 0 0 3px var(--gp-border, #000) !important;
+        }
+        /* Filter panel in square mode: no shadow, fits cleanly inside its 2x2 cell.
+           Keep border, but compress padding so content doesn't overflow. */
+        html.lp-square-mode .gp-filter-panel {
+          border-style: solid !important;
+          border-color: #000 !important;
+          border-width: 3px !important;
           box-shadow: none !important;
+          padding: 6px !important;
+          overflow: hidden !important;
+          height: 100% !important;
+          box-sizing: border-box !important;
         }
-        /* Adjacent borders touch — pull each tile up/left by border-width to overlap
-           neighboring tile borders so they appear as a single shared 3px line.       */
-        html.lp-square-mode .gp-tile-card {
-          margin: 0 -3px -3px 0 !important;
+        html.lp-square-mode .gp-filter-panel > * {
+          font-size: 10px !important;
         }
+        /* In topbar mode, square mode: collapse the gap between the bar and grid */
+        html.lp-square-mode .gp-topbar-filter {
+          margin: 0 !important;
+          border-radius: 0 !important;
+        }
+        /* Kill the mt-3 / margin-top on grid when square so it sits flush */
+        html.lp-square-mode .gp-tile-grid { margin-top: 0 !important; }
       `}</style>
       {/* Create-post section with mosaic behind it */}
       <div className="w-full relative overflow-hidden" style={{ paddingBottom: 48 }}>
@@ -4449,7 +4539,7 @@ export default function GeoPostView({ session }) {
         </div>
         {/* GEO-FEED pill: center locked to line center (top:10px = midpoint of 20px line).
             translateY(-50%) pulls it up by half its own height → top half overlaps mosaic. */}
-        <div className="absolute left-1/2" style={{ top: 10, transform: 'translate(-50%, -50%)', zIndex: 5 }}>
+        <div className="absolute left-1/2 gp-geofeed-pill" style={{ top: 10, transform: 'translate(-50%, -50%)', zIndex: 5 }}>
           <div className="border-[3px] border-black rounded-xl px-4 py-1.5 bg-white" style={{ whiteSpace: 'nowrap' }}>
             <span className="font-black text-[1.75rem] leading-none tracking-tight text-black">🌎 Geo-Feed</span>
           </div>
@@ -4459,7 +4549,7 @@ export default function GeoPostView({ session }) {
       {/* Horizontal filter top bar — only in tile mode when filterPanelMode === 'topbar' */}
       {filterPanelMode === 'topbar' && feedLayout === 'tiles' && (
         <div
-          className="hidden md:flex items-center gap-2 flex-wrap px-3 py-2 bg-white"
+          className="hidden md:flex items-center gap-2 flex-wrap px-3 py-2 bg-white gp-topbar-filter"
           style={{
             border: '3px solid #000',
             borderRadius: 12,
@@ -4539,7 +4629,7 @@ export default function GeoPostView({ session }) {
         </div>
       )}
 
-      <div className="w-full px-3 md:px-4">
+      <div className="w-full px-3 md:px-4 gp-tile-area">
         {/* ── TILE / BENTO MODE ── */}
         {feedLayout === 'tiles' && (<>
       {/* Height-clamp wrapper: clips at 16 half-rows when collapsed; expands on Show More.
@@ -4557,7 +4647,9 @@ export default function GeoPostView({ session }) {
             // dense packs gaps left by pinned/filter panel placements.
             gridAutoFlow: 'dense',
             gridTemplateColumns: 'repeat(14, minmax(0, 1fr))',
-            gridAutoRows: `${Math.max(1, (desktopUnitHeight - 12) / 2)}px`,
+            // In square mode, the tile area loses 32px horizontal padding → cols widen ~2.5%.
+            // Scale row height by the same ratio so tiles stay proportional.
+            gridAutoRows: `${Math.max(1, (desktopUnitHeight - 12) / 2) * (tileShape === 'square' ? 1.025 : 1)}px`,
             overflowAnchor: 'none',
             overflow: 'visible',
           }}
@@ -4576,7 +4668,7 @@ export default function GeoPostView({ session }) {
             visibility: filterPanelMode === 'topbar' ? 'hidden' : 'visible',
             pointerEvents: filterPanelMode === 'topbar' ? 'none' : undefined,
           }}>
-            <div ref={desktopFilterRef} className="rounded-2xl bg-white p-2" style={{ border: '5px dotted #000', boxShadow: 'none' }}>
+            <div ref={desktopFilterRef} className="rounded-2xl bg-white p-2 gp-filter-panel" style={{ border: '5px dotted #000', boxShadow: 'none' }}>
               <div className="text-[10px] font-black text-center tracking-widest uppercase mb-1.5 opacity-60">Filter Panel</div>
               <input
                 value={searchQuery}
