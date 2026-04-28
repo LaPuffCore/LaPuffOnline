@@ -4156,9 +4156,17 @@ export default function GeoPostView({ session }) {
         html.lp-square-mode *::after {
           border-radius: 0 !important;
         }
-        /* Prevent any accidental horizontal scrollbar regardless of measurement. */
-        html.lp-square-mode { overflow-x: hidden; }
-        html.lp-square-mode body { overflow-x: hidden; }
+        /* Hard horizontal-overflow lockdown — page, body, AND every descendant
+           inside the GeoPostView root must never exceed viewport width. Combined
+           with html overflow-x:hidden this kills any chance of a bottom scrollbar. */
+        html.lp-square-mode { overflow-x: hidden; max-width: 100vw; }
+        html.lp-square-mode body { overflow-x: hidden; max-width: 100vw; }
+        html.lp-square-mode .gp-tile-area,
+        html.lp-square-mode .gp-tile-area-fill,
+        html.lp-square-mode .gp-tile-grid {
+          max-width: 100% !important;
+          overflow-x: hidden !important;
+        }
         /* Tile grid: gap:0 + zero margin-top so the grid runs flush against
            the geofeed separator AND the viewport edges (left/right).
            border-box ensures the existing 3px border sits INSIDE each cell.   */
@@ -4190,7 +4198,7 @@ export default function GeoPostView({ session }) {
            button (20px tall + 3px border top + 3px border bottom = 26px) so the
            tile grid sits flush against the bottom of the line — no whitespace gap. */
         html.lp-square-mode .gp-geofeed-sep {
-          height: 26px !important;
+          height: 20px !important;
           margin-bottom: 0 !important;
           padding-bottom: 0 !important;
         }
@@ -4595,7 +4603,7 @@ export default function GeoPostView({ session }) {
       {/* GEO-FEED Separator: OUTSIDE mosaic wrapper. overflow:visible so pill pokes up into mosaic.
           Line button top = mosaic wrapper bottom exactly.
           GEO-FEED pill centered on line → extends ~half-height above into mosaic area. */}
-      <div className="w-full relative gp-geofeed-sep" style={{ height: tileShape === 'square' ? 26 : 44, overflow: 'visible', zIndex: 10 }}>
+      <div className="w-full relative gp-geofeed-sep" style={{ height: tileShape === 'square' ? 20 : 44, overflow: 'visible', zIndex: 10 }}>
         {/* Line button: full width, anchored at top:0 (= mosaic bottom), border-y, no shadow */}
         <div className="absolute left-0 right-0 flex items-center justify-center" style={{ top: 0, height: 20, borderTop: '3px solid #000', borderBottom: '3px solid #000', background: '#fff', zIndex: 1 }}>
           <div style={{ position: 'absolute', left: 0, right: 0, top: '50%', height: 2, background: '#000', transform: 'translateY(-50%)' }} />
@@ -4608,7 +4616,7 @@ export default function GeoPostView({ session }) {
           // top:18 (instead of 26) compensates for the pill's own 3px border +
           // browser sub-pixel rendering so visible bottom aligns with the line
           // button's lower black border.
-          top: tileShape === 'square' ? 18 : 10,
+          top: tileShape === 'square' ? 20 : 10,
           transform: tileShape === 'square' ? 'translate(-50%, -100%)' : 'translate(-50%, -50%)',
           zIndex: 5,
         }}>
@@ -4701,7 +4709,7 @@ export default function GeoPostView({ session }) {
         </div>
       )}
 
-      <div className="w-full px-3 md:px-4 gp-tile-area" style={tileShape === 'square' ? { marginTop: -12, paddingTop: 0 } : undefined}>
+      <div className="w-full px-3 md:px-4 gp-tile-area">
         {/* ── TILE / BENTO MODE ── */}
         {feedLayout === 'tiles' && (<>
       {/* Height-clamp wrapper: clips at 16 half-rows when collapsed; expands on Show More.
