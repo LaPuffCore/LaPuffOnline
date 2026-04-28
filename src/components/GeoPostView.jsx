@@ -4024,13 +4024,12 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
       const scrollEl2 = scrollEl;
       const scrollTop = scrollEl2 === window ? window.scrollY : scrollEl2.scrollTop;
       const containerH = scrollEl2 === window ? window.innerHeight : scrollEl2.clientHeight;
-      // Read live shape/scale via refs so the closure stays in sync without re-binding.
-      // Square mode: 0 row gap and rows are scaled by squareRowScale (matches DOM at lines ~4843,4852).
-      // Rounded mode: 12px row gap, no scale.
-      const isSquareMode = tileShapeRef.current === 'square';
-      const baseRowHeight = Math.max(1, (desktopUnitHeight - 12) / 2);
-      const scaledRowHeight = isSquareMode ? baseRowHeight * squareRowScaleRef.current : baseRowHeight;
-      const rowGap = isSquareMode ? 0 : 12;
+      // Read actual grid geometry directly from computed style — works
+      // identically in rounded and square modes without reverse-engineering
+      // the formula from desktopUnitHeight.
+      const gridCs = getComputedStyle(desktopGridRef.current);
+      const scaledRowHeight = parseFloat(gridCs.gridAutoRows) || 200;
+      const rowGap = parseFloat(gridCs.rowGap) || 0;
       const halfRowPx = Math.max(1, scaledRowHeight + rowGap);
       const fullVisualRowPx = halfRowPx * 2;
       rowStepRef.current = halfRowPx;
