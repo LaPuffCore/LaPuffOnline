@@ -2607,10 +2607,22 @@ export default function GeoPostView({ session }) {
     const measure = () => {
       const el = desktopGridRef.current;
       if (!el) return;
+      // squareGridWidth = the actual grid width right now (in square mode this is ~100vw,
+      // in rounded mode it's the constrained width).
       const w = el.offsetWidth;
       if (w <= 0) return;
       if (tileShape === 'square') setSquareGridWidth(w);
       else setRoundedGridWidth(w);
+      // ALSO compute rounded-equivalent width from the constrained parent so the ratio
+      // works on first load even if the user started in square mode.
+      // The tile-area's parent is `max-w-7xl mx-auto px-3`; in square mode our negative
+      // margins escape it, but the parent itself stays the constrained width.
+      const parent = el.closest('.gp-tile-area')?.parentElement;
+      if (parent && tileShape === 'square') {
+        // parent is max-w-7xl mx-auto px-3 — inner width minus tile-area's md:px-4 padding (32px).
+        const parentInner = parent.clientWidth - 32;
+        if (parentInner > 0) setRoundedGridWidth(parentInner);
+      }
     };
     measure();
     let ro;
@@ -4592,14 +4604,14 @@ export default function GeoPostView({ session }) {
       {/* GEO-FEED Separator: OUTSIDE mosaic wrapper. overflow:visible so pill pokes up into mosaic.
           Line button top = mosaic wrapper bottom exactly.
           GEO-FEED pill centered on line → extends ~half-height above into mosaic area. */}
-      <div className="w-full relative gp-geofeed-sep" style={{ height: 44, overflow: 'visible', zIndex: 10 }}>
+      <div className="w-full relative gp-geofeed-sep" style={{ height: tileShape === 'square' ? 26 : 44, overflow: 'visible', zIndex: 10 }}>
         {/* Line button: full width, anchored at top:0 (= mosaic bottom), border-y, no shadow */}
         <div className="absolute left-0 right-0 flex items-center justify-center" style={{ top: 0, height: 20, borderTop: '3px solid #000', borderBottom: '3px solid #000', background: '#fff', zIndex: 1 }}>
           <div style={{ position: 'absolute', left: 0, right: 0, top: '50%', height: 2, background: '#000', transform: 'translateY(-50%)' }} />
         </div>
         {/* GEO-FEED pill: center locked to line center (top:10px = midpoint of 20px line).
             translateY(-50%) pulls it up by half its own height → top half overlaps mosaic. */}
-        <div className="absolute left-1/2 gp-geofeed-pill" style={{ top: 10, transform: 'translate(-50%, -50%)', zIndex: 5 }}>
+        <div className="absolute left-1/2 gp-geofeed-pill" style={{ top: tileShape === 'square' ? 'auto' : 10, bottom: tileShape === 'square' ? 0 : 'auto', transform: tileShape === 'square' ? 'translate(-50%, 0)' : 'translate(-50%, -50%)', zIndex: 5 }}>
           <div className="border-[3px] border-black rounded-xl px-4 py-1.5 bg-white" style={{ whiteSpace: 'nowrap' }}>
             <span className="font-black text-[1.75rem] leading-none tracking-tight text-black">🌎 Geo-Feed</span>
           </div>
