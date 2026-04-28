@@ -57,6 +57,6 @@ SET session_replication_role = DEFAULT;
 
 -- Verify: should return 34 rows
 SELECT id, username, bio FROM profiles
-WHERE id LIKE '00000000-0000-4000-c000-%'
+WHERE id::text LIKE '00000000-0000-4000-c000-%'
 ORDER BY username;
 

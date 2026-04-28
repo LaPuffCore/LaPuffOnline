@@ -271,19 +271,36 @@ export async function recordAnonAuthorInteraction(postId, deviceId) {
 }
 
 /**
- * Delete a geopost. Server-side RLS enforces ownership.
- * - Signed-in: requires session; auth.uid() must match post.user_id.
- * - Anonymous: requires deviceId; row must exist in anon_device_interactions
- *   (interaction_type='author', target_id=postId, device_id=deviceId).
- * Sends x-device-id header so PostgREST exposes it via current_setting('request.headers').
+ * Delete a geopost. Server-side enforces ownership.
+ * - Signed-in: direct REST DELETE (auth.uid() checked by RLS).
+ * - Anonymous: calls delete_anon_geopost RPC which accepts device_id as a
+ *   parameter (SECURITY DEFINER function — bypasses header-forwarding issues).
  */
 export async function deleteGeoPost(postId, session = null, deviceId = null) {
+  // Anonymous path: use RPC so device_id is a proper SQL parameter, not a
+  // header (PostgREST does not reliably forward custom headers to current_setting).
+  if (!session?.user?.id && deviceId) {
+    const headers = { ...baseHeaders };
+    const rpcRes = await fetch(`${SUPABASE_URL}/rest/v1/rpc/delete_anon_geopost`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ p_post_id: postId, p_device_id: deviceId }),
+    });
+    if (!rpcRes.ok) {
+      const err = await rpcRes.text().catch(() => '');
+      throw new Error(err || `Delete failed (${rpcRes.status})`);
+    }
+    const result = await rpcRes.json().catch(() => null);
+    if (result !== true) {
+      throw new Error('Post not found or you do not have permission to delete it.');
+    }
+    return true;
+  }
+
+  // Authenticated path: direct REST DELETE guarded by auth.uid() RLS.
   const headers = { ...baseHeaders, 'Prefer': 'return=representation' };
   if (session?.access_token) {
     headers['Authorization'] = `Bearer ${session.access_token}`;
-  }
-  if (deviceId) {
-    headers['x-device-id'] = deviceId;
   }
   const res = await fetch(
     `${SUPABASE_URL}/rest/v1/geoposts?id=eq.${encodeURIComponent(postId)}`,
@@ -293,7 +310,6 @@ export async function deleteGeoPost(postId, session = null, deviceId = null) {
     const err = await res.text().catch(() => '');
     throw new Error(err || `Delete failed (${res.status})`);
   }
-  // Verify that at least one row was actually deleted (RLS may silently block it)
   const deleted = await res.json().catch(() => []);
   if (!Array.isArray(deleted) || deleted.length === 0) {
     throw new Error('Post not found or you do not have permission to delete it.');
