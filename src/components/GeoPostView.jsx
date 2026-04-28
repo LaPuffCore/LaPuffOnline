@@ -2042,6 +2042,87 @@ function clipPathToSvgPoints(clipStr, size) {
   }).join(' ');
 }
 
+// Parse polygon clip string into array of {x,y} fractions (0..1)
+function parsePolygonFractions(clipStr) {
+  if (!clipStr || !clipStr.startsWith('polygon(')) return null;
+  const inner = clipStr.slice(8, -1);
+  return inner.split(',').map(pair => {
+    const p = pair.trim().split(/\s+/);
+    return { x: parseFloat(p[0]) / 100, y: parseFloat(p[1]) / 100 };
+  });
+}
+
+// Returns {leftFrac, rightFrac, widthFrac} of horizontal extent of a shape at vertical fraction yFrac (0..1)
+function shapeHorizontalExtentAt(shapeDef, yFrac) {
+  const c = shapeDef.clip || '';
+  if (c === 'circle') {
+    const dy = (yFrac - 0.5) * 2;
+    const half = Math.sqrt(Math.max(0, 1 - dy * dy)) / 2;
+    return { leftFrac: 0.5 - half, rightFrac: 0.5 + half, widthFrac: 2 * half };
+  }
+  if (c === 'ellipse') {
+    const ry = 0.48;
+    const dy = (yFrac - 0.5) / ry;
+    const half = Math.sqrt(Math.max(0, 1 - dy * dy)) / 2;
+    return { leftFrac: 0.5 - half, rightFrac: 0.5 + half, widthFrac: 2 * half };
+  }
+  if (c === 'pill-h' || c === 'pill-v') {
+    return { leftFrac: 0, rightFrac: 1, widthFrac: 1 };
+  }
+  const verts = parsePolygonFractions(c);
+  if (!verts || verts.length < 3) return { leftFrac: 0, rightFrac: 1, widthFrac: 1 };
+  // Find x intersections of horizontal line y=yFrac with each polygon edge
+  const xs = [];
+  for (let i = 0; i < verts.length; i++) {
+    const a = verts[i];
+    const b = verts[(i + 1) % verts.length];
+    if ((a.y <= yFrac && b.y > yFrac) || (b.y <= yFrac && a.y > yFrac)) {
+      const t = (yFrac - a.y) / (b.y - a.y);
+      xs.push(a.x + t * (b.x - a.x));
+    }
+  }
+  if (xs.length < 2) return { leftFrac: 0.45, rightFrac: 0.55, widthFrac: 0.1 };
+  xs.sort((a, b) => a - b);
+  return { leftFrac: xs[0], rightFrac: xs[xs.length - 1], widthFrac: xs[xs.length - 1] - xs[0] };
+}
+
+// Returns the minimum horizontal width fraction across a vertical band [y0Frac..y1Frac]
+function shapeMinWidthInBand(shapeDef, y0Frac, y1Frac, samples = 5) {
+  let minW = 1;
+  let minLeft = 0;
+  let maxRight = 1;
+  for (let i = 0; i <= samples; i++) {
+    const t = y0Frac + (y1Frac - y0Frac) * (i / samples);
+    const e = shapeHorizontalExtentAt(shapeDef, t);
+    if (e.widthFrac < minW) minW = e.widthFrac;
+  }
+  // Also use the narrower of top/bottom band edges for left/right
+  const eTop = shapeHorizontalExtentAt(shapeDef, y0Frac);
+  const eBot = shapeHorizontalExtentAt(shapeDef, y1Frac);
+  minLeft = Math.max(eTop.leftFrac, eBot.leftFrac);
+  maxRight = Math.min(eTop.rightFrac, eBot.rightFrac);
+  return { minWidthFrac: minW, minLeftFrac: minLeft, maxRightFrac: maxRight };
+}
+
+// CSS clip-path matching shapeDef for use on foreignObject content
+function cssClipPathForShape(shapeDef) {
+  const c = shapeDef.clip || '';
+  if (c === 'circle') return 'circle(50% at 50% 50%)';
+  if (c === 'ellipse') return 'ellipse(50% 48% at 50% 50%)';
+  if (c === 'pill-h' || c === 'pill-v') return 'inset(0 round 9999px)';
+  return c; // polygon(...) is valid CSS clip-path syntax
+}
+
+// Luminance helper (0..1) for hover invert
+function luminance(hex) {
+  if (!hex || hex[0] !== '#') return 0.5;
+  const h = hex.slice(1);
+  const r = parseInt(h.slice(0, 2), 16) / 255;
+  const g = parseInt(h.slice(2, 4), 16) / 255;
+  const b = parseInt(h.slice(4, 6), 16) / 255;
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
 // Build a matter-js body for a shape at position (x, y) with given size
 function buildMatterBody(shapeDef, x, y, size) {
   const options = { friction: 0.4, restitution: 0.15, frictionAir: 0.015 };
@@ -2062,8 +2143,30 @@ function buildMatterBody(shapeDef, x, y, size) {
   return Matter.Bodies.rectangle(x, y, size, size, options);
 }
 
-// ── ShapePostCard (SVG-based — 4-zone layout: username 20% / image 30% / text 30% / reactions 20%) ──
-function ShapePostCard({ post, shapeId = 'square', size = 270, postReactions, onReact, onClick }) {
+// ── Hover-invert wrapper for buttons inside shape cards ──
+function HoverInvertButton({ children, baseStyle, onClick, onMouseDown, title }) {
+  const [hover, setHover] = useState(false);
+  const bg = baseStyle.background || baseStyle.backgroundColor || '#f3f4f6';
+  const fg = baseStyle.color || '#000';
+  const border = baseStyle.borderColor || '#000';
+  const inverted = hover ? { background: fg, color: bg, borderColor: border } : { background: bg, color: fg, borderColor: border };
+  return (
+    <button
+      type="button"
+      title={title}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      onMouseDown={onMouseDown || (e => e.preventDefault())}
+      onClick={onClick}
+      style={{ ...baseStyle, ...inverted, transition: 'background 0.12s, color 0.12s', cursor: 'pointer' }}
+    >
+      {children}
+    </button>
+  );
+}
+
+// ── ShapePostCard (SVG-based, clip-path bound, 4-band vertical layout 20/30/30/20) ──
+function ShapePostCard({ post, shapeId = 'square', size = 270, postReactions, onReact, onOpenReactors, onOpenPicker, onSelectTag, onClick, onPointerDown, registerHover }) {
   const { resolvedTheme } = useSiteTheme();
   const theme = getPostVisualTheme(post, resolvedTheme);
   const shapeDef = GEOPOST_SHAPES.find(s => s.id === shapeId) || GEOPOST_SHAPES[0];
@@ -2079,67 +2182,84 @@ function ShapePostCard({ post, shapeId = 'square', size = 270, postReactions, on
   }, [postHtml]);
 
   const postIsAnon = !post.user_id;
-  const username = postIsAnon ? 'Anonymous' : (post.username || 'Orbiter');
+  const username = postIsAnon ? '🎭 Anonymous' : (post.username || 'Orbiter');
   const showStatusTag = !postIsAnon;
-  const statusTag = post.is_participant ? 'PAR' : 'ORB';
-  const statusColor = post.is_participant ? '#16a34a' : '#dc2626';
+  const statusLabel = post.is_participant ? 'PAR' : 'ORB';
+  const statusBg = post.is_participant ? '#16a34a' : '#dc2626';
 
-  const ins = shapeDef.inscribed || { x: 0.10, y: 0.10, w: 0.80, h: 0.80 };
-  const ix = ins.x * size;
-  const iy = ins.y * size;
-  const iw = ins.w * size;
-  const ih = ins.h * size;
+  // Geometry: 4 vertical bands (full shape height): 20/30/30/20
+  const BAND_PCTS = [0.20, 0.30, 0.30, 0.20];
+  const bandTops = [0, 0.20, 0.50, 0.80, 1.00];
 
-  // Vertical bands within INSCRIBED area: 20% / 30% / 30% / 20%
-  const bandTop    = { x: ix, y: iy,                  w: iw, h: ih * 0.20 };
-  const bandMid    = { x: 0,  y: iy + ih * 0.20,      w: size, h: ih * 0.30 }; // image: full SHAPE width, clipped to shape
-  const bandBody   = { x: ix, y: iy + ih * 0.50,      w: iw, h: ih * 0.30 };
-  const bandBottom = { x: ix, y: iy + ih * 0.80,      w: iw, h: ih * 0.20 };
+  // For each band, compute the minimum horizontal width to constrain text/buttons
+  const bandExtents = bandTops.slice(0, 4).map((y0, i) => {
+    const y1 = bandTops[i + 1];
+    return shapeMinWidthInBand(shapeDef, y0, y1);
+  });
 
-  const svgPoints = clipPathToSvgPoints(shapeDef.clip, size);
-  const isCircle = shapeDef.clip === 'circle';
-  const isEllipse = shapeDef.clip === 'ellipse';
-  const isPillH = shapeDef.clip === 'pill-h';
-  const isPillV = shapeDef.clip === 'pill-v';
-  const pillRx = isPillH ? size / 2 : isPillV ? size / 2 : 0;
+  // Username font scales by band 0 width (narrow tip → tiny font)
+  const usernameMaxWidth = Math.max(20, bandExtents[0].minWidthFrac * size);
+  const usernameFont = Math.max(7, Math.min(usernameMaxWidth * 0.18, size * 0.055, 16));
+  const tagFont = Math.max(6, Math.min(usernameMaxWidth * 0.13, size * 0.035, 11));
 
-  // Unique clipPath id per card so multiple cards don't collide
-  const clipId = useMemo(() => `gp-clip-${post.id}-${size}`, [post.id, size]);
+  // Text body fixed per shape size (NOT scaled by shape size per spec — controlled by createpost; here just constant)
+  const textFont = Math.max(8, size * 0.038);
+  const bodyHeight = size * BAND_PCTS[2];
+  const lineHeight = 1.25;
+  const maxTextLines = Math.max(1, Math.floor((bodyHeight - textFont * 1.2) / (textFont * lineHeight))); // -1 line for "show more"
 
-  // Reactions summary (top emoji)
+  // Estimate if text overflows (rough char-per-line based on band-3 min width)
+  const bodyWidthPx = Math.max(20, bandExtents[2].minWidthFrac * size * 0.9);
+  const charsPerLine = Math.max(5, Math.floor(bodyWidthPx / (textFont * 0.55)));
+  const willOverflow = plainText.length > maxTextLines * charsPerLine;
+
+  // Reactions
   const reactions = postReactions || [];
   const reactionMap = {};
   reactions.forEach(r => { reactionMap[r.emoji_text] = (reactionMap[r.emoji_text] || 0) + 1; });
   const topEmojis = Object.entries(reactionMap).sort((a,b) => b[1]-a[1]).slice(0, 1);
-  const totalReactions = post.total_reactions ?? reactions.length;
 
-  // Scope tag
-  const scopeTag = (() => {
-    if (post.zip_code) return { label: `📍${post.zip_code}`, color: '#7C3AED' };
-    if (post.borough) return { label: `🏙${(post.borough || '').slice(0, 4)}`, color: '#2563eb' };
-    if (post.scope === 'nyc') return { label: '🗽NYC', color: '#0891b2' };
-    return { label: '💻DGT', color: '#64748b' };
+  // Scope label (full text, smaller)
+  const scopeInfo = (() => {
+    if (post.scope === 'zip' && post.zip_code) return { label: `📍 ${post.zip_code}`, bg: '#ede9fe', color: '#6d28d9', border: '#6d28d9' };
+    if (post.borough) return { label: `🏙 ${post.borough}`, bg: '#dbeafe', color: '#1d4ed8', border: '#1d4ed8' };
+    if (post.scope === 'nyc') return { label: '🗽 NYC', bg: '#cffafe', color: '#0e7490', border: '#0e7490' };
+    return { label: '💻 Digital', bg: '#f3f4f6', color: '#475569', border: '#94a3b8' };
   })();
 
-  // Fonts scale with shape size
-  const usernameFont = Math.max(9, Math.min(size * 0.058, 18));
-  const tagFont = Math.max(7, size * 0.034);
-  const textFont = Math.max(8, Math.min(size * 0.040, 13));
-  const lineHeight = 1.25;
-  const textLines = Math.max(1, Math.floor(bandBody.h / (textFont * lineHeight)) - 1); // -1 reserves space for "show more"
+  const isCircle = shapeDef.clip === 'circle';
+  const isEllipse = shapeDef.clip === 'ellipse';
+  const isPillH = shapeDef.clip === 'pill-h';
+  const isPillV = shapeDef.clip === 'pill-v';
+  const svgPoints = clipPathToSvgPoints(shapeDef.clip, size);
+  const pillRx = (isPillH || isPillV) ? size / 2 : 0;
+  const clipId = useMemo(() => `gp-clip-${post.id}-${size}`, [post.id, size]);
+  const cssClip = cssClipPathForShape(shapeDef);
 
-  const needsShowMore = plainText.length > 0 && (plainText.length > textLines * (iw / (textFont * 0.55)));
+  // Common button styling (matches tile/horizontal mode visuals)
+  const usesPostFill = !!post.post_fill;
+  const baseChromeBg = '#f3f4f6';
+  const baseChromeText = '#000';
+  const chromeBorder = theme.outline || '#000';
+  const btnPad = `${Math.max(1, size * 0.005)}px ${Math.max(3, size * 0.018)}px`;
+  const btnRadius = 9999;
+  const btnFont = Math.max(8, Math.min(size * 0.038, 12));
+
+  const tagPad = `${Math.max(1, size * 0.005)}px ${Math.max(3, size * 0.015)}px`;
+  const tagFont2 = Math.max(7, Math.min(size * 0.030, 10));
+
+  // image band geometry (full shape width — clipped to shape via SVG clipPath)
+  const imageBandY = size * BAND_PCTS[0];
+  const imageBandH = size * BAND_PCTS[1];
 
   return (
     <svg
       width={size}
       height={size}
       viewBox={`0 0 ${size} ${size}`}
-      onClick={onClick}
-      style={{ cursor: 'pointer', userSelect: 'none', display: 'block', overflow: 'visible' }}
+      style={{ display: 'block', overflow: 'visible', userSelect: 'none', pointerEvents: 'none' }}
     >
       <defs>
-        {/* Clip path matching the shape — used to clip image to shape edges */}
         <clipPath id={clipId} clipPathUnits="userSpaceOnUse">
           {isCircle && <circle cx={size/2} cy={size/2} r={size/2 - 2} />}
           {isEllipse && <ellipse cx={size/2} cy={size/2} rx={size/2 - 2} ry={size*0.48} />}
@@ -2149,135 +2269,167 @@ function ShapePostCard({ post, shapeId = 'square', size = 270, postReactions, on
         </clipPath>
       </defs>
 
-      {/* Outer shape fill + stroke */}
-      {isCircle && (
-        <circle cx={size/2} cy={size/2} r={size/2 - 2}
-          fill={theme.fill} stroke={theme.outline} strokeWidth="3" />
-      )}
-      {isEllipse && (
-        <ellipse cx={size/2} cy={size/2} rx={size/2 - 2} ry={size*0.48}
-          fill={theme.fill} stroke={theme.outline} strokeWidth="3" />
-      )}
-      {(isPillH || isPillV) && (
-        <rect x="2" y="2" width={size-4} height={size-4} rx={pillRx} ry={pillRx}
-          fill={theme.fill} stroke={theme.outline} strokeWidth="3" />
-      )}
-      {!isCircle && !isEllipse && !isPillH && !isPillV && svgPoints && (
-        <polygon points={svgPoints}
-          fill={theme.fill} stroke={theme.outline} strokeWidth="3" strokeLinejoin="round" />
-      )}
-      {!isCircle && !isEllipse && !isPillH && !isPillV && !svgPoints && (
-        <rect x="2" y="2" width={size-4} height={size-4} rx="8"
-          fill={theme.fill} stroke={theme.outline} strokeWidth="3" />
-      )}
+      {/* Outer shape — receives clicks for popup open and pointerdown for drag (only on filled geometry) */}
+      <g
+        style={{ pointerEvents: 'auto', cursor: 'grab' }}
+        onPointerDown={(e) => { onPointerDown && onPointerDown(e, post.id); }}
+        onClick={(e) => { if (!e.defaultPrevented) onClick && onClick(e); }}
+      >
+        {isCircle && (
+          <circle cx={size/2} cy={size/2} r={size/2 - 2}
+            fill={theme.fill} stroke={theme.outline} strokeWidth="3" />
+        )}
+        {isEllipse && (
+          <ellipse cx={size/2} cy={size/2} rx={size/2 - 2} ry={size*0.48}
+            fill={theme.fill} stroke={theme.outline} strokeWidth="3" />
+        )}
+        {(isPillH || isPillV) && (
+          <rect x="2" y="2" width={size-4} height={size-4} rx={pillRx} ry={pillRx}
+            fill={theme.fill} stroke={theme.outline} strokeWidth="3" />
+        )}
+        {!isCircle && !isEllipse && !isPillH && !isPillV && svgPoints && (
+          <polygon points={svgPoints}
+            fill={theme.fill} stroke={theme.outline} strokeWidth="3" strokeLinejoin="round" />
+        )}
+        {!isCircle && !isEllipse && !isPillH && !isPillV && !svgPoints && (
+          <rect x="2" y="2" width={size-4} height={size-4} rx="8"
+            fill={theme.fill} stroke={theme.outline} strokeWidth="3" />
+        )}
+      </g>
 
-      {/* Image — full SHAPE width, clipped to shape, occupies middle 30% band */}
+      {/* Image — full shape width, clipped to shape, in band 2 */}
       {post.image_url && (
         <image
           href={post.image_url}
           xlinkHref={post.image_url}
-          x={bandMid.x}
-          y={bandMid.y}
-          width={bandMid.w}
-          height={bandMid.h}
+          x={0}
+          y={imageBandY}
+          width={size}
+          height={imageBandH}
           preserveAspectRatio="xMidYMid slice"
           clipPath={`url(#${clipId})`}
+          style={{ pointerEvents: 'none' }}
         />
       )}
 
-      {/* Top 20%: username + status tag */}
-      <foreignObject x={bandTop.x} y={bandTop.y} width={bandTop.w} height={bandTop.h}>
-        <div xmlns="http://www.w3.org/1999/xhtml" style={{
-          width: '100%', height: '100%', display: 'flex', flexDirection: 'column',
-          alignItems: 'center', justifyContent: 'center', gap: 1, overflow: 'hidden',
-          padding: '2px', boxSizing: 'border-box', pointerEvents: 'none', textAlign: 'center',
-        }}>
+      {/* Full-shape foreignObject with CSS clip-path — bands sized by % of shape height */}
+      <foreignObject x={0} y={0} width={size} height={size} style={{ pointerEvents: 'none' }}>
+        <div
+          xmlns="http://www.w3.org/1999/xhtml"
+          style={{
+            width: '100%', height: '100%', display: 'flex', flexDirection: 'column',
+            clipPath: cssClip, WebkitClipPath: cssClip,
+            color: theme.text, boxSizing: 'border-box',
+          }}
+        >
+          {/* Band 0: username + status tag (top 20%) */}
           <div style={{
-            color: theme.text, fontWeight: 900, fontSize: usernameFont, lineHeight: 1.1,
-            wordBreak: 'break-word', overflow: 'hidden',
-            display: '-webkit-box', WebkitLineClamp: showStatusTag ? 1 : 2, WebkitBoxOrient: 'vertical',
-            width: '100%',
+            height: `${BAND_PCTS[0] * 100}%`,
+            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+            gap: 1, overflow: 'hidden', textAlign: 'center', padding: '2px 4px', boxSizing: 'border-box',
           }}>
-            {username}
-          </div>
-          {showStatusTag && (
             <div style={{
-              fontSize: tagFont, fontWeight: 900, color: '#fff', background: statusColor,
-              padding: '1px 5px', borderRadius: 4, lineHeight: 1.2, letterSpacing: 0.5,
-            }}>
-              {statusTag}
-            </div>
-          )}
-        </div>
-      </foreignObject>
-
-      {/* Body 30%: text + show more anchored bottom */}
-      <foreignObject x={bandBody.x} y={bandBody.y} width={bandBody.w} height={bandBody.h}>
-        <div xmlns="http://www.w3.org/1999/xhtml" style={{
-          width: '100%', height: '100%', display: 'flex', flexDirection: 'column',
-          alignItems: 'center', justifyContent: 'flex-end', overflow: 'hidden',
-          padding: '2px', boxSizing: 'border-box', pointerEvents: 'none', textAlign: 'center',
-        }}>
-          {plainText && (
-            <div style={{
-              color: theme.text, fontSize: textFont, lineHeight,
-              overflow: 'hidden', wordBreak: 'break-word',
-              display: '-webkit-box', WebkitLineClamp: textLines, WebkitBoxOrient: 'vertical',
-              width: '100%',
-            }}>
-              {plainText}
-            </div>
-          )}
-          {needsShowMore && (
-            <div style={{
-              color: theme.text, opacity: 0.7, fontSize: Math.max(7, textFont * 0.85),
-              fontWeight: 900, marginTop: 1, lineHeight: 1,
-            }}>
-              show more →
-            </div>
-          )}
-        </div>
-      </foreignObject>
-
-      {/* Bottom 20%: reactions + scope tag */}
-      <foreignObject x={bandBottom.x} y={bandBottom.y} width={bandBottom.w} height={bandBottom.h}>
-        <div xmlns="http://www.w3.org/1999/xhtml" style={{
-          width: '100%', height: '100%', display: 'flex',
-          alignItems: 'center', justifyContent: 'space-around', gap: 2, overflow: 'hidden',
-          padding: '2px', boxSizing: 'border-box', pointerEvents: 'none', flexWrap: 'wrap',
-        }}>
-          {/* React button (top emoji or +) */}
-          <div
-            onClick={(e) => { e.stopPropagation(); onReact && onReact(post.id, topEmojis[0]?.[0] || '🔥'); }}
-            style={{
-              fontSize: Math.max(8, size * 0.04), fontWeight: 900, color: theme.text,
-              background: 'rgba(0,0,0,0.08)', borderRadius: 8, padding: '2px 5px',
-              pointerEvents: 'auto', cursor: 'pointer', lineHeight: 1,
-              display: 'inline-flex', alignItems: 'center', gap: 2,
-            }}
-          >
-            {topEmojis[0] ? `${topEmojis[0][0]} ${topEmojis[0][1]}` : `🔥 ${totalReactions || 0}`}
+              fontWeight: 900, fontSize: usernameFont, lineHeight: 1.05,
+              maxWidth: `${bandExtents[0].minWidthFrac * 100}%`,
+              wordBreak: 'break-word', overflow: 'hidden',
+              display: '-webkit-box', WebkitLineClamp: showStatusTag ? 1 : 2, WebkitBoxOrient: 'vertical',
+            }}>{username}</div>
+            {showStatusTag && (
+              <HoverInvertButton
+                onClick={(e) => { e.stopPropagation(); onSelectTag && onSelectTag({ status: post.is_participant ? 'participant' : 'orbiter' }); }}
+                baseStyle={{
+                  fontSize: tagFont, fontWeight: 900, color: '#fff', background: statusBg, borderColor: statusBg,
+                  borderWidth: '1px', borderStyle: 'solid', borderRadius: 9999,
+                  padding: `0 ${Math.max(3, tagFont * 0.6)}px`, lineHeight: 1.3, letterSpacing: 0.4,
+                  pointerEvents: 'auto',
+                }}
+              >{statusLabel}</HoverInvertButton>
+            )}
           </div>
 
-          {/* Show all reactions (...) */}
-          <div
-            onClick={(e) => { e.stopPropagation(); onClick && onClick(); }}
-            style={{
-              fontSize: Math.max(9, size * 0.045), fontWeight: 900, color: theme.text,
-              background: 'rgba(0,0,0,0.08)', borderRadius: 8, padding: '0 5px',
-              pointerEvents: 'auto', cursor: 'pointer', lineHeight: 1,
-            }}
-          >
-            …
-          </div>
+          {/* Band 1: image space — image rendered as SVG sibling. Spacer here to preserve layout. */}
+          <div style={{ height: `${BAND_PCTS[1] * 100}%` }} />
 
-          {/* Scope tag */}
+          {/* Band 2: text body + show more anchored bottom */}
           <div style={{
-            fontSize: Math.max(7, size * 0.032), fontWeight: 900, color: '#fff',
-            background: scopeTag.color, borderRadius: 4, padding: '2px 4px',
-            lineHeight: 1.2, letterSpacing: 0.3,
+            height: `${BAND_PCTS[2] * 100}%`,
+            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end',
+            overflow: 'hidden', padding: '0 4px', boxSizing: 'border-box', textAlign: 'center',
           }}>
-            {scopeTag.label}
+            {plainText && (
+              <div style={{
+                width: `${bandExtents[2].minWidthFrac * 100}%`,
+                fontSize: textFont, lineHeight,
+                overflow: 'hidden', wordBreak: 'break-word',
+                display: '-webkit-box', WebkitLineClamp: willOverflow ? Math.max(1, maxTextLines - 1) : maxTextLines,
+                WebkitBoxOrient: 'vertical',
+              }}>{plainText}</div>
+            )}
+            {willOverflow && (
+              <div
+                style={{
+                  fontSize: Math.max(7, textFont * 0.85), fontWeight: 900,
+                  marginTop: 1, lineHeight: 1, opacity: 0.75, pointerEvents: 'auto', cursor: 'pointer',
+                }}
+                onMouseDown={e => e.preventDefault()}
+                onClick={(e) => { e.stopPropagation(); onClick && onClick(e); }}
+              >show more →</div>
+            )}
+          </div>
+
+          {/* Band 3: reactions + ... + scope (bottom 20%) */}
+          <div style={{
+            height: `${BAND_PCTS[3] * 100}%`,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            gap: Math.max(2, size * 0.012), flexWrap: 'wrap', overflow: 'hidden',
+            padding: '0 4px', boxSizing: 'border-box',
+            maxWidth: `${bandExtents[3].minWidthFrac * 100}%`,
+            margin: '0 auto', alignContent: 'center',
+          }}>
+            {/* Top reaction (if any) — clicking re-applies same emoji */}
+            {topEmojis[0] && (
+              <HoverInvertButton
+                onClick={(e) => { e.stopPropagation(); onReact && onReact(post.id, topEmojis[0][0]); }}
+                baseStyle={{
+                  display: 'inline-flex', alignItems: 'center', gap: 2,
+                  background: baseChromeBg, color: baseChromeText, borderColor: chromeBorder,
+                  borderWidth: '2px', borderStyle: 'solid', borderRadius: btnRadius,
+                  padding: btnPad, fontSize: btnFont, fontWeight: 900, lineHeight: 1, pointerEvents: 'auto',
+                }}
+              >{topEmojis[0][0]}<span style={{ fontSize: btnFont * 0.85 }}>{topEmojis[0][1]}</span></HoverInvertButton>
+            )}
+
+            {/* + emoji picker button */}
+            <HoverInvertButton
+              onClick={(e) => { e.stopPropagation(); onOpenPicker && onOpenPicker(post.id, e.currentTarget.getBoundingClientRect()); }}
+              baseStyle={{
+                background: baseChromeBg, color: baseChromeText, borderColor: chromeBorder,
+                borderWidth: '2px', borderStyle: 'solid', borderRadius: btnRadius,
+                padding: btnPad, fontSize: btnFont, fontWeight: 900, lineHeight: 1, pointerEvents: 'auto',
+              }}
+            >+</HoverInvertButton>
+
+            {/* … reactors button */}
+            {reactions.length > 0 && (
+              <HoverInvertButton
+                onClick={(e) => { e.stopPropagation(); onOpenReactors && onOpenReactors(post.id); }}
+                baseStyle={{
+                  background: baseChromeBg, color: baseChromeText, borderColor: chromeBorder,
+                  borderWidth: '2px', borderStyle: 'solid', borderRadius: btnRadius,
+                  padding: btnPad, fontSize: Math.max(7, btnFont * 0.9), fontWeight: 900, lineHeight: 1, pointerEvents: 'auto',
+                }}
+              >…</HoverInvertButton>
+            )}
+
+            {/* Scope tag */}
+            <HoverInvertButton
+              onClick={(e) => { e.stopPropagation(); onSelectTag && onSelectTag(post); }}
+              baseStyle={{
+                background: scopeInfo.bg, color: scopeInfo.color, borderColor: scopeInfo.border,
+                borderWidth: '1px', borderStyle: 'solid', borderRadius: 9999,
+                padding: tagPad, fontSize: tagFont2, fontWeight: 900, lineHeight: 1.2, pointerEvents: 'auto',
+              }}
+            >{scopeInfo.label}</HoverInvertButton>
           </div>
         </div>
       </foreignObject>
@@ -2285,36 +2437,10 @@ function ShapePostCard({ post, shapeId = 'square', size = 270, postReactions, on
   );
 }
 
-// ── ShapeDetailPopup — post popup shaped like the post's shape ─────────────────
-function ShapeDetailPopup({ post, shapeId, onClose, onReact, postReactions, accentColor, onSelectTag }) {
-  const { resolvedTheme } = useSiteTheme();
-  const theme = getPostVisualTheme(post, resolvedTheme);
-  const shapeDef = GEOPOST_SHAPES.find(s => s.id === shapeId) || GEOPOST_SHAPES[0];
-
-  const parsedContent = useMemo(() => {
-    try { return typeof post.content === 'string' ? JSON.parse(post.content) : (post.content || {}); } catch { return {}; }
-  }, [post.content]);
-  const postHtml = parsedContent.html || '';
-  const postIsAnon = !post.user_id;
-  const username = postIsAnon ? '🎭 Anonymous' : (post.username || 'Orbiter');
-
-  const popupSize = Math.min(520, window.innerWidth * 0.85);
-  const ins = shapeDef.inscribed || { x: 0.1, y: 0.1, w: 0.8, h: 0.8 };
-  const ix = ins.x * popupSize;
-  const iy = ins.y * popupSize;
-  const iw = ins.w * popupSize;
-  const ih = ins.h * popupSize;
-  const svgPoints = clipPathToSvgPoints(shapeDef.clip, popupSize);
-  const isCircle = shapeDef.clip === 'circle';
-  const isEllipse = shapeDef.clip === 'ellipse';
-  const isPillH = shapeDef.clip === 'pill-h';
-  const isPillV = shapeDef.clip === 'pill-v';
-  const pillRx = isPillH || isPillV ? popupSize / 2 : 0;
-
-  const reactions = postReactions || [];
-  const reactionMap = {};
-  reactions.forEach(r => { reactionMap[r.emoji_text] = (reactionMap[r.emoji_text] || 0) + 1; });
-  const topEmojis = Object.entries(reactionMap).sort((a,b) => b[1]-a[1]).slice(0, 6);
+// ── ShapeDetailPopup — uses same ShapePostCard 4-band layout, just larger ──
+function ShapeDetailPopup({ post, shapeId, onClose, onReact, postReactions, accentColor, onSelectTag, onOpenReactors }) {
+  const popupSize = Math.min(560, Math.min(window.innerWidth, window.innerHeight) * 0.85);
+  const [pickerRect, setPickerRect] = useState(null);
 
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') onClose(); };
@@ -2333,40 +2459,43 @@ function ShapeDetailPopup({ post, shapeId, onClose, onReact, postReactions, acce
         <button
           onMouseDown={e => e.preventDefault()}
           onClick={onClose}
-          style={{ position: 'absolute', top: -16, right: -16, zIndex: 10, width: 32, height: 32, borderRadius: '50%', background: '#000', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 900, fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          style={{ position: 'absolute', top: -16, right: -16, zIndex: 10, width: 36, height: 36, borderRadius: '50%', background: '#000', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 900, fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
         >×</button>
-
-        <svg width={popupSize} height={popupSize} viewBox={`0 0 ${popupSize} ${popupSize}`} overflow="visible" style={{ display: 'block' }}>
-          {isCircle && <circle cx={popupSize/2} cy={popupSize/2} r={popupSize/2-3} fill={theme.fill} stroke={theme.outline} strokeWidth="4" />}
-          {isEllipse && <ellipse cx={popupSize/2} cy={popupSize/2} rx={popupSize/2-3} ry={popupSize*0.48} fill={theme.fill} stroke={theme.outline} strokeWidth="4" />}
-          {(isPillH || isPillV) && <rect x="3" y="3" width={popupSize-6} height={popupSize-6} rx={pillRx} ry={pillRx} fill={theme.fill} stroke={theme.outline} strokeWidth="4" />}
-          {!isCircle && !isEllipse && !isPillH && !isPillV && svgPoints && <polygon points={svgPoints} fill={theme.fill} stroke={theme.outline} strokeWidth="4" strokeLinejoin="round" />}
-          {!isCircle && !isEllipse && !isPillH && !isPillV && !svgPoints && <rect x="3" y="3" width={popupSize-6} height={popupSize-6} rx="12" fill={theme.fill} stroke={theme.outline} strokeWidth="4" />}
-
-          <foreignObject x={ix} y={iy} width={iw} height={ih}>
-            <div xmlns="http://www.w3.org/1999/xhtml" style={{ width: '100%', height: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column', gap: 6, padding: 8, boxSizing: 'border-box', alignItems: 'center' }}>
-              <div style={{ color: theme.text, fontWeight: 900, fontSize: 14, textAlign: 'center' }}>{username}</div>
-              {postHtml && (
-                <div style={{ color: theme.text, fontSize: 11, lineHeight: 1.45, overflow: 'hidden', textAlign: 'center', width: '100%', maxHeight: ih * 0.45, display: '-webkit-box', WebkitLineClamp: 6, WebkitBoxOrient: 'vertical' }}
-                  dangerouslySetInnerHTML={{ __html: postHtml }} />
-              )}
-              {post.image_url && (
-                <img src={post.image_url} alt="" style={{ maxWidth: '70%', maxHeight: ih * 0.38, objectFit: 'cover', borderRadius: 6, flexShrink: 0 }} />
-              )}
-              {topEmojis.length > 0 && (
-                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', justifyContent: 'center' }}>
-                  {topEmojis.map(([emoji, count]) => (
-                    <span key={emoji} onClick={e => { e.stopPropagation(); onReact && onReact(post.id, emoji); }}
-                      style={{ fontSize: 13, background: 'rgba(0,0,0,0.1)', borderRadius: 10, padding: '2px 6px', cursor: 'pointer' }}>
-                      {emoji}{count > 1 ? count : ''}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
-          </foreignObject>
-        </svg>
+        <ShapePostCard
+          post={post}
+          shapeId={shapeId}
+          size={popupSize}
+          postReactions={postReactions}
+          onReact={onReact}
+          onOpenReactors={onOpenReactors}
+          onSelectTag={onSelectTag}
+          onOpenPicker={(_pid, rect) => setPickerRect(rect)}
+          onClick={() => { /* clicking shape does nothing inside popup */ }}
+        />
       </div>
+
+      {pickerRect && createPortal(
+        <>
+          <div className="fixed inset-0 z-[100015]" onClick={(e) => { e.stopPropagation(); setPickerRect(null); }} />
+          <div
+            className="fixed z-[100016]"
+            style={pickerRect.top > window.innerHeight * 0.5
+              ? { bottom: window.innerHeight - pickerRect.top + 4, left: Math.max(4, pickerRect.left - 80) }
+              : { top: pickerRect.bottom + 4, left: Math.max(4, pickerRect.left - 80) }
+            }
+            onMouseDown={e => e.stopPropagation()}
+            onClick={e => e.stopPropagation()}
+          >
+            <EmojiPicker
+              embedded={true}
+              compact={true}
+              value=""
+              onChange={(e) => { if (e) { onReact && onReact(post.id, e); setPickerRect(null); } }}
+            />
+          </div>
+        </>,
+        document.body
+      )}
     </div>,
     document.body
   );
@@ -2375,7 +2504,7 @@ function ShapeDetailPopup({ post, shapeId, onClose, onReact, postReactions, acce
 // ── ShapeModeView — matter-js upward-gravity physics drop ─────────────────────
 const SHAPE_PAGE_SIZE = 12;
 
-function ShapeModeView({ posts, postReactions, onReact, onSelectTag, accentColor, session }) {
+function ShapeModeView({ posts, postReactions, onReact, onSelectTag, onOpenReactors, accentColor, session }) {
   const containerRef = useRef(null);
   const engineRef = useRef(null);
   const runnerRef = useRef(null);
@@ -2386,13 +2515,17 @@ function ShapeModeView({ posts, postReactions, onReact, onSelectTag, accentColor
   const [visibleCount, setVisibleCount] = useState(SHAPE_PAGE_SIZE);
   const [shapePopupPost, setShapePopupPost] = useState(null);
   const [shapePopupId, setShapePopupId] = useState('square');
+  const [qepRect, setQepRect] = useState(null);
+  const [qepPostId, setQepPostId] = useState(null);
   const hasMoreRef = useRef(false);
+
+  // Drag/throw state
+  const dragRef = useRef(null); // { body, postId, samples: [{x,y,t}], origFrictionAir, didDrag }
 
   const visiblePosts = useMemo(() => posts.slice(0, visibleCount), [posts, visibleCount]);
   hasMoreRef.current = visibleCount < posts.length;
 
   const postsWithShapes = useMemo(() => {
-    // NO reverse: most recent (index 0) drops first → ends up highest after upward gravity
     return visiblePosts.map((post, i) => {
       const shapeId = (post.tile_shape && GEOPOST_SHAPES.find(s => s.id === post.tile_shape))
         ? post.tile_shape
@@ -2406,30 +2539,19 @@ function ShapeModeView({ posts, postReactions, onReact, onSelectTag, accentColor
     });
   }, [visiblePosts]);
 
-  // ── Mount-only: create engine, runner, walls, RAF tick ──
+  // Mount-only engine setup
   useEffect(() => {
     const containerEl = containerRef.current;
     if (!containerEl) return;
-
     const containerWidth = containerEl.offsetWidth || 900;
     const CEIL_Y = 20;
     const WALL_THICK = 40;
-
     const engine = Matter.Engine.create({ gravity: { x: 0, y: -0.8 } });
     engineRef.current = engine;
-
-    const ceiling = Matter.Bodies.rectangle(containerWidth / 2, CEIL_Y, containerWidth + WALL_THICK * 2, WALL_THICK, {
-      isStatic: true, label: 'ceiling', friction: 0.5, restitution: 0.1,
-    });
-    const leftWall = Matter.Bodies.rectangle(-WALL_THICK / 2, 0, WALL_THICK, 100000, {
-      isStatic: true, label: 'wall',
-    });
-    const rightWall = Matter.Bodies.rectangle(containerWidth + WALL_THICK / 2, 0, WALL_THICK, 100000, {
-      isStatic: true, label: 'wall',
-    });
-
+    const ceiling = Matter.Bodies.rectangle(containerWidth / 2, CEIL_Y, containerWidth + WALL_THICK * 2, WALL_THICK, { isStatic: true, label: 'ceiling', friction: 0.5, restitution: 0.1 });
+    const leftWall = Matter.Bodies.rectangle(-WALL_THICK / 2, 0, WALL_THICK, 100000, { isStatic: true, label: 'wall' });
+    const rightWall = Matter.Bodies.rectangle(containerWidth + WALL_THICK / 2, 0, WALL_THICK, 100000, { isStatic: true, label: 'wall' });
     Matter.Composite.add(engine.world, [ceiling, leftWall, rightWall]);
-
     const runner = Matter.Runner.create();
     Matter.Runner.run(runner, engine);
     runnerRef.current = runner;
@@ -2438,28 +2560,15 @@ function ShapeModeView({ posts, postReactions, onReact, onSelectTag, accentColor
     const tick = () => {
       const states = bodiesRef.current
         .filter(({ body }) => body && Matter.Composite.get(engine.world, body.id, 'body'))
-        .map(({ body, postId, size }) => ({
-          postId,
-          x: body.position.x,
-          y: body.position.y,
-          angle: body.angle,
-          size,
-        }));
-
+        .map(({ body, postId, size }) => ({ postId, x: body.position.x, y: body.position.y, angle: body.angle, size }));
       setBodyStates(states);
-
       if (states.length > 0) {
         const maxBodyY = Math.max(...states.map(s => s.y + s.size / 2));
-        if (maxBodyY > expandedTo - 80) {
-          expandedTo += 350;
-          setContainerHeight(expandedTo);
-        }
+        if (maxBodyY > expandedTo - 80) { expandedTo += 350; setContainerHeight(expandedTo); }
       }
-
       rafRef.current = requestAnimationFrame(tick);
     };
     rafRef.current = requestAnimationFrame(tick);
-
     return () => {
       cancelAnimationFrame(rafRef.current);
       Matter.Runner.stop(runner);
@@ -2468,10 +2577,9 @@ function ShapeModeView({ posts, postReactions, onReact, onSelectTag, accentColor
       engineRef.current = null;
       runnerRef.current = null;
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Incremental: add NEW bodies for posts beyond what's already in world ──
+  // Incremental body adds
   const addedCountRef = useRef(0);
   useEffect(() => {
     const engine = engineRef.current;
@@ -2479,43 +2587,32 @@ function ShapeModeView({ posts, postReactions, onReact, onSelectTag, accentColor
     if (!engine || !containerEl) return;
     const containerWidth = containerEl.offsetWidth || 900;
     const WALL_THICK = 40;
-
     const startIdx = addedCountRef.current;
     const newOnes = postsWithShapes.slice(startIdx);
     if (newOnes.length === 0) return;
-
-    // Find current bottom of stack so new shapes spawn below
     const currentMaxY = bodiesRef.current.reduce((max, { body, size }) => {
       const by = (body?.position?.y || 0) + size / 2;
       return by > max ? by : max;
     }, containerHeight);
     const baseSpawnY = Math.max(currentMaxY + 100, containerHeight + 100);
-
     newOnes.forEach(({ post, shapeId, size }, idxInBatch) => {
       const i = startIdx + idxInBatch;
       const shapeDef = GEOPOST_SHAPES.find(s => s.id === shapeId) || GEOPOST_SHAPES[0];
       const cols = Math.max(1, Math.floor((containerWidth - WALL_THICK * 2) / (size + 10)));
       const spawnX = WALL_THICK + size / 2 + (i % cols) * (size + 10);
       const spawnY = baseSpawnY + idxInBatch * 30;
-
       const body = buildMatterBody(shapeDef, spawnX, spawnY, size);
       body._postId = post.id;
       body._shapeId = shapeId;
       body._size = size;
-
       bodiesRef.current.push({ body, postId: post.id, shapeId, size });
-
       setTimeout(() => {
         if (!engineRef.current) return;
         Matter.Composite.add(engine.world, body);
-        Matter.Body.setVelocity(body, {
-          x: (Math.random() - 0.5) * 3,
-          y: -(4 + Math.random() * 2),
-        });
+        Matter.Body.setVelocity(body, { x: (Math.random() - 0.5) * 3, y: -(4 + Math.random() * 2) });
         Matter.Body.setAngularVelocity(body, (Math.random() - 0.5) * 0.1);
       }, idxInBatch * 120);
     });
-
     addedCountRef.current = postsWithShapes.length;
   }, [postsWithShapes, containerHeight]);
 
@@ -2527,16 +2624,80 @@ function ShapeModeView({ posts, postReactions, onReact, onSelectTag, accentColor
     setShapePopupPost(found);
   };
 
+  // ── Drag handlers attached at window level once drag begins ──
+  const onShapePointerDown = (e, postId) => {
+    const containerEl = containerRef.current;
+    if (!containerEl) return;
+    const entry = bodiesRef.current.find(b => b.postId === postId);
+    if (!entry) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const rect = containerEl.getBoundingClientRect();
+    const startX = e.clientX - rect.left;
+    const startY = e.clientY - rect.top;
+    const body = entry.body;
+    const origFrictionAir = body.frictionAir;
+    body.frictionAir = 0.15; // dampen flailing while held
+    Matter.Body.setStatic(body, false);
+    dragRef.current = {
+      body, postId,
+      samples: [{ x: startX, y: startY, t: performance.now() }],
+      origFrictionAir, didDrag: false, startClientX: e.clientX, startClientY: e.clientY,
+    };
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch {}
+
+    const onMove = (ev) => {
+      if (!dragRef.current) return;
+      const r = containerRef.current?.getBoundingClientRect();
+      if (!r) return;
+      const mx = ev.clientX - r.left;
+      const my = ev.clientY - r.top;
+      const dx = ev.clientX - dragRef.current.startClientX;
+      const dy = ev.clientY - dragRef.current.startClientY;
+      if (!dragRef.current.didDrag && (dx*dx + dy*dy) > 25) dragRef.current.didDrag = true;
+      Matter.Body.setPosition(dragRef.current.body, { x: mx, y: my });
+      Matter.Body.setVelocity(dragRef.current.body, { x: 0, y: 0 });
+      const samples = dragRef.current.samples;
+      samples.push({ x: mx, y: my, t: performance.now() });
+      if (samples.length > 6) samples.shift();
+    };
+    const onUp = (ev) => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      if (!dragRef.current) return;
+      const { body, postId: pid, samples, origFrictionAir, didDrag } = dragRef.current;
+      body.frictionAir = origFrictionAir;
+      if (!didDrag) {
+        // It was a click — open popup
+        dragRef.current = null;
+        handleShapeClick(pid);
+        return;
+      }
+      // Compute throw velocity from last samples
+      if (samples.length >= 2) {
+        const last = samples[samples.length - 1];
+        const prev = samples[Math.max(0, samples.length - 4)];
+        const dt = Math.max(16, last.t - prev.t);
+        const vx = ((last.x - prev.x) / dt) * 16; // scale to matter step
+        const vy = ((last.y - prev.y) / dt) * 16;
+        Matter.Body.setVelocity(body, { x: Math.max(-40, Math.min(40, vx)), y: Math.max(-40, Math.min(40, vy)) });
+        Matter.Body.setAngularVelocity(body, (Math.random() - 0.5) * 0.1);
+      }
+      dragRef.current = null;
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+  };
+
   return (
     <div style={{ width: '100%', position: 'relative' }}>
       <div
         ref={containerRef}
         style={{
-          position: 'relative',
-          width: '100%',
-          height: containerHeight,
-          overflow: 'hidden',
-          background: 'transparent',
+          position: 'relative', width: '100%', height: containerHeight,
+          overflow: 'hidden', background: 'transparent', touchAction: 'none',
         }}
       >
         {bodyStates.map(({ postId, x, y, angle, size }) => {
@@ -2547,14 +2708,11 @@ function ShapeModeView({ posts, postReactions, onReact, onSelectTag, accentColor
               key={postId}
               style={{
                 position: 'absolute',
-                left: x - size / 2,
-                top: y - size / 2,
-                width: size,
-                height: size,
-                transform: `rotate(${angle}rad)`,
-                transformOrigin: 'center center',
+                left: x - size / 2, top: y - size / 2,
+                width: size, height: size,
+                transform: `rotate(${angle}rad)`, transformOrigin: 'center center',
                 willChange: 'transform',
-                pointerEvents: 'auto',
+                pointerEvents: 'none', // wrapper transparent — only shape geometry receives events
               }}
             >
               <ShapePostCard
@@ -2564,6 +2722,10 @@ function ShapeModeView({ posts, postReactions, onReact, onSelectTag, accentColor
                 postReactions={postReactions[entry.post.id]}
                 onReact={onReact}
                 onClick={() => handleShapeClick(postId)}
+                onPointerDown={onShapePointerDown}
+                onOpenReactors={onOpenReactors}
+                onOpenPicker={(pid, rect) => { setQepPostId(pid); setQepRect(rect); }}
+                onSelectTag={onSelectTag}
               />
             </div>
           );
@@ -2576,7 +2738,7 @@ function ShapeModeView({ posts, postReactions, onReact, onSelectTag, accentColor
         )}
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: '4px 0 8px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, padding: '2px 0 4px', marginTop: -40 }}>
         <div style={{ fontSize: 11, fontWeight: 900, opacity: 0.5 }}>
           {Math.min(visibleCount, posts.length)} of {posts.length} shapes
         </div>
@@ -2585,21 +2747,40 @@ function ShapeModeView({ posts, postReactions, onReact, onSelectTag, accentColor
             onMouseDown={e => e.preventDefault()}
             onClick={() => setVisibleCount(c => c + SHAPE_PAGE_SIZE)}
             style={{
-              padding: '8px 24px',
-              borderRadius: 999,
-              border: '3px solid #000',
-              background: accentColor,
-              color: '#fff',
-              fontWeight: 900,
-              fontSize: 13,
-              cursor: 'pointer',
-              boxShadow: '3px 3px 0px black',
+              padding: '8px 24px', borderRadius: 999, border: '3px solid #000',
+              background: accentColor, color: '#fff', fontWeight: 900, fontSize: 13,
+              cursor: 'pointer', boxShadow: '3px 3px 0px black',
             }}
-          >
-            Drop more shapes ▲
-          </button>
+          >Drop more shapes ▲</button>
         )}
       </div>
+
+      {/* Emoji picker portal — anchored to clicked button */}
+      {qepRect && createPortal(
+        <>
+          <div className="fixed inset-0 z-[99998]" onClick={(e) => { e.stopPropagation(); setQepRect(null); setQepPostId(null); }} />
+          <div
+            className="fixed z-[99999]"
+            style={qepRect.top > window.innerHeight * 0.5
+              ? { bottom: window.innerHeight - qepRect.top + 4, left: Math.max(4, Math.min(window.innerWidth - 320, qepRect.left - 80)) }
+              : { top: qepRect.bottom + 4, left: Math.max(4, Math.min(window.innerWidth - 320, qepRect.left - 80)) }
+            }
+            onMouseDown={e => e.stopPropagation()}
+            onClick={e => e.stopPropagation()}
+          >
+            <EmojiPicker
+              embedded={true}
+              compact={true}
+              value=""
+              onChange={(em) => {
+                if (em && qepPostId) { onReact && onReact(qepPostId, em); }
+                setQepRect(null); setQepPostId(null);
+              }}
+            />
+          </div>
+        </>,
+        document.body
+      )}
 
       {shapePopupPost && (
         <ShapeDetailPopup
@@ -2608,6 +2789,7 @@ function ShapeModeView({ posts, postReactions, onReact, onSelectTag, accentColor
           postReactions={postReactions[shapePopupPost.id]}
           onReact={onReact}
           onSelectTag={onSelectTag}
+          onOpenReactors={onOpenReactors}
           accentColor={accentColor}
           onClose={() => setShapePopupPost(null)}
         />
@@ -5395,6 +5577,7 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
               postReactions={reactions}
               onReact={handleReact}
               onSelectTag={handleSelectTag}
+              onOpenReactors={(id) => setReactorsModal(id)}
               accentColor={accentColor}
               session={session}
             />
