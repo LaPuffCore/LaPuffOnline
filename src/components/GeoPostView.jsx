@@ -274,7 +274,8 @@ const SAMPLE_TILE_SHAPES = [
   'half-down','pill-h','pow','quatrefoil','half-right','tri-right',
   'oval','tri-reuleaux','tri-scalene','pill-v','half-left','square',
 ];
-const SAMPLE_SHAPE_SIZES = ['medium','small','large','medium','xlarge','small','large','medium','small','large'];
+// Use only DB-aligned size strings ('small','medium','medium-large','large')
+const SAMPLE_SHAPE_SIZES = ['medium','small','large','medium-large','small','large','medium','medium-large','small','large'];
 
 function buildSamplePosts() {
   const now = Date.now();
@@ -2061,8 +2062,8 @@ function buildMatterBody(shapeDef, x, y, size) {
   return Matter.Bodies.rectangle(x, y, size, size, options);
 }
 
-// ── ShapePostCard (SVG-based — correct stroke + foreignObject text wrapping) ──
-function ShapePostCard({ post, shapeId = 'square', size = 270, onClick }) {
+// ── ShapePostCard (SVG-based — 4-zone layout: username 20% / image 30% / text 30% / reactions 20%) ──
+function ShapePostCard({ post, shapeId = 'square', size = 270, postReactions, onReact, onClick }) {
   const { resolvedTheme } = useSiteTheme();
   const theme = getPostVisualTheme(post, resolvedTheme);
   const shapeDef = GEOPOST_SHAPES.find(s => s.id === shapeId) || GEOPOST_SHAPES[0];
@@ -2071,14 +2072,29 @@ function ShapePostCard({ post, shapeId = 'square', size = 270, onClick }) {
     try { return typeof post.content === 'string' ? JSON.parse(post.content) : (post.content || {}); } catch { return {}; }
   }, [post.content]);
   const postHtml = parsedContent.html || '';
-  const postIsAnon = !post.user_id;
-  const username = postIsAnon ? '🎭 Anon' : (post.username || 'Orbiter');
+  const plainText = useMemo(() => {
+    const tmp = document.createElement('div');
+    tmp.innerHTML = postHtml;
+    return (tmp.textContent || tmp.innerText || '').trim();
+  }, [postHtml]);
 
-  const ins = shapeDef.inscribed || { x: 0.1, y: 0.1, w: 0.8, h: 0.8 };
+  const postIsAnon = !post.user_id;
+  const username = postIsAnon ? 'Anonymous' : (post.username || 'Orbiter');
+  const showStatusTag = !postIsAnon;
+  const statusTag = post.is_participant ? 'PAR' : 'ORB';
+  const statusColor = post.is_participant ? '#16a34a' : '#dc2626';
+
+  const ins = shapeDef.inscribed || { x: 0.10, y: 0.10, w: 0.80, h: 0.80 };
   const ix = ins.x * size;
   const iy = ins.y * size;
   const iw = ins.w * size;
   const ih = ins.h * size;
+
+  // Vertical bands within INSCRIBED area: 20% / 30% / 30% / 20%
+  const bandTop    = { x: ix, y: iy,                  w: iw, h: ih * 0.20 };
+  const bandMid    = { x: 0,  y: iy + ih * 0.20,      w: size, h: ih * 0.30 }; // image: full SHAPE width, clipped to shape
+  const bandBody   = { x: ix, y: iy + ih * 0.50,      w: iw, h: ih * 0.30 };
+  const bandBottom = { x: ix, y: iy + ih * 0.80,      w: iw, h: ih * 0.20 };
 
   const svgPoints = clipPathToSvgPoints(shapeDef.clip, size);
   const isCircle = shapeDef.clip === 'circle';
@@ -2086,6 +2102,33 @@ function ShapePostCard({ post, shapeId = 'square', size = 270, onClick }) {
   const isPillH = shapeDef.clip === 'pill-h';
   const isPillV = shapeDef.clip === 'pill-v';
   const pillRx = isPillH ? size / 2 : isPillV ? size / 2 : 0;
+
+  // Unique clipPath id per card so multiple cards don't collide
+  const clipId = useMemo(() => `gp-clip-${post.id}-${size}`, [post.id, size]);
+
+  // Reactions summary (top emoji)
+  const reactions = postReactions || [];
+  const reactionMap = {};
+  reactions.forEach(r => { reactionMap[r.emoji_text] = (reactionMap[r.emoji_text] || 0) + 1; });
+  const topEmojis = Object.entries(reactionMap).sort((a,b) => b[1]-a[1]).slice(0, 1);
+  const totalReactions = post.total_reactions ?? reactions.length;
+
+  // Scope tag
+  const scopeTag = (() => {
+    if (post.zip_code) return { label: `📍${post.zip_code}`, color: '#7C3AED' };
+    if (post.borough) return { label: `🏙${(post.borough || '').slice(0, 4)}`, color: '#2563eb' };
+    if (post.scope === 'nyc') return { label: '🗽NYC', color: '#0891b2' };
+    return { label: '💻DGT', color: '#64748b' };
+  })();
+
+  // Fonts scale with shape size
+  const usernameFont = Math.max(9, Math.min(size * 0.058, 18));
+  const tagFont = Math.max(7, size * 0.034);
+  const textFont = Math.max(8, Math.min(size * 0.040, 13));
+  const lineHeight = 1.25;
+  const textLines = Math.max(1, Math.floor(bandBody.h / (textFont * lineHeight)) - 1); // -1 reserves space for "show more"
+
+  const needsShowMore = plainText.length > 0 && (plainText.length > textLines * (iw / (textFont * 0.55)));
 
   return (
     <svg
@@ -2095,6 +2138,18 @@ function ShapePostCard({ post, shapeId = 'square', size = 270, onClick }) {
       onClick={onClick}
       style={{ cursor: 'pointer', userSelect: 'none', display: 'block', overflow: 'visible' }}
     >
+      <defs>
+        {/* Clip path matching the shape — used to clip image to shape edges */}
+        <clipPath id={clipId} clipPathUnits="userSpaceOnUse">
+          {isCircle && <circle cx={size/2} cy={size/2} r={size/2 - 2} />}
+          {isEllipse && <ellipse cx={size/2} cy={size/2} rx={size/2 - 2} ry={size*0.48} />}
+          {(isPillH || isPillV) && <rect x="2" y="2" width={size-4} height={size-4} rx={pillRx} ry={pillRx} />}
+          {!isCircle && !isEllipse && !isPillH && !isPillV && svgPoints && <polygon points={svgPoints} />}
+          {!isCircle && !isEllipse && !isPillH && !isPillV && !svgPoints && <rect x="2" y="2" width={size-4} height={size-4} rx="8" />}
+        </clipPath>
+      </defs>
+
+      {/* Outer shape fill + stroke */}
       {isCircle && (
         <circle cx={size/2} cy={size/2} r={size/2 - 2}
           fill={theme.fill} stroke={theme.outline} strokeWidth="3" />
@@ -2116,39 +2171,114 @@ function ShapePostCard({ post, shapeId = 'square', size = 270, onClick }) {
           fill={theme.fill} stroke={theme.outline} strokeWidth="3" />
       )}
 
-      <foreignObject x={ix} y={iy} width={iw} height={ih}>
-        <div
-          xmlns="http://www.w3.org/1999/xhtml"
-          style={{
+      {/* Image — full SHAPE width, clipped to shape, occupies middle 30% band */}
+      {post.image_url && (
+        <image
+          href={post.image_url}
+          xlinkHref={post.image_url}
+          x={bandMid.x}
+          y={bandMid.y}
+          width={bandMid.w}
+          height={bandMid.h}
+          preserveAspectRatio="xMidYMid slice"
+          clipPath={`url(#${clipId})`}
+        />
+      )}
+
+      {/* Top 20%: username + status tag */}
+      <foreignObject x={bandTop.x} y={bandTop.y} width={bandTop.w} height={bandTop.h}>
+        <div xmlns="http://www.w3.org/1999/xhtml" style={{
+          width: '100%', height: '100%', display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'center', gap: 1, overflow: 'hidden',
+          padding: '2px', boxSizing: 'border-box', pointerEvents: 'none', textAlign: 'center',
+        }}>
+          <div style={{
+            color: theme.text, fontWeight: 900, fontSize: usernameFont, lineHeight: 1.1,
+            wordBreak: 'break-word', overflow: 'hidden',
+            display: '-webkit-box', WebkitLineClamp: showStatusTag ? 1 : 2, WebkitBoxOrient: 'vertical',
             width: '100%',
-            height: '100%',
-            overflow: 'hidden',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '3px',
-            padding: '4px',
-            boxSizing: 'border-box',
-            pointerEvents: 'none',
-          }}
-        >
-          <div style={{ color: theme.text, fontWeight: 900, fontSize: Math.max(9, size * 0.048), textAlign: 'center', lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', width: '100%' }}>
+          }}>
             {username}
           </div>
-          {postHtml ? (
-            <div
-              style={{ color: theme.text, fontSize: Math.max(8, size * 0.042), lineHeight: 1.3, overflow: 'hidden', textAlign: 'center', width: '100%', maxHeight: ih * 0.55, display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical' }}
-              dangerouslySetInnerHTML={{ __html: postHtml }}
-            />
-          ) : null}
-          {post.image_url && (
-            <img
-              src={post.image_url}
-              alt=""
-              style={{ width: '55%', maxHeight: ih * 0.35, objectFit: 'cover', borderRadius: 3, flexShrink: 0 }}
-            />
+          {showStatusTag && (
+            <div style={{
+              fontSize: tagFont, fontWeight: 900, color: '#fff', background: statusColor,
+              padding: '1px 5px', borderRadius: 4, lineHeight: 1.2, letterSpacing: 0.5,
+            }}>
+              {statusTag}
+            </div>
           )}
+        </div>
+      </foreignObject>
+
+      {/* Body 30%: text + show more anchored bottom */}
+      <foreignObject x={bandBody.x} y={bandBody.y} width={bandBody.w} height={bandBody.h}>
+        <div xmlns="http://www.w3.org/1999/xhtml" style={{
+          width: '100%', height: '100%', display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'flex-end', overflow: 'hidden',
+          padding: '2px', boxSizing: 'border-box', pointerEvents: 'none', textAlign: 'center',
+        }}>
+          {plainText && (
+            <div style={{
+              color: theme.text, fontSize: textFont, lineHeight,
+              overflow: 'hidden', wordBreak: 'break-word',
+              display: '-webkit-box', WebkitLineClamp: textLines, WebkitBoxOrient: 'vertical',
+              width: '100%',
+            }}>
+              {plainText}
+            </div>
+          )}
+          {needsShowMore && (
+            <div style={{
+              color: theme.text, opacity: 0.7, fontSize: Math.max(7, textFont * 0.85),
+              fontWeight: 900, marginTop: 1, lineHeight: 1,
+            }}>
+              show more →
+            </div>
+          )}
+        </div>
+      </foreignObject>
+
+      {/* Bottom 20%: reactions + scope tag */}
+      <foreignObject x={bandBottom.x} y={bandBottom.y} width={bandBottom.w} height={bandBottom.h}>
+        <div xmlns="http://www.w3.org/1999/xhtml" style={{
+          width: '100%', height: '100%', display: 'flex',
+          alignItems: 'center', justifyContent: 'space-around', gap: 2, overflow: 'hidden',
+          padding: '2px', boxSizing: 'border-box', pointerEvents: 'none', flexWrap: 'wrap',
+        }}>
+          {/* React button (top emoji or +) */}
+          <div
+            onClick={(e) => { e.stopPropagation(); onReact && onReact(post.id, topEmojis[0]?.[0] || '🔥'); }}
+            style={{
+              fontSize: Math.max(8, size * 0.04), fontWeight: 900, color: theme.text,
+              background: 'rgba(0,0,0,0.08)', borderRadius: 8, padding: '2px 5px',
+              pointerEvents: 'auto', cursor: 'pointer', lineHeight: 1,
+              display: 'inline-flex', alignItems: 'center', gap: 2,
+            }}
+          >
+            {topEmojis[0] ? `${topEmojis[0][0]} ${topEmojis[0][1]}` : `🔥 ${totalReactions || 0}`}
+          </div>
+
+          {/* Show all reactions (...) */}
+          <div
+            onClick={(e) => { e.stopPropagation(); onClick && onClick(); }}
+            style={{
+              fontSize: Math.max(9, size * 0.045), fontWeight: 900, color: theme.text,
+              background: 'rgba(0,0,0,0.08)', borderRadius: 8, padding: '0 5px',
+              pointerEvents: 'auto', cursor: 'pointer', lineHeight: 1,
+            }}
+          >
+            …
+          </div>
+
+          {/* Scope tag */}
+          <div style={{
+            fontSize: Math.max(7, size * 0.032), fontWeight: 900, color: '#fff',
+            background: scopeTag.color, borderRadius: 4, padding: '2px 4px',
+            lineHeight: 1.2, letterSpacing: 0.3,
+          }}>
+            {scopeTag.label}
+          </div>
         </div>
       </foreignObject>
     </svg>
@@ -2262,21 +2392,21 @@ function ShapeModeView({ posts, postReactions, onReact, onSelectTag, accentColor
   hasMoreRef.current = visibleCount < posts.length;
 
   const postsWithShapes = useMemo(() => {
-    return [...visiblePosts].reverse().map((post, i) => {
+    // NO reverse: most recent (index 0) drops first → ends up highest after upward gravity
+    return visiblePosts.map((post, i) => {
       const shapeId = (post.tile_shape && GEOPOST_SHAPES.find(s => s.id === post.tile_shape))
         ? post.tile_shape
         : GEOPOST_SHAPES[(i + 3) % GEOPOST_SHAPES.length].id;
       const sizeScale = post.shape_size === 'small' ? 0.7
-        : post.shape_size === 'large' ? 1.4
-        : post.shape_size === 'xlarge' ? 1.8
+        : post.shape_size === 'medium-large' ? 1.25
+        : post.shape_size === 'large' ? 1.5
         : 1.0;
       const size = Math.round(270 * sizeScale * 1.5);
       return { post, shapeId, size };
     });
   }, [visiblePosts]);
 
-  // Re-init physics only when post count changes (not on every containerHeight expansion)
-  const postCountRef = useRef(0);
+  // ── Mount-only: create engine, runner, walls, RAF tick ──
   useEffect(() => {
     const containerEl = containerRef.current;
     if (!containerEl) return;
@@ -2285,55 +2415,26 @@ function ShapeModeView({ posts, postReactions, onReact, onSelectTag, accentColor
     const CEIL_Y = 20;
     const WALL_THICK = 40;
 
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    if (runnerRef.current) Matter.Runner.stop(runnerRef.current);
-    if (engineRef.current) Matter.Engine.clear(engineRef.current);
-    bodiesRef.current = [];
-
     const engine = Matter.Engine.create({ gravity: { x: 0, y: -0.8 } });
     engineRef.current = engine;
 
     const ceiling = Matter.Bodies.rectangle(containerWidth / 2, CEIL_Y, containerWidth + WALL_THICK * 2, WALL_THICK, {
       isStatic: true, label: 'ceiling', friction: 0.5, restitution: 0.1,
     });
-    const leftWall = Matter.Bodies.rectangle(-WALL_THICK / 2, containerHeight / 2, WALL_THICK, containerHeight * 3, {
+    const leftWall = Matter.Bodies.rectangle(-WALL_THICK / 2, 0, WALL_THICK, 100000, {
       isStatic: true, label: 'wall',
     });
-    const rightWall = Matter.Bodies.rectangle(containerWidth + WALL_THICK / 2, containerHeight / 2, WALL_THICK, containerHeight * 3, {
+    const rightWall = Matter.Bodies.rectangle(containerWidth + WALL_THICK / 2, 0, WALL_THICK, 100000, {
       isStatic: true, label: 'wall',
     });
 
     Matter.Composite.add(engine.world, [ceiling, leftWall, rightWall]);
 
-    postsWithShapes.forEach(({ post, shapeId, size }, i) => {
-      const shapeDef = GEOPOST_SHAPES.find(s => s.id === shapeId) || GEOPOST_SHAPES[0];
-      const cols = Math.max(1, Math.floor((containerWidth - WALL_THICK * 2) / (size + 10)));
-      const spawnX = WALL_THICK + size / 2 + (i % cols) * (size + 10);
-      const spawnY = containerHeight + size + i * 20;
-
-      const body = buildMatterBody(shapeDef, spawnX, spawnY, size);
-      body._postId = post.id;
-      body._shapeId = shapeId;
-      body._size = size;
-
-      bodiesRef.current.push({ body, postId: post.id, shapeId, size });
-
-      setTimeout(() => {
-        if (!engineRef.current) return;
-        Matter.Composite.add(engine.world, body);
-        Matter.Body.setVelocity(body, {
-          x: (Math.random() - 0.5) * 3,
-          y: -(4 + Math.random() * 2),
-        });
-        Matter.Body.setAngularVelocity(body, (Math.random() - 0.5) * 0.1);
-      }, i * 150);
-    });
-
     const runner = Matter.Runner.create();
     Matter.Runner.run(runner, engine);
     runnerRef.current = runner;
 
-    let expandedTo = containerHeight;
+    let expandedTo = 700;
     const tick = () => {
       const states = bodiesRef.current
         .filter(({ body }) => body && Matter.Composite.get(engine.world, body.id, 'body'))
@@ -2345,7 +2446,7 @@ function ShapeModeView({ posts, postReactions, onReact, onSelectTag, accentColor
           size,
         }));
 
-      setBodyStates([...states]);
+      setBodyStates(states);
 
       if (states.length > 0) {
         const maxBodyY = Math.max(...states.map(s => s.y + s.size / 2));
@@ -2363,9 +2464,60 @@ function ShapeModeView({ posts, postReactions, onReact, onSelectTag, accentColor
       cancelAnimationFrame(rafRef.current);
       Matter.Runner.stop(runner);
       Matter.Engine.clear(engine);
+      bodiesRef.current = [];
+      engineRef.current = null;
+      runnerRef.current = null;
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [postsWithShapes.length]);
+  }, []);
+
+  // ── Incremental: add NEW bodies for posts beyond what's already in world ──
+  const addedCountRef = useRef(0);
+  useEffect(() => {
+    const engine = engineRef.current;
+    const containerEl = containerRef.current;
+    if (!engine || !containerEl) return;
+    const containerWidth = containerEl.offsetWidth || 900;
+    const WALL_THICK = 40;
+
+    const startIdx = addedCountRef.current;
+    const newOnes = postsWithShapes.slice(startIdx);
+    if (newOnes.length === 0) return;
+
+    // Find current bottom of stack so new shapes spawn below
+    const currentMaxY = bodiesRef.current.reduce((max, { body, size }) => {
+      const by = (body?.position?.y || 0) + size / 2;
+      return by > max ? by : max;
+    }, containerHeight);
+    const baseSpawnY = Math.max(currentMaxY + 100, containerHeight + 100);
+
+    newOnes.forEach(({ post, shapeId, size }, idxInBatch) => {
+      const i = startIdx + idxInBatch;
+      const shapeDef = GEOPOST_SHAPES.find(s => s.id === shapeId) || GEOPOST_SHAPES[0];
+      const cols = Math.max(1, Math.floor((containerWidth - WALL_THICK * 2) / (size + 10)));
+      const spawnX = WALL_THICK + size / 2 + (i % cols) * (size + 10);
+      const spawnY = baseSpawnY + idxInBatch * 30;
+
+      const body = buildMatterBody(shapeDef, spawnX, spawnY, size);
+      body._postId = post.id;
+      body._shapeId = shapeId;
+      body._size = size;
+
+      bodiesRef.current.push({ body, postId: post.id, shapeId, size });
+
+      setTimeout(() => {
+        if (!engineRef.current) return;
+        Matter.Composite.add(engine.world, body);
+        Matter.Body.setVelocity(body, {
+          x: (Math.random() - 0.5) * 3,
+          y: -(4 + Math.random() * 2),
+        });
+        Matter.Body.setAngularVelocity(body, (Math.random() - 0.5) * 0.1);
+      }, idxInBatch * 120);
+    });
+
+    addedCountRef.current = postsWithShapes.length;
+  }, [postsWithShapes, containerHeight]);
 
   const handleShapeClick = (postId) => {
     const found = visiblePosts.find(p => p.id === postId);
@@ -2409,6 +2561,8 @@ function ShapeModeView({ posts, postReactions, onReact, onSelectTag, accentColor
                 post={entry.post}
                 shapeId={entry.shapeId}
                 size={size}
+                postReactions={postReactions[entry.post.id]}
+                onReact={onReact}
                 onClick={() => handleShapeClick(postId)}
               />
             </div>
@@ -2422,7 +2576,7 @@ function ShapeModeView({ posts, postReactions, onReact, onSelectTag, accentColor
         )}
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, padding: '16px 0' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: '4px 0 8px' }}>
         <div style={{ fontSize: 11, fontWeight: 900, opacity: 0.5 }}>
           {Math.min(visibleCount, posts.length)} of {posts.length} shapes
         </div>
@@ -5225,7 +5379,17 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
 
         {/* ── SHAPE MODE ── */}
         {feedLayout === 'shapes' && (
-          <div className="col-span-full p-4">
+          <div
+            className="col-span-full"
+            style={{
+              width: '100vw',
+              maxWidth: '100vw',
+              marginLeft: 'calc(-50vw + 50%)',
+              overflowX: 'hidden',
+              paddingTop: 8,
+              paddingBottom: 0,
+            }}
+          >
             <ShapeModeView
               posts={filteredPosts}
               postReactions={reactions}
