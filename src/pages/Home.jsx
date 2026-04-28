@@ -544,7 +544,7 @@ export default function Home({ events = [], eventsLoading = false }) {
                 {user ? (
                   <div className="relative">
                     <button onClick={() => setShowUserMenu(v => !v)}
-                      className="w-[112px] bg-white rounded-full px-3 py-1.5 font-black text-xs hover:bg-violet-50 transition-colors shadow-[2px_2px_0px_#333] truncate text-center border-2 lp-accent-border lp-accent-color-text">
+                      className="w-[112px] bg-white rounded-full px-3.5 py-1.5 font-black text-xs hover:bg-violet-50 transition-all hover:scale-105 shadow-[2px_2px_0px_#333] truncate text-center border-2 lp-accent-border lp-accent-color-text">
                       {displayName}
                     </button>
                     {showUserMenu && (
@@ -647,7 +647,7 @@ export default function Home({ events = [], eventsLoading = false }) {
             </div>
             {user ? (
               <button onClick={() => setShowUserMenu(v => !v)}
-                className="w-[112px] bg-white rounded-full px-3 py-1.5 font-black text-[11px] shadow-[2px_2px_0px_#333] truncate text-center border-2 lp-accent-border lp-accent-color-text">
+                className="w-[112px] bg-white rounded-full px-3 py-1.5 font-black text-[11px] shadow-[2px_2px_0px_#333] truncate text-center border-2 lp-accent-border lp-accent-color-text transition-all hover:scale-105">
                 {displayName}
               </button>
             ) : (
