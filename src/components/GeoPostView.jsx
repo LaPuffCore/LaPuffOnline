@@ -2508,11 +2508,12 @@ export default function GeoPostView({ session }) {
   const visiblePostsRef = useRef([]);
   const orderedFilteredPostsRef = useRef([]);
   // Refs for blocked-zone logic — kept in sync each render so drag closure can read current values
-  const pinnedPositionsRef  = useRef({});
-  const userPositionsRef    = useRef({});
-  const desktopPanelRowRef  = useRef(1);
-  const filterPanelModeRef  = useRef('panel');
-  const pinnedPostIdsRef    = useRef(new Set());
+  const pinnedPositionsRef      = useRef({});
+  const userPositionsRef        = useRef({});
+  const clearUserPositionsRef   = useRef(null); // set below; lets applyPanelRow clear transient positions
+  const desktopPanelRowRef      = useRef(1);
+  const filterPanelModeRef      = useRef('panel');
+  const pinnedPostIdsRef        = useRef(new Set());
   const hiddenBtnRef = useRef(null);
   // Feed layout: 'tiles' = bento masonry, 'list' = simple sidebar + stacked feed (from b10941b)
   const [feedLayout, setFeedLayout] = useState(() => {
@@ -3739,6 +3740,9 @@ export default function GeoPostView({ session }) {
       if (!ds.active) {
         ds.active = true;
         setDraggingId(ds.postId);
+        // Clear all transient user-positioned tiles so the grid reflowsFreshly.
+        // Any tile the user previously dropped (non-pinned sticky) is released.
+        setUserPositions({});
         document.body.style.userSelect       = 'none';
         document.body.style.webkitUserSelect = 'none';
         document.body.style.cursor           = 'grabbing';
@@ -3835,9 +3839,11 @@ export default function GeoPostView({ session }) {
               ...p,
               [ds.postId]: { col: target.col, row: target.row, w: pinned.w ?? span.w, h: pinned.h ?? span.h },
             }));
+          } else {
+            // Transient sticky: tile stays at drop position until the next drag starts
+            // or the filter panel moves (both clear userPositions — see handlers below).
+            setUserPositions(p => ({ ...p, [ds.postId]: target }));
           }
-          // Non-pinned tiles: no explicit position written.
-          // CSS Grid dense auto-flow places them freely — they never get stuck.
         }
 
         if (dragGhostRef.current) { dragGhostRef.current.remove(); dragGhostRef.current = null; }
@@ -3874,6 +3880,17 @@ export default function GeoPostView({ session }) {
       document.body.style.cursor           = '';
     };
   }, [feedLayout, pinnedPostIds]);
+
+  // When the filter panel moves to a new row, release all transient user-positioned tiles
+  // so the grid can reflow naturally around the new panel position.
+  // Pinned tiles are not affected — their positions are frozen separately.
+  const prevPanelRowRef = useRef(desktopPanelRow);
+  useEffect(() => {
+    if (prevPanelRowRef.current !== desktopPanelRow) {
+      prevPanelRowRef.current = desktopPanelRow;
+      setUserPositions({});
+    }
+  }, [desktopPanelRow]);
 
   // Post-settle overlap audit: whenever the panel moves, pins change, or user-positions change,
   // evict any userPositions entries that now conflict with pinned tiles or the filter panel.
