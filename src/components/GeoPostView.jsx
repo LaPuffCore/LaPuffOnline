@@ -3941,6 +3941,9 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
   }, [tileShape]);
 
   useEffect(() => {
+    // Round engine: bail in square mode — square has its own engine below.
+    // Prevents both engines fighting over setDesktopPanelRow.
+    if (tileShape === 'square') return;
     const grid = desktopGridRef.current;
     const scrollEl = grid ? findScrollParent(grid) : window;
 
@@ -4035,7 +4038,7 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
       scrollEl.removeEventListener('scroll', onScroll);
       window.removeEventListener('resize', onResize);
     };
-  }, [desktopUnitHeight, visiblePosts.length, canShowMore, canShowLess, applyPanelRow, feedLayout, filterPanelMode, tileViewKey]);
+  }, [desktopUnitHeight, visiblePosts.length, canShowMore, canShowLess, applyPanelRow, feedLayout, filterPanelMode, tileViewKey, tileShape]);
 
   // ─── SQUARE-MODE PANEL ENGINE ────────────────────────────────────────────
   // Fully independent engine that runs ONLY when tileShape === 'square'.
