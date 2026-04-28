@@ -4106,7 +4106,7 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
       scrollEl.removeEventListener('scroll', onScroll);
       window.removeEventListener('resize', onResize);
     };
-  }, [desktopUnitHeight, visiblePosts.length, canShowMore, canShowLess, applyPanelRow, feedLayout, filterPanelMode, tileViewKey]);
+  }, [desktopUnitHeight, visiblePosts.length, canShowMore, canShowLess, applyPanelRow, feedLayout, filterPanelMode, tileViewKey, tileShape]);
 
   // When switching back to tile mode, double-rAF to ensure two browser layout passes
   // (grid was unmounted in list mode so getBoundingClientRect was stale after remount)
@@ -4139,32 +4139,29 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
   }, [feedLayout, tileViewKey]);
 
   // ===========================================================================
-  // Square↔Round shape swap: anchor preservation (Option A + B).
+  // Square↔Round shape swap: tile re-anchor (Option B) + force panel recompute.
   //
-  // Option A (panel anchor): The grid's row pixel-height differs between
-  //   modes (square: 0 gap + scaled rows; rounded: 12px gap + base rows).
-  //   The filter panel's stored grid row was computed under the OLD geometry,
-  //   so naively keeping panelRowRef.current makes the panel jump to a
-  //   different pixel position. Instead: capture the panel's absolute pixel
-  //   position from grid top BEFORE the swap, then re-derive the equivalent
-  //   row under NEW geometry so it stays visually anchored.
+  // Panel logic: We do NOT attempt to keep the panel under the cursor. Instead,
+  // we let the standard scroll-driven computeTargetRow() recompute the panel
+  // position fresh under the NEW geometry. This is achieved by adding tileShape
+  // to the main scroll effect's dep array (line ~4109) — the effect tears down
+  // and remounts on swap, immediately calling computeTargetRow() with the new
+  // tileShapeRef + squareRowScaleRef and snapping the panel to its standard
+  // left-side row for the current scroll position. This works correctly in
+  // both square and rounded modes, on reload, and after pinning/moving tiles.
   //
   // Option B (tile anchor): Pinned/moved tiles have stored {col,row} that
   //   maps to different pixel positions in each mode. We snapshot each
   //   tile's bounding-rect at toggle-click time, then after swap re-derive
   //   {col,row} from its old pixel position ÷ new cell size, and write the
   //   result to BOTH the active state AND the new mode's per-mode slot.
-  //
-  // Both run only when:
-  //   - prevTileShapeRef.current !== tileShape (skips initial mount → reload
-  //     behavior is untouched, square mode panel still moves on reload)
-  //   - desktop, tiles layout, panel in 'panel' mode
-  //   - swapSnapshotRef has data (toggle was used, not direct setState)
+  //   This keeps tiles visually anchored across the swap without disturbing
+  //   the panel's standard-logic recompute.
   // ===========================================================================
   const prevTileShapeRef = useRef(tileShape);
   useLayoutEffect(() => {
     const prevShape = prevTileShapeRef.current;
-    if (prevShape === tileShape) return; // initial mount or no-op
+    if (prevShape === tileShape) return; // initial mount
     prevTileShapeRef.current = tileShape;
 
     const snapshot = swapSnapshotRef.current;
@@ -4173,101 +4170,55 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
     if (typeof window === 'undefined' || window.innerWidth < 768) return;
     if (feedLayout !== 'tiles') return;
     if (!desktopGridRef.current) return;
+    if (!snapshot || !snapshot.tiles || Object.keys(snapshot.tiles).length === 0) return;
 
     let raf2 = 0;
     const raf1 = requestAnimationFrame(() => {
       raf2 = requestAnimationFrame(() => {
         if (!desktopGridRef.current) return;
 
-        // Refresh grid offset (separator height differs between modes)
-        const scrollEl = findScrollParent(desktopGridRef.current);
-        const scrollTop = scrollEl === window ? window.scrollY : scrollEl.scrollTop;
-        const containerClientTop = scrollEl === window ? 0 : scrollEl.getBoundingClientRect().top;
-        const gridClientTop = desktopGridRef.current.getBoundingClientRect().top;
-        gridOffsetCacheRef.current = gridClientTop - containerClientTop + scrollTop;
+        // === Option B: pinned/moved tile re-translation ===
+        const grid = desktopGridRef.current;
+        const gridRect = grid.getBoundingClientRect();
+        const cs = getComputedStyle(grid);
+        const newColGap = parseFloat(cs.columnGap) || 0;
+        const newRowGap = parseFloat(cs.rowGap) || 0;
+        const newRowH = parseFloat(cs.gridAutoRows) || 200;
+        const newColW = (gridRect.width - newColGap * (GRID_TOTAL_COLS - 1)) / GRID_TOTAL_COLS;
+        const newCellStrideX = newColW + newColGap;
+        const newCellStrideY = newRowH + newRowGap;
 
-        // Compute NEW geometry row step
-        const isSquare = tileShapeRef.current === 'square';
-        const baseRowHeight = Math.max(1, (desktopUnitHeight - 12) / 2);
-        const scaledRowHeight = isSquare ? baseRowHeight * squareRowScaleRef.current : baseRowHeight;
-        const rowGap = isSquare ? 0 : 12;
-        const newHalfRowPx = Math.max(1, scaledRowHeight + rowGap);
-        rowStepRef.current = newHalfRowPx;
+        const newPin = { ...pinnedPositionsRef.current };
+        const newUsr = { ...userPositionsRef.current };
+        let pinChanged = false;
+        let usrChanged = false;
 
-        // === Option A: panel anchor preservation ===
-        // Only run when panel is in moving mode (⬆️ off). When in topbar
-        // mode, panel is frozen at row 1 — nothing to translate.
-        if (filterPanelMode === 'panel' && snapshot) {
-          const oldRow = snapshot.panelRow;
-          const oldHalfRowPx = snapshot.halfRowPx;
-          const absoluteY = (oldRow - 1) * oldHalfRowPx;
+        for (const [postId, snap] of Object.entries(snapshot.tiles)) {
+          const newCol = Math.max(1, Math.min(
+            GRID_TOTAL_COLS - (snap.w - 1),
+            Math.round(snap.relX / newCellStrideX) + 1
+          ));
+          const newRow = Math.max(1, Math.round(snap.relY / newCellStrideY) + 1);
+          const newPos = { col: newCol, row: newRow, w: snap.w, h: snap.h };
 
-          // Translate to new row, snap to odd (panel always sits on odd row)
-          let rawRow = Math.round(absoluteY / newHalfRowPx) + 1;
-          if (rawRow % 2 === 0) rawRow += 1;
-          rawRow = Math.max(1, rawRow);
-
-          const maxHalfRow = Math.max(1, Math.floor(desktopGridRef.current.scrollHeight / newHalfRowPx));
-          const maxOddRow = maxHalfRow % 2 === 0 ? maxHalfRow - 1 : maxHalfRow;
-          const newRow = Math.min(maxOddRow, rawRow);
-
-          // Hard handoff: snap refs + state, clear residual transform/blur/opacity
-          panelRowRef.current = newRow;
-          lastAppliedRowRef.current = newRow;
-          setDesktopPanelRow(newRow);
-          const el = filterPanelInnerRef.current;
-          if (el) {
-            el.style.transition = 'none';
-            el.style.transform = 'translateY(0)';
-            el.style.filter = 'blur(0)';
-            el.style.opacity = '1';
+          if (snap.kind === 'pinned' && newPin[postId]) {
+            newPin[postId] = newPos;
+            pinChanged = true;
+          } else if (snap.kind === 'user' && newUsr[postId]) {
+            newUsr[postId] = newPos;
+            usrChanged = true;
           }
         }
 
-        // === Option B: pinned/moved tile re-translation ===
-        if (snapshot && snapshot.tiles && Object.keys(snapshot.tiles).length > 0) {
-          const grid = desktopGridRef.current;
-          const gridRect = grid.getBoundingClientRect();
-          const cs = getComputedStyle(grid);
-          const newColGap = parseFloat(cs.columnGap) || 0;
-          const newRowGap = parseFloat(cs.rowGap) || 0;
-          const newRowH = parseFloat(cs.gridAutoRows) || 200;
-          const newColW = (gridRect.width - newColGap * (GRID_TOTAL_COLS - 1)) / GRID_TOTAL_COLS;
-          const newCellStrideX = newColW + newColGap;
-          const newCellStrideY = newRowH + newRowGap;
-
-          const newPin = { ...pinnedPositionsRef.current };
-          const newUsr = { ...userPositionsRef.current };
-          let pinChanged = false;
-          let usrChanged = false;
-
-          for (const [postId, snap] of Object.entries(snapshot.tiles)) {
-            const newCol = Math.max(1, Math.min(
-              GRID_TOTAL_COLS - (snap.w - 1),
-              Math.round(snap.relX / newCellStrideX) + 1
-            ));
-            const newRow = Math.max(1, Math.round(snap.relY / newCellStrideY) + 1);
-            const newPos = { col: newCol, row: newRow, w: snap.w, h: snap.h };
-
-            if (snap.kind === 'pinned' && newPin[postId]) {
-              newPin[postId] = newPos;
-              pinChanged = true;
-            } else if (snap.kind === 'user' && newUsr[postId]) {
-              newUsr[postId] = newPos;
-              usrChanged = true;
-            }
-          }
-
-          if (pinChanged) {
-            setPinnedPositions(newPin);
-            // Persist into NEW mode's slot so the dual-mode restore on
-            // future swaps preserves the visually-anchored coords.
-            pinnedByModeRef.current[tileShape] = newPin;
-          }
-          if (usrChanged) {
-            setUserPositions(newUsr);
-            userByModeRef.current[tileShape] = newUsr;
-          }
+        if (pinChanged) {
+          setPinnedPositions(newPin);
+          // Persist into NEW mode's slot so the dual-mode restore on
+          // future swaps preserves the visually-anchored coords.
+          pinnedByModeRef.current[tileShape] = newPin;
+        }
+        if (usrChanged) {
+          setUserPositions(newUsr);
+          userByModeRef.current[tileShape] = newUsr;
         }
       });
     });
