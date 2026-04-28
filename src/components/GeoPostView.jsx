@@ -3659,7 +3659,9 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
         const containerClientTop = scrollEl === window ? 0 : scrollEl.getBoundingClientRect().top;
         const gridClientTop = desktopGridRef.current.getBoundingClientRect().top;
         gridOffsetCacheRef.current = gridClientTop - containerClientTop + scrollTop;
-        panelRowRef.current = 1;
+        // Do NOT reset panelRowRef here — it must equal the panel's actual current
+        // grid row so that applyPanelRow's FLIP delta is correct.
+        // Only reset the sentinel so applyPanelRow fires even if target == current row.
         lastAppliedRowRef.current = -1; // sentinel forces next applyPanelRow to fire
         if (filterPanelInnerRef.current) {
           filterPanelInnerRef.current.style.transition = 'none';
