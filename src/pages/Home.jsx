@@ -36,6 +36,15 @@ export default function Home({ events = [], eventsLoading = false }) {
   const [showHeader, setShowHeader] = useState(true);
   const [headerCollapsed, setHeaderCollapsed] = useState(false);
   const [logoHovered, setLogoHovered] = useState(false);
+  // Topbar layout mode: 'narrow' (default, current centered look) or 'wide'
+  // (left/center/right anchored to full screen edges). Toggled by the cloud
+  // logo on desktop. Persisted per device.
+  const [topbarWide, setTopbarWide] = useState(() => {
+    try { return localStorage.getItem('lapuff_topbar_wide') === '1'; } catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('lapuff_topbar_wide', topbarWide ? '1' : '0'); } catch {}
+  }, [topbarWide]);
   const lastScrollY = useRef(0);
   const downScrollAccum = useRef(0);
   const headerRef = useRef(null);
@@ -156,6 +165,12 @@ export default function Home({ events = [], eventsLoading = false }) {
   }
 
   function handleLogoHomeReset() {
+    // Desktop: toggle narrow/wide topbar layout.
+    // Mobile: original "go home + reset" behavior.
+    if (typeof window !== 'undefined' && window.innerWidth >= 768) {
+      setTopbarWide(v => !v);
+      return;
+    }
     setView('tiles');
     setShowLeaderboard(false);
     setShowHeader(true);
@@ -361,9 +376,9 @@ export default function Home({ events = [], eventsLoading = false }) {
             </button>
           </div>
         ) : (
-        <div className="max-w-7xl mx-auto px-3 py-2 md:px-4 md:py-3">
+        <div className={`mx-auto py-2 md:py-3 px-3 transition-[max-width,padding] duration-300 ease-out ${topbarWide ? 'max-w-none md:px-2' : 'max-w-7xl md:px-4'}`}>
           {/* Top Row: Logo, Nav, Menu */}
-          <div className="flex items-center gap-1 md:gap-2 md:justify-between md:relative">
+          <div className={`flex items-center gap-1 md:gap-2 md:justify-between md:relative ${topbarWide ? 'md:gap-0' : ''}`}>
             {/* Logo + Music Button */}
             <div className="flex items-center gap-2">
               <button
@@ -376,7 +391,7 @@ export default function Home({ events = [], eventsLoading = false }) {
                 <div
                   className="w-9 h-9 md:w-11 md:h-11 rounded-xl md:rounded-2xl flex items-center justify-center text-xl md:text-2xl transition-all duration-150"
                   style={{
-                    backgroundColor: logoHovered ? accentColor : '#000',
+                    backgroundColor: logoHovered ? accentColor : (topbarWide ? accentColor : '#000'),
                     boxShadow: logoHovered
                       ? '2px 2px 0px #000, 3px 3px 0px #000'
                       : `2px 2px 0px ${accentColor}`,
@@ -462,6 +477,17 @@ export default function Home({ events = [], eventsLoading = false }) {
                   </div>
                 )}
               </div>
+
+              {/* Desktop Trophy Button (extracted from view selector — opens leaderboard) */}
+              <button
+                onClick={() => setShowLeaderboard(v => !v)}
+                className={`hidden md:flex w-9 h-9 md:w-10 md:h-10 items-center justify-center rounded-xl border-2 md:border-3 border-black bg-white shadow-[2px_2px_0px_black] md:shadow-[3px_3px_0px_black] transition-all hover:scale-105 text-base md:text-lg`}
+                style={showLeaderboard ? { backgroundColor: accentColor, color: '#fff', borderColor: accentColor, boxShadow: `3px 3px 0px ${accentColor}` } : {}}
+                title="Leaderboard"
+                aria-label="Leaderboard"
+              >
+                🏆
+              </button>
             </div>
 
             {/* View Toggles — center */}
@@ -481,15 +507,8 @@ export default function Home({ events = [], eventsLoading = false }) {
                   onMouseLeave={e => { if (!(view === 'map' && !showLeaderboard)) e.currentTarget.style.backgroundColor = ''; }}>
                   🗺️ Map
                 </button>
-                <button onClick={() => setShowLeaderboard(v => !v)}
-                  className="px-2.5 py-1.5 md:px-4 md:py-2 rounded-lg md:rounded-xl text-xs md:text-sm font-black transition-all flex items-center gap-1"
-                  style={showLeaderboard ? { backgroundColor: accentColor, color: '#fff', boxShadow: '1px 1px 0px #333' } : {}}
-                  onMouseEnter={e => { if (!showLeaderboard) e.currentTarget.style.backgroundColor = accentColor + '30'; }}
-                  onMouseLeave={e => { if (!showLeaderboard) e.currentTarget.style.backgroundColor = ''; }}>
-                  🏆 Top
-                </button>
                 <button onClick={() => { setView('geo'); setShowLeaderboard(false); }}
-                  className="px-2.5 py-1 md:px-4 md:py-2 rounded-lg md:rounded-xl text-[8px] md:text-sm font-black transition-all flex flex-col md:flex-row items-center justify-center gap-0 md:gap-1"
+                  className="px-2.5 py-1 md:px-4 md:py-2 rounded-lg md:rounded-xl text-[8px] md:text-sm font-black transition-all flex flex-col md:flex-row items-center justify-center gap-0 md:gap-1 md:flex-none flex-1"
                   style={view === 'geo' && !showLeaderboard ? { backgroundColor: accentColor, color: '#fff', boxShadow: '1px 1px 0px #333' } : {}}
                   onMouseEnter={e => { if (!(view === 'geo' && !showLeaderboard)) e.currentTarget.style.backgroundColor = accentColor + '30'; }}
                   onMouseLeave={e => { if (!(view === 'geo' && !showLeaderboard)) e.currentTarget.style.backgroundColor = ''; }}>
@@ -642,6 +661,16 @@ export default function Home({ events = [], eventsLoading = false }) {
               style={{ backgroundColor: accentColor }}>
               + Submit Event
             </button>
+            {/* Mobile Trophy Button (extracted from view selector — right of submit event) */}
+            <button
+              onClick={() => setShowLeaderboard(v => !v)}
+              className="w-9 h-9 flex items-center justify-center rounded-xl border-2 border-black bg-white shadow-[2px_2px_0px_black] transition-all flex-shrink-0 text-base"
+              style={showLeaderboard ? { backgroundColor: accentColor, color: '#fff', borderColor: accentColor, boxShadow: `2px 2px 0px ${accentColor}` } : {}}
+              title="Leaderboard"
+              aria-label="Leaderboard"
+            >
+              🏆
+            </button>
             {isMap && (
               <button onClick={() => setHeaderCollapsed(true)}
                 className="flex items-center justify-center px-2.5 py-1.5 rounded-full font-black border-2 border-black bg-white shadow-[2px_2px_0px_black] transition-all"
@@ -697,7 +726,7 @@ export default function Home({ events = [], eventsLoading = false }) {
           </main>
         ) : (
           <main className="h-full overflow-y-auto" onScroll={handleScroll}>
-            <div className="max-w-7xl mx-auto w-full">
+            <div className="w-full">
               <TileView key={tileViewKey} events={events} eventsLoading={eventsLoading} />
             </div>
           </main>

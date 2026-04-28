@@ -927,9 +927,17 @@ function PostDetailPopup({ post, postReactions, onReact, onOpenReactors, accentC
 
 // ── GeoPostMosaic ─────────────────────────────────────────────────────────────
 function GeoPostMosaic({ posts, accentColor, opacity = 0.42, onTileClick = null }) {
-  const COLS = 16;
+  // Responsive tile count: desktop = 16x6=96; mobile = 8x6=48 (matches the
+  // narrower viewport so cells stay flush squares without white gaps).
+  const [isMobile, setIsMobile] = useState(typeof window !== 'undefined' ? window.innerWidth < 768 : false);
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  const COLS = isMobile ? 8 : 16;
   const ROWS = 6;
-  const TOTAL = COLS * ROWS; // 96
+  const TOTAL = COLS * ROWS; // desktop 96, mobile 48
 
   const imagePosts = useMemo(() => {
     const imgs = posts.filter(p => p.image_url).slice(0, TOTAL);
@@ -4292,8 +4300,16 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
         /* (Pill positioning handled inline in JSX with top:26 + translateY(-100%)
            so pill bottom edge sits exactly at line button bottom.)             */
       `}</style>
-      {/* Create-post section with mosaic behind it */}
-      <div className="w-full relative overflow-hidden" style={{ paddingBottom: 48, paddingTop: headerCollapsed ? 24 : 0 }}>
+      {/* Create-post section with mosaic behind it.
+          24px top shift only applies on desktop when collapsed (room for expand chevron).
+          On mobile, mosaic must span exactly from topbar bottom to geo-feed separator
+          with no offset, so paddingTop stays 0 regardless of collapsed state. */}
+      <div className="w-full relative overflow-hidden geo-create-section" style={{ paddingBottom: 48 }}>
+        <style>{`
+          @media (min-width: 768px) {
+            .geo-create-section { padding-top: ${headerCollapsed ? 24 : 0}px; }
+          }
+        `}</style>
         {/* Mosaic: absolute background layer, fills height of this section, behind createpost */}
         <div className="block absolute inset-0" style={{ zIndex: 0, pointerEvents: mosaicPeekOn ? 'auto' : 'none' }} aria-hidden={!mosaicPeekOn}>
           <GeoPostMosaic posts={posts} accentColor={accentColor} opacity={(mosaicPeek || mosaicPeekOn) ? 1 : 0.42} onTileClick={mosaicPeekOn ? (post) => setOpenPostPopup(post) : null} />

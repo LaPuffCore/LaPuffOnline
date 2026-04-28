@@ -806,7 +806,7 @@ export default function TileView({ events, eventsLoading = false }) {
           <p className="text-xl font-black">{eventsLoading ? 'Events loading...' : 'No events found!'}</p>
         </div>
       ) : (
-        <div className={`tv-tile-grid grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 ${isMobile ? 'gap-2 px-3 pb-4' : 'gap-4 px-4 pb-4'}`}>
+        <div className={`tv-tile-grid grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 ${isMobile ? 'gap-2 px-3 pb-4' : 'gap-4 px-4 pb-4'}`}>
           {displayed.map(event => (
             <div key={event.id} className={`${isMobile ? 'scale-[0.92] -mx-1 -my-2 origin-center' : ''}`}>
                <EventTile
