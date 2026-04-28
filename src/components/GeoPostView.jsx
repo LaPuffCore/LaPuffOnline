@@ -3076,6 +3076,7 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
   const [selectedShape, setSelectedShape] = useState('square');
   const [selectedShapeSize, setSelectedShapeSize] = useState(1.0);
   const shapeBtnRef = useRef(null);
+  const shapeEditorBtnRef = useRef(null);
   const [miniOpenToolbar, setMiniOpenToolbar] = useState(null);
   const [miniPostFill, setMiniPostFill] = useState('');
   const [miniPostOutline, setMiniPostOutline] = useState('');
@@ -4763,6 +4764,112 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
           <GeoPostMosaic posts={posts} accentColor={accentColor} opacity={(mosaicPeek || mosaicPeekOn) ? 1 : 0.42} onTileClick={mosaicPeekOn ? (post) => setOpenPostPopup(post) : null} />
         </div>
       <div className="w-full max-w-7xl mx-auto px-3 pt-8 pb-0" style={{ position: 'relative', zIndex: 1, pointerEvents: mosaicPeekOn ? 'none' : 'auto' }}>
+        {(() => {
+          const useShapeCreatePost = feedLayout === 'shapes' && selectedShape !== 'square';
+          if (useShapeCreatePost) {
+            const shapeDef = GEOPOST_SHAPES.find(s => s.id === selectedShape) || GEOPOST_SHAPES[0];
+            const ar = (shapeDef.inscribed?.w || 0.7) * (shapeDef.inscribed?.h || 0.7);
+            const heightFactor = Math.max(1.0, Math.min(1.85, 0.7 / Math.sqrt(ar)));
+            const baseW = 720;
+            const h = Math.round(baseW * heightFactor * Math.max(0.85, Math.min(1.5, selectedShapeSize)));
+            const cssClip = cssClipPathForShape(shapeDef);
+            const shapeBg = postFill || surfaceBg;
+            return (
+              <div ref={createPostAreaRef} className="mx-auto" style={{ width: '100%', maxWidth: baseW, opacity: (mosaicPeek || mosaicPeekOn) ? 0 : 1, pointerEvents: (mosaicPeek || mosaicPeekOn) ? 'none' : 'auto', transition: 'opacity 200ms ease' }}>
+                <div style={{
+                  width: '100%', height: h,
+                  clipPath: cssClip || undefined,
+                  borderRadius: shapeDef.id === 'circle' || shapeDef.id === 'oval' ? '50%' : (shapeDef.id === 'pill-h' || shapeDef.id === 'pill-v') ? 9999 : 0,
+                  background: shapeBg,
+                  boxShadow: postShadow ? `5px 5px 0 ${postShadow}` : '4px 4px 0 #000',
+                  border: postOutline ? `3px solid ${postOutline}` : undefined,
+                  display: 'flex', flexDirection: 'column', overflow: 'hidden',
+                  position: 'relative',
+                }}>
+                  {/* Top 20%: posting-to / location */}
+                  <div style={{ height: '20%', flexShrink: 0, flexGrow: 0, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 14%' }}>
+                    <div style={{ width: '100%', maxWidth: '100%', overflow: 'hidden' }}>
+                      <LocationSelector scope={editorScope} setScope={setEditorScope}
+                        borough={editorBorough} setBorough={setEditorBorough}
+                        zip={editorZip} setZip={setEditorZip} accentColor={accentColor} />
+                    </div>
+                  </div>
+                  {/* Middle 60% — split 30/30 if image, else full 60% text */}
+                  {imagePreview ? (
+                    <>
+                      <div style={{ height: '30%', flexShrink: 0, flexGrow: 0, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px 12%' }}>
+                        <div style={{ position: 'relative', maxWidth: '100%', maxHeight: '100%' }}>
+                          <img src={imagePreview} alt="preview" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'cover', borderRadius: 8, display: 'block' }} />
+                          <button onMouseDown={e => e.preventDefault()} onClick={() => { setImageFile(null); setImagePreview(null); }}
+                            style={{ position: 'absolute', top: 4, right: 4, width: 22, height: 22, background: '#000', color: '#fff', borderRadius: '50%', fontSize: 11, fontWeight: 900 }}>✕</button>
+                        </div>
+                      </div>
+                      <div style={{ height: '30%', flexShrink: 0, flexGrow: 0, overflow: 'hidden', padding: '0 12%' }}>
+                        <div ref={editorRef} contentEditable suppressContentEditableWarning
+                          className="text-sm" style={{ width: '100%', height: '100%', overflowY: 'auto', overflowX: 'hidden', overflowWrap: 'break-word', outline: 'none' }}
+                          onInput={() => { localStorage.setItem('lapuff_createpost_draft', editorRef.current?.innerHTML || ''); }}
+                        />
+                      </div>
+                    </>
+                  ) : (
+                    <div style={{ height: '60%', flexShrink: 0, flexGrow: 0, overflow: 'hidden', padding: '0 12%' }}>
+                      <div ref={editorRef} contentEditable suppressContentEditableWarning
+                        className="text-sm" style={{ width: '100%', height: '100%', overflowY: 'auto', overflowX: 'hidden', overflowWrap: 'break-word', outline: 'none' }}
+                        onInput={() => { localStorage.setItem('lapuff_createpost_draft', editorRef.current?.innerHTML || ''); }}
+                      />
+                    </div>
+                  )}
+                  {/* Bottom 20%: editor button */}
+                  <div style={{ height: '20%', flexShrink: 0, flexGrow: 0, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                    <button ref={shapeEditorBtnRef} onMouseDown={e => e.preventDefault()}
+                      onClick={e => { e.preventDefault(); openTb(openToolbar === 'shapeEditor' ? null : 'shapeEditor'); }}
+                      className="px-3 py-1.5 border-2 border-black rounded-lg text-xs font-black bg-white hover:bg-gray-100 shadow-[2px_2px_0px_black]">
+                      ✏️ Edit
+                    </button>
+                  </div>
+                </div>
+                {/* Submit + image-attach: float below shape, centered */}
+                <div className="flex justify-center items-center gap-2 mt-3 pb-3 px-3 flex-wrap">
+                  <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageChange} />
+                  <button onMouseDown={e => e.preventDefault()} onClick={() => fileInputRef.current?.click()} className="px-3 py-2 border-2 border-black rounded-lg text-sm font-black bg-white hover:bg-gray-100 shadow-[2px_2px_0px_black]">
+                    <span className="text-lg leading-none">📎</span> Image
+                  </button>
+                  {submitError && <p className="text-[10px] text-red-600 font-semibold truncate">{submitError}</p>}
+                  <button onMouseDown={e => e.preventDefault()} onClick={handlePost} disabled={submitting} className="px-4 py-2 border-2 border-black rounded-lg text-sm font-black shadow-[2px_2px_0px_black]" style={{ background: accentColor, color: '#fff' }}>
+                    {submitting ? '...' : 'Post'}
+                  </button>
+                </div>
+                {/* Editor popup: 4 rows of toolbar buttons */}
+                <PortalPopup btnRef={shapeEditorBtnRef} open={openToolbar === 'shapeEditor'} onClose={closeToolbar} minWidth={320}>
+                  <div className="bg-white border-3 border-black rounded-xl shadow-[4px_4px_0px_black] p-2" style={{ display: 'grid', gridTemplateColumns: 'repeat(6, auto)', gap: 4 }}>
+                    {tbBtn(false, e => { e.preventDefault(); execCmd('undo'); }, '↩', 'Undo')}
+                    {tbBtn(false, e => { e.preventDefault(); execCmd('redo'); }, '↪', 'Redo')}
+                    {tbBtn(fmtBold, e => { e.preventDefault(); execCmd('bold'); }, <strong>B</strong>, 'Bold')}
+                    {tbBtn(fmtItalic, e => { e.preventDefault(); execCmd('italic'); }, <em>I</em>, 'Italic')}
+                    {tbBtn(fmtUnderline, e => { e.preventDefault(); execCmd('underline'); }, <u>U</u>, 'Underline')}
+                    {tbBtn(false, e => { e.preventDefault(); handleClear(); }, '✕', 'Clear')}
+                    {tbBtn(fmtAlign === 'left', e => { e.preventDefault(); handleAlign('left'); }, <AlignLeftIcon />, 'Align L')}
+                    {tbBtn(fmtAlign === 'center', e => { e.preventDefault(); handleAlign('center'); }, <AlignCenterIcon />, 'Align C')}
+                    {tbBtn(fmtAlign === 'right', e => { e.preventDefault(); handleAlign('right'); }, <AlignRightIcon />, 'Align R')}
+                    {tbBtn(fmtSize < 3, e => { e.preventDefault(); handleFontSize(-1); }, <span className="text-[10px]">A↓</span>, 'Smaller')}
+                    {tbBtn(fmtSize > 3, e => { e.preventDefault(); handleFontSize(+1); }, <span className="text-[10px]">A↑</span>, 'Larger')}
+                    <span />
+                    {tbBtn(false, e => { e.preventDefault(); openTb('list'); }, <span className="text-[10px]">☰▾</span>, 'Lists', listBtnRef)}
+                    {tbBtn(!!activeCoolFont, e => { e.preventDefault(); openTb('coolFont'); }, <span className="text-[10px]">Ψ▾</span>, 'Cool', coolBtnRef)}
+                    {tbBtn(openToolbar === 'textColor', e => { e.preventDefault(); openTb('textColor'); }, <span style={{ borderBottom: `3px solid ${textColor}`, fontWeight: 900, fontSize: 11, lineHeight: 1.1, paddingBottom: 1 }}>A</span>, 'Color', txtColBtnRef)}
+                    {tbBtn(!!postFill || openToolbar === 'postFill', e => { e.preventDefault(); openTb('postFill'); }, <span style={{ fontSize: 13 }}>🪣</span>, 'Fill', fillBtnRef)}
+                    {tbBtn(!!postOutline || openToolbar === 'postOutline', e => { e.preventDefault(); openTb('postOutline'); }, <span style={{ fontSize: 10, border: `2px solid ${postOutline || '#555'}`, padding: '0 2px', borderRadius: 2 }}>□</span>, 'Outline', outlineBtnRef)}
+                    {tbBtn(!!postShadow || openToolbar === 'postShadow', e => { e.preventDefault(); openTb('postShadow'); }, <span style={{ fontSize: 10, textShadow: `2px 2px 0 ${postShadow || '#555'}` }}>▦</span>, 'Shadow', shadowBtnRef)}
+                    {tbBtn(openToolbar === 'emoji', e => { e.preventDefault(); openTb('emoji'); }, <span style={{ fontSize: 13 }}>😀</span>, 'Emoji', emojiBtnRef)}
+                    {tbBtn(openToolbar === 'shape' || selectedShape !== 'square', e => { e.preventDefault(); openTb('shape'); }, <span style={{ fontSize: 9, fontWeight: 900 }}>⬡▲</span>, 'Shape', shapeBtnRef)}
+                  </div>
+                </PortalPopup>
+              </div>
+            );
+          }
+          return null;
+        })()}
+        {!(feedLayout === 'shapes' && selectedShape !== 'square') && (
         <div ref={createPostAreaRef} className="rounded-2xl border-3 border-black shadow-[4px_4px_0px_black] relative overflow-hidden"
           style={{ background: surfaceBg, borderColor: postOutline || '#000', opacity: (mosaicPeek || mosaicPeekOn) ? 0 : 1, pointerEvents: (mosaicPeek || mosaicPeekOn) ? 'none' : 'auto', transition: 'opacity 200ms ease' }}>
 
@@ -4952,7 +5059,8 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
           </div>
           </div>
         </div>
-      </div>
+        )}
+        </div>
       {/* Top-right controls: feed layout toggle + eye peek button */}
       <div className="flex absolute items-start gap-2" style={{ top: 10, right: 24, zIndex: 10 }} onClick={e => e.stopPropagation()} onMouseDown={e => e.stopPropagation()}>
         {/* Vertical stack: layout toggle on top, shape (rounded/square) toggle below */}
