@@ -2194,33 +2194,49 @@ function ShapePostCard({ post, shapeId = 'square', size = 270, postReactions, on
   const BAND_PCTS = [0.20, 0.30, 0.30, 0.20];
   const bandTops = [0, 0.20, 0.50, 0.80, 1.00];
 
-  // For each band, compute BOTH minimum width (narrowest slice — used as a
-  // visibility guarantee) AND average-of-edges width (used for sizing chrome
-  // so usable area is the realistic available row width, not the apex pinch).
+  // For each band: width at top edge, bottom edge, and minimum across the band.
+  // The "inner edge" is the edge nearest shape vertical center (band 0's bottom,
+  // band 3's top), where the silhouette is widest for typical upright shapes.
+  // Anchoring chrome to that inner edge maximizes usable row width and prevents
+  // username/buttons from getting pinched at the apex/base.
   const bandExtents = bandTops.slice(0, 4).map((y0, i) => {
     const y1 = bandTops[i + 1];
-    const min = shapeMinWidthInBand(shapeDef, y0, y1);
     const eTop = shapeHorizontalExtentAt(shapeDef, y0);
     const eBot = shapeHorizontalExtentAt(shapeDef, y1);
-    const avgWidthFrac = Math.max(0.30, (eTop.widthFrac + eBot.widthFrac) / 2);
-    const maxWidthFrac = Math.max(eTop.widthFrac, eBot.widthFrac);
-    return { ...min, avgWidthFrac, maxWidthFrac };
+    const min = shapeMinWidthInBand(shapeDef, y0, y1);
+    return {
+      widthAtTop:    Math.max(0.05, eTop.widthFrac),
+      widthAtBottom: Math.max(0.05, eBot.widthFrac),
+      widthMin:      Math.max(0.05, min.minWidthFrac),
+      widthMax:      Math.max(eTop.widthFrac, eBot.widthFrac),
+    };
   });
 
-  // Username sized off band 0's AVG width (apex-narrow shapes still get a
-  // legible font; cssClip will visually trim any overflow into the shape).
-  const usernameAvgWidth = Math.max(40, bandExtents[0].avgWidthFrac * size);
-  const usernameFont = Math.max(9, Math.min(usernameAvgWidth * 0.15, size * 0.06, 18));
-  const tagFont = Math.max(7, Math.min(usernameAvgWidth * 0.10, size * 0.038, 12));
+  // Inner-edge widths for anchored chrome (px)
+  const band0InnerW = Math.max(40, bandExtents[0].widthAtBottom * size); // username row at bottom of band 0
+  const band3InnerW = Math.max(40, bandExtents[3].widthAtTop    * size); // buttons row at top of band 3
 
-  // Text body fixed per shape size (NOT scaled by shape size per spec — controlled by createpost; here just constant)
+  // Auto-fit fontSize: shrink so text width (≈ chars * 0.55 * fontSize) fits container.
+  const autoFitFont = (text, containerW, maxFont, minFont = 7) => {
+    const len = Math.max(1, (text || '').length);
+    const ideal = containerW / (len * 0.58);
+    return Math.max(minFont, Math.min(maxFont, ideal));
+  };
+
+  // Username + status tag share band 0 inner row. Reserve ~30% of width for tag
+  // when it's shown, so username font auto-fits the remaining space.
+  const tagReservedFrac = showStatusTag ? 0.32 : 0;
+  const usernameAvail = band0InnerW * (1 - tagReservedFrac) - 6;
+  const usernameFont = autoFitFont(username, usernameAvail, Math.min(size * 0.075, 18), 7);
+  const tagFont = Math.max(6, Math.min(usernameFont * 0.78, 11));
+
+  // Text body
   const textFont = Math.max(8, size * 0.038);
   const bodyHeight = size * BAND_PCTS[2];
   const lineHeight = 1.25;
-  const maxTextLines = Math.max(1, Math.floor(bodyHeight / (textFont * lineHeight))); // tight pack
-
-  // Estimate if text overflows (use AVG width — wider available area)
-  const bodyWidthPx = Math.max(40, bandExtents[2].avgWidthFrac * size * 0.95);
+  const maxTextLines = Math.max(1, Math.floor(bodyHeight / (textFont * lineHeight)));
+  // Body width = MIN width of band 2 (so text never breaches silhouette).
+  const bodyWidthPx = Math.max(40, bandExtents[2].widthMin * size * 0.96);
   const charsPerLine = Math.max(5, Math.floor(bodyWidthPx / (textFont * 0.55)));
   const willOverflow = plainText.length > maxTextLines * charsPerLine;
 
@@ -2252,18 +2268,16 @@ function ShapePostCard({ post, shapeId = 'square', size = 270, postReactions, on
   const baseChromeBg = '#f3f4f6';
   const baseChromeText = '#000';
   const chromeBorder = theme.outline || '#000';
-  // Buttons sized off band 3's avg available width so they fit one-row
-  // whenever the shape gives them enough physical room. Padding scales
-  // with band width — tight bands → tight buttons → still one row.
-  const band3Width = Math.max(40, bandExtents[3].avgWidthFrac * size);
-  const btnPad = `${Math.max(1, size * 0.005)}px ${Math.max(2, band3Width * 0.025)}px`;
+  // Buttons sized off band 3's INNER (top) edge — widest part of the band when
+  // anchored to top. Padding/font auto-shrink with band width to fit one row.
+  const btnPad = `${Math.max(1, size * 0.005)}px ${Math.max(2, band3InnerW * 0.025)}px`;
   const btnRadius = 9999;
-  const btnFont = Math.max(7, Math.min(band3Width * 0.07, size * 0.038, 12));
+  const btnFont = Math.max(7, Math.min(band3InnerW * 0.07, size * 0.038, 12));
 
-  const tagPad = `${Math.max(1, size * 0.005)}px ${Math.max(2, band3Width * 0.022)}px`;
-  const tagFont2 = Math.max(6, Math.min(band3Width * 0.06, size * 0.030, 10));
+  const tagPad = `${Math.max(1, size * 0.005)}px ${Math.max(2, band3InnerW * 0.022)}px`;
+  const tagFont2 = Math.max(6, Math.min(band3InnerW * 0.06, size * 0.030, 10));
 
-  // image band geometry (full shape width — clipped to shape via SVG clipPath)
+  // image band geometry — image must fit ENTIRE band 1 silhouette (use MIN width)
   const imageBandY = size * BAND_PCTS[0];
   const imageBandH = size * BAND_PCTS[1];
 
@@ -2312,11 +2326,10 @@ function ShapePostCard({ post, shapeId = 'square', size = 270, postReactions, on
         )}
       </g>
 
-      {/* Image — sized to band 1's AVG visible width (not full rect),
-          centered horizontally. Avoids the thin-sliver crop on apex shapes
-          where a full-width image would be clipped by the silhouette. */}
+      {/* Image — sized to band 1's MIN visible width (narrowest slice in band)
+          so it always fits inside the silhouette, never bleeding past edges. */}
       {post.image_url && (() => {
-        const imgW = Math.max(size * 0.30, bandExtents[1].avgWidthFrac * size);
+        const imgW = Math.max(size * 0.20, bandExtents[1].widthMin * size);
         const imgX = (size - imgW) / 2;
         return (
           <image
@@ -2344,22 +2357,23 @@ function ShapePostCard({ post, shapeId = 'square', size = 270, postReactions, on
           }}
         >
           {/* Band 0: username + status tag (top 20%) — strict 20% height.
-              The INNER row is constrained to the band's avg visible width
-              so wrap triggers at the silhouette edge, not the rect edge. */}
+              Inner row ANCHORED TO BOTTOM of band (toward shape interior, the
+              wider edge) and constrained to width at band's bottom edge so
+              wrap triggers at the silhouette, not the rect edge. */}
           <div style={{
             height: `${BAND_PCTS[0] * 100}%`, flexShrink: 0, flexGrow: 0,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
             overflow: 'hidden', boxSizing: 'border-box',
           }}>
             <div style={{
-              width: `${bandExtents[0].avgWidthFrac * 100}%`,
+              width: `${bandExtents[0].widthAtBottom * 100}%`,
               display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-              flexWrap: 'wrap', gap: Math.max(2, size * 0.012),
+              flexWrap: 'nowrap', gap: Math.max(2, size * 0.012),
               textAlign: 'center', boxSizing: 'border-box',
             }}>
             <span style={{
               fontWeight: 900, fontSize: usernameFont, lineHeight: 1.05,
-              maxWidth: '100%',
+              maxWidth: '100%', minWidth: 0, flexShrink: 1,
               overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
             }}>{username}</span>
             {showStatusTag && (
@@ -2388,7 +2402,7 @@ function ShapePostCard({ post, shapeId = 'square', size = 270, postReactions, on
             {plainText && (
               <div style={{
                 width: '100%',
-                maxWidth: `${bandExtents[2].avgWidthFrac * 100}%`,
+                maxWidth: `${bandExtents[2].widthMin * 100}%`,
                 fontSize: textFont, lineHeight,
                 overflow: 'hidden', wordBreak: 'break-word',
                 display: '-webkit-box', WebkitLineClamp: willOverflow ? Math.max(1, maxTextLines - 1) : maxTextLines,
@@ -2407,20 +2421,21 @@ function ShapePostCard({ post, shapeId = 'square', size = 270, postReactions, on
             )}
           </div>
 
-          {/* Band 3: emoji react + ... + scope tag (bottom 20%) — single horizontal
-              row constrained to the band's AVG visible width so wrap triggers at
-              the silhouette edge, not the rect edge. Stays one row whenever the
+          {/* Band 3: emoji react + ... + scope tag (bottom 20%) — strict 20% height.
+              Inner row ANCHORED TO TOP of band (toward shape interior, the wider
+              edge) and constrained to width at band's top edge so wrap triggers
+              at the silhouette, not the rect edge. Stays one row whenever the
               shape physically allows. */}
           <div style={{
             height: `${BAND_PCTS[3] * 100}%`, flexShrink: 0, flexGrow: 0,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
             overflow: 'hidden', boxSizing: 'border-box',
           }}>
           <div style={{
-            width: `${bandExtents[3].avgWidthFrac * 100}%`,
+            width: `${bandExtents[3].widthAtTop * 100}%`,
             display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
             gap: Math.max(2, size * 0.012), flexWrap: 'wrap',
-            boxSizing: 'border-box', alignContent: 'center',
+            boxSizing: 'border-box', alignContent: 'flex-start',
           }}>
             {topEmojis[0] && (
               <HoverInvertButton
