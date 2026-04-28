@@ -3053,11 +3053,6 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
   const squareRowScale = (tileShape === 'square' && containerW > 56)
     ? containerW / (containerW - 56)
     : 1;
-  // Live-readable refs so the scroll effect closure always sees current values.
-  const tileShapeRef = useRef(tileShape);
-  tileShapeRef.current = tileShape;
-  const squareRowScaleRef = useRef(squareRowScale);
-  squareRowScaleRef.current = squareRowScale;
 
   const [listScaleOpen, setListScaleOpen] = useState(false);
   const createPostAreaRef = useRef(null);
@@ -3943,11 +3938,7 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
       const scrollEl2 = scrollEl;
       const scrollTop = scrollEl2 === window ? window.scrollY : scrollEl2.scrollTop;
       const containerH = scrollEl2 === window ? window.innerHeight : scrollEl2.clientHeight;
-      const isSquareMode = tileShapeRef.current === 'square';
-      const baseRowHeight = Math.max(1, (desktopUnitHeight - 12) / 2);
-      const scaledRowHeight = isSquareMode ? baseRowHeight * squareRowScaleRef.current : baseRowHeight;
-      const rowGap = isSquareMode ? 0 : 12;
-      const halfRowPx = Math.max(1, scaledRowHeight + rowGap);
+      const halfRowPx = Math.max(1, (desktopUnitHeight - 12) / 2 + 12);
       const fullVisualRowPx = halfRowPx * 2;
       rowStepRef.current = halfRowPx;
 
@@ -4054,14 +4045,18 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [feedLayout, tileViewKey]);
 
-  // Additive resume removed — restoring 2dffe83 panel logic verbatim.
-
-  // When the user swaps square↔round, the grid layout changes but no scroll
-  // event fires, so the panel stays frozen. Re-measure gridOffset and nudge
-  // the scroll handler to recompute the target row.
+  // Additive fallback: when swapping square↔round tile shape while the filter
+  // panel is in moving mode (⬆️ off, i.e. filterPanelMode === 'panel'), pinned
+  // or user-moved tiles can leave panelRowRef / lastAppliedRowRef stale relative
+  // to the new layout, freezing scroll-tracked motion. Reset tracking refs and
+  // re-fire the scroll-tracked recompute path on the next two paints so motion
+  // always resumes regardless of pin/move state.
   useEffect(() => {
-    let raf1 = requestAnimationFrame(() => {
-      let raf2;
+    if (typeof window === 'undefined' || window.innerWidth < 768) return;
+    if (feedLayout !== 'tiles') return;
+    if (filterPanelMode !== 'panel') return; // ⬆️ on (topbar mode) — respect user
+    let raf2 = 0;
+    const raf1 = requestAnimationFrame(() => {
       raf2 = requestAnimationFrame(() => {
         if (!desktopGridRef.current) return;
         const scrollEl = findScrollParent(desktopGridRef.current);
@@ -4069,10 +4064,8 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
         const containerClientTop = scrollEl === window ? 0 : scrollEl.getBoundingClientRect().top;
         const gridClientTop = desktopGridRef.current.getBoundingClientRect().top;
         gridOffsetCacheRef.current = gridClientTop - containerClientTop + scrollTop;
-        // Do NOT reset panelRowRef here — it must equal the panel's actual current
-        // grid row so that applyPanelRow's FLIP delta is correct.
-        // Only reset the sentinel so applyPanelRow fires even if target == current row.
-        lastAppliedRowRef.current = -1;
+        panelRowRef.current = 1;
+        lastAppliedRowRef.current = -1; // sentinel forces next applyPanelRow to fire
         if (filterPanelInnerRef.current) {
           filterPanelInnerRef.current.style.transition = 'none';
           filterPanelInnerRef.current.style.transform = 'translateY(0)';
@@ -4085,6 +4078,7 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
     });
     return () => {
       cancelAnimationFrame(raf1);
+      if (raf2) cancelAnimationFrame(raf2);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tileShape]);
