@@ -76,7 +76,7 @@ export default function Leaderboard({ onClose }) {
           .from('profiles')
           .select('username, clout_points, home_zip, rank_change_24h, current_rank')
           .not('current_rank', 'is', null)
-          .order('clout_points', { ascending: false })
+          .order('current_rank', { ascending: true })
           .limit(50);
 
         if (error) throw error;
@@ -87,6 +87,7 @@ export default function Leaderboard({ onClose }) {
           home_zip: u.home_zip || '[----]',
           rank_change: u.rank_change_24h || 0,
           isPlaceholder: false,
+          isSample: typeof u.username === 'string' && u.username.startsWith('sample_user_'),
         }));
 
         // Pad to exactly 50 rows with [null] placeholders
@@ -187,7 +188,7 @@ export default function Leaderboard({ onClose }) {
   if (loading) return <div className="p-4 font-black text-xs animate-pulse text-center text-black" style={{ color: resolvedTheme.leaderboardTextColor }}>SYNCING_CLOUT_INDEX...</div>;
 
   return (
-    <div className="lp-theme-scope bg-black border-2 border-black rounded-xl overflow-hidden shadow-[4px_4px_0px_black] w-full max-w-sm mx-auto max-h-[calc(100dvh-1rem)] md:max-h-[calc(100dvh-3rem)]" style={{ backgroundColor: resolvedTheme.leaderboardBackgroundColor, borderColor: resolvedTheme.buttonOutlineColor, boxShadow: `4px 4px 0px ${resolvedTheme.tileShadowColor}` }}>
+    <div className="lp-theme-scope bg-black border-2 border-black rounded-xl overflow-hidden shadow-[4px_4px_0px_black] w-full max-w-[26rem] md:max-w-[28rem] mx-auto max-h-[calc(100dvh-1rem)] md:max-h-[calc(100dvh-3rem)]" style={{ backgroundColor: resolvedTheme.leaderboardBackgroundColor, borderColor: resolvedTheme.buttonOutlineColor, boxShadow: `4px 4px 0px ${resolvedTheme.tileShadowColor}` }}>
       {/* Header */}
       <div className="p-2.5 md:p-3 border-b-2 border-black flex items-center justify-between" style={{ backgroundColor: resolvedTheme.leaderboardHeaderColor, borderColor: resolvedTheme.buttonOutlineColor }}>
         <div className="flex items-center gap-2">
@@ -213,7 +214,7 @@ export default function Leaderboard({ onClose }) {
       </div>
 
       {/* List */}
-      <div className="bg-white divide-y-2 divide-gray-100 min-h-[360px] md:min-h-[480px] max-h-[calc(100dvh-13.5rem)] md:max-h-[calc(100dvh-16rem)] overflow-y-auto">
+      <div className="bg-white divide-y-2 divide-gray-100 min-h-[360px] md:min-h-[480px] max-h-[calc(100dvh-13.5rem)] md:max-h-[calc(100dvh-16rem)] overflow-y-auto overflow-x-hidden">
         {currentView.map((user, index) => (
           (() => {
             const rank = startIndex + index + 1;
@@ -256,7 +257,7 @@ export default function Leaderboard({ onClose }) {
             onMouseLeave={() => { if (!isMobile && !isSignedInUser) setActiveRow(null); }}
             onTouchStart={() => { if (isMobile) setActiveRow(rowKey); }}
             onClick={() => { if (isMobile) setActiveRow(prev => prev === rowKey ? null : rowKey); }}
-            className={`px-2.5 py-2 md:p-3 grid grid-cols-[16px_20px_1fr_auto_62px] md:grid-cols-[16px_20px_1fr_auto_72px] items-center gap-2 transition-all duration-200 ${shouldShowActive ? tierActiveRowClass(tier, isSignedInUser) : (isPlaceholder ? '' : 'hover:bg-violet-50')}`}
+            className={`px-2.5 py-2 md:p-3 grid grid-cols-[16px_20px_1fr_auto_62px] md:grid-cols-[16px_20px_1fr_auto_72px] items-center gap-2 transition-all duration-200 ${shouldShowActive ? tierActiveRowClass(tier, isSignedInUser) : (isPlaceholder ? (active ? 'bg-gray-200/60' : '') : (user.isSample ? 'bg-cyan-50/60 hover:bg-cyan-100/70' : 'hover:bg-violet-50'))}`}
           >
             {/* Tracking column */}
             <span className="text-xs font-black w-4 h-4 flex items-center justify-center">
@@ -265,7 +266,7 @@ export default function Leaderboard({ onClose }) {
 
             <span className={`font-black text-[10px] md:text-[11px] w-5 ${shouldShowActive ? 'text-white/85' : (isPlaceholder ? 'text-gray-300' : 'text-gray-400')}`}>{rank}</span>
 
-            <div className="min-w-0">
+            <div className="min-w-0 flex items-center gap-1.5">
               <p
                 className={`relative font-extrabold text-[12px] md:text-sm leading-none uppercase tracking-[0.06em] truncate ${
                   isPlaceholder
@@ -280,6 +281,14 @@ export default function Leaderboard({ onClose }) {
               >
                 {user.username}
               </p>
+              {user.isSample && !isPlaceholder && (
+                <span
+                  className={`text-[8px] font-black uppercase tracking-wider px-1 py-0.5 rounded border ${shouldShowActive ? 'bg-white/20 border-white/40 text-white' : 'bg-cyan-200/70 border-cyan-500/60 text-cyan-900'}`}
+                  title="Sample / simulation account"
+                >
+                  SIM
+                </span>
+              )}
             </div>
 
             <div className={`flex items-center gap-1.5 px-2 py-1 rounded-lg border justify-self-end ${shouldShowActive ? 'bg-black/25 border-white/25' : (isPlaceholder ? 'bg-gray-50 border-gray-200' : 'bg-gray-100 border-black/5')}`}>

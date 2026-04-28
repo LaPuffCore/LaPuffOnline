@@ -3658,11 +3658,16 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
   }, [feedLayout, tileViewKey]);
 
   // Additive fallback: when swapping square↔round tile shape while the filter
-  // panel is in moving mode (⬆️ off, i.e. filterPanelMode === 'panel'), pinned
-  // or user-moved tiles can leave panelRowRef / lastAppliedRowRef stale relative
-  // to the new layout, freezing scroll-tracked motion. Reset tracking refs and
-  // re-fire the scroll-tracked recompute path on the next two paints so motion
-  // always resumes regardless of pin/move state.
+  // panel is in moving mode (⬆️ off, i.e. filterPanelMode === 'panel'), the
+  // grid's row pixel-height changes (square: 0 gap + scaled rows; rounded:
+  // 12px gap + base rows). Pinned/moved tiles are anchored to the same grid
+  // cells in both modes, so they don't reflow — but the panel's stored grid
+  // row was computed under the OLD geometry, so a naive scroll re-fire makes
+  // applyPanelRow compute a FLIP delta with mismatched (oldRow, newRowStep)
+  // and the panel jumps or freezes. Solution: directly re-derive the panel's
+  // correct grid row under NEW geometry from current scroll, snap state +
+  // refs to it, and clear transforms with no animation. Scroll-tracked motion
+  // resumes cleanly from the correct baseline.
   useEffect(() => {
     if (typeof window === 'undefined' || window.innerWidth < 768) return;
     if (feedLayout !== 'tiles') return;
@@ -3674,20 +3679,48 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
         const scrollEl = findScrollParent(desktopGridRef.current);
         const scrollTop = scrollEl === window ? window.scrollY : scrollEl.scrollTop;
         const containerClientTop = scrollEl === window ? 0 : scrollEl.getBoundingClientRect().top;
+        const containerH = scrollEl === window ? window.innerHeight : scrollEl.clientHeight;
         const gridClientTop = desktopGridRef.current.getBoundingClientRect().top;
+        // Refresh grid offset (separator height changes between modes — 20px square vs 44px rounded)
         gridOffsetCacheRef.current = gridClientTop - containerClientTop + scrollTop;
-        // Do NOT reset panelRowRef here — it must equal the panel's actual current
-        // grid row so that applyPanelRow's FLIP delta is correct.
-        // Only reset the sentinel so applyPanelRow fires even if target == current row.
-        lastAppliedRowRef.current = -1; // sentinel forces next applyPanelRow to fire
+
+        // Re-derive panel row using the SAME math as computeTargetRow but with
+        // the NEW shape's geometry. Mirror of lines ~3549-3590.
+        const isSquareMode = tileShapeRef.current === 'square';
+        const baseRowHeight = Math.max(1, (desktopUnitHeight - 12) / 2);
+        const scaledRowHeight = isSquareMode ? baseRowHeight * squareRowScaleRef.current : baseRowHeight;
+        const rowGap = isSquareMode ? 0 : 12;
+        const halfRowPx = Math.max(1, scaledRowHeight + rowGap);
+        const fullVisualRowPx = halfRowPx * 2;
+        rowStepRef.current = halfRowPx;
+
+        const TOPBAR_H = 72;
+        const visibleScrollTopInGrid = Math.max(0, scrollTop - gridOffsetCacheRef.current);
+        let visualRowIdx = Math.floor((visibleScrollTopInGrid + fullVisualRowPx * 0.5) / fullVisualRowPx);
+        let targetRow = Math.max(1, 1 + visualRowIdx * 2);
+        for (let safety = 0; safety < 10; safety++) {
+          const panelTop = gridOffsetCacheRef.current + (targetRow - 1) * halfRowPx - scrollTop + containerClientTop;
+          if (panelTop >= TOPBAR_H) break;
+          targetRow = Math.max(1, targetRow + 2);
+        }
+        const maxHalfRow = Math.max(1, Math.floor(desktopGridRef.current.scrollHeight / halfRowPx));
+        const maxOddRow = maxHalfRow % 2 === 0 ? maxHalfRow - 1 : maxHalfRow;
+        targetRow = Math.min(maxOddRow, targetRow);
+
+        // Hard handoff: snap refs + state to the new geometry, clear any
+        // residual transform/blur/opacity from a mid-flight FLIP, and prime
+        // lastAppliedRowRef so the next scroll-tick won't re-FLIP redundantly.
+        panelRowRef.current = targetRow;
+        lastAppliedRowRef.current = targetRow;
+        setDesktopPanelRow(targetRow);
         if (filterPanelInnerRef.current) {
           filterPanelInnerRef.current.style.transition = 'none';
           filterPanelInnerRef.current.style.transform = 'translateY(0)';
           filterPanelInnerRef.current.style.filter = 'blur(0)';
           filterPanelInnerRef.current.style.opacity = '1';
         }
-        // Nudge the existing scroll handler to recompute target row from current scroll
-        try { (scrollEl === window ? window : scrollEl).dispatchEvent(new Event('scroll')); } catch {}
+        // Suppress unused warning — containerH may be used by future bounds checks
+        void containerH;
       });
     });
     return () => {
