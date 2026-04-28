@@ -2597,46 +2597,6 @@ export default function GeoPostView({ session }) {
     if (tileShape === 'square') document.documentElement.classList.add('lp-square-mode');
     else document.documentElement.classList.remove('lp-square-mode');
   }, [tileShape]);
-  // Measure rounded-mode grid width once → use as baseline for square-mode row scaling.
-  // In square mode the grid breaks out to ~100vw, so cols widen; rows must scale by the
-  // same ratio to preserve tile aspect ratio.
-  const [roundedGridWidth, setRoundedGridWidth] = useState(0);
-  const [squareGridWidth, setSquareGridWidth] = useState(0);
-  useEffect(() => {
-    if (typeof window === 'undefined') return undefined;
-    const measure = () => {
-      const el = desktopGridRef.current;
-      if (!el) return;
-      // squareGridWidth = the actual grid width right now (in square mode this is ~100vw,
-      // in rounded mode it's the constrained width).
-      const w = el.offsetWidth;
-      if (w <= 0) return;
-      if (tileShape === 'square') setSquareGridWidth(w);
-      else setRoundedGridWidth(w);
-      // ALSO compute rounded-equivalent width from the constrained parent so the ratio
-      // works on first load even if the user started in square mode.
-      // The tile-area's parent is `max-w-7xl mx-auto px-3`; in square mode our negative
-      // margins escape it, but the parent itself stays the constrained width.
-      const parent = el.closest('.gp-tile-area')?.parentElement;
-      if (parent && tileShape === 'square') {
-        // parent is max-w-7xl mx-auto px-3 — inner width minus tile-area's md:px-4 padding (32px).
-        const parentInner = parent.clientWidth - 32;
-        if (parentInner > 0) setRoundedGridWidth(parentInner);
-      }
-    };
-    measure();
-    let ro;
-    if (typeof ResizeObserver !== 'undefined' && desktopGridRef.current) {
-      ro = new ResizeObserver(measure);
-      ro.observe(desktopGridRef.current);
-    } else {
-      window.addEventListener('resize', measure);
-    }
-    return () => {
-      if (ro) ro.disconnect();
-      else window.removeEventListener('resize', measure);
-    };
-  }, [tileShape, feedLayout]);
   const [listScaleOpen, setListScaleOpen] = useState(false);
   const createPostAreaRef = useRef(null);
   const [fabOpacity, setFabOpacity] = useState(0);
@@ -4611,7 +4571,7 @@ export default function GeoPostView({ session }) {
         </div>
         {/* GEO-FEED pill: center locked to line center (top:10px = midpoint of 20px line).
             translateY(-50%) pulls it up by half its own height → top half overlaps mosaic. */}
-        <div className="absolute left-1/2 gp-geofeed-pill" style={{ top: tileShape === 'square' ? 'auto' : 10, bottom: tileShape === 'square' ? 0 : 'auto', transform: tileShape === 'square' ? 'translate(-50%, 0)' : 'translate(-50%, -50%)', zIndex: 5 }}>
+        <div className="absolute left-1/2 gp-geofeed-pill" style={{ top: tileShape === 'square' ? 'auto' : 10, bottom: tileShape === 'square' ? 6 : 'auto', transform: tileShape === 'square' ? 'translate(-50%, 0)' : 'translate(-50%, -50%)', zIndex: 5 }}>
           <div className="border-[3px] border-black rounded-xl px-4 py-1.5 bg-white" style={{ whiteSpace: 'nowrap' }}>
             <span className="font-black text-[1.75rem] leading-none tracking-tight text-black">🌎 Geo-Feed</span>
           </div>
@@ -4709,19 +4669,17 @@ export default function GeoPostView({ session }) {
       <div className="gp-tile-area-fill" style={{
         overflow: canShowLess ? 'visible' : 'clip',
         overflowClipMargin: '40px',
-        maxHeight: canShowLess ? 'none' : `${16 * Math.max(1, (desktopUnitHeight - 12) / 2) * (tileShape === 'square' && roundedGridWidth > 0 && squareGridWidth > 0 ? squareGridWidth / roundedGridWidth : 1) + 15 * (tileShape === 'square' ? 0 : 12)}px`,
+        maxHeight: canShowLess ? 'none' : `${16 * Math.max(1, (desktopUnitHeight - 12) / 2) + 15 * (tileShape === 'square' ? 0 : 12)}px`,
         position: 'relative',
       }}>
         <div ref={desktopGridRef} className="hidden md:grid gap-3 mt-3 gp-tile-grid"
           style={{
             '--image-scale': Math.max(0.5, Number(feedImageScale || 1)),
-            // Keep dense always — prevents holes in layout. Array order controls placement,
-            // dense packs gaps left by pinned/filter panel placements.
             gridAutoFlow: 'dense',
             gridTemplateColumns: 'repeat(14, minmax(0, 1fr))',
-            // Square mode: scale row height by (currentGridWidth / roundedGridWidth) so cols+rows
-            // grow together and tile aspect ratio matches rounded mode exactly.
-            gridAutoRows: `${Math.max(1, (desktopUnitHeight - 12) / 2) * (tileShape === 'square' && roundedGridWidth > 0 && squareGridWidth > 0 ? squareGridWidth / roundedGridWidth : 1)}px`,
+            // Same row height in both modes — tiles stay the same height as rounded mode.
+            // Columns widen naturally in square mode (no padding) but rows are unchanged.
+            gridAutoRows: `${Math.max(1, (desktopUnitHeight - 12) / 2)}px`,
             overflowAnchor: 'none',
             overflow: 'visible',
           }}
