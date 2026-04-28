@@ -3862,6 +3862,10 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
   }, [feedLayout, tileViewKey]);
 
   const applyPanelRow = useCallback((newRow) => {
+    // Square mode: shift visual placement up by 2 half-rows so the panel
+    // doesn't sit too low. Logical row math (computeTargetRow / sentinels)
+    // stays the same; only the displayed row is offset.
+    if (tileShape === 'square') newRow = Math.max(1, newRow - 2);
     const prevRow = panelRowRef.current;
     if (newRow === prevRow) return;
     const el = filterPanelInnerRef.current;
@@ -3916,7 +3920,7 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
         desktopGridRef.current?.classList.remove('geopost-tiles-animating');
       }, 1200);
     }
-  }, []);
+  }, [tileShape]);
 
   useEffect(() => {
     const grid = desktopGridRef.current;
@@ -4008,8 +4012,15 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
 
     scrollEl.addEventListener('scroll', onScroll, { passive: true });
     window.addEventListener('resize', onResize);
+    // Defensive: on initial mount (especially when loading directly into square
+    // mode), measurements may not be settled. Dispatch a synthetic scroll once
+    // the layout has stabilized so the panel begins tracking immediately.
+    const startupTimer = setTimeout(() => {
+      try { (scrollEl === window ? window : scrollEl).dispatchEvent(new Event('scroll')); } catch {}
+    }, 250);
     return () => {
       if (scrollSettleTimerRef.current) clearTimeout(scrollSettleTimerRef.current);
+      clearTimeout(startupTimer);
       scrollEl.removeEventListener('scroll', onScroll);
       window.removeEventListener('resize', onResize);
     };
