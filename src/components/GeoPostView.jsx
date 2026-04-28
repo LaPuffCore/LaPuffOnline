@@ -3829,10 +3829,15 @@ export default function GeoPostView({ session }) {
         }
         if (target) {
           if (pinnedPostIds.has(ds.postId)) {
-            setPinnedPositions(p => ({ ...p, [ds.postId]: target }));
-          } else {
-            setUserPositions(p => ({ ...p, [ds.postId]: target }));
+            // Preserve frozen w,h recorded at pin time — only update col,row from drag.
+            const pinned = pinnedPositionsRef.current[ds.postId] || {};
+            setPinnedPositions(p => ({
+              ...p,
+              [ds.postId]: { col: target.col, row: target.row, w: pinned.w ?? span.w, h: pinned.h ?? span.h },
+            }));
           }
+          // Non-pinned tiles: no explicit position written.
+          // CSS Grid dense auto-flow places them freely — they never get stuck.
         }
 
         if (dragGhostRef.current) { dragGhostRef.current.remove(); dragGhostRef.current = null; }

@@ -12,12 +12,14 @@ const SAMPLE_ZIP_CODE = 'SAMPLE';
 
 function toSampleEventRow(event) {
   return {
+    id: event.id,                              // deterministic UUID from sampleEvents.js
     name: event.name,
     event_name: event.event_name,
     price_category: event.price_category,
     location_data: event.location_data,
     event_date: event.event_date,
     event_time_utc: event.event_time_utc,
+    event_time_utc_end: event.event_time_utc_end || null,
     relevant_links: event.relevant_links || [],
     description: event.description || '',
     photos: event.photos || [],
@@ -27,6 +29,9 @@ function toSampleEventRow(event) {
     zip_code: SAMPLE_ZIP_CODE,
     lat: event.lat || null,
     lng: event.lng || null,
+    afters_address: event.afters_address || null,
+    afters_lat: event.afters_lat || null,
+    afters_lng: event.afters_lng || null,
     borough: event.borough || null,
   };
 }
@@ -99,50 +104,37 @@ export async function syncSampleEvents(sampleEvents = [], enabled = true, clearO
 
   if (!sampleEvents.length) return true;
 
-  const existingRes = await fetch(
-    `${SUPABASE_URL}/rest/v1/events?zip_code=eq.${SAMPLE_ZIP_CODE}&select=event_name,event_date`,
-    { headers: baseHeaders }
-  );
-  if (!existingRes.ok) return false;
+  // Use merge-duplicates upsert on the primary key (id). Since toSampleEventRow now includes
+  // the deterministic UUID from sampleEvents.js, re-running this is safe and idempotent.
+  const rows = sampleEvents.map(toSampleEventRow);
 
-  const existing = await existingRes.json();
-  const existingKeys = new Set(existing.map((e) => sampleKey(e.event_name, e.event_date)));
-
-  const toInsert = sampleEvents
-    .map(toSampleEventRow)
-    .filter((e) => !existingKeys.has(sampleKey(e.event_name, e.event_date)));
-
-  if (!toInsert.length) return true;
-
-  const insertRes = await fetch(`${SUPABASE_URL}/rest/v1/events`, {
+  const upsertRes = await fetch(`${SUPABASE_URL}/rest/v1/events`, {
     method: 'POST',
-    headers: { ...baseHeaders, Prefer: 'return=minimal' },
-    body: JSON.stringify(toInsert),
+    headers: { ...baseHeaders, Prefer: 'resolution=merge-duplicates,return=minimal' },
+    body: JSON.stringify(rows),
   });
 
-  if (insertRes.ok) return true;
+  if (upsertRes.ok) return true;
 
-  // Fallback: attempt one-by-one inserts so one bad row does not block all.
-  // This also gives precise diagnostics in the browser console.
-  let allInserted = true;
-  const bulkError = await insertRes.text().catch(() => 'unknown bulk insert error');
-  console.warn('Bulk sample sync failed, retrying row-by-row:', bulkError);
+  // Fallback: upsert one-by-one for precise diagnostics.
+  let allOk = true;
+  const bulkError = await upsertRes.text().catch(() => 'unknown bulk upsert error');
+  console.warn('Bulk sample event upsert failed, retrying row-by-row:', bulkError);
 
-  for (const row of toInsert) {
+  for (const row of rows) {
     const rowRes = await fetch(`${SUPABASE_URL}/rest/v1/events`, {
       method: 'POST',
-      headers: { ...baseHeaders, Prefer: 'return=minimal' },
+      headers: { ...baseHeaders, Prefer: 'resolution=merge-duplicates,return=minimal' },
       body: JSON.stringify([row]),
     });
-
     if (!rowRes.ok) {
-      allInserted = false;
-      const rowError = await rowRes.text().catch(() => 'unknown row insert error');
-      console.warn(`Sample event insert failed for "${row.event_name}":`, rowError);
+      allOk = false;
+      const rowError = await rowRes.text().catch(() => 'unknown row upsert error');
+      console.warn(`Sample event upsert failed for "${row.event_name}" (${row.id}):`, rowError);
     }
   }
 
-  return allInserted;
+  return allOk;
 }
 
 /**
