@@ -544,16 +544,22 @@ export default function Home({ events = [], eventsLoading = false }) {
                 {user ? (
                   <div className="relative">
                     <button onClick={() => setShowUserMenu(v => !v)}
-                      className="w-[112px] bg-white rounded-full px-3.5 py-1.5 font-black text-xs hover:bg-violet-50 transition-all hover:scale-105 shadow-[2px_2px_0px_#333] truncate text-center border-2 lp-accent-border lp-accent-color-text">
+                      className="w-[112px] bg-white rounded-full px-3.5 py-1.5 font-black text-xs transition-all hover:scale-105 shadow-[2px_2px_0px_black] truncate text-center border-2 border-black text-black"
+                      style={showUserMenu ? { backgroundColor: accentColor, color: '#000', borderColor: '#000' } : {}}
+                      onMouseEnter={e => { e.currentTarget.style.backgroundColor = accentColor; e.currentTarget.style.color = '#000'; e.currentTarget.style.borderColor = '#000'; }}
+                      onMouseLeave={e => { if (!showUserMenu) { e.currentTarget.style.backgroundColor = ''; e.currentTarget.style.color = ''; e.currentTarget.style.borderColor = ''; } }}>
                       {displayName}
                     </button>
                     {showUserMenu && (
-                      <div className="absolute right-0 top-12 bg-white border-3 border-black rounded-2xl shadow-[5px_5px_0px_black] z-50 overflow-hidden min-w-40">
-                        <Link to="/favorites" className="block w-full px-4 py-3 text-left font-black text-sm hover:bg-gray-50 border-b-2 border-gray-100">
+                      <div className="absolute right-0 top-12 bg-white border-3 border-black rounded-2xl shadow-[5px_5px_0px_black] z-50 overflow-hidden w-max">
+                        <div className="px-4 py-2.5 font-black text-sm text-black whitespace-nowrap border-b-2 border-gray-200">
+                          {displayName}
+                        </div>
+                        <Link to="/favorites" className="block w-full px-4 py-3 text-left font-black text-sm hover:bg-gray-50 border-b-2 border-gray-100 whitespace-nowrap">
                           ⭐ My Favorites
                         </Link>
                         <button onClick={handleLogout}
-                          className="w-full px-4 py-3 text-left font-black text-sm hover:bg-red-50 text-red-600 transition-colors">
+                          className="w-full px-4 py-3 text-left font-black text-sm hover:bg-red-50 text-red-600 transition-colors whitespace-nowrap">
                           🚪 Logout
                         </button>
                       </div>
@@ -647,7 +653,10 @@ export default function Home({ events = [], eventsLoading = false }) {
             </div>
             {user ? (
               <button onClick={() => setShowUserMenu(v => !v)}
-                className="w-[112px] bg-white rounded-full px-3 py-1.5 font-black text-[11px] shadow-[2px_2px_0px_#333] truncate text-center border-2 lp-accent-border lp-accent-color-text transition-all hover:scale-105">
+                className="w-[112px] bg-white rounded-full px-3 py-1.5 font-black text-[11px] shadow-[2px_2px_0px_black] truncate text-center border-2 border-black text-black transition-all hover:scale-105"
+                style={showUserMenu ? { backgroundColor: accentColor, color: '#000', borderColor: '#000' } : {}}
+                onMouseEnter={e => { e.currentTarget.style.backgroundColor = accentColor; e.currentTarget.style.color = '#000'; e.currentTarget.style.borderColor = '#000'; }}
+                onMouseLeave={e => { if (!showUserMenu) { e.currentTarget.style.backgroundColor = ''; e.currentTarget.style.color = ''; e.currentTarget.style.borderColor = ''; } }}>
                 {displayName}
               </button>
             ) : (
