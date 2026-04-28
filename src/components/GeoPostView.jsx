@@ -3081,6 +3081,14 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
   const canShowLessRef = useRef(false);
   const rowStepRef = useRef(432);
   const scrollSettleTimerRef = useRef(null);
+  // Square-mode engine — fully independent from the round-mode panel refs above.
+  // Never written by round-mode code; reset cleanly on every square-mode mount.
+  const sqPanelRowRef = useRef(1);
+  const sqLastAppliedRowRef = useRef(-1);
+  const sqRowStepRef = useRef(432);
+  const sqGridOffsetRef = useRef(0);
+  const sqSettleTimerRef = useRef(null);
+  const sqTileAnimatingRef = useRef(false);
   const scaleButtonRef = useRef(null);
   // Cached distance from scroll-container top to grid top — computed once on mount / resize,
   // NOT on every scroll event. Recalculating on scroll is wrong because the grid reflowing
@@ -4028,6 +4036,182 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
       window.removeEventListener('resize', onResize);
     };
   }, [desktopUnitHeight, visiblePosts.length, canShowMore, canShowLess, applyPanelRow, feedLayout, filterPanelMode, tileViewKey]);
+
+  // ─── SQUARE-MODE PANEL ENGINE ────────────────────────────────────────────
+  // Fully independent engine that runs ONLY when tileShape === 'square'.
+  // Mirrors the round-mode FLIP/blur/glide animation but reads row stride
+  // from live computed-style (gridAutoRows) instead of using the round
+  // formula, so it works correctly with square-mode geometry (gap=0,
+  // squareRowScale-adjusted rows). Has its own refs and never touches
+  // round-mode state — clean handoff on swap.
+  useEffect(() => {
+    if (typeof window === 'undefined' || window.innerWidth < 768) return;
+    if (tileShape !== 'square') return;
+    if (feedLayout !== 'tiles') return;
+    if (filterPanelMode !== 'panel') return;
+    const grid = desktopGridRef.current;
+    if (!grid) return;
+    const scrollEl = findScrollParent(grid);
+
+    const computeSqGridOffset = () => {
+      if (!desktopGridRef.current) return;
+      const scrollTop = scrollEl === window ? window.scrollY : scrollEl.scrollTop;
+      const containerClientTop = scrollEl === window ? 0 : scrollEl.getBoundingClientRect().top;
+      const gridClientTop = desktopGridRef.current.getBoundingClientRect().top;
+      sqGridOffsetRef.current = gridClientTop - containerClientTop + scrollTop;
+    };
+
+    const computeSqTargetRow = () => {
+      if (!desktopGridRef.current) return sqPanelRowRef.current;
+      const scrollTop = scrollEl === window ? window.scrollY : scrollEl.scrollTop;
+      const containerH = scrollEl === window ? window.innerHeight : scrollEl.clientHeight;
+      // Read actual row stride from the live grid CS (gridAutoRows is the
+      // half-row height browser uses to lay out tiles). Bypasses formula bugs.
+      const cs = window.getComputedStyle(desktopGridRef.current);
+      const rawAutoRows = parseFloat(cs.gridAutoRows);
+      const halfRowPx = Math.max(1, isFinite(rawAutoRows) ? rawAutoRows : (desktopUnitHeight - 12) / 2);
+      const fullVisualRowPx = halfRowPx * 2;
+      sqRowStepRef.current = halfRowPx;
+
+      const TOPBAR_H = 72;
+      const containerClientTop = scrollEl === window ? 0 : scrollEl.getBoundingClientRect().top;
+
+      const visibleScrollTopInGrid = Math.max(0, scrollTop - sqGridOffsetRef.current);
+      let visualRowIdx = Math.floor((visibleScrollTopInGrid + fullVisualRowPx * 0.5) / fullVisualRowPx);
+      let targetRow = Math.max(1, 1 + visualRowIdx * 2);
+
+      const getVisualPanelTop = (row) => {
+        return sqGridOffsetRef.current + (row - 1) * halfRowPx - scrollTop + containerClientTop;
+      };
+      for (let safety = 0; safety < 10; safety++) {
+        const panelTop = getVisualPanelTop(targetRow);
+        if (panelTop >= TOPBAR_H) break;
+        targetRow = Math.max(1, targetRow + 2);
+      }
+
+      const maxHalfRow = Math.max(1, Math.floor(desktopGridRef.current.scrollHeight / halfRowPx));
+      const maxOddRow = maxHalfRow % 2 === 0 ? maxHalfRow - 1 : maxHalfRow;
+
+      if (canShowMoreRef.current || canShowLessRef.current) {
+        const showMoreEl = desktopGridRef.current.querySelector('[data-show-more-bar]');
+        if (showMoreEl) {
+          const smRect = showMoreEl.getBoundingClientRect();
+          const viewportBottom = containerClientTop + containerH;
+          if (smRect.top < viewportBottom && smRect.bottom > containerClientTop) {
+            return maxOddRow;
+          }
+        }
+      }
+      return Math.min(maxOddRow, targetRow);
+    };
+
+    const applySqPanelRow = (newRow) => {
+      const prevRow = sqPanelRowRef.current;
+      if (newRow === prevRow) return;
+      const el = filterPanelInnerRef.current;
+      if (!el) {
+        sqPanelRowRef.current = newRow;
+        setDesktopPanelRow(newRow);
+        return;
+      }
+      const matrix = window.getComputedStyle(el).transform;
+      let currentTranslateY = 0;
+      if (matrix && matrix !== 'none') {
+        const vals = matrix.replace('matrix(', '').replace(')', '').split(',');
+        if (vals.length >= 6) currentTranslateY = parseFloat(vals[5]) || 0;
+      }
+      const rowStep = sqRowStepRef.current;
+      const delta = (prevRow - newRow) * rowStep;
+      const startTranslate = currentTranslateY + delta;
+      const travelDistance = Math.abs(startTranslate);
+
+      sqPanelRowRef.current = newRow;
+      setDesktopPanelRow(newRow);
+
+      el.style.transition = 'none';
+      el.style.transform = `translateY(${startTranslate}px)`;
+      const blurPx = Math.min(18, Math.max(3, travelDistance / 28));
+      el.style.filter = `blur(${blurPx}px)`;
+      el.style.opacity = '0.6';
+
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        el.style.transition = [
+          'transform 2000ms cubic-bezier(0.16, 1, 0.3, 1)',
+          'filter 1700ms cubic-bezier(0.4, 0, 0.2, 1)',
+          'opacity 900ms ease-out',
+        ].join(', ');
+        el.style.transform = 'translateY(0px)';
+        el.style.filter = 'blur(0px)';
+        el.style.opacity = '1';
+      }));
+
+      if (!sqTileAnimatingRef.current) {
+        sqTileAnimatingRef.current = true;
+        if (desktopGridRef.current) {
+          desktopGridRef.current.classList.add('geopost-tiles-animating');
+        }
+        setTimeout(() => {
+          sqTileAnimatingRef.current = false;
+          desktopGridRef.current?.classList.remove('geopost-tiles-animating');
+        }, 1200);
+      }
+    };
+
+    const onScroll = () => {
+      if (sqSettleTimerRef.current) clearTimeout(sqSettleTimerRef.current);
+      sqSettleTimerRef.current = setTimeout(() => {
+        const target = computeSqTargetRow();
+        if (target !== sqLastAppliedRowRef.current) {
+          sqLastAppliedRowRef.current = target;
+          applySqPanelRow(target);
+        }
+      }, 500);
+    };
+
+    const onResize = () => {
+      computeSqGridOffset();
+      if (sqSettleTimerRef.current) clearTimeout(sqSettleTimerRef.current);
+      applySqPanelRow(computeSqTargetRow());
+    };
+
+    // Reset state on mount: panel snaps to row 1, sentinel cleared.
+    sqPanelRowRef.current = 1;
+    sqLastAppliedRowRef.current = -1;
+    setDesktopPanelRow(1);
+    if (filterPanelInnerRef.current) {
+      filterPanelInnerRef.current.style.transition = 'none';
+      filterPanelInnerRef.current.style.transform = 'translateY(0)';
+      filterPanelInnerRef.current.style.filter = 'blur(0)';
+      filterPanelInnerRef.current.style.opacity = '1';
+    }
+
+    // Defer initial measurement to next paint so square-mode CSS has applied.
+    const initRaf = requestAnimationFrame(() => {
+      computeSqGridOffset();
+      const initialRow = computeSqTargetRow();
+      sqLastAppliedRowRef.current = initialRow;
+      sqPanelRowRef.current = initialRow;
+      setDesktopPanelRow(initialRow);
+    });
+
+    scrollEl.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onResize);
+    return () => {
+      cancelAnimationFrame(initRaf);
+      if (sqSettleTimerRef.current) clearTimeout(sqSettleTimerRef.current);
+      scrollEl.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onResize);
+      // Cleanup: snap panel back to translateY(0), clear refs.
+      if (filterPanelInnerRef.current) {
+        filterPanelInnerRef.current.style.transition = 'none';
+        filterPanelInnerRef.current.style.transform = 'translateY(0)';
+        filterPanelInnerRef.current.style.filter = 'blur(0)';
+        filterPanelInnerRef.current.style.opacity = '1';
+      }
+      sqPanelRowRef.current = 1;
+      sqLastAppliedRowRef.current = -1;
+    };
+  }, [tileShape, feedLayout, filterPanelMode, desktopUnitHeight, visiblePosts.length, canShowMore, canShowLess, tileViewKey]);
 
   // When switching back to tile mode, double-rAF to ensure two browser layout passes
   // (grid was unmounted in list mode so getBoundingClientRect was stale after remount)
