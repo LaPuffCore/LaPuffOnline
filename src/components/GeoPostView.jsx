@@ -4604,9 +4604,10 @@ export default function GeoPostView({ session }) {
           Line button top = mosaic wrapper bottom exactly.
           GEO-FEED pill centered on line → extends ~half-height above into mosaic area. */}
       <div className="w-full relative gp-geofeed-sep" style={{ height: tileShape === 'square' ? 20 : 44, overflow: 'visible', zIndex: 10 }}>
-        {/* Line button: full width, anchored at top:0 (= mosaic bottom), border-y, no shadow */}
-        <div className="absolute left-0 right-0 flex items-center justify-center" style={{ top: 0, height: 20, borderTop: '3px solid #000', borderBottom: '3px solid #000', background: '#fff', zIndex: 1 }}>
-          <div style={{ position: 'absolute', left: 0, right: 0, top: '50%', height: 2, background: '#000', transform: 'translateY(-50%)' }} />
+        {/* Line button: full width, anchored at top:0 (= mosaic bottom), border-y, no shadow.
+            Square mode: blue fill + lighter inner divider for visual distinction. */}
+        <div className="absolute left-0 right-0 flex items-center justify-center" style={{ top: 0, height: 20, borderTop: '3px solid #000', borderBottom: '3px solid #000', background: tileShape === 'square' ? '#1a6bbf' : '#fff', zIndex: 1 }}>
+          <div style={{ position: 'absolute', left: 0, right: 0, top: '50%', height: 2, background: tileShape === 'square' ? 'rgba(255,255,255,0.35)' : '#000', transform: 'translateY(-50%)' }} />
         </div>
         {/* GEO-FEED pill: center locked to line center (top:10px = midpoint of 20px line).
             translateY(-50%) pulls it up by half its own height → top half overlaps mosaic. */}
@@ -4703,7 +4704,21 @@ export default function GeoPostView({ session }) {
 
           <div className="flex items-center gap-1 ml-auto">
             {/* ⬆️ returns to panel mode and fully resets panel state */}
-            <button onMouseDown={e => e.preventDefault()} onClick={() => { setFilterPanelMode('panel'); setFilterPanelPinned(false); setDesktopPanelRow(1); }} className={baseFB} style={activeFS} title="Return to side panel">⬆️</button>
+            <button onMouseDown={e => e.preventDefault()} onClick={() => {
+              setFilterPanelMode('panel');
+              setFilterPanelPinned(false);
+              setDesktopPanelRow(1);
+              // Hard-reset internal tracking refs so the scroll-driven moving
+              // logic re-engages cleanly after returning from topbar mode.
+              panelRowRef.current = 1;
+              lastAppliedRowRef.current = 1;
+              if (filterPanelInnerRef.current) {
+                filterPanelInnerRef.current.style.transition = 'none';
+                filterPanelInnerRef.current.style.transform = 'translateY(0)';
+                filterPanelInnerRef.current.style.filter = 'blur(0)';
+                filterPanelInnerRef.current.style.opacity = '1';
+              }
+            }} className={baseFB} style={activeFS} title="Return to side panel">⬆️</button>
             <button onMouseDown={e => e.preventDefault()} onClick={() => setFilterPanelPinned(v => !v)} className={baseFB} style={filterPanelPinned ? activeFS : {}} title={filterPanelPinned ? 'Unpin top bar' : 'Pin top bar below topbar'}>📌</button>
           </div>
         </div>
