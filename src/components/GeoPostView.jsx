@@ -2597,6 +2597,34 @@ export default function GeoPostView({ session }) {
     if (tileShape === 'square') document.documentElement.classList.add('lp-square-mode');
     else document.documentElement.classList.remove('lp-square-mode');
   }, [tileShape]);
+  // Measure rounded-mode grid width once → use as baseline for square-mode row scaling.
+  // In square mode the grid breaks out to ~100vw, so cols widen; rows must scale by the
+  // same ratio to preserve tile aspect ratio.
+  const [roundedGridWidth, setRoundedGridWidth] = useState(0);
+  const [squareGridWidth, setSquareGridWidth] = useState(0);
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const measure = () => {
+      const el = desktopGridRef.current;
+      if (!el) return;
+      const w = el.offsetWidth;
+      if (w <= 0) return;
+      if (tileShape === 'square') setSquareGridWidth(w);
+      else setRoundedGridWidth(w);
+    };
+    measure();
+    let ro;
+    if (typeof ResizeObserver !== 'undefined' && desktopGridRef.current) {
+      ro = new ResizeObserver(measure);
+      ro.observe(desktopGridRef.current);
+    } else {
+      window.addEventListener('resize', measure);
+    }
+    return () => {
+      if (ro) ro.disconnect();
+      else window.removeEventListener('resize', measure);
+    };
+  }, [tileShape, feedLayout]);
   const [listScaleOpen, setListScaleOpen] = useState(false);
   const createPostAreaRef = useRef(null);
   const [fabOpacity, setFabOpacity] = useState(0);
@@ -4136,13 +4164,23 @@ export default function GeoPostView({ session }) {
         html.lp-square-mode *::after {
           border-radius: 0 !important;
         }
+        /* Reserve scrollbar space so 100vw doesn't trigger horizontal scroll. */
+        html.lp-square-mode { scrollbar-gutter: stable; overflow-x: hidden; }
+        html.lp-square-mode body { overflow-x: hidden; }
         /* Tile grid: gap:0 + zero padding on the tile area + zero margin-top
            so the grid runs flush against the geofeed separator AND the
            viewport edges (left/right). border-box ensures the existing 3px
            border sits INSIDE each cell — no overlap, no negative margin.    */
         html.lp-square-mode .gp-tile-grid { gap: 0 !important; margin-top: 0 !important; }
+        /* Break tile area out of any max-w wrapper to span full viewport width.
+           scrollbar-gutter on <html> reserves the scrollbar so 100vw == content edge. */
         html.lp-square-mode .gp-tile-area {
           padding: 0 !important;
+          width: 100vw !important;
+          max-width: 100vw !important;
+          margin-left: calc(50% - 50vw) !important;
+          margin-right: calc(50% - 50vw) !important;
+          box-sizing: border-box !important;
         }
         /* Tile card: kill drop shadow; keep the original colored border (it's
            already box-sizing: border-box from Tailwind preflight). Adjacent
@@ -4152,9 +4190,15 @@ export default function GeoPostView({ session }) {
           box-shadow: none !important;
           box-sizing: border-box !important;
         }
-        /* Ghost-tile area expands to fill viewport bottom in square mode.
-           min-height = viewport - rough offset for topbar+separator+createpost.
-           The Show More clamp logic still works because it sets max-height. */
+        /* Square mode: collapse geofeed-separator wrapper down to JUST the line
+           button (20px tall + 3px border top + 3px border bottom = 26px) so the
+           tile grid sits flush against the bottom of the line — no whitespace gap. */
+        html.lp-square-mode .gp-geofeed-sep {
+          height: 26px !important;
+          margin-bottom: 0 !important;
+          padding-bottom: 0 !important;
+        }
+        /* Ghost-tile area expands to fill viewport bottom in square mode. */
         html.lp-square-mode .gp-tile-area-fill {
           min-height: calc(100vh - 120px) !important;
         }
@@ -4177,12 +4221,11 @@ export default function GeoPostView({ session }) {
           margin: 0 !important;
           border-radius: 0 !important;
         }
-        /* Geofeed pill: anchor BOTTOM flush with bottom of the line button (line button
-           is 20px tall at top:0; separator is 44px → bottom of line at top=20).
-           Pill bottom = 24px from bottom of separator (44 - 20 = 24).         */
+        /* Geofeed pill anchors with its BOTTOM flush against the bottom of the
+           shrunk-to-26px separator wrapper, so pill bottom = line bottom. */
         html.lp-square-mode .gp-geofeed-pill {
           top: auto !important;
-          bottom: 24px !important;
+          bottom: 0 !important;
           transform: translate(-50%, 0) !important;
         }
       `}</style>
@@ -4549,7 +4592,7 @@ export default function GeoPostView({ session }) {
       {/* GEO-FEED Separator: OUTSIDE mosaic wrapper. overflow:visible so pill pokes up into mosaic.
           Line button top = mosaic wrapper bottom exactly.
           GEO-FEED pill centered on line → extends ~half-height above into mosaic area. */}
-      <div className="w-full relative" style={{ height: 44, overflow: 'visible', zIndex: 10 }}>
+      <div className="w-full relative gp-geofeed-sep" style={{ height: 44, overflow: 'visible', zIndex: 10 }}>
         {/* Line button: full width, anchored at top:0 (= mosaic bottom), border-y, no shadow */}
         <div className="absolute left-0 right-0 flex items-center justify-center" style={{ top: 0, height: 20, borderTop: '3px solid #000', borderBottom: '3px solid #000', background: '#fff', zIndex: 1 }}>
           <div style={{ position: 'absolute', left: 0, right: 0, top: '50%', height: 2, background: '#000', transform: 'translateY(-50%)' }} />
@@ -4654,7 +4697,7 @@ export default function GeoPostView({ session }) {
       <div className="gp-tile-area-fill" style={{
         overflow: canShowLess ? 'visible' : 'clip',
         overflowClipMargin: '40px',
-        maxHeight: canShowLess ? 'none' : `${16 * Math.max(1, (desktopUnitHeight - 12) / 2) + 15 * 12}px`,
+        maxHeight: canShowLess ? 'none' : `${16 * Math.max(1, (desktopUnitHeight - 12) / 2) * (tileShape === 'square' && roundedGridWidth > 0 && squareGridWidth > 0 ? squareGridWidth / roundedGridWidth : 1) + 15 * (tileShape === 'square' ? 0 : 12)}px`,
         position: 'relative',
       }}>
         <div ref={desktopGridRef} className="hidden md:grid gap-3 mt-3 gp-tile-grid"
@@ -4664,8 +4707,9 @@ export default function GeoPostView({ session }) {
             // dense packs gaps left by pinned/filter panel placements.
             gridAutoFlow: 'dense',
             gridTemplateColumns: 'repeat(14, minmax(0, 1fr))',
-            // Same row height in both shape modes — tiles keep their rounded-mode aspect ratio.
-            gridAutoRows: `${Math.max(1, (desktopUnitHeight - 12) / 2)}px`,
+            // Square mode: scale row height by (currentGridWidth / roundedGridWidth) so cols+rows
+            // grow together and tile aspect ratio matches rounded mode exactly.
+            gridAutoRows: `${Math.max(1, (desktopUnitHeight - 12) / 2) * (tileShape === 'square' && roundedGridWidth > 0 && squareGridWidth > 0 ? squareGridWidth / roundedGridWidth : 1)}px`,
             overflowAnchor: 'none',
             overflow: 'visible',
           }}
