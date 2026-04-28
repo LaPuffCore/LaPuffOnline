@@ -4115,8 +4115,7 @@ export default function GeoPostView({ session }) {
         /* ─── SQUARE MODE ─── flush tiles, no rounded corners site-wide ─── */
         .gp-tile-card {
           transition: border-radius 450ms cubic-bezier(0.22, 1, 0.36, 1),
-                      box-shadow 450ms ease,
-                      border-color 300ms ease !important;
+                      box-shadow 450ms ease !important;
         }
         .gp-tile-card-inner {
           transition: border-radius 450ms cubic-bezier(0.22, 1, 0.36, 1) !important;
@@ -4127,7 +4126,7 @@ export default function GeoPostView({ session }) {
         .gp-tile-area {
           transition: padding 450ms cubic-bezier(0.22, 1, 0.36, 1);
         }
-        /* Square-mode global: zero out border-radius on every element + simple fade */
+        /* Square-mode global: zero border-radius on every element + simple fade */
         html.lp-square-mode,
         html.lp-square-mode body {
           transition: background-color 220ms ease;
@@ -4137,17 +4136,29 @@ export default function GeoPostView({ session }) {
         html.lp-square-mode *::after {
           border-radius: 0 !important;
         }
-        /* Tile-specific: kill drop shadow, gap:0, no negative margin needed.
-           Border becomes inward inset shadow so neighbors share a single 3px
-           edge with NO overlap. The actual <div> border is hidden. */
-        html.lp-square-mode .gp-tile-grid { gap: 0 !important; }
-        html.lp-square-mode .gp-tile-area { padding-left: 0 !important; padding-right: 0 !important; }
-        html.lp-square-mode .gp-tile-card {
-          border-color: transparent !important;
-          box-shadow: inset 0 0 0 3px var(--gp-border, #000) !important;
+        /* Tile grid: gap:0 + zero padding on the tile area + zero margin-top
+           so the grid runs flush against the geofeed separator AND the
+           viewport edges (left/right). border-box ensures the existing 3px
+           border sits INSIDE each cell — no overlap, no negative margin.    */
+        html.lp-square-mode .gp-tile-grid { gap: 0 !important; margin-top: 0 !important; }
+        html.lp-square-mode .gp-tile-area {
+          padding: 0 !important;
         }
-        /* Filter panel in square mode: no shadow, fits cleanly inside its 2x2 cell.
-           Keep border, but compress padding so content doesn't overflow. */
+        /* Tile card: kill drop shadow; keep the original colored border (it's
+           already box-sizing: border-box from Tailwind preflight). Adjacent
+           tiles abut → each renders its own 3px colored border on every side,
+           giving a clean shared edge with both colors visible.              */
+        html.lp-square-mode .gp-tile-card {
+          box-shadow: none !important;
+          box-sizing: border-box !important;
+        }
+        /* Ghost-tile area expands to fill viewport bottom in square mode.
+           min-height = viewport - rough offset for topbar+separator+createpost.
+           The Show More clamp logic still works because it sets max-height. */
+        html.lp-square-mode .gp-tile-area-fill {
+          min-height: calc(100vh - 120px) !important;
+        }
+        /* Filter panel in square mode: no shadow, fits cleanly inside its 2x2 cell */
         html.lp-square-mode .gp-filter-panel {
           border-style: solid !important;
           border-color: #000 !important;
@@ -4161,13 +4172,19 @@ export default function GeoPostView({ session }) {
         html.lp-square-mode .gp-filter-panel > * {
           font-size: 10px !important;
         }
-        /* In topbar mode, square mode: collapse the gap between the bar and grid */
+        /* Topbar filter bar: collapse the gap between bar and grid */
         html.lp-square-mode .gp-topbar-filter {
           margin: 0 !important;
           border-radius: 0 !important;
         }
-        /* Kill the mt-3 / margin-top on grid when square so it sits flush */
-        html.lp-square-mode .gp-tile-grid { margin-top: 0 !important; }
+        /* Geofeed pill: anchor BOTTOM flush with bottom of the line button (line button
+           is 20px tall at top:0; separator is 44px → bottom of line at top=20).
+           Pill bottom = 24px from bottom of separator (44 - 20 = 24).         */
+        html.lp-square-mode .gp-geofeed-pill {
+          top: auto !important;
+          bottom: 24px !important;
+          transform: translate(-50%, 0) !important;
+        }
       `}</style>
       {/* Create-post section with mosaic behind it */}
       <div className="w-full relative overflow-hidden" style={{ paddingBottom: 48 }}>
@@ -4634,7 +4651,7 @@ export default function GeoPostView({ session }) {
         {feedLayout === 'tiles' && (<>
       {/* Height-clamp wrapper: clips at 16 half-rows when collapsed; expands on Show More.
           Grid itself stays overflow:visible so corner buttons on edge tiles are never clipped. */}
-      <div style={{
+      <div className="gp-tile-area-fill" style={{
         overflow: canShowLess ? 'visible' : 'clip',
         overflowClipMargin: '40px',
         maxHeight: canShowLess ? 'none' : `${16 * Math.max(1, (desktopUnitHeight - 12) / 2) + 15 * 12}px`,
@@ -4647,9 +4664,8 @@ export default function GeoPostView({ session }) {
             // dense packs gaps left by pinned/filter panel placements.
             gridAutoFlow: 'dense',
             gridTemplateColumns: 'repeat(14, minmax(0, 1fr))',
-            // In square mode, the tile area loses 32px horizontal padding → cols widen ~2.5%.
-            // Scale row height by the same ratio so tiles stay proportional.
-            gridAutoRows: `${Math.max(1, (desktopUnitHeight - 12) / 2) * (tileShape === 'square' ? 1.025 : 1)}px`,
+            // Same row height in both shape modes — tiles keep their rounded-mode aspect ratio.
+            gridAutoRows: `${Math.max(1, (desktopUnitHeight - 12) / 2)}px`,
             overflowAnchor: 'none',
             overflow: 'visible',
           }}
