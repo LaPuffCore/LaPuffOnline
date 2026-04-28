@@ -2597,29 +2597,26 @@ export default function GeoPostView({ session }) {
     if (tileShape === 'square') document.documentElement.classList.add('lp-square-mode');
     else document.documentElement.classList.remove('lp-square-mode');
   }, [tileShape]);
-  // Track viewport width and scrollbar width so we can break the tile area
-  // out of the constrained max-w-7xl wrapper without triggering a horizontal
-  // scrollbar and so we can scale row height proportionally with the width.
-  const [vpw, setVpw] = useState(typeof window !== 'undefined' ? window.innerWidth : 1280);
-  const [sbw, setSbw] = useState(0);
+  // Measure GeoPostView's parent (the scroll container) so we can compute the
+  // square-mode row scaling factor. In rounded mode the tile area has 56px of
+  // horizontal padding (px-3 + md:px-4 = 24+32). In square mode that padding
+  // is removed and tiles fill the full parent width — to preserve aspect ratio
+  // we scale rows by parentWidth / (parentWidth - 56).
+  const containerRef = useRef(null);
+  const [containerW, setContainerW] = useState(0);
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
     const measure = () => {
-      setVpw(window.innerWidth);
-      setSbw(Math.max(0, window.innerWidth - document.documentElement.clientWidth));
+      const el = containerRef.current?.parentElement;
+      if (el) setContainerW(el.clientWidth);
     };
     measure();
     window.addEventListener('resize', measure);
     return () => window.removeEventListener('resize', measure);
   }, []);
-  // Constants: max-w-7xl = 80rem = 1280px at default root font size.
-  // Constrained grid width = min(vpw - sbw - 56, 1224)
-  //   - 56 = parent px-3 (24px) + tile-area md:px-4 (32px)
-  //   - 1224 = 1280 - 56
-  // Square grid width = vpw - sbw (full body width)
-  const roundedGridW = Math.min(vpw - sbw - 56, 1224);
-  const squareGridW = vpw - sbw;
-  const squareRowScale = tileShape === 'square' && roundedGridW > 0 ? squareGridW / roundedGridW : 1;
+  const squareRowScale = (tileShape === 'square' && containerW > 56)
+    ? containerW / (containerW - 56)
+    : 1;
   const [listScaleOpen, setListScaleOpen] = useState(false);
   const createPostAreaRef = useRef(null);
   const [fabOpacity, setFabOpacity] = useState(0);
@@ -4130,7 +4127,7 @@ export default function GeoPostView({ session }) {
   };
 
   return (
-    <div className="w-full" ref={topAnchorRef}>
+    <div className="w-full" ref={(el) => { topAnchorRef.current = el; containerRef.current = el; }}>
       <style>{`
         .geopost-tiles-animating > *:not(aside):not([data-pinned="true"]) {
           transition: transform 1000ms cubic-bezier(0.16, 1, 0.3, 1) !important;
@@ -4166,8 +4163,14 @@ export default function GeoPostView({ session }) {
            the geofeed separator AND the viewport edges (left/right).
            border-box ensures the existing 3px border sits INSIDE each cell.   */
         html.lp-square-mode .gp-tile-grid { gap: 0 !important; margin-top: 0 !important; }
-        /* (Tile-area width / margin / padding handled inline in JSX so we can
-           subtract the measured scrollbar width — avoids 100vw overflow.)     */
+        /* Just zero the tile-area horizontal padding so the grid fills the
+           full parent (which is the scroll container — already viewport-width
+           with reserved scrollbar gutter). NO 100vw breakout, NO margin
+           hacks — those caused right-side gaps and overflow. */
+        html.lp-square-mode .gp-tile-area {
+          padding-left: 0 !important;
+          padding-right: 0 !important;
+        }
         /* Tile card: kill drop shadow; keep the original colored border (it's
            already box-sizing: border-box from Tailwind preflight). Adjacent
            tiles abut → each renders its own 3px colored border on every side,
@@ -4188,19 +4191,13 @@ export default function GeoPostView({ session }) {
         html.lp-square-mode .gp-tile-area-fill {
           min-height: calc(100vh - 120px) !important;
         }
-        /* Filter panel in square mode: no shadow, fits cleanly inside its 2x2 cell */
+        /* Filter panel in square mode: ONLY kill drop shadow. DO NOT shrink
+           font-size or padding — that shrinks the panel's intrinsic height,
+           which is what desktopUnitHeight is measured from, which in turn
+           halves every tile's row height. Border-radius is killed by the
+           global rule. */
         html.lp-square-mode .gp-filter-panel {
-          border-style: solid !important;
-          border-color: #000 !important;
-          border-width: 3px !important;
           box-shadow: none !important;
-          padding: 6px !important;
-          overflow: hidden !important;
-          height: 100% !important;
-          box-sizing: border-box !important;
-        }
-        html.lp-square-mode .gp-filter-panel > * {
-          font-size: 10px !important;
         }
         /* Topbar filter bar: collapse the gap between bar and grid */
         html.lp-square-mode .gp-topbar-filter {
@@ -4678,15 +4675,7 @@ export default function GeoPostView({ session }) {
         </div>
       )}
 
-      <div className="w-full px-3 md:px-4 gp-tile-area" style={tileShape === 'square' ? {
-        width: `calc(100vw - ${sbw}px)`,
-        maxWidth: `calc(100vw - ${sbw}px)`,
-        marginLeft: `calc(50% - 50vw + ${sbw / 2}px)`,
-        marginRight: `calc(50% - 50vw + ${sbw / 2}px)`,
-        paddingLeft: 0,
-        paddingRight: 0,
-        boxSizing: 'border-box',
-      } : undefined}>
+      <div className="w-full px-3 md:px-4 gp-tile-area">
         {/* ── TILE / BENTO MODE ── */}
         {feedLayout === 'tiles' && (<>
       {/* Height-clamp wrapper: clips at 16 half-rows when collapsed; expands on Show More.
