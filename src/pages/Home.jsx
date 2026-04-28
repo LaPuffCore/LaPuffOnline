@@ -357,7 +357,7 @@ export default function Home({ events = [], eventsLoading = false }) {
       {/* Header — collapses differently per view: map/geo slide off-screen, tile reduces to minimal expand bar */}
       <header
         ref={headerRef}
-        className={`lp-topbar bg-white ${collapsedAsMinimal ? 'border-b border-black shadow-none' : 'border-b-4 border-black shadow-[0_4px_0px_black]'} z-50 flex-shrink-0 transition-[margin-top,transform,opacity,border-width] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform ${collapsedAsHidden ? '-translate-y-full opacity-0' : 'translate-y-0'} ${(isMap || (isGeo && headerCollapsed)) ? 'absolute w-full' : 'relative'}`}
+        className={`lp-topbar bg-white ${collapsedAsMinimal ? 'border-b-[5px] border-black shadow-none' : 'border-b-4 border-black shadow-[0_4px_0px_black]'} z-50 flex-shrink-0 transition-[margin-top,transform,opacity,border-width] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform ${collapsedAsHidden ? '-translate-y-full opacity-0' : 'translate-y-0'} ${(isMap || (isGeo && headerCollapsed)) ? 'absolute w-full' : 'relative'}`}
         style={!isMap && !(isGeo && headerCollapsed) ? { marginTop: !showHeader && measuredHeaderH ? `-${measuredHeaderH}px` : '0px', opacity: !showHeader ? 0 : 1 } : {}}
       >
         {collapsedAsMinimal ? (
@@ -488,6 +488,20 @@ export default function Home({ events = [], eventsLoading = false }) {
               >
                 🏆
               </button>
+
+              {/* Desktop Collapse Header Button (right of trophy) */}
+              {(isMap || isTiles || isGeo) && (
+                <button onClick={() => setHeaderCollapsed(true)}
+                  className="hidden md:flex w-9 h-9 md:w-10 md:h-10 items-center justify-center rounded-full border-2 md:border-3 border-black bg-white shadow-[2px_2px_0px_black] md:shadow-[3px_3px_0px_black] transition-all hover:scale-105"
+                  title="Collapse header"
+                  onMouseEnter={e => { e.currentTarget.style.backgroundColor = accentColor; e.currentTarget.style.color = '#fff'; e.currentTarget.style.borderColor = accentColor; }}
+                  onMouseLeave={e => { e.currentTarget.style.backgroundColor = ''; e.currentTarget.style.color = ''; e.currentTarget.style.borderColor = ''; }}>
+                  <svg width="14" height="18" viewBox="0 0 12 16" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="2 7 6 3 10 7"/>
+                    <polyline points="2 13 6 9 10 13"/>
+                  </svg>
+                </button>
+              )}
             </div>
 
             {/* View Toggles — center */}
@@ -521,18 +535,6 @@ export default function Home({ events = [], eventsLoading = false }) {
 
             {/* Desktop Actions / Mobile Hamburger */}
             <div className="flex items-center gap-2 ml-auto md:ml-0">
-              {(isMap || isTiles || isGeo) && (
-                <button onClick={() => setHeaderCollapsed(true)}
-                  className="hidden md:flex items-center justify-center px-3 py-2 rounded-full font-black border-2 border-black bg-white shadow-[2px_2px_0px_black] transition-all"
-                  title="Collapse header"
-                  onMouseEnter={e => { e.currentTarget.style.backgroundColor = accentColor; e.currentTarget.style.color = '#fff'; e.currentTarget.style.borderColor = accentColor; }}
-                  onMouseLeave={e => { e.currentTarget.style.backgroundColor = ''; e.currentTarget.style.color = ''; e.currentTarget.style.borderColor = ''; }}>
-                  <svg width="14" height="18" viewBox="0 0 12 16" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="2 7 6 3 10 7"/>
-                    <polyline points="2 13 6 9 10 13"/>
-                  </svg>
-                </button>
-              )}
               <button onClick={() => setShowForm(true)}
                 className="hidden md:block text-white font-black px-3.5 py-1.5 rounded-full text-xs border-2 border-black transition-all shadow-[2px_2px_0px_black] hover:scale-105 whitespace-nowrap text-center"
                 style={{ backgroundColor: accentColor, minWidth: '112px' }}>

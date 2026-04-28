@@ -194,7 +194,7 @@ export default function ParticipantDot({ onStatusChange }) {
         }}
         onMouseEnter={() => { setHoverOpen(true); setBtnHovered(true); }}
         onMouseLeave={() => setBtnHovered(false)}
-        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border-2 transition-colors shadow-[2px_2px_0px_black]"
+        className="flex items-center gap-1.5 md:gap-2 px-2.5 py-1.5 md:px-3.5 md:py-2.5 rounded-full md:rounded-2xl border-2 md:border-3 transition-colors shadow-[2px_2px_0px_black] md:shadow-[3px_3px_0px_black]"
         style={{
           backgroundColor: btnHovered ? statusAccent : '#fff',
           borderColor: btnHovered ? statusAccent : '#000',
@@ -202,10 +202,10 @@ export default function ParticipantDot({ onStatusChange }) {
         }}
       >
         <span
-          className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${loading ? 'animate-pulse' : ''}`}
+          className={`w-2.5 h-2.5 md:w-3 md:h-3 rounded-full flex-shrink-0 ${loading ? 'animate-pulse' : ''}`}
           style={{ background: btnHovered ? '#fff' : dotColor, boxShadow: `0 0 6px ${btnHovered ? '#fff' : dotColor}` }}
         />
-        <span className="text-[11px] font-black uppercase tracking-tighter" style={{ color: btnHovered ? '#fff' : labelColor }}>
+        <span className="text-[11px] md:text-xs font-black uppercase tracking-tighter" style={{ color: btnHovered ? '#fff' : labelColor }}>
           {loading && stage === 'validating' ? 'syncing' : statusLabel}
         </span>
       </button>
@@ -221,7 +221,7 @@ export default function ParticipantDot({ onStatusChange }) {
         <div
           ref={popupRef}
           onMouseEnter={() => setHoverOpen(true)}
-          className="absolute top-10 left-0 sm:left-auto sm:right-0 md:right-auto md:left-1/2 md:-translate-x-1/2 z-50 bg-black text-white text-[11px] rounded-2xl px-3 py-3 w-72 max-w-[calc(100vw-0.5rem)] text-center font-bold shadow-lg whitespace-normal leading-snug"
+          className="absolute top-12 left-0 sm:left-auto sm:right-0 md:right-auto md:left-0 md:translate-x-0 z-50 bg-black text-white text-[11px] rounded-2xl px-3 py-3 w-72 max-w-[calc(100vw-1rem)] text-center font-bold shadow-lg whitespace-normal leading-snug"
         >
           {stage === 'result' && (
             <button
