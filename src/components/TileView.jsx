@@ -30,7 +30,7 @@ const SOURCE_MODES = [
 ];
 const MAX_TAG_FILTERS = 3;
 const MAX_EMOJI_FILTERS = 5;
-const PAGE_SIZE = 12;
+const PAGE_SIZE = 10;
 
 const EMOJI_GROUPS = [
   ['⚽', '🏀', '🏈', '⚾', '🥎', '🎾', '🏐', '🏉', '🥊', '🏒', '🎽', '🏆', '🥇', '🥈', '🥉'],
@@ -183,6 +183,14 @@ export default function TileView({ events, eventsLoading = false }) {
   useEffect(() => {
     try { localStorage.setItem('lapuff_tileview_shape', tileShape); } catch {}
   }, [tileShape]);
+
+  // Layout mode: 'wide' (default) full-screen 5-col grid, or 'narrow' constrained 4-col.
+  const [tileLayout, setTileLayout] = useState(() => {
+    try { return localStorage.getItem('lapuff_tileview_layout') || 'wide'; } catch { return 'wide'; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('lapuff_tileview_layout', tileLayout); } catch {}
+  }, [tileLayout]);
 
   const tagDropdownRef = useRef(null);
   const emojiPickerRef = useRef(null);
@@ -401,7 +409,7 @@ export default function TileView({ events, eventsLoading = false }) {
   const hasActiveMoreFilters = priceFilter !== 'all' || emojiFilters.length > 0 || borough !== 'All';
 
   return (
-    <div className={`w-full sm:scale-100 scale-[0.98] origin-top transition-transform lp-theme-scope ${tileShape === 'square' ? 'tv-square' : ''}`}>
+    <div className={`w-full sm:scale-100 scale-[0.98] origin-top transition-transform lp-theme-scope ${tileShape === 'square' ? 'tv-square' : ''} ${tileLayout === 'narrow' ? 'tv-narrow' : ''}`}>
       <style>{`
         /* ─── TileView SQUARE MODE (desktop only) ─── flush event tiles, no rounded corners ─── */
         @media (min-width: 768px) {
@@ -435,6 +443,21 @@ export default function TileView({ events, eventsLoading = false }) {
           }
           .tv-square .lp-tile-card:hover {
             transform: none !important;
+          }
+          /* ─── TileView NARROW LAYOUT (desktop only) ─── constrained centered width, 4-col cap ─── */
+          .tv-narrow > .bg-white.sticky,
+          .tv-narrow .tv-tile-grid {
+            max-width: 80rem !important;
+            margin-left: auto !important;
+            margin-right: auto !important;
+          }
+          .tv-narrow .tv-tile-grid {
+            grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+          }
+          /* Narrow + Square combined: keep flush look but still capped width */
+          .tv-square.tv-narrow > .bg-white.sticky,
+          .tv-square.tv-narrow .tv-tile-grid {
+            max-width: 80rem !important;
           }
         }
       `}</style>
@@ -638,22 +661,40 @@ export default function TileView({ events, eventsLoading = false }) {
             </div>
           )}
 
-          {/* Square/Round shape toggle — right-aligned. Visual + state on mobile, fully wired on desktop. */}
-          <div className="ml-auto flex items-center gap-0 border-[2.5px] border-black rounded-2xl overflow-hidden bg-white" style={{ flexShrink: 0 }}>
-            <button
-              onClick={() => setTileShape('rounded')}
-              title="Rounded tiles"
-              className={`px-2 py-1 text-[11px] font-black transition-colors ${tileShape === 'rounded' ? 'bg-[#7C3AED] text-white' : 'bg-white hover:bg-violet-50'}`}
-            >
-              ▢
-            </button>
-            <button
-              onClick={() => setTileShape('square')}
-              title="Square tiles"
-              className={`px-2 py-1 text-[11px] font-black transition-colors border-l-[2.5px] border-black ${tileShape === 'square' ? 'bg-[#7C3AED] text-white' : 'bg-white hover:bg-violet-50'}`}
-            >
-              ◻
-            </button>
+          {/* Layout (Wide/Narrow) + Shape (Round/Square) toggles — right-aligned. */}
+          <div className="ml-auto flex items-center gap-2" style={{ flexShrink: 0 }}>
+            <div className="hidden md:flex items-center gap-0 border-[2.5px] border-black rounded-2xl overflow-hidden bg-white">
+              <button
+                onClick={() => setTileLayout('wide')}
+                title="Wide (full screen) layout"
+                className={`px-2 py-1 text-[12px] font-black transition-colors leading-none ${tileLayout === 'wide' ? 'bg-[#7C3AED] text-white' : 'bg-white hover:bg-violet-50'}`}
+              >
+                ▬
+              </button>
+              <button
+                onClick={() => setTileLayout('narrow')}
+                title="Narrow (centered) layout"
+                className={`px-2 py-1 text-[12px] font-black transition-colors leading-none border-l-[2.5px] border-black ${tileLayout === 'narrow' ? 'bg-[#7C3AED] text-white' : 'bg-white hover:bg-violet-50'}`}
+              >
+                ▮
+              </button>
+            </div>
+            <div className="flex items-center gap-0 border-[2.5px] border-black rounded-2xl overflow-hidden bg-white">
+              <button
+                onClick={() => setTileShape('rounded')}
+                title="Rounded tiles"
+                className={`px-2 py-1 text-[11px] font-black transition-colors ${tileShape === 'rounded' ? 'bg-[#7C3AED] text-white' : 'bg-white hover:bg-violet-50'}`}
+              >
+                ▢
+              </button>
+              <button
+                onClick={() => setTileShape('square')}
+                title="Square tiles"
+                className={`px-2 py-1 text-[11px] font-black transition-colors border-l-[2.5px] border-black ${tileShape === 'square' ? 'bg-[#7C3AED] text-white' : 'bg-white hover:bg-violet-50'}`}
+              >
+                ◻
+              </button>
+            </div>
           </div>
         </div>
 

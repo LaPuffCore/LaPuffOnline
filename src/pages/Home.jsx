@@ -376,7 +376,7 @@ export default function Home({ events = [], eventsLoading = false }) {
             </button>
           </div>
         ) : (
-        <div className={`mx-auto py-2 md:py-3 px-3 transition-[max-width,padding] duration-300 ease-out ${topbarWide ? 'max-w-none md:px-2' : 'max-w-7xl md:px-4'}`}>
+        <div className={`mx-auto py-2 md:py-3 px-3 transition-[max-width,padding] duration-300 ease-out ${topbarWide ? 'max-w-none md:pl-2 md:pr-6' : 'max-w-7xl md:px-4'}`}>
           {/* Top Row: Logo, Nav, Menu */}
           <div className={`flex items-center gap-1 md:gap-2 md:justify-between md:relative ${topbarWide ? 'md:gap-0' : ''}`}>
             {/* Logo + Music Button */}
@@ -492,23 +492,23 @@ export default function Home({ events = [], eventsLoading = false }) {
 
             {/* View Toggles — center */}
             <div className="flex items-center gap-1 md:gap-2 scale-90 md:scale-100 md:absolute md:left-1/2 md:-translate-x-1/2">
-              <div className="bg-gray-100 border-2 md:border-3 border-black rounded-xl md:rounded-2xl p-0.5 md:p-1 flex shadow-[2px_2px_0px_black] md:shadow-[3px_3px_0px_black]">
+              <div className="bg-gray-100 border-2 md:border-3 border-black rounded-xl md:rounded-2xl p-0.5 md:p-1 flex items-center justify-center shadow-[2px_2px_0px_black] md:shadow-[3px_3px_0px_black]">
                 <button onClick={() => { setView('tiles'); setShowLeaderboard(false); setShowHeader(true); }}
-                  className="px-2.5 py-1.5 md:px-4 md:py-2 rounded-lg md:rounded-xl text-xs md:text-sm font-black transition-all"
+                  className="px-2.5 py-1.5 md:px-4 md:py-2 rounded-lg md:rounded-xl text-xs md:text-sm font-black transition-all flex items-center justify-center md:min-w-[104px]"
                   style={view === 'tiles' && !showLeaderboard ? { backgroundColor: accentColor, color: '#fff', boxShadow: '1px 1px 0px #333' } : {}}
                   onMouseEnter={e => { if (!(view === 'tiles' && !showLeaderboard)) e.currentTarget.style.backgroundColor = accentColor + '30'; }}
                   onMouseLeave={e => { if (!(view === 'tiles' && !showLeaderboard)) e.currentTarget.style.backgroundColor = ''; }}>
                   🎴 Tiles
                 </button>
                 <button onClick={handleMapClick}
-                  className="px-2.5 py-1.5 md:px-4 md:py-2 rounded-lg md:rounded-xl text-xs md:text-sm font-black transition-all"
+                  className="px-2.5 py-1.5 md:px-4 md:py-2 rounded-lg md:rounded-xl text-xs md:text-sm font-black transition-all flex items-center justify-center md:min-w-[104px]"
                   style={view === 'map' && !showLeaderboard ? { backgroundColor: accentColor, color: '#fff', boxShadow: '1px 1px 0px #333' } : {}}
                   onMouseEnter={e => { if (!(view === 'map' && !showLeaderboard)) e.currentTarget.style.backgroundColor = accentColor + '30'; }}
                   onMouseLeave={e => { if (!(view === 'map' && !showLeaderboard)) e.currentTarget.style.backgroundColor = ''; }}>
                   🗺️ Map
                 </button>
                 <button onClick={() => { setView('geo'); setShowLeaderboard(false); }}
-                  className="px-2.5 py-1 md:px-4 md:py-2 rounded-lg md:rounded-xl text-[8px] md:text-sm font-black transition-all flex flex-col md:flex-row items-center justify-center gap-0 md:gap-1 md:flex-none flex-1"
+                  className="px-2.5 py-1 md:px-4 md:py-2 rounded-lg md:rounded-xl text-[8px] md:text-sm font-black transition-all flex flex-col md:flex-row items-center justify-center gap-0 md:gap-1 flex-1 md:flex-none md:min-w-[104px]"
                   style={view === 'geo' && !showLeaderboard ? { backgroundColor: accentColor, color: '#fff', boxShadow: '1px 1px 0px #333' } : {}}
                   onMouseEnter={e => { if (!(view === 'geo' && !showLeaderboard)) e.currentTarget.style.backgroundColor = accentColor + '30'; }}
                   onMouseLeave={e => { if (!(view === 'geo' && !showLeaderboard)) e.currentTarget.style.backgroundColor = ''; }}>
