@@ -1003,7 +1003,7 @@ function GeoPostMosaic({ posts, accentColor, opacity = 0.42, onTileClick = null 
 }
 
 // ── PostCard ──────────────────────────────────────────────────────────────────
-function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, onSelectTag, zipHeatMap, boroughHeatMap, textScale = 1, imageScale = 1, imagePriority = false, isDesktopMasonry = false, gridUnitHeight = 0, commentCount = 0, commentsOpen = false, onToggleComments, commentsChildren, onOpenPopup, onHide, isOwner = false, onDelete, isPinned = false, pinnedRow = null, pinnedCol = null, userRow = null, userCol = null, dragTargetRow = null, dragTargetCol = null, onTogglePin, onClickUsername, isDragging = false }) {
+function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, onSelectTag, zipHeatMap, boroughHeatMap, textScale = 1, imageScale = 1, imagePriority = false, isDesktopMasonry = false, gridUnitHeight = 0, commentCount = 0, commentsOpen = false, onToggleComments, commentsChildren, onOpenPopup, onHide, isOwner = false, onDelete, isPinned = false, pinnedRow = null, pinnedCol = null, pinnedW = null, pinnedH = null, userRow = null, userCol = null, dragTargetRow = null, dragTargetCol = null, onTogglePin, onClickUsername, isDragging = false }) {
   const { resolvedTheme } = useSiteTheme();
   const theme = getPostVisualTheme(post, resolvedTheme);
   const date = new Date(post.created_at);
@@ -1142,9 +1142,13 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
       };
     }
     if (isPinned && pinnedRow != null && pinnedCol != null) {
+      // Use frozen span stored at pin time — prevents image-load or text-reflow from changing the tile footprint.
+      // Comments expansion (+2) is still allowed since it only extends the bottom edge, not the anchor.
+      const frozenW = pinnedW ?? finalColSpan;
+      const frozenH = (pinnedH ?? finalRowSpan) + (commentsOpen && isDesktopMasonry ? 2 : 0);
       return {
-        gridRow: `${pinnedRow} / span ${rowSpan}`,
-        gridColumn: `${pinnedCol} / span ${finalColSpan}`,
+        gridRow: `${pinnedRow} / span ${frozenH}`,
+        gridColumn: `${pinnedCol} / span ${frozenW}`,
       };
     }
     // User-set position from prior drag — explicit grid placement, dense flow displaces neighbors around it.
@@ -1251,6 +1255,7 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
       data-post-id={post.id}
       data-w={finalColSpan}
       data-h={finalRowSpan}
+      data-pinned={isPinned ? 'true' : undefined}
       style={{
         ...tileGridStyle,
         position: 'relative',
@@ -1355,9 +1360,12 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
                   const csCol = cs ? parseInt(cs.gridColumnStart, 10) : NaN;
                   const row = Number.isFinite(csRow) ? csRow : gridPositionRef.current.row;
                   const col = Number.isFinite(csCol) ? csCol : gridPositionRef.current.col;
-                  onTogglePin(post.id, row, col);
+                  // Read current DOM-computed span to freeze it at pin time
+                  const w = Math.max(2, parseInt(el?.dataset.w || '2', 10));
+                  const h = Math.max(1, parseInt(el?.dataset.h || '1', 10));
+                  onTogglePin(post.id, row, col, w, h);
                 } else {
-                  onTogglePin(post.id, null, null);
+                  onTogglePin(post.id, null, null, null, null);
                 }
               }}
               title={isPinned ? 'Unpin tile' : 'Pin tile in place'}
@@ -1602,9 +1610,12 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
                   const csCol = cs ? parseInt(cs.gridColumnStart, 10) : NaN;
                   const row = Number.isFinite(csRow) ? csRow : gridPositionRef.current.row;
                   const col = Number.isFinite(csCol) ? csCol : gridPositionRef.current.col;
-                  onTogglePin(post.id, row, col);
+                  // Read current DOM-computed span to freeze it at pin time
+                  const w = Math.max(2, parseInt(el?.dataset.w || '2', 10));
+                  const h = Math.max(1, parseInt(el?.dataset.h || '1', 10));
+                  onTogglePin(post.id, row, col, w, h);
                 } else {
-                  onTogglePin(post.id, null, null);
+                  onTogglePin(post.id, null, null, null, null);
                 }
               }}
               title={isPinned ? 'Unpin tile' : 'Pin tile in place'}
@@ -3621,7 +3632,7 @@ export default function GeoPostView({ session }) {
     }
   }, [deleteConfirmId, session]);
 
-  const togglePin = useCallback((postId, row, col) => {
+  const togglePin = useCallback((postId, row, col, w, h) => {
     setPinnedPostIds(prev => {
       const next = new Set(prev);
       if (next.has(postId)) {
@@ -3629,8 +3640,8 @@ export default function GeoPostView({ session }) {
         setPinnedPositions(p => { const n = { ...p }; delete n[postId]; return n; });
       } else {
         next.add(postId);
-        // Always save position — both row and col must be valid to lock the tile
-        setPinnedPositions(p => ({ ...p, [postId]: { row, col } }));
+        // Store full position + span so the tile is completely frozen regardless of image/text reflow
+        setPinnedPositions(p => ({ ...p, [postId]: { row, col, w: w ?? 2, h: h ?? 1 } }));
       }
       return next;
     });
@@ -3663,14 +3674,16 @@ export default function GeoPostView({ session }) {
           };
         });
       }
-      // 3. Pinned tiles
+      // 3. Pinned tiles — use frozen span from pinnedPositions (not DOM data-w/h which may have changed after pin)
       const pinPos = pinnedPositionsRef.current;
       for (const id of pinnedPostIdsRef.current) {
         if (id === excludePostId) continue;
         const pos = pinPos[id];
         if (!pos) continue;
-        const span = spanMap[id] || { w: 2, h: 2 };
-        blocked.push({ col: pos.col, row: pos.row, w: span.w, h: span.h });
+        // pos.w / pos.h were frozen at pin time; fall back to DOM only if somehow missing
+        const w = pos.w ?? spanMap[id]?.w ?? 2;
+        const h = pos.h ?? spanMap[id]?.h ?? 2;
+        blocked.push({ col: pos.col, row: pos.row, w, h });
       }
       // 4. User-positioned tiles (soft-pinned by prior drag)
       for (const [id, pos] of Object.entries(userPositionsRef.current)) {
@@ -3874,6 +3887,8 @@ export default function GeoPostView({ session }) {
       });
     }
     // Build permanent blocked zones: filter panel + pinned tiles only
+    // NOTE: pinnedPositions is NEVER modified by this audit — only userPositions tiles are evicted.
+    // Pinned tiles use frozen {w, h} stored at pin time so their footprint doesn't change with image/text reflow.
     const permanentBlocked = [];
     if (filterPanelMode !== 'topbar') {
       permanentBlocked.push({ col: 1, row: desktopPanelRow, w: 2, h: 2 });
@@ -3881,8 +3896,10 @@ export default function GeoPostView({ session }) {
     for (const id of pinnedPostIds) {
       const pos = pinnedPositions[id];
       if (!pos) continue;
-      const span = spanMap[id] || { w: 2, h: 2 };
-      permanentBlocked.push({ col: pos.col, row: pos.row, w: span.w, h: span.h });
+      // Use frozen span (pos.w/h) stored at pin time; fall back to DOM span only if missing
+      const w = pos.w ?? spanMap[id]?.w ?? 2;
+      const h = pos.h ?? spanMap[id]?.h ?? 2;
+      permanentBlocked.push({ col: pos.col, row: pos.row, w, h });
     }
     // Find user-positioned tiles that now overlap permanent blocked zones
     const toRemove = [];
@@ -3951,6 +3968,8 @@ export default function GeoPostView({ session }) {
         isPinned={pinnedPostIds.has(post.id)}
         pinnedRow={pinnedPositions[post.id]?.row ?? null}
         pinnedCol={pinnedPositions[post.id]?.col ?? null}
+        pinnedW={pinnedPositions[post.id]?.w ?? null}
+        pinnedH={pinnedPositions[post.id]?.h ?? null}
         userRow={userPositions[post.id]?.row ?? null}
         userCol={userPositions[post.id]?.col ?? null}
         dragTargetRow={draggingId === post.id ? dragTarget?.row ?? null : null}
@@ -3978,7 +3997,7 @@ export default function GeoPostView({ session }) {
   return (
     <div className="w-full" ref={topAnchorRef}>
       <style>{`
-        .geopost-tiles-animating > *:not(aside) {
+        .geopost-tiles-animating > *:not(aside):not([data-pinned="true"]) {
           transition: transform 1000ms cubic-bezier(0.16, 1, 0.3, 1) !important;
         }
       `}</style>
