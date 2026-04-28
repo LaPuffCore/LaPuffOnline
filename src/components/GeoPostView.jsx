@@ -4347,7 +4347,7 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
       <div className="w-full relative overflow-hidden geo-create-section" style={{ paddingBottom: 48 }}>
         <style>{`
           @media (min-width: 768px) {
-            .geo-create-section { padding-top: ${headerCollapsed ? 24 : 0}px; }
+            .geo-create-section { padding-top: ${headerCollapsed ? 44 : 0}px; }
           }
         `}</style>
         {/* Mosaic: absolute background layer, fills height of this section, behind createpost */}

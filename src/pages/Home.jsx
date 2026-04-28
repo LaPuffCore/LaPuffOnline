@@ -357,7 +357,7 @@ export default function Home({ events = [], eventsLoading = false }) {
       {/* Header — collapses differently per view: map/geo slide off-screen, tile reduces to minimal expand bar */}
       <header
         ref={headerRef}
-        className={`lp-topbar bg-white border-b-4 border-black z-50 shadow-[0_4px_0px_black] flex-shrink-0 transition-[margin-top,transform,opacity] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform ${collapsedAsHidden ? '-translate-y-full opacity-0' : 'translate-y-0'} ${(isMap || (isGeo && headerCollapsed)) ? 'absolute w-full' : 'relative'}`}
+        className={`lp-topbar bg-white ${collapsedAsMinimal ? 'border-b border-black shadow-none' : 'border-b-4 border-black shadow-[0_4px_0px_black]'} z-50 flex-shrink-0 transition-[margin-top,transform,opacity,border-width] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform ${collapsedAsHidden ? '-translate-y-full opacity-0' : 'translate-y-0'} ${(isMap || (isGeo && headerCollapsed)) ? 'absolute w-full' : 'relative'}`}
         style={!isMap && !(isGeo && headerCollapsed) ? { marginTop: !showHeader && measuredHeaderH ? `-${measuredHeaderH}px` : '0px', opacity: !showHeader ? 0 : 1 } : {}}
       >
         {collapsedAsMinimal ? (
@@ -376,7 +376,7 @@ export default function Home({ events = [], eventsLoading = false }) {
             </button>
           </div>
         ) : (
-        <div className={`mx-auto py-2 md:py-3 px-3 transition-[max-width,padding] duration-300 ease-out ${topbarWide ? 'max-w-none md:pl-2 md:pr-6' : 'max-w-7xl md:px-4'}`}>
+        <div className={`mx-auto py-2 md:py-3 px-3 transition-[max-width,padding] duration-300 ease-out ${topbarWide ? 'max-w-none md:px-6' : 'max-w-7xl md:px-4'}`}>
           {/* Top Row: Logo, Nav, Menu */}
           <div className={`flex items-center gap-1 md:gap-2 md:justify-between md:relative ${topbarWide ? 'md:gap-0' : ''}`}>
             {/* Logo + Music Button */}
@@ -392,7 +392,7 @@ export default function Home({ events = [], eventsLoading = false }) {
                   className="w-9 h-9 md:w-11 md:h-11 rounded-xl md:rounded-2xl flex items-center justify-center text-xl md:text-2xl transition-all duration-150"
                   style={{
                     backgroundColor: logoHovered ? accentColor : (topbarWide ? accentColor : '#000'),
-                    boxShadow: logoHovered
+                    boxShadow: (logoHovered || topbarWide)
                       ? '2px 2px 0px #000, 3px 3px 0px #000'
                       : `2px 2px 0px ${accentColor}`,
                   }}
@@ -494,27 +494,27 @@ export default function Home({ events = [], eventsLoading = false }) {
             <div className="flex items-center gap-1 md:gap-2 scale-90 md:scale-100 md:absolute md:left-1/2 md:-translate-x-1/2">
               <div className="bg-gray-100 border-2 md:border-3 border-black rounded-xl md:rounded-2xl p-0.5 md:p-1 flex items-center justify-center shadow-[2px_2px_0px_black] md:shadow-[3px_3px_0px_black]">
                 <button onClick={() => { setView('tiles'); setShowLeaderboard(false); setShowHeader(true); }}
-                  className="px-2.5 py-1.5 md:px-4 md:py-2 rounded-lg md:rounded-xl text-xs md:text-sm font-black transition-all flex items-center justify-center md:min-w-[104px]"
+                  className="flex-1 md:flex-none px-2.5 py-1.5 md:px-4 md:py-2 rounded-lg md:rounded-xl text-xs md:text-sm font-black transition-all flex items-center justify-center md:min-w-[104px]"
                   style={view === 'tiles' && !showLeaderboard ? { backgroundColor: accentColor, color: '#fff', boxShadow: '1px 1px 0px #333' } : {}}
                   onMouseEnter={e => { if (!(view === 'tiles' && !showLeaderboard)) e.currentTarget.style.backgroundColor = accentColor + '30'; }}
                   onMouseLeave={e => { if (!(view === 'tiles' && !showLeaderboard)) e.currentTarget.style.backgroundColor = ''; }}>
                   🎴 Tiles
                 </button>
                 <button onClick={handleMapClick}
-                  className="px-2.5 py-1.5 md:px-4 md:py-2 rounded-lg md:rounded-xl text-xs md:text-sm font-black transition-all flex items-center justify-center md:min-w-[104px]"
+                  className="flex-1 md:flex-none px-2.5 py-1.5 md:px-4 md:py-2 rounded-lg md:rounded-xl text-xs md:text-sm font-black transition-all flex items-center justify-center md:min-w-[104px]"
                   style={view === 'map' && !showLeaderboard ? { backgroundColor: accentColor, color: '#fff', boxShadow: '1px 1px 0px #333' } : {}}
                   onMouseEnter={e => { if (!(view === 'map' && !showLeaderboard)) e.currentTarget.style.backgroundColor = accentColor + '30'; }}
                   onMouseLeave={e => { if (!(view === 'map' && !showLeaderboard)) e.currentTarget.style.backgroundColor = ''; }}>
                   🗺️ Map
                 </button>
                 <button onClick={() => { setView('geo'); setShowLeaderboard(false); }}
-                  className="px-2.5 py-1 md:px-4 md:py-2 rounded-lg md:rounded-xl text-[8px] md:text-sm font-black transition-all flex flex-col md:flex-row items-center justify-center gap-0 md:gap-1 flex-1 md:flex-none md:min-w-[104px]"
+                  className="flex-[2] md:flex-none px-2.5 py-1 md:px-4 md:py-2 rounded-lg md:rounded-xl text-[8px] md:text-sm font-black transition-all flex flex-col md:flex-row items-center justify-center gap-0 md:gap-1 md:min-w-[104px]"
                   style={view === 'geo' && !showLeaderboard ? { backgroundColor: accentColor, color: '#fff', boxShadow: '1px 1px 0px #333' } : {}}
                   onMouseEnter={e => { if (!(view === 'geo' && !showLeaderboard)) e.currentTarget.style.backgroundColor = accentColor + '30'; }}
                   onMouseLeave={e => { if (!(view === 'geo' && !showLeaderboard)) e.currentTarget.style.backgroundColor = ''; }}>
                   <span className="text-xs md:text-sm leading-none">🌍</span>
                   <span className="leading-none hidden md:inline"> Geo-Post</span>
-                  <span className="leading-[1.15] md:hidden text-center">Geo-<br />Post</span>
+                  <span className="leading-none md:hidden text-[8px]">Geo-Post</span>
                 </button>
               </div>
             </div>

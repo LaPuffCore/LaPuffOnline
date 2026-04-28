@@ -205,7 +205,7 @@ export default function ParticipantDot({ onStatusChange }) {
           className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${loading ? 'animate-pulse' : ''}`}
           style={{ background: btnHovered ? '#fff' : dotColor, boxShadow: `0 0 6px ${btnHovered ? '#fff' : dotColor}` }}
         />
-        <span className="text-xs font-black uppercase tracking-tighter" style={{ color: btnHovered ? '#fff' : labelColor }}>
+        <span className="text-[11px] font-black uppercase tracking-tighter" style={{ color: btnHovered ? '#fff' : labelColor }}>
           {loading && stage === 'validating' ? 'syncing' : statusLabel}
         </span>
       </button>

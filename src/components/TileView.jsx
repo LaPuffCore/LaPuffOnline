@@ -182,6 +182,14 @@ export default function TileView({ events, eventsLoading = false }) {
   });
   useEffect(() => {
     try { localStorage.setItem('lapuff_tileview_shape', tileShape); } catch {}
+    // Mirror square mode to a global class so Home.jsx topbar also goes flush
+    if (typeof document !== 'undefined') {
+      if (tileShape === 'square') document.documentElement.classList.add('tv-square-active');
+      else document.documentElement.classList.remove('tv-square-active');
+    }
+    return () => {
+      if (typeof document !== 'undefined') document.documentElement.classList.remove('tv-square-active');
+    };
   }, [tileShape]);
 
   // Layout mode: 'wide' (default) full-screen 5-col grid, or 'narrow' constrained 4-col.
@@ -420,6 +428,8 @@ export default function TileView({ events, eventsLoading = false }) {
           .tv-square > .bg-white.sticky {
             box-shadow: none !important;
             border-bottom-width: 5px !important;
+            border-left-width: 5px !important;
+            border-right-width: 5px !important;
           }
           .tv-square .tv-tile-grid {
             gap: 0 !important;
@@ -444,9 +454,16 @@ export default function TileView({ events, eventsLoading = false }) {
           .tv-square .lp-tile-card:hover {
             transform: none !important;
           }
+          /* Square mode: topbar also goes flush (mirrors lp-square-mode in GeoPostView) */
+          html.tv-square-active .lp-topbar *,
+          html.tv-square-active .lp-topbar *::before,
+          html.tv-square-active .lp-topbar *::after {
+            border-radius: 0 !important;
+          }
           /* ─── TileView NARROW LAYOUT (desktop only) ─── constrained centered width, 4-col cap ─── */
           .tv-narrow > .bg-white.sticky,
-          .tv-narrow .tv-tile-grid {
+          .tv-narrow .tv-tile-grid,
+          .tv-narrow .tv-upcoming-section {
             max-width: 80rem !important;
             margin-left: auto !important;
             margin-right: auto !important;
@@ -456,7 +473,8 @@ export default function TileView({ events, eventsLoading = false }) {
           }
           /* Narrow + Square combined: keep flush look but still capped width */
           .tv-square.tv-narrow > .bg-white.sticky,
-          .tv-square.tv-narrow .tv-tile-grid {
+          .tv-square.tv-narrow .tv-tile-grid,
+          .tv-square.tv-narrow .tv-upcoming-section {
             max-width: 80rem !important;
           }
         }
@@ -683,16 +701,26 @@ export default function TileView({ events, eventsLoading = false }) {
               <button
                 onClick={() => setTileShape('rounded')}
                 title="Rounded tiles"
-                className={`px-2 py-1 text-[11px] font-black transition-colors ${tileShape === 'rounded' ? 'bg-[#7C3AED] text-white' : 'bg-white hover:bg-violet-50'}`}
+                className={`px-2 py-1 font-black transition-colors flex items-center justify-center ${tileShape === 'rounded' ? 'bg-[#7C3AED] text-white' : 'bg-white hover:bg-violet-50'}`}
               >
-                ▢
+                <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><rect x="1" y="1" width="11" height="11" rx="3.5" stroke="currentColor" strokeWidth="2" fill="none"/></svg>
               </button>
               <button
                 onClick={() => setTileShape('square')}
                 title="Square tiles"
-                className={`px-2 py-1 text-[11px] font-black transition-colors border-l-[2.5px] border-black ${tileShape === 'square' ? 'bg-[#7C3AED] text-white' : 'bg-white hover:bg-violet-50'}`}
+                className={`px-2 py-1 font-black transition-colors border-l-[2.5px] border-black flex items-center justify-center ${tileShape === 'square' ? 'bg-[#7C3AED] text-white' : 'bg-white hover:bg-violet-50'}`}
               >
-                ◻
+                <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+                  <rect x="0" y="0" width="4" height="4" fill="currentColor"/>
+                  <rect x="4.5" y="0" width="4" height="4" fill="currentColor"/>
+                  <rect x="9" y="0" width="4" height="4" fill="currentColor"/>
+                  <rect x="0" y="4.5" width="4" height="4" fill="currentColor"/>
+                  <rect x="4.5" y="4.5" width="4" height="4" fill="currentColor"/>
+                  <rect x="9" y="4.5" width="4" height="4" fill="currentColor"/>
+                  <rect x="0" y="9" width="4" height="4" fill="currentColor"/>
+                  <rect x="4.5" y="9" width="4" height="4" fill="currentColor"/>
+                  <rect x="9" y="9" width="4" height="4" fill="currentColor"/>
+                </svg>
               </button>
             </div>
           </div>
@@ -834,7 +862,7 @@ export default function TileView({ events, eventsLoading = false }) {
       </div>
 
       {/* Count */}
-      <div className={`px-4 pb-1 ${isMobile ? 'pt-5' : 'pt-3'}`}>
+      <div className={`tv-upcoming-section px-4 py-3 ${isMobile ? 'pt-5' : ''}`}>
         <p className="text-xs font-black text-gray-500">
           {showArchive ? '🕰️ PAST' : '📅 UPCOMING'} · {filtered.length} events
         </p>
