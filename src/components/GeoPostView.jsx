@@ -2650,6 +2650,16 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
   const squareRowScale = (tileShape === 'square' && containerW > 56)
     ? containerW / (containerW - 56)
     : 1;
+
+  // Mutable refs mirror tileShape + squareRowScale so the scroll listener's
+  // computeTargetRow closure can read the LIVE active-mode geometry without
+  // needing to re-bind on every shape/scale change. Fixes filter-panel desync
+  // when swapping square↔round after tiles are pinned/moved.
+  const tileShapeRef = useRef(tileShape);
+  tileShapeRef.current = tileShape;
+  const squareRowScaleRef = useRef(squareRowScale);
+  squareRowScaleRef.current = squareRowScale;
+
   const [listScaleOpen, setListScaleOpen] = useState(false);
   const createPostAreaRef = useRef(null);
   const [fabOpacity, setFabOpacity] = useState(0);
@@ -3533,7 +3543,14 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
       const scrollEl2 = scrollEl;
       const scrollTop = scrollEl2 === window ? window.scrollY : scrollEl2.scrollTop;
       const containerH = scrollEl2 === window ? window.innerHeight : scrollEl2.clientHeight;
-      const halfRowPx = Math.max(1, (desktopUnitHeight - 12) / 2 + 12);
+      // Read live shape/scale via refs so the closure stays in sync without re-binding.
+      // Square mode: 0 row gap and rows are scaled by squareRowScale (matches DOM at lines ~4843,4852).
+      // Rounded mode: 12px row gap, no scale.
+      const isSquareMode = tileShapeRef.current === 'square';
+      const baseRowHeight = Math.max(1, (desktopUnitHeight - 12) / 2);
+      const scaledRowHeight = isSquareMode ? baseRowHeight * squareRowScaleRef.current : baseRowHeight;
+      const rowGap = isSquareMode ? 0 : 12;
+      const halfRowPx = Math.max(1, scaledRowHeight + rowGap);
       const fullVisualRowPx = halfRowPx * 2;
       rowStepRef.current = halfRowPx;
 
