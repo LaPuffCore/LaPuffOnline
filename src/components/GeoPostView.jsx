@@ -3019,14 +3019,6 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
   // Refs for blocked-zone logic — kept in sync each render so drag closure can read current values
   const pinnedPositionsRef      = useRef({});
   const userPositionsRef        = useRef({});
-  // Dual-mode position storage (Option C — fixes mode-swap desync).
-  // Each id stores { rounded?: {col,row,w,h}, square?: {col,row,w,h} }.
-  // Writes to active maps are mirrored into the active mode's slot here.
-  // On mode swap the active maps are restored from the new mode's slot,
-  // so pinned/moved tiles remember their per-mode grid position independently
-  // and the filter panel's row math always lines up with the active mode.
-  const pinnedByModeRef = useRef({});
-  const userByModeRef   = useRef({});
   const clearUserPositionsRef   = useRef(null); // set below; lets applyPanelRow clear transient positions
   const desktopPanelRowRef      = useRef(1);
   const filterPanelModeRef      = useRef('panel');
@@ -3840,17 +3832,6 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
   // Keep blocked-zone refs current every render
   pinnedPositionsRef.current = pinnedPositions;
   userPositionsRef.current   = userPositions;
-  // Mirror active maps into the current mode's slot of the by-mode storage so
-  // pin/move writes are remembered per-mode (Option C — see refs declaration).
-  {
-    const mode = tileShape; // 'rounded' | 'square'
-    const pinSlot = {};
-    for (const [id, pos] of Object.entries(pinnedPositions)) pinSlot[id] = pos;
-    const usrSlot = {};
-    for (const [id, pos] of Object.entries(userPositions)) usrSlot[id] = pos;
-    pinnedByModeRef.current[mode] = pinSlot;
-    userByModeRef.current[mode]   = usrSlot;
-  }
   desktopPanelRowRef.current = desktopPanelRow;
   filterPanelModeRef.current = filterPanelMode;
   pinnedPostIdsRef.current   = pinnedPostIds;
@@ -4065,24 +4046,6 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
   }, [feedLayout, tileViewKey]);
 
   // Additive resume removed — restoring 2dffe83 panel logic verbatim.
-
-  // Dual-coord mode swap (Option C):
-  // When user toggles between rounded ↔ square, restore the active pinned/user
-  // position maps from the destination mode's slot. The previous mode's writes
-  // are already preserved in pinnedByModeRef/userByModeRef (mirrored each render).
-  // First entry into a mode (no slot yet) carries over the previous mode's coords
-  // as a sane starting point — subsequent edits diverge per-mode.
-  const lastShapeRef = useRef(tileShape);
-  useEffect(() => {
-    const prev = lastShapeRef.current;
-    if (prev === tileShape) return;
-    lastShapeRef.current = tileShape;
-    const nextPin = pinnedByModeRef.current[tileShape];
-    const nextUsr = userByModeRef.current[tileShape];
-    if (nextPin) setPinnedPositions(nextPin); // explicit per-mode coords exist
-    if (nextUsr) setUserPositions(nextUsr);
-    // If no slot yet, leave current state — first toggle copies-then-diverges.
-  }, [tileShape]);
 
 
   // FAB visibility: fade in as create-post area scrolls away
