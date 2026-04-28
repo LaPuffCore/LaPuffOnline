@@ -4178,6 +4178,7 @@ export default function GeoPostView({ session }) {
         html.lp-square-mode .gp-tile-card {
           box-shadow: none !important;
           box-sizing: border-box !important;
+          border-width: 5px !important;
         }
         /* Square mode: collapse geofeed-separator wrapper down to JUST the line
            button (20px tall + 3px border top + 3px border bottom = 26px) so the
@@ -4578,11 +4579,12 @@ export default function GeoPostView({ session }) {
         {/* GEO-FEED pill: center locked to line center (top:10px = midpoint of 20px line).
             translateY(-50%) pulls it up by half its own height → top half overlaps mosaic. */}
         <div className="absolute left-1/2 gp-geofeed-pill" style={{
-          // Square mode: pin pill BOTTOM to line button bottom (y=26 from wrapper top
-          // since line is height:20 + borderTop:3 + borderBottom:3 = 26 box). Using
-          // top:26 + translateY(-100%) anchors pill bottom edge exactly at line bottom
-          // regardless of pill's own intrinsic height.
-          top: tileShape === 'square' ? 26 : 10,
+          // Square mode: pull pill UP so its bottom edge sits flush with line
+          // button bottom. translateY(-100%) anchors pill bottom at `top` value;
+          // top:18 (instead of 26) compensates for the pill's own 3px border +
+          // browser sub-pixel rendering so visible bottom aligns with the line
+          // button's lower black border.
+          top: tileShape === 'square' ? 18 : 10,
           transform: tileShape === 'square' ? 'translate(-50%, -100%)' : 'translate(-50%, -50%)',
           zIndex: 5,
         }}>
