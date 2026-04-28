@@ -489,7 +489,7 @@ export default function Home({ events = [], eventsLoading = false }) {
                 </button>
               )}
               <button onClick={() => setShowForm(true)}
-                className="hidden md:block text-white font-black px-3.5 py-1.5 rounded-full text-xs transition-all shadow-[2px_2px_0px_black] hover:scale-105 whitespace-nowrap text-center"
+                className="hidden md:block text-white font-black px-3.5 py-1.5 rounded-full text-xs border-2 border-black transition-all shadow-[2px_2px_0px_black] hover:scale-105 whitespace-nowrap text-center"
                 style={{ backgroundColor: accentColor, minWidth: '112px' }}>
                 + Submit Event
               </button>
@@ -514,7 +514,7 @@ export default function Home({ events = [], eventsLoading = false }) {
                   </div>
                 ) : (
                   <button onClick={() => setShowAuth(true)}
-                    className="bg-white border-2 border-black rounded-full px-3.5 py-1.5 font-black text-xs transition-all shadow-[2px_2px_0px_black] whitespace-nowrap text-center"
+                    className="bg-white border-2 border-black rounded-full px-3.5 py-1.5 font-black text-xs transition-all shadow-[2px_2px_0px_black] hover:scale-105 whitespace-nowrap text-center"
                     style={{ minWidth: '112px' }}
                     onMouseEnter={e => { e.currentTarget.style.backgroundColor = accentColor; e.currentTarget.style.color = '#fff'; e.currentTarget.style.borderColor = accentColor; }}
                     onMouseLeave={e => { e.currentTarget.style.backgroundColor = ''; e.currentTarget.style.color = ''; e.currentTarget.style.borderColor = ''; }}>
@@ -605,14 +605,14 @@ export default function Home({ events = [], eventsLoading = false }) {
               </button>
             ) : (
               <button onClick={() => setShowAuth(true)}
-                className="w-[112px] bg-white border-2 border-black rounded-full px-3 py-1.5 font-black text-[11px] shadow-[2px_2px_0px_black] text-center transition-all"
+                className="w-[112px] bg-white border-2 border-black rounded-full px-3 py-1.5 font-black text-[11px] shadow-[2px_2px_0px_black] text-center transition-all hover:scale-105"
                 onMouseEnter={e => { e.currentTarget.style.backgroundColor = accentColor; e.currentTarget.style.color = '#fff'; e.currentTarget.style.borderColor = accentColor; }}
                 onMouseLeave={e => { e.currentTarget.style.backgroundColor = ''; e.currentTarget.style.color = ''; e.currentTarget.style.borderColor = ''; }}>
                 Sign In / Up
               </button>
             )}
             <button onClick={() => setShowForm(true)}
-              className="w-[112px] text-white font-black px-3 py-1.5 rounded-full text-[11px] shadow-[2px_2px_0px_black] whitespace-nowrap flex-shrink-0 text-center"
+              className="w-[112px] text-white font-black px-3 py-1.5 rounded-full text-[11px] border-2 border-black shadow-[2px_2px_0px_black] whitespace-nowrap flex-shrink-0 text-center transition-all hover:scale-105"
               style={{ backgroundColor: accentColor }}>
               + Submit Event
             </button>
