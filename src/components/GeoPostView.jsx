@@ -2188,29 +2188,39 @@ function ShapePostCard({ post, shapeId = 'square', size = 270, postReactions, on
   const statusLabel = post.is_participant ? 'PAR' : 'ORB';
   const statusBg = post.is_participant ? '#16a34a' : '#dc2626';
 
-  // Geometry: 4 vertical bands (full shape height): 20/30/30/20
+  // Geometry: 4 vertical bands (full shape height): 20/30/30/20.
+  // Cumulative y-cuts at 0, 0.20, 0.50, 0.80, 1.00 — sums to 100% so all
+  // content always fits inside the shape height with zero deadspace.
   const BAND_PCTS = [0.20, 0.30, 0.30, 0.20];
   const bandTops = [0, 0.20, 0.50, 0.80, 1.00];
 
-  // For each band, compute the minimum horizontal width to constrain text/buttons
+  // For each band, compute BOTH minimum width (narrowest slice — used as a
+  // visibility guarantee) AND average-of-edges width (used for sizing chrome
+  // so usable area is the realistic available row width, not the apex pinch).
   const bandExtents = bandTops.slice(0, 4).map((y0, i) => {
     const y1 = bandTops[i + 1];
-    return shapeMinWidthInBand(shapeDef, y0, y1);
+    const min = shapeMinWidthInBand(shapeDef, y0, y1);
+    const eTop = shapeHorizontalExtentAt(shapeDef, y0);
+    const eBot = shapeHorizontalExtentAt(shapeDef, y1);
+    const avgWidthFrac = Math.max(0.30, (eTop.widthFrac + eBot.widthFrac) / 2);
+    const maxWidthFrac = Math.max(eTop.widthFrac, eBot.widthFrac);
+    return { ...min, avgWidthFrac, maxWidthFrac };
   });
 
-  // Username font scales by band 0 width (narrow tip → tiny font)
-  const usernameMaxWidth = Math.max(20, bandExtents[0].minWidthFrac * size);
-  const usernameFont = Math.max(7, Math.min(usernameMaxWidth * 0.18, size * 0.055, 16));
-  const tagFont = Math.max(6, Math.min(usernameMaxWidth * 0.13, size * 0.035, 11));
+  // Username sized off band 0's AVG width (apex-narrow shapes still get a
+  // legible font; cssClip will visually trim any overflow into the shape).
+  const usernameAvgWidth = Math.max(40, bandExtents[0].avgWidthFrac * size);
+  const usernameFont = Math.max(9, Math.min(usernameAvgWidth * 0.15, size * 0.06, 18));
+  const tagFont = Math.max(7, Math.min(usernameAvgWidth * 0.10, size * 0.038, 12));
 
   // Text body fixed per shape size (NOT scaled by shape size per spec — controlled by createpost; here just constant)
   const textFont = Math.max(8, size * 0.038);
   const bodyHeight = size * BAND_PCTS[2];
   const lineHeight = 1.25;
-  const maxTextLines = Math.max(1, Math.floor((bodyHeight - textFont * 1.2) / (textFont * lineHeight))); // -1 line for "show more"
+  const maxTextLines = Math.max(1, Math.floor(bodyHeight / (textFont * lineHeight))); // tight pack
 
-  // Estimate if text overflows (rough char-per-line based on band-3 min width)
-  const bodyWidthPx = Math.max(20, bandExtents[2].minWidthFrac * size * 0.9);
+  // Estimate if text overflows (use AVG width — wider available area)
+  const bodyWidthPx = Math.max(40, bandExtents[2].avgWidthFrac * size * 0.95);
   const charsPerLine = Math.max(5, Math.floor(bodyWidthPx / (textFont * 0.55)));
   const willOverflow = plainText.length > maxTextLines * charsPerLine;
 
@@ -2242,12 +2252,16 @@ function ShapePostCard({ post, shapeId = 'square', size = 270, postReactions, on
   const baseChromeBg = '#f3f4f6';
   const baseChromeText = '#000';
   const chromeBorder = theme.outline || '#000';
-  const btnPad = `${Math.max(1, size * 0.005)}px ${Math.max(3, size * 0.018)}px`;
+  // Buttons sized off band 3's avg available width so they fit one-row
+  // whenever the shape gives them enough physical room. Padding scales
+  // with band width — tight bands → tight buttons → still one row.
+  const band3Width = Math.max(40, bandExtents[3].avgWidthFrac * size);
+  const btnPad = `${Math.max(1, size * 0.005)}px ${Math.max(2, band3Width * 0.025)}px`;
   const btnRadius = 9999;
-  const btnFont = Math.max(8, Math.min(size * 0.038, 12));
+  const btnFont = Math.max(7, Math.min(band3Width * 0.07, size * 0.038, 12));
 
-  const tagPad = `${Math.max(1, size * 0.005)}px ${Math.max(3, size * 0.015)}px`;
-  const tagFont2 = Math.max(7, Math.min(size * 0.030, 10));
+  const tagPad = `${Math.max(1, size * 0.005)}px ${Math.max(2, band3Width * 0.022)}px`;
+  const tagFont2 = Math.max(6, Math.min(band3Width * 0.06, size * 0.030, 10));
 
   // image band geometry (full shape width — clipped to shape via SVG clipPath)
   const imageBandY = size * BAND_PCTS[0];
@@ -2323,7 +2337,10 @@ function ShapePostCard({ post, shapeId = 'square', size = 270, postReactions, on
             color: theme.text, boxSizing: 'border-box', overflow: 'hidden',
           }}
         >
-          {/* Band 0: username + status tag (top 20%) — centered, inline, wraps */}
+          {/* Band 0: username + status tag (top 20%) — strict 20% height,
+              perfectly centered horizontally + vertically. Inline row,
+              wraps to a second line ONLY when both don't fit. cssClip
+              already trims any sliver bleed beyond the shape silhouette. */}
           <div style={{
             height: `${BAND_PCTS[0] * 100}%`, flexShrink: 0, flexGrow: 0,
             display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
@@ -2333,7 +2350,7 @@ function ShapePostCard({ post, shapeId = 'square', size = 270, postReactions, on
           }}>
             <span style={{
               fontWeight: 900, fontSize: usernameFont, lineHeight: 1.05,
-              maxWidth: `${bandExtents[0].minWidthFrac * 100}%`,
+              maxWidth: '100%',
               overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
             }}>{username}</span>
             {showStatusTag && (
@@ -2349,10 +2366,10 @@ function ShapePostCard({ post, shapeId = 'square', size = 270, postReactions, on
             )}
           </div>
 
-          {/* Band 1: image space — strict 30% spacer; image is rendered as SVG sibling */}
+          {/* Band 1: image space — strict 30% spacer; image rendered as SVG sibling. */}
           <div style={{ height: `${BAND_PCTS[1] * 100}%`, flexShrink: 0, flexGrow: 0 }} />
 
-          {/* Band 2: text body + show more — strict 30%, top-aligned, no padding above */}
+          {/* Band 2: text body — strict 30%, top-aligned, hugs band 1 with no padding. */}
           <div style={{
             height: `${BAND_PCTS[2] * 100}%`, flexShrink: 0, flexGrow: 0,
             display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start',
@@ -2360,7 +2377,8 @@ function ShapePostCard({ post, shapeId = 'square', size = 270, postReactions, on
           }}>
             {plainText && (
               <div style={{
-                width: `${bandExtents[2].minWidthFrac * 100}%`,
+                width: '100%',
+                maxWidth: `${bandExtents[2].avgWidthFrac * 100}%`,
                 fontSize: textFont, lineHeight,
                 overflow: 'hidden', wordBreak: 'break-word',
                 display: '-webkit-box', WebkitLineClamp: willOverflow ? Math.max(1, maxTextLines - 1) : maxTextLines,
@@ -2379,14 +2397,15 @@ function ShapePostCard({ post, shapeId = 'square', size = 270, postReactions, on
             )}
           </div>
 
-          {/* Band 3: reactions + ... + scope — strict 20%, single row with wrap */}
+          {/* Band 3: emoji react + ... + scope tag (bottom 20%) — single horizontal
+              row at full container width. Wraps to second line ONLY when items
+              don't physically fit. No artificial maxWidth shrink. */}
           <div style={{
             height: `${BAND_PCTS[3] * 100}%`, flexShrink: 0, flexGrow: 0,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
             gap: Math.max(2, size * 0.012), flexWrap: 'wrap', overflow: 'hidden',
             padding: `0 ${Math.max(2, size * 0.012)}px`, boxSizing: 'border-box',
-            maxWidth: `${bandExtents[3].minWidthFrac * 100}%`,
-            margin: '0 auto', alignContent: 'center',
+            width: '100%', alignContent: 'center',
           }}>
             {topEmojis[0] && (
               <HoverInvertButton
@@ -2969,6 +2988,14 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
   // Refs for blocked-zone logic — kept in sync each render so drag closure can read current values
   const pinnedPositionsRef      = useRef({});
   const userPositionsRef        = useRef({});
+  // Dual-mode position storage (Option C — fixes mode-swap desync).
+  // Each id stores { rounded?: {col,row,w,h}, square?: {col,row,w,h} }.
+  // Writes to active maps are mirrored into the active mode's slot here.
+  // On mode swap the active maps are restored from the new mode's slot,
+  // so pinned/moved tiles remember their per-mode grid position independently
+  // and the filter panel's row math always lines up with the active mode.
+  const pinnedByModeRef = useRef({});
+  const userByModeRef   = useRef({});
   const clearUserPositionsRef   = useRef(null); // set below; lets applyPanelRow clear transient positions
   const desktopPanelRowRef      = useRef(1);
   const filterPanelModeRef      = useRef('panel');
@@ -3791,6 +3818,17 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
   // Keep blocked-zone refs current every render
   pinnedPositionsRef.current = pinnedPositions;
   userPositionsRef.current   = userPositions;
+  // Mirror active maps into the current mode's slot of the by-mode storage so
+  // pin/move writes are remembered per-mode (Option C — see refs declaration).
+  {
+    const mode = tileShape; // 'rounded' | 'square'
+    const pinSlot = {};
+    for (const [id, pos] of Object.entries(pinnedPositions)) pinSlot[id] = pos;
+    const usrSlot = {};
+    for (const [id, pos] of Object.entries(userPositions)) usrSlot[id] = pos;
+    pinnedByModeRef.current[mode] = pinSlot;
+    userByModeRef.current[mode]   = usrSlot;
+  }
   desktopPanelRowRef.current = desktopPanelRow;
   filterPanelModeRef.current = filterPanelMode;
   pinnedPostIdsRef.current   = pinnedPostIds;
@@ -4083,6 +4121,25 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tileShape]);
+
+  // Dual-coord mode swap (Option C):
+  // When user toggles between rounded ↔ square, restore the active pinned/user
+  // position maps from the destination mode's slot. The previous mode's writes
+  // are already preserved in pinnedByModeRef/userByModeRef (mirrored each render).
+  // First entry into a mode (no slot yet) carries over the previous mode's coords
+  // as a sane starting point — subsequent edits diverge per-mode.
+  const lastShapeRef = useRef(tileShape);
+  useEffect(() => {
+    const prev = lastShapeRef.current;
+    if (prev === tileShape) return;
+    lastShapeRef.current = tileShape;
+    const nextPin = pinnedByModeRef.current[tileShape];
+    const nextUsr = userByModeRef.current[tileShape];
+    if (nextPin) setPinnedPositions(nextPin); // explicit per-mode coords exist
+    if (nextUsr) setUserPositions(nextUsr);
+    // If no slot yet, leave current state — first toggle copies-then-diverges.
+  }, [tileShape]);
+
 
   // FAB visibility: fade in as create-post area scrolls away
   useEffect(() => {    const scrollEl = desktopGridRef.current ? findScrollParent(desktopGridRef.current) : window;
