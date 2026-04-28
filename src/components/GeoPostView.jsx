@@ -3892,6 +3892,18 @@ export default function GeoPostView({ session }) {
     }
   }, [desktopPanelRow]);
 
+  // When the posts array grows (new post submitted or synced from another user),
+  // clear transient user-positioned tiles so the grid reflows to accommodate the new post.
+  // Pinned tiles are intentionally NOT cleared — their positions are frozen.
+  const prevPostsLengthRef = useRef(0);
+  useEffect(() => {
+    const prev = prevPostsLengthRef.current;
+    prevPostsLengthRef.current = posts.length;
+    if (posts.length > prev && prev > 0) {
+      setUserPositions({});
+    }
+  }, [posts.length]);
+
   // Post-settle overlap audit: whenever the panel moves, pins change, or user-positions change,
   // evict any userPositions entries that now conflict with pinned tiles or the filter panel.
   // This covers cascading conflicts (e.g., panel scrolls onto a user-placed tile).
@@ -4651,7 +4663,7 @@ export default function GeoPostView({ session }) {
         </div>
         </div>{/* end height-clamp wrapper */}
         {(canShowMore || canShowLess) && (
-          <div data-show-more-bar className="hidden md:flex justify-center gap-3 pt-2 pb-1">
+          <div data-show-more-bar className="hidden md:flex justify-center gap-3 pt-2 pb-1 relative" style={{ zIndex: 20000 }}>
             {canShowMore && (
               <button onMouseDown={e => e.preventDefault()} onClick={() => setVisibleCount(v => v + PAGE_SIZE)} className="min-h-[32px] px-4 py-1.5 border-2 border-black rounded-full text-xs font-black bg-white shadow-[2px_2px_0px_black] hover:scale-105 transition-transform leading-tight text-center inline-flex items-center justify-center whitespace-nowrap">
                 Show More ({orderedFilteredPosts.length - visibleCount} remaining)
