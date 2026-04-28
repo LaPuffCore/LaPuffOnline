@@ -3071,64 +3071,6 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
   const squareRowScaleRef = useRef(squareRowScale);
   squareRowScaleRef.current = squareRowScale;
 
-  // Pre-swap snapshot for Option A (panel anchor) + Option B (tile anchor).
-  // Captured in setTileShapeWithSnapshot BEFORE setState so the snapshot
-  // reflects the OLD geometry; consumed in the swap useLayoutEffect AFTER
-  // the new layout commits.
-  const swapSnapshotRef = useRef(null);
-  const setTileShapeWithSnapshot = useCallback((nextShape) => {
-    try {
-      if (
-        typeof window !== 'undefined' &&
-        window.innerWidth >= 768 &&
-        desktopGridRef.current &&
-        nextShape !== tileShapeRef.current
-      ) {
-        const grid = desktopGridRef.current;
-        const gRect = grid.getBoundingClientRect();
-        const cs = getComputedStyle(grid);
-        const colGap = parseFloat(cs.columnGap) || 0;
-        const rowGap = parseFloat(cs.rowGap) || 0;
-        const rowH   = parseFloat(cs.gridAutoRows) || 200;
-        const colW   = (gRect.width - colGap * (GRID_TOTAL_COLS - 1)) / GRID_TOTAL_COLS;
-        const cellStrideX = colW + colGap;
-        const cellStrideY = rowH + rowGap;
-        // Tile snapshots: pixel center relative to grid (so we can re-derive
-        // {col, row} under new cell sizes after swap).
-        const tiles = {};
-        const collect = (kind, posMap) => {
-          for (const [postId, pos] of Object.entries(posMap || {})) {
-            const sel = `[data-post-id="${postId}"]`;
-            const el = grid.querySelector(sel);
-            if (!el) {
-              // Fallback: derive pixel pos from old {col,row} arithmetic
-              const relX = (pos.col - 1) * cellStrideX;
-              const relY = (pos.row - 1) * cellStrideY;
-              tiles[postId] = { kind, relX, relY, w: pos.w || 2, h: pos.h || 1 };
-              continue;
-            }
-            const eRect = el.getBoundingClientRect();
-            tiles[postId] = {
-              kind,
-              relX: eRect.left - gRect.left,
-              relY: eRect.top  - gRect.top,
-              w: pos.w || 2,
-              h: pos.h || 1,
-            };
-          }
-        };
-        collect('pinned', pinnedPositionsRef.current);
-        collect('user',   userPositionsRef.current);
-        swapSnapshotRef.current = {
-          panelRow: panelRowRef.current,
-          halfRowPx: rowStepRef.current,
-          tiles,
-        };
-      }
-    } catch {}
-    setTileShape(nextShape);
-  }, [setTileShape]);
-
   const [listScaleOpen, setListScaleOpen] = useState(false);
   const createPostAreaRef = useRef(null);
   const [fabOpacity, setFabOpacity] = useState(0);
@@ -4024,13 +3966,7 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
       const scrollEl2 = scrollEl;
       const scrollTop = scrollEl2 === window ? window.scrollY : scrollEl2.scrollTop;
       const containerH = scrollEl2 === window ? window.innerHeight : scrollEl2.clientHeight;
-      // Read actual grid geometry directly from computed style — works
-      // identically in rounded and square modes without reverse-engineering
-      // the formula from desktopUnitHeight.
-      const gridCs = getComputedStyle(desktopGridRef.current);
-      const scaledRowHeight = parseFloat(gridCs.gridAutoRows) || 200;
-      const rowGap = parseFloat(gridCs.rowGap) || 0;
-      const halfRowPx = Math.max(1, scaledRowHeight + rowGap);
+      const halfRowPx = Math.max(1, (desktopUnitHeight - 12) / 2 + 12);
       const fullVisualRowPx = halfRowPx * 2;
       rowStepRef.current = halfRowPx;
 
@@ -4105,7 +4041,7 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
       scrollEl.removeEventListener('scroll', onScroll);
       window.removeEventListener('resize', onResize);
     };
-  }, [desktopUnitHeight, visiblePosts.length, canShowMore, canShowLess, applyPanelRow, feedLayout, filterPanelMode, tileViewKey, tileShape]);
+  }, [desktopUnitHeight, visiblePosts.length, canShowMore, canShowLess, applyPanelRow, feedLayout, filterPanelMode, tileViewKey]);
 
   // When switching back to tile mode, double-rAF to ensure two browser layout passes
   // (grid was unmounted in list mode so getBoundingClientRect was stale after remount)
@@ -4136,97 +4072,6 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
     return () => cancelAnimationFrame(raf1);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [feedLayout, tileViewKey]);
-
-  // ===========================================================================
-  // Square↔Round shape swap: tile re-anchor (Option B) + force panel recompute.
-  //
-  // Panel logic: We do NOT attempt to keep the panel under the cursor. Instead,
-  // we let the standard scroll-driven computeTargetRow() recompute the panel
-  // position fresh under the NEW geometry. This is achieved by adding tileShape
-  // to the main scroll effect's dep array (line ~4109) — the effect tears down
-  // and remounts on swap, immediately calling computeTargetRow() with the new
-  // tileShapeRef + squareRowScaleRef and snapping the panel to its standard
-  // left-side row for the current scroll position. This works correctly in
-  // both square and rounded modes, on reload, and after pinning/moving tiles.
-  //
-  // Option B (tile anchor): Pinned/moved tiles have stored {col,row} that
-  //   maps to different pixel positions in each mode. We snapshot each
-  //   tile's bounding-rect at toggle-click time, then after swap re-derive
-  //   {col,row} from its old pixel position ÷ new cell size, and write the
-  //   result to BOTH the active state AND the new mode's per-mode slot.
-  //   This keeps tiles visually anchored across the swap without disturbing
-  //   the panel's standard-logic recompute.
-  // ===========================================================================
-  const prevTileShapeRef = useRef(tileShape);
-  useLayoutEffect(() => {
-    const prevShape = prevTileShapeRef.current;
-    if (prevShape === tileShape) return; // initial mount
-    prevTileShapeRef.current = tileShape;
-
-    const snapshot = swapSnapshotRef.current;
-    swapSnapshotRef.current = null;
-
-    if (typeof window === 'undefined' || window.innerWidth < 768) return;
-    if (feedLayout !== 'tiles') return;
-    if (!desktopGridRef.current) return;
-    if (!snapshot || !snapshot.tiles || Object.keys(snapshot.tiles).length === 0) return;
-
-    let raf2 = 0;
-    const raf1 = requestAnimationFrame(() => {
-      raf2 = requestAnimationFrame(() => {
-        if (!desktopGridRef.current) return;
-
-        // === Option B: pinned/moved tile re-translation ===
-        const grid = desktopGridRef.current;
-        const gridRect = grid.getBoundingClientRect();
-        const cs = getComputedStyle(grid);
-        const newColGap = parseFloat(cs.columnGap) || 0;
-        const newRowGap = parseFloat(cs.rowGap) || 0;
-        const newRowH = parseFloat(cs.gridAutoRows) || 200;
-        const newColW = (gridRect.width - newColGap * (GRID_TOTAL_COLS - 1)) / GRID_TOTAL_COLS;
-        const newCellStrideX = newColW + newColGap;
-        const newCellStrideY = newRowH + newRowGap;
-
-        const newPin = { ...pinnedPositionsRef.current };
-        const newUsr = { ...userPositionsRef.current };
-        let pinChanged = false;
-        let usrChanged = false;
-
-        for (const [postId, snap] of Object.entries(snapshot.tiles)) {
-          const newCol = Math.max(1, Math.min(
-            GRID_TOTAL_COLS - (snap.w - 1),
-            Math.round(snap.relX / newCellStrideX) + 1
-          ));
-          const newRow = Math.max(1, Math.round(snap.relY / newCellStrideY) + 1);
-          const newPos = { col: newCol, row: newRow, w: snap.w, h: snap.h };
-
-          if (snap.kind === 'pinned' && newPin[postId]) {
-            newPin[postId] = newPos;
-            pinChanged = true;
-          } else if (snap.kind === 'user' && newUsr[postId]) {
-            newUsr[postId] = newPos;
-            usrChanged = true;
-          }
-        }
-
-        if (pinChanged) {
-          setPinnedPositions(newPin);
-          // Persist into NEW mode's slot so the dual-mode restore on
-          // future swaps preserves the visually-anchored coords.
-          pinnedByModeRef.current[tileShape] = newPin;
-        }
-        if (usrChanged) {
-          setUserPositions(newUsr);
-          userByModeRef.current[tileShape] = newUsr;
-        }
-      });
-    });
-    return () => {
-      cancelAnimationFrame(raf1);
-      if (raf2) cancelAnimationFrame(raf2);
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tileShape]);
 
   // Additive resume (restored from eb86130): after a square↔round swap,
   // scrollTop hasn't changed, so the scroll listener never fires on its own.
@@ -5302,7 +5147,7 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
           <div className="flex items-center rounded-lg border-2 border-black bg-white shadow-[2px_2px_0px_black] overflow-hidden select-none">
             <button
               onMouseDown={e => e.preventDefault()}
-              onClick={() => setTileShapeWithSnapshot('rounded')}
+              onClick={() => setTileShape('rounded')}
               title="Rounded mode"
               className="flex items-center justify-center w-7 h-7 transition-colors"
               style={{ background: tileShape === 'rounded' ? accentColor : '#fff', color: tileShape === 'rounded' ? '#fff' : '#000' }}
@@ -5312,7 +5157,7 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
             </button>
             <button
               onMouseDown={e => e.preventDefault()}
-              onClick={() => setTileShapeWithSnapshot('square')}
+              onClick={() => setTileShape('square')}
               title="Square / flush mode"
               className="flex items-center justify-center w-7 h-7 transition-colors"
               style={{ background: tileShape === 'square' ? accentColor : '#fff', color: tileShape === 'square' ? '#fff' : '#000' }}
