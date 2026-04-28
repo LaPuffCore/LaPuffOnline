@@ -2312,20 +2312,26 @@ function ShapePostCard({ post, shapeId = 'square', size = 270, postReactions, on
         )}
       </g>
 
-      {/* Image — full shape width, clipped to shape, in band 2 */}
-      {post.image_url && (
-        <image
-          href={post.image_url}
-          xlinkHref={post.image_url}
-          x={0}
-          y={imageBandY}
-          width={size}
-          height={imageBandH}
-          preserveAspectRatio="xMidYMid slice"
-          clipPath={`url(#${clipId})`}
-          style={{ pointerEvents: 'none' }}
-        />
-      )}
+      {/* Image — sized to band 1's AVG visible width (not full rect),
+          centered horizontally. Avoids the thin-sliver crop on apex shapes
+          where a full-width image would be clipped by the silhouette. */}
+      {post.image_url && (() => {
+        const imgW = Math.max(size * 0.30, bandExtents[1].avgWidthFrac * size);
+        const imgX = (size - imgW) / 2;
+        return (
+          <image
+            href={post.image_url}
+            xlinkHref={post.image_url}
+            x={imgX}
+            y={imageBandY}
+            width={imgW}
+            height={imageBandH}
+            preserveAspectRatio="xMidYMid slice"
+            clipPath={`url(#${clipId})`}
+            style={{ pointerEvents: 'none' }}
+          />
+        );
+      })()}
 
       {/* Full-shape foreignObject with CSS clip-path — bands sized strictly by % of shape height */}
       <foreignObject x={0} y={0} width={size} height={size} style={{ pointerEvents: 'none' }}>
@@ -2337,17 +2343,20 @@ function ShapePostCard({ post, shapeId = 'square', size = 270, postReactions, on
             color: theme.text, boxSizing: 'border-box', overflow: 'hidden',
           }}
         >
-          {/* Band 0: username + status tag (top 20%) — strict 20% height,
-              perfectly centered horizontally + vertically. Inline row,
-              wraps to a second line ONLY when both don't fit. cssClip
-              already trims any sliver bleed beyond the shape silhouette. */}
+          {/* Band 0: username + status tag (top 20%) — strict 20% height.
+              The INNER row is constrained to the band's avg visible width
+              so wrap triggers at the silhouette edge, not the rect edge. */}
           <div style={{
             height: `${BAND_PCTS[0] * 100}%`, flexShrink: 0, flexGrow: 0,
-            display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-            flexWrap: 'wrap', gap: Math.max(2, size * 0.012),
-            overflow: 'hidden', textAlign: 'center',
-            padding: `0 ${Math.max(2, size * 0.012)}px`, boxSizing: 'border-box',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            overflow: 'hidden', boxSizing: 'border-box',
           }}>
+            <div style={{
+              width: `${bandExtents[0].avgWidthFrac * 100}%`,
+              display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+              flexWrap: 'wrap', gap: Math.max(2, size * 0.012),
+              textAlign: 'center', boxSizing: 'border-box',
+            }}>
             <span style={{
               fontWeight: 900, fontSize: usernameFont, lineHeight: 1.05,
               maxWidth: '100%',
@@ -2364,6 +2373,7 @@ function ShapePostCard({ post, shapeId = 'square', size = 270, postReactions, on
                 }}
               >{statusLabel}</HoverInvertButton>
             )}
+            </div>
           </div>
 
           {/* Band 1: image space — strict 30% spacer; image rendered as SVG sibling. */}
@@ -2398,14 +2408,19 @@ function ShapePostCard({ post, shapeId = 'square', size = 270, postReactions, on
           </div>
 
           {/* Band 3: emoji react + ... + scope tag (bottom 20%) — single horizontal
-              row at full container width. Wraps to second line ONLY when items
-              don't physically fit. No artificial maxWidth shrink. */}
+              row constrained to the band's AVG visible width so wrap triggers at
+              the silhouette edge, not the rect edge. Stays one row whenever the
+              shape physically allows. */}
           <div style={{
             height: `${BAND_PCTS[3] * 100}%`, flexShrink: 0, flexGrow: 0,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            overflow: 'hidden', boxSizing: 'border-box',
+          }}>
+          <div style={{
+            width: `${bandExtents[3].avgWidthFrac * 100}%`,
             display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-            gap: Math.max(2, size * 0.012), flexWrap: 'wrap', overflow: 'hidden',
-            padding: `0 ${Math.max(2, size * 0.012)}px`, boxSizing: 'border-box',
-            width: '100%', alignContent: 'center',
+            gap: Math.max(2, size * 0.012), flexWrap: 'wrap',
+            boxSizing: 'border-box', alignContent: 'center',
           }}>
             {topEmojis[0] && (
               <HoverInvertButton
@@ -2444,6 +2459,7 @@ function ShapePostCard({ post, shapeId = 'square', size = 270, postReactions, on
                 padding: tagPad, fontSize: tagFont2, fontWeight: 900, lineHeight: 1.2, pointerEvents: 'auto',
               }}
             >{scopeInfo.label}</HoverInvertButton>
+          </div>
           </div>
         </div>
       </foreignObject>
