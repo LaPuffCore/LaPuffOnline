@@ -4237,6 +4237,23 @@ export default function GeoPostView({ session }) {
           width: 100% !important;
           box-sizing: border-box !important;
         }
+        /* No-image tile corner buttons: in square mode float INSIDE the tile at
+           the top corners instead of overhanging outside. The buttons are direct
+           children of .group (the tile outer wrapper) — target them by their
+           inline transform origin that the default mode uses.
+           Left button (hide/delete): snap to inside top-left (8px, 8px from corner).
+           Right button (pin): snap to inside top-right. */
+        html.lp-square-mode .gp-tile-grid .group > button:first-of-type {
+          transform: translate(8px, 8px) !important;
+          top: 0 !important;
+          left: 0 !important;
+        }
+        html.lp-square-mode .gp-tile-grid .group > button:last-of-type {
+          transform: translate(-8px, 8px) !important;
+          top: 0 !important;
+          right: 0 !important;
+          left: auto !important;
+        }
         /* (Pill positioning handled inline in JSX with top:26 + translateY(-100%)
            so pill bottom edge sits exactly at line button bottom.)             */
       `}</style>
