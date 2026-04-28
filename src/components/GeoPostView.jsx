@@ -3640,6 +3640,44 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [feedLayout, tileViewKey]);
 
+  // Additive fallback: when swapping square↔round tile shape while the filter
+  // panel is in moving mode (⬆️ off, i.e. filterPanelMode === 'panel'), pinned
+  // or user-moved tiles can leave panelRowRef / lastAppliedRowRef stale relative
+  // to the new layout, freezing scroll-tracked motion. Reset tracking refs and
+  // re-fire the scroll-tracked recompute path on the next two paints so motion
+  // always resumes regardless of pin/move state.
+  useEffect(() => {
+    if (typeof window === 'undefined' || window.innerWidth < 768) return;
+    if (feedLayout !== 'tiles') return;
+    if (filterPanelMode !== 'panel') return; // ⬆️ on (topbar mode) — respect user
+    let raf2 = 0;
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => {
+        if (!desktopGridRef.current) return;
+        const scrollEl = findScrollParent(desktopGridRef.current);
+        const scrollTop = scrollEl === window ? window.scrollY : scrollEl.scrollTop;
+        const containerClientTop = scrollEl === window ? 0 : scrollEl.getBoundingClientRect().top;
+        const gridClientTop = desktopGridRef.current.getBoundingClientRect().top;
+        gridOffsetCacheRef.current = gridClientTop - containerClientTop + scrollTop;
+        panelRowRef.current = 1;
+        lastAppliedRowRef.current = -1; // sentinel forces next applyPanelRow to fire
+        if (filterPanelInnerRef.current) {
+          filterPanelInnerRef.current.style.transition = 'none';
+          filterPanelInnerRef.current.style.transform = 'translateY(0)';
+          filterPanelInnerRef.current.style.filter = 'blur(0)';
+          filterPanelInnerRef.current.style.opacity = '1';
+        }
+        // Nudge the existing scroll handler to recompute target row from current scroll
+        try { (scrollEl === window ? window : scrollEl).dispatchEvent(new Event('scroll')); } catch {}
+      });
+    });
+    return () => {
+      cancelAnimationFrame(raf1);
+      if (raf2) cancelAnimationFrame(raf2);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tileShape]);
+
   // FAB visibility: fade in as create-post area scrolls away
   useEffect(() => {    const scrollEl = desktopGridRef.current ? findScrollParent(desktopGridRef.current) : window;
     const handleFabScroll = () => {
