@@ -4162,7 +4162,7 @@ export default function GeoPostView({ session }) {
         /* Tile grid: gap:0 + zero margin-top so the grid runs flush against
            the geofeed separator AND the viewport edges (left/right).
            border-box ensures the existing 3px border sits INSIDE each cell.   */
-        html.lp-square-mode .gp-tile-grid { gap: 0 !important; margin-top: 0 !important; }
+        html.lp-square-mode .gp-tile-grid { gap: 0 !important; margin-top: 0 !important; padding-top: 0 !important; }
         /* Just zero the tile-area horizontal padding so the grid fills the
            full parent (which is the scroll container — already viewport-width
            with reserved scrollbar gutter). NO 100vw breakout, NO margin
@@ -4170,6 +4170,12 @@ export default function GeoPostView({ session }) {
         html.lp-square-mode .gp-tile-area {
           padding-left: 0 !important;
           padding-right: 0 !important;
+          padding-top: 0 !important;
+          margin-top: 0 !important;
+        }
+        html.lp-square-mode .gp-tile-area-fill {
+          padding-top: 0 !important;
+          margin-top: 0 !important;
         }
         /* Tile card: kill drop shadow; keep the original colored border (it's
            already box-sizing: border-box from Tailwind preflight). Adjacent
@@ -4677,7 +4683,7 @@ export default function GeoPostView({ session }) {
         </div>
       )}
 
-      <div className="w-full px-3 md:px-4 gp-tile-area">
+      <div className="w-full px-3 md:px-4 gp-tile-area" style={tileShape === 'square' ? { marginTop: -12, paddingTop: 0 } : undefined}>
         {/* ── TILE / BENTO MODE ── */}
         {feedLayout === 'tiles' && (<>
       {/* Height-clamp wrapper: clips at 16 half-rows when collapsed; expands on Show More.
