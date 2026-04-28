@@ -76,6 +76,12 @@ export default function Home({ events = [], eventsLoading = false }) {
 
   const location = useLocation();
   const isMap = view === 'map';
+  const isGeo = view === 'geo';
+  const isTiles = !isMap && !isGeo;
+  // When collapsed in tile view we render a minimal expand-only bar instead of hiding the header.
+  // When collapsed in map or geo view we slide the full header off-screen and overlay an expand chevron in content.
+  const collapsedAsMinimal = headerCollapsed && isTiles;
+  const collapsedAsHidden = headerCollapsed && (isMap || isGeo);
   const displayName = user?.username || user?.user_metadata?.username || user?.email?.split('@')[0] || 'Account';
 
   useEffect(() => {
@@ -333,8 +339,28 @@ export default function Home({ events = [], eventsLoading = false }) {
 
   return (
     <div className="h-[100dvh] lp-page-bg flex flex-col overflow-hidden" style={{ fontFamily: "'Nunito', cursive, sans-serif" }}>
-      {/* Header — hidden when map is active and user collapsed it */}
-      <header ref={headerRef} className={`lp-topbar bg-white border-b-4 border-black z-50 shadow-[0_4px_0px_black] flex-shrink-0 transition-[margin-top,transform,opacity] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform ${(isMap && headerCollapsed) ? '-translate-y-full opacity-0' : 'translate-y-0'} ${isMap ? 'absolute w-full' : 'relative'}`} style={!isMap ? { marginTop: !showHeader && measuredHeaderH ? `-${measuredHeaderH}px` : '0px', opacity: !showHeader ? 0 : 1 } : {}}>
+      {/* Header — collapses differently per view: map/geo slide off-screen, tile reduces to minimal expand bar */}
+      <header
+        ref={headerRef}
+        className={`lp-topbar bg-white border-b-4 border-black z-50 shadow-[0_4px_0px_black] flex-shrink-0 transition-[margin-top,transform,opacity] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform ${collapsedAsHidden ? '-translate-y-full opacity-0' : 'translate-y-0'} ${(isMap || (isGeo && headerCollapsed)) ? 'absolute w-full' : 'relative'}`}
+        style={!isMap && !(isGeo && headerCollapsed) ? { marginTop: !showHeader && measuredHeaderH ? `-${measuredHeaderH}px` : '0px', opacity: !showHeader ? 0 : 1 } : {}}
+      >
+        {collapsedAsMinimal ? (
+          <div className="py-1 flex justify-center items-center">
+            <button
+              onClick={() => setHeaderCollapsed(false)}
+              className="flex items-center justify-center px-3 py-1 rounded-full font-black border-2 border-black bg-white shadow-[2px_2px_0px_black] transition-all"
+              title="Expand header"
+              onMouseEnter={e => { e.currentTarget.style.backgroundColor = accentColor; e.currentTarget.style.color = '#fff'; e.currentTarget.style.borderColor = accentColor; }}
+              onMouseLeave={e => { e.currentTarget.style.backgroundColor = ''; e.currentTarget.style.color = ''; e.currentTarget.style.borderColor = ''; }}
+            >
+              <svg width="14" height="18" viewBox="0 0 12 16" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="2 3 6 7 10 3"/>
+                <polyline points="2 9 6 13 10 9"/>
+              </svg>
+            </button>
+          </div>
+        ) : (
         <div className="max-w-7xl mx-auto px-3 py-2 md:px-4 md:py-3">
           {/* Top Row: Logo, Nav, Menu */}
           <div className="flex items-center gap-1 md:gap-2 md:justify-between md:relative">
@@ -476,10 +502,10 @@ export default function Home({ events = [], eventsLoading = false }) {
 
             {/* Desktop Actions / Mobile Hamburger */}
             <div className="flex items-center gap-2 ml-auto md:ml-0">
-              {isMap && (
+              {(isMap || isTiles || isGeo) && (
                 <button onClick={() => setHeaderCollapsed(true)}
                   className="hidden md:flex items-center justify-center px-3 py-2 rounded-full font-black border-2 border-black bg-white shadow-[2px_2px_0px_black] transition-all"
-                  title="Collapse header to see more map"
+                  title="Collapse header"
                   onMouseEnter={e => { e.currentTarget.style.backgroundColor = accentColor; e.currentTarget.style.color = '#fff'; e.currentTarget.style.borderColor = accentColor; }}
                   onMouseLeave={e => { e.currentTarget.style.backgroundColor = ''; e.currentTarget.style.color = ''; e.currentTarget.style.borderColor = ''; }}>
                   <svg width="14" height="18" viewBox="0 0 12 16" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -630,6 +656,7 @@ export default function Home({ events = [], eventsLoading = false }) {
             )}
           </div>
         </div>
+        )}
       </header>
 
       {/* Content Area */}
@@ -652,9 +679,22 @@ export default function Home({ events = [], eventsLoading = false }) {
             <MapView events={events} headerCollapsed={headerCollapsed} />
           </div>
         ) : view === 'geo' ? (
-          <div className="h-full overflow-y-auto">
-            <GeoPostView session={session} />
-          </div>
+          <main className="h-full overflow-y-auto relative" onScroll={handleScroll}>
+            {headerCollapsed && (
+              <button
+                onClick={() => setHeaderCollapsed(false)}
+                className="hidden md:flex absolute top-3 left-1/2 -translate-x-1/2 z-[60] items-center justify-center px-3 py-2 rounded-full font-black border-2 border-black bg-white shadow-[2px_2px_0px_black] transition-all"
+                title="Expand header"
+                onMouseEnter={e => { e.currentTarget.style.backgroundColor = accentColor; e.currentTarget.style.color = '#fff'; e.currentTarget.style.borderColor = accentColor; }}
+                onMouseLeave={e => { e.currentTarget.style.backgroundColor = ''; e.currentTarget.style.color = ''; e.currentTarget.style.borderColor = ''; }}>
+                <svg width="14" height="18" viewBox="0 0 12 16" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="2 3 6 7 10 3"/>
+                  <polyline points="2 9 6 13 10 9"/>
+                </svg>
+              </button>
+            )}
+            <GeoPostView session={session} headerCollapsed={headerCollapsed} />
+          </main>
         ) : (
           <main className="h-full overflow-y-auto" onScroll={handleScroll}>
             <div className="max-w-7xl mx-auto w-full">

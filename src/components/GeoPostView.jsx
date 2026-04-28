@@ -2529,7 +2529,7 @@ function findNearestValidGridSlot(col, row, w, h, blocked) {
 }
 
 // ── GeoPostView ───────────────────────────────────────────────────────────────
-export default function GeoPostView({ session }) {
+export default function GeoPostView({ session, headerCollapsed = false }) {
   const { resolvedTheme } = useSiteTheme();
   const accentColor = resolvedTheme?.accentColor || '#7C3AED';
   const surfaceBg   = resolvedTheme?.surfaceBackgroundColor || '#fff';
@@ -4293,9 +4293,9 @@ export default function GeoPostView({ session }) {
            so pill bottom edge sits exactly at line button bottom.)             */
       `}</style>
       {/* Create-post section with mosaic behind it */}
-      <div className="w-full relative overflow-hidden" style={{ paddingBottom: 48 }}>
+      <div className="w-full relative overflow-hidden" style={{ paddingBottom: 48, paddingTop: headerCollapsed ? 24 : 0 }}>
         {/* Mosaic: absolute background layer, fills height of this section, behind createpost */}
-        <div className="hidden md:block absolute inset-0" style={{ zIndex: 0, pointerEvents: mosaicPeekOn ? 'auto' : 'none' }} aria-hidden={!mosaicPeekOn}>
+        <div className="block absolute inset-0" style={{ zIndex: 0, pointerEvents: mosaicPeekOn ? 'auto' : 'none' }} aria-hidden={!mosaicPeekOn}>
           <GeoPostMosaic posts={posts} accentColor={accentColor} opacity={(mosaicPeek || mosaicPeekOn) ? 1 : 0.42} onTileClick={mosaicPeekOn ? (post) => setOpenPostPopup(post) : null} />
         </div>
       <div className="w-full max-w-7xl mx-auto px-3 pt-8 pb-0" style={{ position: 'relative', zIndex: 1, pointerEvents: mosaicPeekOn ? 'none' : 'auto' }}>
@@ -4490,9 +4490,9 @@ export default function GeoPostView({ session }) {
         </div>
       </div>
       {/* Top-right controls: feed layout toggle + eye peek button */}
-      <div className="hidden md:flex absolute items-start gap-2" style={{ top: 10, right: 24, zIndex: 10 }} onClick={e => e.stopPropagation()} onMouseDown={e => e.stopPropagation()}>
+      <div className="flex absolute items-start gap-2" style={{ top: 10, right: 24, zIndex: 10 }} onClick={e => e.stopPropagation()} onMouseDown={e => e.stopPropagation()}>
         {/* Vertical stack: layout toggle on top, shape (rounded/square) toggle below */}
-        <div className="flex flex-col items-end gap-1.5">
+        <div className="hidden md:flex flex-col items-end gap-1.5">
         {/* Layout toggle: tile mode or list mode */}
         <div className="flex items-center rounded-lg border-2 border-black bg-white shadow-[2px_2px_0px_black] overflow-hidden select-none">
           <button

@@ -175,6 +175,14 @@ export default function TileView({ events, eventsLoading = false }) {
   const [isMobile, setIsMobile] = useState(false);
   const [trendFilter, setTrendFilter] = useState(null);
   const [trendCache, setTrendCache] = useState({});
+  // Tile container shape: 'rounded' (default) or 'square'. Persists per device.
+  // Applied via the `tv-square` class on the outer scope so EventTile + filter chrome go flush.
+  const [tileShape, setTileShape] = useState(() => {
+    try { return localStorage.getItem('lapuff_tileview_shape') || 'rounded'; } catch { return 'rounded'; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('lapuff_tileview_shape', tileShape); } catch {}
+  }, [tileShape]);
 
   const tagDropdownRef = useRef(null);
   const emojiPickerRef = useRef(null);
@@ -393,7 +401,43 @@ export default function TileView({ events, eventsLoading = false }) {
   const hasActiveMoreFilters = priceFilter !== 'all' || emojiFilters.length > 0 || borough !== 'All';
 
   return (
-    <div className="w-full sm:scale-100 scale-[0.98] origin-top transition-transform lp-theme-scope">
+    <div className={`w-full sm:scale-100 scale-[0.98] origin-top transition-transform lp-theme-scope ${tileShape === 'square' ? 'tv-square' : ''}`}>
+      <style>{`
+        /* ─── TileView SQUARE MODE (desktop only) ─── flush event tiles, no rounded corners ─── */
+        @media (min-width: 768px) {
+          .tv-square *, .tv-square *::before, .tv-square *::after {
+            border-radius: 0 !important;
+          }
+          .tv-square { max-width: 100%; overflow-x: hidden; }
+          .tv-square > .bg-white.sticky {
+            box-shadow: none !important;
+            border-bottom-width: 5px !important;
+          }
+          .tv-square .tv-tile-grid {
+            gap: 0 !important;
+            padding-left: 0 !important;
+            padding-right: 0 !important;
+            margin-left: 0 !important;
+            margin-right: 0 !important;
+            max-width: 100% !important;
+            overflow-x: hidden !important;
+          }
+          .tv-square .tv-tile-grid > * {
+            transform: none !important;
+            margin: 0 !important;
+          }
+          .tv-square .lp-tile-card {
+            box-shadow: none !important;
+            border-radius: 0 !important;
+            border-width: 5px !important;
+            box-sizing: border-box !important;
+            transform: none !important;
+          }
+          .tv-square .lp-tile-card:hover {
+            transform: none !important;
+          }
+        }
+      `}</style>
       {/* Filter bar */}
       <div className="bg-white border-b-3 border-black sticky top-0 z-30 px-4 py-3 md:space-y-2.5 space-y-2 rounded-b-[24px] shadow-md">
 
@@ -493,56 +537,7 @@ export default function TileView({ events, eventsLoading = false }) {
         </div>
         )}
 
-        {/* ROW 4: RSVP + Tag filter */}
-        {isMobile && (
-        <div className="flex items-center gap-2 flex-wrap">
-          <button
-            onClick={() => { setRsvpOnly(v => !v); resetPage(); }}
-            className={`flex items-center gap-1 px-3 py-1.5 rounded-2xl text-xs font-black border-[2.5px] border-black transition-colors ${rsvpOnly ? 'bg-[#7C3AED] text-white border-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
-          >
-            🤫 RSVP only
-          </button>
-
-          {tagFilters.map(tag => (
-            <span
-              key={tag}
-              className="flex items-center gap-1 bg-[#7C3AED] text-white text-xs font-black px-2.5 py-1.5 rounded-full border-[2.5px] border-[#7C3AED]"
-            >
-              {tag}
-              <button onClick={() => removeTagFilter(tag)} className="ml-0.5 hover:text-red-200">✕</button>
-            </span>
-          ))}
-
-          {tagFilters.length < MAX_TAG_FILTERS && (
-            <div ref={tagDropdownRef} className="relative">
-              <button
-                onClick={() => setTagDropdownOpen(v => !v)}
-                className={`flex items-center gap-1 px-3 py-1.5 rounded-2xl text-xs font-black border-[2.5px] border-black transition-colors ${tagDropdownOpen ? 'bg-violet-100 border-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
-              >
-                + tag
-                <span className="text-[10px]">{tagDropdownOpen ? '▲' : '▼'}</span>
-              </button>
-              {tagDropdownOpen && (
-                <div className="absolute top-full left-0 mt-1 z-50 bg-white border-3 border-black rounded-2xl shadow-[4px_4px_0px_black] p-2 w-56 max-h-64 overflow-y-auto">
-                  <div className="flex flex-wrap gap-1.5">
-                    {availableTags.map(tag => (
-                      <button
-                        key={tag}
-                        onClick={() => addTagFilter(tag)}
-                        className="px-2.5 py-1 rounded-xl text-xs font-black border-[2.5px] border-black bg-white hover:bg-[#7C3AED] hover:text-white hover:border-[#7C3AED] transition-colors"
-                      >
-                        {tag}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-        )}
-
-        {/* ROW 5: More Filters Toggle + Trend Filter Pills */}
+        {/* ROW 5: More Filters Toggle + Trend Filter Pills + Square/Round Toggle */}
         <div className="flex items-center gap-2">
           <button
             onClick={() => setShowMoreFilters(v => !v)}
@@ -642,11 +637,78 @@ export default function TileView({ events, eventsLoading = false }) {
               ))}
             </div>
           )}
+
+          {/* Square/Round shape toggle — right-aligned. Visual + state on mobile, fully wired on desktop. */}
+          <div className="ml-auto flex items-center gap-0 border-[2.5px] border-black rounded-2xl overflow-hidden bg-white" style={{ flexShrink: 0 }}>
+            <button
+              onClick={() => setTileShape('rounded')}
+              title="Rounded tiles"
+              className={`px-2 py-1 text-[11px] font-black transition-colors ${tileShape === 'rounded' ? 'bg-[#7C3AED] text-white' : 'bg-white hover:bg-violet-50'}`}
+            >
+              ▢
+            </button>
+            <button
+              onClick={() => setTileShape('square')}
+              title="Square tiles"
+              className={`px-2 py-1 text-[11px] font-black transition-colors border-l-[2.5px] border-black ${tileShape === 'square' ? 'bg-[#7C3AED] text-white' : 'bg-white hover:bg-violet-50'}`}
+            >
+              ◻
+            </button>
+          </div>
         </div>
 
         {/* EXPANDABLE SECTION */}
         {showMoreFilters && (
           <div className="md:space-y-2.5 space-y-2 pt-1.5 border-t-2 border-dashed border-violet-100">
+
+            {/* RSVP + Tag (mobile only — moved here from standalone row) */}
+            {isMobile && (
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  onClick={() => { setRsvpOnly(v => !v); resetPage(); }}
+                  className={`flex items-center gap-1 px-3 py-1.5 rounded-2xl text-xs font-black border-[2.5px] border-black transition-colors ${rsvpOnly ? 'bg-[#7C3AED] text-white border-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
+                >
+                  🤫 RSVP only
+                </button>
+
+                {tagFilters.map(tag => (
+                  <span
+                    key={tag}
+                    className="flex items-center gap-1 bg-[#7C3AED] text-white text-xs font-black px-2.5 py-1.5 rounded-full border-[2.5px] border-[#7C3AED]"
+                  >
+                    {tag}
+                    <button onClick={() => removeTagFilter(tag)} className="ml-0.5 hover:text-red-200">✕</button>
+                  </span>
+                ))}
+
+                {tagFilters.length < MAX_TAG_FILTERS && (
+                  <div ref={tagDropdownRef} className="relative">
+                    <button
+                      onClick={() => setTagDropdownOpen(v => !v)}
+                      className={`flex items-center gap-1 px-3 py-1.5 rounded-2xl text-xs font-black border-[2.5px] border-black transition-colors ${tagDropdownOpen ? 'bg-violet-100 border-[#7C3AED]' : 'bg-white hover:bg-violet-50'}`}
+                    >
+                      + tag
+                      <span className="text-[10px]">{tagDropdownOpen ? '▲' : '▼'}</span>
+                    </button>
+                    {tagDropdownOpen && (
+                      <div className="absolute top-full left-0 mt-1 z-50 bg-white border-3 border-black rounded-2xl shadow-[4px_4px_0px_black] p-2 w-56 max-h-64 overflow-y-auto">
+                        <div className="flex flex-wrap gap-1.5">
+                          {availableTags.map(tag => (
+                            <button
+                              key={tag}
+                              onClick={() => addTagFilter(tag)}
+                              className="px-2.5 py-1 rounded-xl text-xs font-black border-[2.5px] border-black bg-white hover:bg-[#7C3AED] hover:text-white hover:border-[#7C3AED] transition-colors"
+                            >
+                              {tag}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Price */}
             <div className="flex items-center gap-2 flex-wrap">
@@ -744,7 +806,7 @@ export default function TileView({ events, eventsLoading = false }) {
           <p className="text-xl font-black">{eventsLoading ? 'Events loading...' : 'No events found!'}</p>
         </div>
       ) : (
-        <div className={`grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 ${isMobile ? 'gap-2 px-3 pb-4' : 'gap-4 px-4 pb-4'}`}>
+        <div className={`tv-tile-grid grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 ${isMobile ? 'gap-2 px-3 pb-4' : 'gap-4 px-4 pb-4'}`}>
           {displayed.map(event => (
             <div key={event.id} className={`${isMobile ? 'scale-[0.92] -mx-1 -my-2 origin-center' : ''}`}>
                <EventTile
