@@ -2,6 +2,11 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from '@/App.jsx'
 import '@/index.css'
+import { applyUIShapeClasses, getUIShape } from '@/lib/uiMode'
+
+// Apply universal UI shape (square/rounded) at boot so all views (MapView topbar,
+// FavoritesPage, CalendarPage) reflect it without requiring TileView/GeoPostView mount.
+applyUIShapeClasses(getUIShape());
 
 // Gear 1 — Global Idle Preloader: silently cache the raw FGB bytes while the user browses.
 // Uses requestIdleCallback so it never competes with the UI thread.

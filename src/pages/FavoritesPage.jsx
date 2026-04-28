@@ -202,7 +202,7 @@ export default function FavoritesPage({ events = [] }) {
   }
 
   return (
-    <div className="min-h-screen bg-[#FAFAF8] lp-theme-scope lp-page-bg">
+    <div className="min-h-screen bg-[#FAFAF8] lp-theme-scope lp-page-bg lp-favorites-page">
       <div className="max-w-7xl mx-auto px-3 md:px-4 py-5 md:py-6 overflow-visible">
         <div className="flex items-start md:items-center justify-between mb-6 md:mb-7 gap-3 md:gap-4">
           <Link

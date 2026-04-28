@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
+import { useUIShape } from '../lib/uiMode';
 import { generateAutoTags } from '../lib/autoTags';
 import { isEventHappeningNow } from '../lib/eventUtils';
 import EmojiPicker from './EmojiPicker';
@@ -175,22 +176,9 @@ export default function TileView({ events, eventsLoading = false }) {
   const [isMobile, setIsMobile] = useState(false);
   const [trendFilter, setTrendFilter] = useState(null);
   const [trendCache, setTrendCache] = useState({});
-  // Tile container shape: 'rounded' (default) or 'square'. Persists per device.
-  // Applied via the `tv-square` class on the outer scope so EventTile + filter chrome go flush.
-  const [tileShape, setTileShape] = useState(() => {
-    try { return localStorage.getItem('lapuff_tileview_shape') || 'rounded'; } catch { return 'rounded'; }
-  });
-  useEffect(() => {
-    try { localStorage.setItem('lapuff_tileview_shape', tileShape); } catch {}
-    // Mirror square mode to a global class so Home.jsx topbar also goes flush
-    if (typeof document !== 'undefined') {
-      if (tileShape === 'square') document.documentElement.classList.add('tv-square-active');
-      else document.documentElement.classList.remove('tv-square-active');
-    }
-    return () => {
-      if (typeof document !== 'undefined') document.documentElement.classList.remove('tv-square-active');
-    };
-  }, [tileShape]);
+  // Tile container shape: 'rounded' (default) or 'square'. Universal site-wide state
+  // shared with GeoPostView, MapView topbar, FavoritesPage, CalendarPage via uiMode.js.
+  const [tileShape, setTileShape] = useUIShape();
 
   // Layout mode: 'wide' (default) full-screen 5-col grid, or 'narrow' constrained 4-col.
   const [tileLayout, setTileLayout] = useState(() => {

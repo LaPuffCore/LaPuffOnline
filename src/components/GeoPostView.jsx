@@ -3,6 +3,7 @@ import { useState, useRef, useEffect, useCallback, useLayoutEffect, useMemo } fr
 import { createPortal } from 'react-dom';
 import Matter from 'matter-js';
 import { useSiteTheme } from '../lib/theme';
+import { useUIShape } from '../lib/uiMode';
 import { containsProfanity } from '../lib/profanityFilter';
 import { isUserInZipCode } from '../lib/locationService';
 import {
@@ -2978,16 +2979,10 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
     try { return localStorage.getItem('lapuff_feed_layout') || 'tiles'; } catch { return 'tiles'; }
   });
   // Tile container shape: 'rounded' (default) or 'square' (flush, no radius, no tile shadow).
-  // Persists across viewmodes and page reloads. Applied as `lp-square-mode` class on <html>
-  // so the styling cascades to topbar buttons and other pages.
-  const [tileShape, setTileShape] = useState(() => {
-    try { return localStorage.getItem('lapuff_tile_shape') || 'rounded'; } catch { return 'rounded'; }
-  });
-  useEffect(() => {
-    try { localStorage.setItem('lapuff_tile_shape', tileShape); } catch {}
-    if (tileShape === 'square') document.documentElement.classList.add('lp-square-mode');
-    else document.documentElement.classList.remove('lp-square-mode');
-  }, [tileShape]);
+  // Universal site-wide state shared with TileView, MapView topbar, FavoritesPage,
+  // CalendarPage via uiMode.js. Applied as `lp-square-mode` (+ tv-square-active + lp-ui-square)
+  // classes on <html> so the styling cascades site-wide.
+  const [tileShape, setTileShape] = useUIShape();
   // Measure GeoPostView's parent (the scroll container) so we can compute the
   // square-mode row scaling factor. In rounded mode the tile area has 56px of
   // horizontal padding (px-3 + md:px-4 = 24+32). In square mode that padding

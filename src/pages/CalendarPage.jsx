@@ -489,7 +489,7 @@ export default function CalendarPage({ events = [] }) {
       : curDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
 
   return (
-    <div className="h-[100dvh] overflow-hidden lp-page-bg lp-theme-scope">
+    <div className="h-[100dvh] overflow-hidden lp-page-bg lp-theme-scope lp-calendar-page">
       <div className="max-w-7xl mx-auto h-full px-3 md:px-4 py-4 md:py-5 flex flex-col min-h-0">
         <div className="grid grid-cols-[72px_minmax(0,1fr)_72px] md:grid-cols-[88px_minmax(0,1fr)_88px] items-start md:items-center mb-3 md:mb-4 gap-2 md:gap-4">
           <Link to="/" className="w-[72px] md:w-[88px] flex flex-col items-center justify-start text-black hover:text-[#7C3AED] transition-colors">

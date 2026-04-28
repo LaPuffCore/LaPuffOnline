@@ -310,3 +310,20 @@ html.lp-emoji-stain-active .lp-emoji {
   animation: radio-bass-jiggle 1.8s ease-in-out infinite;
   transform-origin: center;
 }
+
+/* ───────────────────────────────────────────────────────────────────
+   Universal Square Mode — applied site-wide via uiMode.js
+   When `html.lp-ui-square` is set, every button/container in
+   FavoritesPage and CalendarPage loses its border-radius for the
+   flush retro aesthetic. TileView + GeoPostView already have their
+   own dedicated square-mode CSS (tv-square / lp-square-mode) so we
+   only need to cover the secondary pages here.
+   ─────────────────────────────────────────────────────────────────── */
+html.lp-ui-square .lp-favorites-page *,
+html.lp-ui-square .lp-favorites-page *::before,
+html.lp-ui-square .lp-favorites-page *::after,
+html.lp-ui-square .lp-calendar-page *,
+html.lp-ui-square .lp-calendar-page *::before,
+html.lp-ui-square .lp-calendar-page *::after {
+  border-radius: 0 !important;
+}
