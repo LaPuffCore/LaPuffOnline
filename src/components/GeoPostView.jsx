@@ -1282,7 +1282,7 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
     >
       {/* Inner visual card — border wrapper (no overflow:hidden to prevent corner pixel bleed) */}
       <div
-        className="rounded-2xl border-3"
+        className="rounded-2xl border-3 gp-tile-card"
         style={{
           borderColor: theme.outline,
           boxShadow: `4px 4px 0px ${theme.shadow}`,
@@ -1296,7 +1296,7 @@ function PostCard({ post, postReactions, onReact, onOpenReactors, accentColor, o
       >
       {/* Content wrapper — overflow:hidden separated from border to eliminate corner pixel bleed */}
       <div
-        className="overflow-clip rounded-[13px]"
+        className="overflow-clip rounded-[13px] gp-tile-card-inner"
         style={{
           background: theme.fill,
           flex: 1,
@@ -2519,6 +2519,17 @@ export default function GeoPostView({ session }) {
   const [feedLayout, setFeedLayout] = useState(() => {
     try { return localStorage.getItem('lapuff_feed_layout') || 'tiles'; } catch { return 'tiles'; }
   });
+  // Tile container shape: 'rounded' (default) or 'square' (flush, no radius, no tile shadow).
+  // Persists across viewmodes and page reloads. Applied as `lp-square-mode` class on <html>
+  // so the styling cascades to topbar buttons and other pages.
+  const [tileShape, setTileShape] = useState(() => {
+    try { return localStorage.getItem('lapuff_tile_shape') || 'rounded'; } catch { return 'rounded'; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('lapuff_tile_shape', tileShape); } catch {}
+    if (tileShape === 'square') document.documentElement.classList.add('lp-square-mode');
+    else document.documentElement.classList.remove('lp-square-mode');
+  }, [tileShape]);
   const [listScaleOpen, setListScaleOpen] = useState(false);
   const createPostAreaRef = useRef(null);
   const [fabOpacity, setFabOpacity] = useState(0);
@@ -4034,6 +4045,39 @@ export default function GeoPostView({ session }) {
         .geopost-tiles-animating > *:not(aside):not([data-pinned="true"]) {
           transition: transform 1000ms cubic-bezier(0.16, 1, 0.3, 1) !important;
         }
+        /* ─── SQUARE MODE ─── flush tiles, no rounded corners site-wide ─── */
+        /* Tiles always have the radius/shadow transition in both directions */
+        .gp-tile-card {
+          transition: border-radius 450ms cubic-bezier(0.22, 1, 0.36, 1),
+                      box-shadow 450ms ease,
+                      margin 450ms cubic-bezier(0.22, 1, 0.36, 1) !important;
+        }
+        .gp-tile-card-inner {
+          transition: border-radius 450ms cubic-bezier(0.22, 1, 0.36, 1) !important;
+        }
+        .gp-tile-grid {
+          transition: gap 450ms cubic-bezier(0.22, 1, 0.36, 1);
+        }
+        /* Square-mode global: zero out border-radius on every element + simple fade */
+        html.lp-square-mode,
+        html.lp-square-mode body {
+          transition: background-color 220ms ease;
+        }
+        html.lp-square-mode *,
+        html.lp-square-mode *::before,
+        html.lp-square-mode *::after {
+          border-radius: 0 !important;
+        }
+        /* Tile-specific: kill drop shadow and pull the grid to gap:0 */
+        html.lp-square-mode .gp-tile-grid { gap: 0 !important; }
+        html.lp-square-mode .gp-tile-card {
+          box-shadow: none !important;
+        }
+        /* Adjacent borders touch — pull each tile up/left by border-width to overlap
+           neighboring tile borders so they appear as a single shared 3px line.       */
+        html.lp-square-mode .gp-tile-card {
+          margin: 0 -3px -3px 0 !important;
+        }
       `}</style>
       {/* Create-post section with mosaic behind it */}
       <div className="w-full relative overflow-hidden" style={{ paddingBottom: 48 }}>
@@ -4233,7 +4277,9 @@ export default function GeoPostView({ session }) {
         </div>
       </div>
       {/* Top-right controls: feed layout toggle + eye peek button */}
-      <div className="hidden md:flex absolute items-center gap-2" style={{ top: 10, right: 24, zIndex: 10 }} onClick={e => e.stopPropagation()} onMouseDown={e => e.stopPropagation()}>
+      <div className="hidden md:flex absolute items-start gap-2" style={{ top: 10, right: 24, zIndex: 10 }} onClick={e => e.stopPropagation()} onMouseDown={e => e.stopPropagation()}>
+        {/* Vertical stack: layout toggle on top, shape (rounded/square) toggle below */}
+        <div className="flex flex-col items-end gap-1.5">
         {/* Layout toggle: tile mode or list mode */}
         <div className="flex items-center rounded-lg border-2 border-black bg-white shadow-[2px_2px_0px_black] overflow-hidden select-none">
           <button
@@ -4278,6 +4324,42 @@ export default function GeoPostView({ session }) {
             {/* Triangle icon */}
             <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><polygon points="6.5,1 13,12 0,12" fill="currentColor"/></svg>
           </button>
+        </div>
+        {/* Shape toggle: rounded (default) or square. Hidden in shape mode. Persists across viewmodes + reload. */}
+        {feedLayout !== 'shapes' && (
+          <div className="flex items-center rounded-lg border-2 border-black bg-white shadow-[2px_2px_0px_black] overflow-hidden select-none">
+            <button
+              onMouseDown={e => e.preventDefault()}
+              onClick={() => setTileShape('rounded')}
+              title="Rounded mode"
+              className="flex items-center justify-center w-7 h-7 transition-colors"
+              style={{ background: tileShape === 'rounded' ? accentColor : '#fff', color: tileShape === 'rounded' ? '#fff' : '#000' }}
+            >
+              {/* Rounded square icon */}
+              <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><rect x="1" y="1" width="11" height="11" rx="3.5" stroke="currentColor" strokeWidth="2" fill="none"/></svg>
+            </button>
+            <button
+              onMouseDown={e => e.preventDefault()}
+              onClick={() => setTileShape('square')}
+              title="Square / flush mode"
+              className="flex items-center justify-center w-7 h-7 transition-colors"
+              style={{ background: tileShape === 'square' ? accentColor : '#fff', color: tileShape === 'square' ? '#fff' : '#000' }}
+            >
+              {/* 3×3 grid texture icon */}
+              <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+                <rect x="0" y="0" width="4" height="4" fill="currentColor"/>
+                <rect x="4.5" y="0" width="4" height="4" fill="currentColor"/>
+                <rect x="9" y="0" width="4" height="4" fill="currentColor"/>
+                <rect x="0" y="4.5" width="4" height="4" fill="currentColor"/>
+                <rect x="4.5" y="4.5" width="4" height="4" fill="currentColor"/>
+                <rect x="9" y="4.5" width="4" height="4" fill="currentColor"/>
+                <rect x="0" y="9" width="4" height="4" fill="currentColor"/>
+                <rect x="4.5" y="9" width="4" height="4" fill="currentColor"/>
+                <rect x="9" y="9" width="4" height="4" fill="currentColor"/>
+              </svg>
+            </button>
+          </div>
+        )}
         </div>
         {/* Eye button: click to toggle mosaic peek — mosaic becomes visible, createpost hides.
             When on: icon grows, button gets accent fill, mosaic tiles are clickable (→ popup). */}
@@ -4468,7 +4550,7 @@ export default function GeoPostView({ session }) {
         maxHeight: canShowLess ? 'none' : `${16 * Math.max(1, (desktopUnitHeight - 12) / 2) + 15 * 12}px`,
         position: 'relative',
       }}>
-        <div ref={desktopGridRef} className="hidden md:grid gap-3 mt-3"
+        <div ref={desktopGridRef} className="hidden md:grid gap-3 mt-3 gp-tile-grid"
           style={{
             '--image-scale': Math.max(0.5, Number(feedImageScale || 1)),
             // Keep dense always — prevents holes in layout. Array order controls placement,

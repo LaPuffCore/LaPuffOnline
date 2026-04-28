@@ -137,6 +137,15 @@ function AppWithEvents() {
     });
   }, [events]);
 
+  // Apply persisted square/rounded mode globally on mount so it covers ALL pages
+  useEffect(() => {
+    try {
+      const shape = localStorage.getItem('lapuff_tile_shape') || 'rounded';
+      if (shape === 'square') document.documentElement.classList.add('lp-square-mode');
+      else document.documentElement.classList.remove('lp-square-mode');
+    } catch {}
+  }, []);
+
   return (
     <Routes>
       <Route path="/" element={<Home events={events} eventsLoading={eventsLoading} />} />
