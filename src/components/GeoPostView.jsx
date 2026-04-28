@@ -2312,28 +2312,29 @@ function ShapePostCard({ post, shapeId = 'square', size = 270, postReactions, on
         />
       )}
 
-      {/* Full-shape foreignObject with CSS clip-path — bands sized by % of shape height */}
+      {/* Full-shape foreignObject with CSS clip-path — bands sized strictly by % of shape height */}
       <foreignObject x={0} y={0} width={size} height={size} style={{ pointerEvents: 'none' }}>
         <div
           xmlns="http://www.w3.org/1999/xhtml"
           style={{
             width: '100%', height: '100%', display: 'flex', flexDirection: 'column',
             clipPath: cssClip, WebkitClipPath: cssClip,
-            color: theme.text, boxSizing: 'border-box',
+            color: theme.text, boxSizing: 'border-box', overflow: 'hidden',
           }}
         >
-          {/* Band 0: username + status tag (top 20%) */}
+          {/* Band 0: username + status tag (top 20%) — centered, inline, wraps */}
           <div style={{
-            height: `${BAND_PCTS[0] * 100}%`,
-            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-            gap: 1, overflow: 'hidden', textAlign: 'center', padding: '2px 4px', boxSizing: 'border-box',
+            height: `${BAND_PCTS[0] * 100}%`, flexShrink: 0, flexGrow: 0,
+            display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+            flexWrap: 'wrap', gap: Math.max(2, size * 0.012),
+            overflow: 'hidden', textAlign: 'center',
+            padding: `0 ${Math.max(2, size * 0.012)}px`, boxSizing: 'border-box',
           }}>
-            <div style={{
+            <span style={{
               fontWeight: 900, fontSize: usernameFont, lineHeight: 1.05,
               maxWidth: `${bandExtents[0].minWidthFrac * 100}%`,
-              wordBreak: 'break-word', overflow: 'hidden',
-              display: '-webkit-box', WebkitLineClamp: showStatusTag ? 1 : 2, WebkitBoxOrient: 'vertical',
-            }}>{username}</div>
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            }}>{username}</span>
             {showStatusTag && (
               <HoverInvertButton
                 onClick={(e) => { e.stopPropagation(); onSelectTag && onSelectTag({ status: post.is_participant ? 'participant' : 'orbiter' }); }}
@@ -2341,20 +2342,20 @@ function ShapePostCard({ post, shapeId = 'square', size = 270, postReactions, on
                   fontSize: tagFont, fontWeight: 900, color: '#fff', background: statusBg, borderColor: statusBg,
                   borderWidth: '1px', borderStyle: 'solid', borderRadius: 9999,
                   padding: `0 ${Math.max(3, tagFont * 0.6)}px`, lineHeight: 1.3, letterSpacing: 0.4,
-                  pointerEvents: 'auto',
+                  pointerEvents: 'auto', flexShrink: 0,
                 }}
               >{statusLabel}</HoverInvertButton>
             )}
           </div>
 
-          {/* Band 1: image space — image rendered as SVG sibling. Spacer here to preserve layout. */}
-          <div style={{ height: `${BAND_PCTS[1] * 100}%` }} />
+          {/* Band 1: image space — strict 30% spacer; image is rendered as SVG sibling */}
+          <div style={{ height: `${BAND_PCTS[1] * 100}%`, flexShrink: 0, flexGrow: 0 }} />
 
-          {/* Band 2: text body + show more anchored bottom */}
+          {/* Band 2: text body + show more — strict 30%, top-aligned, no padding above */}
           <div style={{
-            height: `${BAND_PCTS[2] * 100}%`,
-            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end',
-            overflow: 'hidden', padding: '0 4px', boxSizing: 'border-box', textAlign: 'center',
+            height: `${BAND_PCTS[2] * 100}%`, flexShrink: 0, flexGrow: 0,
+            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start',
+            overflow: 'hidden', padding: `0 ${Math.max(2, size * 0.015)}px`, boxSizing: 'border-box', textAlign: 'center',
           }}>
             {plainText && (
               <div style={{
@@ -2369,7 +2370,7 @@ function ShapePostCard({ post, shapeId = 'square', size = 270, postReactions, on
               <div
                 style={{
                   fontSize: Math.max(7, textFont * 0.85), fontWeight: 900,
-                  marginTop: 1, lineHeight: 1, opacity: 0.75, pointerEvents: 'auto', cursor: 'pointer',
+                  marginTop: 'auto', lineHeight: 1, opacity: 0.75, pointerEvents: 'auto', cursor: 'pointer',
                 }}
                 onMouseDown={e => e.preventDefault()}
                 onClick={(e) => { e.stopPropagation(); onClick && onClick(e); }}
@@ -2377,16 +2378,15 @@ function ShapePostCard({ post, shapeId = 'square', size = 270, postReactions, on
             )}
           </div>
 
-          {/* Band 3: reactions + ... + scope (bottom 20%) */}
+          {/* Band 3: reactions + ... + scope — strict 20%, single row with wrap */}
           <div style={{
-            height: `${BAND_PCTS[3] * 100}%`,
+            height: `${BAND_PCTS[3] * 100}%`, flexShrink: 0, flexGrow: 0,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             gap: Math.max(2, size * 0.012), flexWrap: 'wrap', overflow: 'hidden',
-            padding: '0 4px', boxSizing: 'border-box',
+            padding: `0 ${Math.max(2, size * 0.012)}px`, boxSizing: 'border-box',
             maxWidth: `${bandExtents[3].minWidthFrac * 100}%`,
             margin: '0 auto', alignContent: 'center',
           }}>
-            {/* Top reaction (if any) — clicking re-applies same emoji */}
             {topEmojis[0] && (
               <HoverInvertButton
                 onClick={(e) => { e.stopPropagation(); onReact && onReact(post.id, topEmojis[0][0]); }}
@@ -2398,8 +2398,6 @@ function ShapePostCard({ post, shapeId = 'square', size = 270, postReactions, on
                 }}
               >{topEmojis[0][0]}<span style={{ fontSize: btnFont * 0.85 }}>{topEmojis[0][1]}</span></HoverInvertButton>
             )}
-
-            {/* + emoji picker button */}
             <HoverInvertButton
               onClick={(e) => { e.stopPropagation(); onOpenPicker && onOpenPicker(post.id, e.currentTarget.getBoundingClientRect()); }}
               baseStyle={{
@@ -2408,8 +2406,6 @@ function ShapePostCard({ post, shapeId = 'square', size = 270, postReactions, on
                 padding: btnPad, fontSize: btnFont, fontWeight: 900, lineHeight: 1, pointerEvents: 'auto',
               }}
             >+</HoverInvertButton>
-
-            {/* … reactors button */}
             {reactions.length > 0 && (
               <HoverInvertButton
                 onClick={(e) => { e.stopPropagation(); onOpenReactors && onOpenReactors(post.id); }}
@@ -2420,8 +2416,6 @@ function ShapePostCard({ post, shapeId = 'square', size = 270, postReactions, on
                 }}
               >…</HoverInvertButton>
             )}
-
-            {/* Scope tag */}
             <HoverInvertButton
               onClick={(e) => { e.stopPropagation(); onSelectTag && onSelectTag(post); }}
               baseStyle={{
@@ -2519,8 +2513,21 @@ function ShapeModeView({ posts, postReactions, onReact, onSelectTag, onOpenReact
   const [qepPostId, setQepPostId] = useState(null);
   const hasMoreRef = useRef(false);
 
-  // Drag/throw state
-  const dragRef = useRef(null); // { body, postId, samples: [{x,y,t}], origFrictionAir, didDrag }
+  // Drag/throw state — and click-suppression after drag
+  const dragRef = useRef(null);
+  const suppressClickRef = useRef(false);
+
+  // ── Lock horizontal scroll while ShapeModeView is mounted ──
+  useEffect(() => {
+    const prevHtml = document.documentElement.style.overflowX;
+    const prevBody = document.body.style.overflowX;
+    document.documentElement.style.overflowX = 'clip';
+    document.body.style.overflowX = 'clip';
+    return () => {
+      document.documentElement.style.overflowX = prevHtml;
+      document.body.style.overflowX = prevBody;
+    };
+  }, []);
 
   const visiblePosts = useMemo(() => posts.slice(0, visibleCount), [posts, visibleCount]);
   hasMoreRef.current = visibleCount < posts.length;
@@ -2558,6 +2565,20 @@ function ShapeModeView({ posts, postReactions, onReact, onSelectTag, onOpenReact
 
     let expandedTo = 700;
     const tick = () => {
+      // Settle-to-upright: when body is nearly at rest, ease angle toward nearest 2π multiple
+      bodiesRef.current.forEach(({ body }) => {
+        if (!body) return;
+        const speed = Math.sqrt(body.velocity.x ** 2 + body.velocity.y ** 2);
+        if (speed < 0.5 && Math.abs(body.angularVelocity) < 0.04) {
+          const TWO_PI = Math.PI * 2;
+          const target = Math.round(body.angle / TWO_PI) * TWO_PI;
+          const delta = target - body.angle;
+          if (Math.abs(delta) > 0.005) {
+            Matter.Body.setAngle(body, body.angle + delta * 0.08);
+            Matter.Body.setAngularVelocity(body, 0);
+          }
+        }
+      });
       const states = bodiesRef.current
         .filter(({ body }) => body && Matter.Composite.get(engine.world, body.id, 'body'))
         .map(({ body, postId, size }) => ({ postId, x: body.position.x, y: body.position.y, angle: body.angle, size }));
@@ -2669,17 +2690,18 @@ function ShapeModeView({ posts, postReactions, onReact, onSelectTag, onOpenReact
       const { body, postId: pid, samples, origFrictionAir, didDrag } = dragRef.current;
       body.frictionAir = origFrictionAir;
       if (!didDrag) {
-        // It was a click — open popup
         dragRef.current = null;
         handleShapeClick(pid);
         return;
       }
-      // Compute throw velocity from last samples
+      // It WAS a drag — suppress the upcoming synthetic click on the SVG <g>
+      suppressClickRef.current = true;
+      setTimeout(() => { suppressClickRef.current = false; }, 350);
       if (samples.length >= 2) {
         const last = samples[samples.length - 1];
         const prev = samples[Math.max(0, samples.length - 4)];
         const dt = Math.max(16, last.t - prev.t);
-        const vx = ((last.x - prev.x) / dt) * 16; // scale to matter step
+        const vx = ((last.x - prev.x) / dt) * 16;
         const vy = ((last.y - prev.y) / dt) * 16;
         Matter.Body.setVelocity(body, { x: Math.max(-40, Math.min(40, vx)), y: Math.max(-40, Math.min(40, vy)) });
         Matter.Body.setAngularVelocity(body, (Math.random() - 0.5) * 0.1);
@@ -2721,7 +2743,7 @@ function ShapeModeView({ posts, postReactions, onReact, onSelectTag, onOpenReact
                 size={size}
                 postReactions={postReactions[entry.post.id]}
                 onReact={onReact}
-                onClick={() => handleShapeClick(postId)}
+                onClick={() => { if (suppressClickRef.current) return; handleShapeClick(postId); }}
                 onPointerDown={onShapePointerDown}
                 onOpenReactors={onOpenReactors}
                 onOpenPicker={(pid, rect) => { setQepPostId(pid); setQepRect(rect); }}
