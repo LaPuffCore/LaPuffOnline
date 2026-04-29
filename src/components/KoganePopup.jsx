@@ -9,13 +9,29 @@ const BOTTOM_END_MT = -180;
 const BOTTOM_INIT_EXTRA_DOWN = 200;
 // X offset right for koganebottom (both positions)
 const BOTTOM_X = 153;
-// Zoom start/end transform — images appear at 1/3 scale at top of viewport (40px padding).
-// translateY compensates for the negative marginTop on koganetop at 1/3 scale so the
-// visual top of the composition sits exactly 40px below the viewport top edge.
-// Math: visualTop@1/3 = -60px (wrapper offset) + marginTop * 0.333 ≈ -(57+2.833vw)px
-// → translateY needed = 40 - -(57+2.833vw) = calc(97px + 2.833vw)
-const ZOOM_START_TRANSFORM = 'translateY(calc(97px + 2.833vw)) scale(0.333)';
-const ZOOM_FULL_TRANSFORM  = 'translateY(0px) scale(1.0)';
+// translateY for the small (1/3 scale) rest position.
+// +60px added from previous iteration to push it down into view.
+// Controls where the small images sit AND where fly-in/out targets aim.
+const ZOOM_Y_START = 'calc(157px + 2.833vw)';
+// The on-screen resting transform at 1/3 scale (fly-in destination / fly-out origin)
+const ZOOM_START_TRANSFORM = `translateX(0px) translateY(${ZOOM_Y_START}) scale(0.333)`;
+const ZOOM_FULL_TRANSFORM  = 'translateX(0px) translateY(0px) scale(1.0)';
+
+// Pick a random offscreen direction at the small scale — same Y plane so it
+// swoops in/out laterally or diagonally, keeping composition aligned in Z.
+function randomOffscreen() {
+  const y = ZOOM_Y_START;
+  const opts = [
+    `translateX(-150vw) translateY(${y}) scale(0.333)`,
+    `translateX(150vw) translateY(${y}) scale(0.333)`,
+    `translateX(-110vw) translateY(-110vh) scale(0.333)`,
+    `translateX(110vw) translateY(-110vh) scale(0.333)`,
+    `translateX(0px) translateY(-130vh) scale(0.333)`,
+    `translateX(-110vw) translateY(110vh) scale(0.333)`,
+    `translateX(110vw) translateY(110vh) scale(0.333)`,
+  ];
+  return opts[Math.floor(Math.random() * opts.length)];
+}
 
 const NUM = {
   color: '#8B0000',
@@ -121,13 +137,10 @@ export default function KoganePopup({ onClose }) {
   const closingRef = useRef(false);
   const openTimersRef = useRef([]);
 
-  // Zoom transform — starts at ZOOM_START_TRANSFORM, grows to ZOOM_FULL on open, reverses on close
-  const [zoomTransform, setZoomTransform] = useState(ZOOM_START_TRANSFORM);
+  // Zoom transform — initialised to a random offscreen position, flies in to ZOOM_START on open
+  const [zoomTransform, setZoomTransform] = useState(() => randomOffscreen());
   const [zoomTransition, setZoomTransition] = useState('none');
-  // Fade-out at end of close animation
-  const [zoomOpacity, setZoomOpacity] = useState(1);
-  const [zoomOpacityTransition, setZoomOpacityTransition] = useState('none');
-  // Backdrop blur ramps from 0 to 10px as images fade in
+  // Backdrop blur ramps from 0 to 10px when images load
   const [blurPx, setBlurPx] = useState(0);
 
   // Images use stable versioned URLs (no cache-bust) — preloaded on mount and on site load
@@ -143,15 +156,16 @@ export default function KoganePopup({ onClose }) {
     openTimersRef.current = [];
     setClosing(true);
     setScreenH(0);
-    // At 2000ms: screen + koganebottom fully retracted (1500ms) → start zoom-out over 2000ms
+    // At 2000ms: retraction done (1500ms) → zoom-out to ZOOM_START over 2000ms
     setTimeout(() => {
       setZoomTransition('transform 2000ms cubic-bezier(0.7,0,1,0.9)');
       requestAnimationFrame(() => requestAnimationFrame(() => setZoomTransform(ZOOM_START_TRANSFORM)));
     }, 2000);
-    // At 4000ms: zoom done → fade out over 500ms
+    // At 4000ms: zoom done → fly off-screen in random direction over 500ms
     setTimeout(() => {
-      setZoomOpacityTransition('opacity 500ms ease');
-      requestAnimationFrame(() => requestAnimationFrame(() => setZoomOpacity(0)));
+      const target = randomOffscreen();
+      setZoomTransition('transform 500ms cubic-bezier(0.7,0,1,0.9)');
+      requestAnimationFrame(() => requestAnimationFrame(() => setZoomTransform(target)));
     }, 4000);
     // At 4500ms: fully closed
     setTimeout(() => onClose?.(), 4500);
@@ -185,16 +199,14 @@ export default function KoganePopup({ onClose }) {
     return () => { document.getElementById('kogane-css')?.remove(); };
   }, []);
 
-  // Track image load state — animation only starts when both images are loaded
+  // Track image load state — fly-in starts as soon as both images are loaded
   const [imagesReady, setImagesReady] = useState(false);
-  const [imagesVisible, setImagesVisible] = useState(false);
   const loadedCount = useRef(0);
   const handleImageLoad = useCallback(() => {
     loadedCount.current += 1;
     if (loadedCount.current >= 2) {
-      setImagesVisible(true);
-      setBlurPx(10); // ramp blur 0→10px over 500ms (matches fade-in duration)
-      // Small rAF delay to ensure paint before starting animation sequence
+      setBlurPx(10); // ramp blur 0→10px over 1000ms (matches fly-in duration)
+      // rAF to ensure browser has painted the initial offscreen position before transitioning
       requestAnimationFrame(() => setImagesReady(true));
     }
   }, []);
@@ -202,21 +214,23 @@ export default function KoganePopup({ onClose }) {
   useEffect(() => {
     if (!imagesReady) return;
     const timers = [];
-    // Phase 1 — after 500ms fade-in, start zoom-in from start → full (2000ms)
+    // Phase 0 — immediately fly in from offscreen → ZOOM_START over 1000ms
+    setZoomTransition('transform 1000ms cubic-bezier(0.22,1,0.36,1)');
+    requestAnimationFrame(() => requestAnimationFrame(() => setZoomTransform(ZOOM_START_TRANSFORM)));
+    // Phase 1 — after fly-in(1000ms): zoom to full size over 2000ms
     timers.push(setTimeout(() => {
       if (closingRef.current) return;
       setZoomTransition('transform 2000ms cubic-bezier(0.33,0,0.2,1)');
-      // Double rAF ensures transition style is committed before transform changes
       requestAnimationFrame(() => requestAnimationFrame(() => setZoomTransform(ZOOM_FULL_TRANSFORM)));
-    }, 500));
-    // Phase 2 — after fade(500) + zoom(2000) + 500ms hold = 3000ms: expand screen
+    }, 1000));
+    // Phase 2 — after fly(1000) + zoom(2000) + 500ms hold = 3500ms: expand screen
     timers.push(setTimeout(() => {
       if (closingRef.current) return;
       const inner = contentInnerRef.current;
       const h = inner ? Math.max(inner.scrollHeight + 8, 300) : 1200;
       setScreenH(h);
       setExpanded(true);
-    }, 3000));
+    }, 3500));
     openTimersRef.current = timers;
     return () => timers.forEach(clearTimeout);
   }, [imagesReady]);
@@ -285,15 +299,15 @@ export default function KoganePopup({ onClose }) {
             aria-label="Close"
           >✕</button>
 
-          {/* ZOOM WRAPPER — scales the entire scroll composition uniformly from 1/3 → 1.0 on open, back to 1/3 on close.
-              transform-origin '50% 0%' anchors to the top-center so images zoom up from the top of the composition.
-              overflow:visible allows koganetop's negative marginTop to render above this container. */}
-          <div style={{ transform: zoomTransform, transformOrigin: '50% 0%', transition: [zoomTransition, zoomOpacityTransition].filter(Boolean).join(', ') || 'none', opacity: zoomOpacity, overflow: 'visible' }}>
+          {/* ZOOM WRAPPER — starts at random offscreen position, flies to ZOOM_START on open,
+              zooms to ZOOM_FULL, then reverses on close (zoom-out then fly off-screen).
+              transformOrigin '50% 0%' keeps zoom anchored to top-center of composition. */}
+          <div style={{ transform: zoomTransform, transformOrigin: '50% 0%', transition: zoomTransition, overflow: 'visible' }}>
 
           {/* KOGANE TOP — scale(0.96) from bottom-center, clips horizontally and vertically off-screen as intended */}
           <img src={topSrc} alt="scroll top" onClick={triggerClose} onLoad={handleImageLoad}
             fetchpriority="high" loading="eager"
-            style={{ display: 'block', width: '100%', position: 'relative', zIndex: 4, transform: 'translateX(-5px) scale(0.96)', transformOrigin: 'bottom center', marginTop: 'calc(-8.5vw + 9px)', cursor: 'pointer', opacity: imagesVisible ? 1 : 0, transition: 'opacity 500ms ease' }}
+            style={{ display: 'block', width: '100%', position: 'relative', zIndex: 4, transform: 'translateX(-5px) scale(0.96)', transformOrigin: 'bottom center', marginTop: 'calc(-8.5vw + 9px)', cursor: 'pointer' }}
           />
 
           {/* GREEN SCREEN */}
@@ -434,7 +448,7 @@ export default function KoganePopup({ onClose }) {
               cursor: 'pointer',
               transform: `translateX(${BOTTOM_X}px) scale(1.08)`,
               transformOrigin: 'top center',
-              opacity: imagesVisible ? 1 : 0,
+              opacity: 1,
               transition: [
                 'opacity 500ms ease',
                 expanded
