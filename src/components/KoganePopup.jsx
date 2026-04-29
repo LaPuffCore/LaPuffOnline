@@ -1,10 +1,9 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 
-// After all scaling: SEAM = (40+20) * 1.5 = 90
-const SEAM = 90;
+// SEAM: how far images overlap the green screen (top and bottom). +10 extra each side.
+const SEAM = 100;
 
-// Red + black-shadow style for roman numerals & ABC markers
 const NUM = {
   color: '#8B0000',
   textShadow: '0 2px 5px rgba(0,0,0,0.95), 0 1px 0 #000',
@@ -12,7 +11,6 @@ const NUM = {
   flexShrink: 0,
 };
 
-// Layered glass background — green-tinted with depth & reflections
 const GLASS_BG = [
   'linear-gradient(160deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.04) 45%, rgba(255,255,255,0.11) 100%)',
   'radial-gradient(ellipse at 28% 18%, rgba(255,255,255,0.14) 0%, transparent 52%)',
@@ -21,7 +19,6 @@ const GLASS_BG = [
   '#0a2a10',
 ].join(', ');
 
-// Inset bevel + outer glow for glass depth
 const GLASS_SHADOW = [
   'inset 0 3px 0 rgba(255,255,255,0.55)',
   'inset 0 -3px 0 rgba(0,60,10,0.65)',
@@ -36,14 +33,23 @@ export default function KoganePopup({ onClose }) {
   const [headerH, setHeaderH] = useState(72);
   const [screenH, setScreenH] = useState(0);
   const [expanded, setExpanded] = useState(false);
+  const [closing, setClosing] = useState(false);
   const [showLocked, setShowLocked] = useState(false);
   const contentInnerRef = useRef(null);
+  const closingRef = useRef(false);
 
   const base = import.meta.env?.BASE_URL ?? '/';
   const topSrc = `${base}data/koganetop.png`;
   const bottomSrc = `${base}data/koganebottom.png`;
 
-  const handleClose = useCallback(() => { onClose?.(); }, [onClose]);
+  // triggerClose: reverse scroll animation then call onClose
+  const triggerClose = useCallback(() => {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    setClosing(true);
+    setScreenH(0);
+    setTimeout(() => onClose?.(), 520);
+  }, [onClose]);
 
   useEffect(() => {
     const hdr = document.querySelector('header');
@@ -54,10 +60,10 @@ export default function KoganePopup({ onClose }) {
   }, []);
 
   useEffect(() => {
-    const handler = (e) => { if (e.key === 'Escape') handleClose(); };
+    const handler = (e) => { if (e.key === 'Escape') triggerClose(); };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [handleClose]);
+  }, [triggerClose]);
 
   useEffect(() => {
     if (!document.getElementById('kogane-css')) {
@@ -73,7 +79,6 @@ export default function KoganePopup({ onClose }) {
     return () => { document.getElementById('kogane-css')?.remove(); };
   }, []);
 
-  // 1.5s delay, then measure content and open scroll
   useEffect(() => {
     const t = setTimeout(() => {
       const inner = contentInnerRef.current;
@@ -83,6 +88,13 @@ export default function KoganePopup({ onClose }) {
     }, 1500);
     return () => clearTimeout(t);
   }, []);
+
+  // Height transition: fast (500ms ease-in) when closing, slow (1100ms) when opening
+  const heightTransition = closing
+    ? 'height 500ms cubic-bezier(0.7,0,1,0.9)'
+    : expanded
+      ? 'height 1100ms cubic-bezier(0.33,0,0.2,1)'
+      : 'none';
 
   const ruleTextStyle = {
     display: 'flex',
@@ -96,7 +108,7 @@ export default function KoganePopup({ onClose }) {
   };
 
   return createPortal(
-    // Outer: full-screen scroll container — clicking outside content closes popup
+    // Outer wrapper: clicking anywhere here (outside green screen) closes popup
     <div
       className="fixed inset-0 z-[100000]"
       style={{
@@ -104,59 +116,67 @@ export default function KoganePopup({ onClose }) {
         overflowX: 'hidden',
         overscrollBehavior: 'contain',
         fontFamily: 'Nunito, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial',
+        cursor: 'pointer',
       }}
-      onClick={handleClose}
+      onClick={triggerClose}
     >
-      {/* Blurred backdrop */}
+      {/* Backdrop */}
       <div
         className="fixed inset-0 bg-black/60"
-        style={{ backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)' }}
+        style={{ backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)', pointerEvents: 'none' }}
       />
 
-      {/* Content column — stopPropagation keeps clicks here from closing */}
+      {/* Scroll content column — does NOT stopPropagation so outer click still works */}
       <div
         className="relative z-10 flex flex-col items-center"
-        style={{ paddingTop: `${headerH}px`, paddingBottom: '120px' }}
-        onClick={e => e.stopPropagation()}
+        style={{ paddingTop: `${headerH}px`, paddingBottom: '120px', cursor: 'default' }}
       >
-        {/* Scroll assembly: min(3600px,144vw) — outer overflow-x:hidden clips to viewport */}
+        {/* Scroll assembly: min(3600px, 144vw), overflow clipped by outer */}
         <div style={{ width: 'min(3600px, 144vw)', position: 'relative' }}>
 
           {/* Close button */}
           <button
-            onClick={handleClose}
+            onClick={(e) => { e.stopPropagation(); triggerClose(); }}
             className="absolute top-4 right-4 z-[100010] w-10 h-10 bg-black/70 text-white rounded-full font-black flex items-center justify-center border-2 border-white hover:bg-red-500 transition-colors"
             aria-label="Close"
           >✕</button>
 
-          {/* ── KOGANE TOP — z-index 4 (in front of bottom), shifted 15px right ── */}
+          {/* ── KOGANE TOP — z:4 (front), shifted 20px right, closes on click ── */}
           <img
             src={topSrc}
             alt="scroll top"
+            onClick={triggerClose}
             style={{
               display: 'block',
               width: '100%',
               position: 'relative',
               zIndex: 4,
-              transform: 'translateX(15px)',
+              transform: 'translateX(20px)',
+              cursor: 'pointer',
             }}
           />
 
-          {/* ── GREEN GLASS SCREEN — 1/3 width, centered, overlaps top by SEAM ── */}
+          {/* ── GREEN GLASS SCREEN — 1/3 width centered, overlaps top/bottom by SEAM ── */}
           <div style={{ display: 'flex', justifyContent: 'center', marginTop: `-${SEAM}px`, position: 'relative', zIndex: 2 }}>
-            <div style={{
-              width: 'calc(100% / 3)',
-              minWidth: '390px',
-              height: expanded ? `${screenH}px` : '0px',
-              overflow: 'hidden',
-              transition: expanded ? 'height 1100ms cubic-bezier(0.33,0,0.2,1)' : 'none',
-              position: 'relative',
-              background: GLASS_BG,
-              boxShadow: GLASS_SHADOW,
-              border: '1.5px solid rgba(80,255,110,0.4)',
-              borderRadius: '4px',
-              animation: expanded ? 'kogane-flicker 9s ease-in-out infinite, kogane-pulse 5s ease-in-out infinite' : 'none',
-            }}>
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                width: 'calc(100% / 3)',
+                minWidth: '390px',
+                height: expanded || closing ? `${screenH}px` : '0px',
+                overflow: 'hidden',
+                transition: heightTransition,
+                position: 'relative',
+                background: GLASS_BG,
+                boxShadow: GLASS_SHADOW,
+                border: '1.5px solid rgba(80,255,110,0.4)',
+                borderRadius: '4px',
+                cursor: 'default',
+                animation: expanded && !closing
+                  ? 'kogane-flicker 9s ease-in-out infinite, kogane-pulse 5s ease-in-out infinite'
+                  : 'none',
+              }}
+            >
               {/* Scanlines */}
               <div style={{
                 position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 10,
@@ -164,30 +184,26 @@ export default function KoganePopup({ onClose }) {
                 backgroundSize: '100% 8px',
                 animation: 'kogane-scan 0.35s linear infinite',
               }} />
-              {/* Horizontal glow lines */}
               <div style={{
                 position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 9,
                 backgroundImage: 'repeating-linear-gradient(0deg,transparent 0px,transparent 28px,rgba(0,255,80,0.05) 28px,rgba(0,255,80,0.05) 30px)',
               }} />
-              {/* Top bevel highlight */}
               <div style={{
                 position: 'absolute', top: 0, left: 0, right: 0, height: '70px',
                 pointerEvents: 'none', zIndex: 11,
                 background: 'linear-gradient(180deg, rgba(255,255,255,0.20) 0%, transparent 100%)',
               }} />
-              {/* Bottom depth shadow */}
               <div style={{
                 position: 'absolute', bottom: 0, left: 0, right: 0, height: '70px',
                 pointerEvents: 'none', zIndex: 11,
                 background: 'linear-gradient(0deg, rgba(0,60,10,0.35) 0%, transparent 100%)',
               }} />
-              {/* CRT vignette */}
               <div style={{
                 position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 11,
                 background: 'radial-gradient(ellipse at 50% 50%, transparent 45%, rgba(0,0,0,0.30) 100%)',
               }} />
 
-              {/* Rules content */}
+              {/* Rules content — padded by SEAM so text clears scroll image overlaps */}
               <div
                 ref={contentInnerRef}
                 style={{
@@ -197,8 +213,8 @@ export default function KoganePopup({ onClose }) {
                   paddingRight: '42px',
                   position: 'relative',
                   zIndex: 12,
-                  opacity: expanded ? 1 : 0,
-                  transition: 'opacity 700ms ease 600ms',
+                  opacity: expanded && !closing ? 1 : 0,
+                  transition: closing ? 'opacity 200ms ease' : 'opacity 700ms ease 600ms',
                 }}
               >
                 <h2 style={{
@@ -250,19 +266,16 @@ export default function KoganePopup({ onClose }) {
                       <span style={NUM}>VII.</span>
                       <span>Players can expend a set amount of points as determined by Game Master LaPuff to engage one of the three following options:</span>
                     </div>
-
-                    <div style={{ display: 'flex', gap: '14px', marginBottom: '15px', fontWeight: 800, fontSize: '27px', textShadow: '0 1px 2px rgba(0,0,0,0.28)' }}>
-                      <span style={{ ...NUM, minWidth: '32px' }}>A.</span>
-                      <span>Players may add a rule to the Clout Culling Games provided that the rule described does not end the Games. Rules added may not be subtracted.</span>
-                    </div>
-                    <div style={{ display: 'flex', gap: '14px', marginBottom: '15px', fontWeight: 800, fontSize: '27px', textShadow: '0 1px 2px rgba(0,0,0,0.28)' }}>
-                      <span style={{ ...NUM, minWidth: '32px' }}>B.</span>
-                      <span>Players may add a site function to the site which hosts the Clout Culling Games - if this function adds a way for Players to gain or lose points it will be accordingly balanced by Games Master LaPuff.</span>
-                    </div>
-                    <div style={{ display: 'flex', gap: '14px', marginBottom: '15px', fontWeight: 800, fontSize: '27px', textShadow: '0 1px 2px rgba(0,0,0,0.28)' }}>
-                      <span style={{ ...NUM, minWidth: '32px' }}>C.</span>
-                      <span>Players may claim a zip region as theirs to form as an Official Clout Colony gaining a name of their choosing, color of their choosing, and other perks as to be determined by the development of the Game.</span>
-                    </div>
+                    {[
+                      ['A.', 'Players may add a rule to the Clout Culling Games provided that the rule described does not end the Games. Rules added may not be subtracted.'],
+                      ['B.', 'Players may add a site function to the site which hosts the Clout Culling Games - if this function adds a way for Players to gain or lose points it will be accordingly balanced by Games Master LaPuff.'],
+                      ['C.', 'Players may claim a zip region as theirs to form as an Official Clout Colony gaining a name of their choosing, color of their choosing, and other perks as to be determined by the development of the Game.'],
+                    ].map(([lbl, txt]) => (
+                      <div key={lbl} style={{ display: 'flex', gap: '14px', marginBottom: '15px', fontWeight: 800, fontSize: '27px', lineHeight: 1.8, textShadow: '0 1px 2px rgba(0,0,0,0.28)' }}>
+                        <span style={{ ...NUM, minWidth: '36px' }}>{lbl}</span>
+                        <span style={{ color: '#071000' }}>{txt}</span>
+                      </div>
+                    ))}
                   </div>
 
                   <div style={ruleTextStyle}>
@@ -279,7 +292,7 @@ export default function KoganePopup({ onClose }) {
                 {/* Locked add-a-rule button */}
                 <div style={{ textAlign: 'center', paddingBottom: '12px' }}>
                   <button
-                    onClick={() => setShowLocked(v => !v)}
+                    onClick={(e) => { e.stopPropagation(); setShowLocked(v => !v); }}
                     style={{
                       background: 'rgba(0,0,0,0.15)',
                       border: '2px solid rgba(0,0,0,0.25)',
@@ -309,17 +322,19 @@ export default function KoganePopup({ onClose }) {
             </div>
           </div>
 
-          {/* ── KOGANE BOTTOM — z-index 3, 20% wider + centered, shifted 15px right ── */}
+          {/* ── KOGANE BOTTOM — z:3, 120% wide centered, closes on click ── */}
           <img
             src={bottomSrc}
             alt="scroll bottom"
+            onClick={triggerClose}
             style={{
               display: 'block',
               width: '120%',
-              marginLeft: 'calc(-10% + 15px)',
+              marginLeft: '-10%',
               marginTop: `-${SEAM}px`,
               position: 'relative',
               zIndex: 3,
+              cursor: 'pointer',
             }}
           />
         </div>
