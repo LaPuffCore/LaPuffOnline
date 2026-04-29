@@ -245,7 +245,7 @@ export default function KoganePopup({ onClose }) {
           {/* KOGANE TOP — scale(1.2) from bottom-center (50% larger than previous 0.8), clips horizontally and vertically off-screen as intended */}
           <img src={topSrc} alt="scroll top" onClick={triggerClose} onLoad={handleImageLoad}
             fetchpriority="high" loading="eager"
-            style={{ display: 'block', width: '100%', position: 'relative', zIndex: 4, transform: 'translateX(-5px) scale(1.2)', transformOrigin: 'bottom center', marginTop: 'calc(-8.5vw + 9px)', cursor: 'pointer', opacity: imagesVisible ? 1 : 0, transition: 'opacity 400ms ease' }}
+            style={{ display: 'block', width: '100%', position: 'relative', zIndex: 4, transform: 'translateX(-5px) scale(0.96)', transformOrigin: 'bottom center', marginTop: 'calc(-8.5vw + 9px)', cursor: 'pointer', opacity: imagesVisible ? 1 : 0, transition: 'opacity 400ms ease' }}
           />
 
           {/* GREEN SCREEN */}

@@ -2951,6 +2951,9 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
   const accentColor = resolvedTheme?.accentColor || '#7C3AED';
   const surfaceBg   = resolvedTheme?.surfaceBackgroundColor || '#fff';
 
+  // Shape mode features gated to GamesMasterLaPuff only
+  const isGamesMaster = (session?.user?.user_metadata?.username || '').toLowerCase() === 'gamesmasterlapuff';
+
   // ── filter state ─────────────────────────────────────────────────────────────
   const [locTab,          setLocTab]          = useState('all');
   const [filterBorough,   setFilterBorough]   = useState('');
@@ -4862,7 +4865,7 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
                     {tbBtn(!!postOutline || openToolbar === 'postOutline', e => { e.preventDefault(); openTb('postOutline'); }, <span style={{ fontSize: 10, border: `2px solid ${postOutline || '#555'}`, padding: '0 2px', borderRadius: 2 }}>□</span>, 'Outline', outlineBtnRef)}
                     {tbBtn(!!postShadow || openToolbar === 'postShadow', e => { e.preventDefault(); openTb('postShadow'); }, <span style={{ fontSize: 10, textShadow: `2px 2px 0 ${postShadow || '#555'}` }}>▦</span>, 'Shadow', shadowBtnRef)}
                     {tbBtn(openToolbar === 'emoji', e => { e.preventDefault(); openTb('emoji'); }, <span style={{ fontSize: 13 }}>😀</span>, 'Emoji', emojiBtnRef)}
-                    {tbBtn(openToolbar === 'shape' || selectedShape !== 'square', e => { e.preventDefault(); openTb('shape'); }, <span style={{ fontSize: 9, fontWeight: 900 }}>⬡▲</span>, 'Shape', shapeBtnRef)}
+                    {isGamesMaster && tbBtn(openToolbar === 'shape' || selectedShape !== 'square', e => { e.preventDefault(); openTb('shape'); }, <span style={{ fontSize: 9, fontWeight: 900 }}>⬡▲</span>, 'Shape', shapeBtnRef)}
                   </div>
                 </PortalPopup>
               </div>
@@ -5014,7 +5017,8 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
               <EmojiPicker embedded={true} compact={true} value="" onChange={e => { if (e) handleInsertEmoji(e); }} />
             </PortalPopup>
 
-            {/* Shape selector */}
+            {/* Shape selector — GamesMasterLaPuff only */}
+            {isGamesMaster && (
             <div className="relative inline-block">
               {tbBtn(openToolbar === 'shape' || selectedShape !== 'square', e => { e.preventDefault(); openTb('shape'); }, <span style={{ fontSize: 9, fontWeight: 900 }}>⬡▲</span>, 'Shape', shapeBtnRef)}
               <PortalPopup btnRef={shapeBtnRef} open={openToolbar === 'shape'} onClose={closeToolbar} minWidth={200} alignRight>
@@ -5044,6 +5048,7 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
                 </div>
               </PortalPopup>
             </div>
+            )}
 
             {tbBtn(false, e => { e.preventDefault(); handleClear(); }, '✕', 'Clear')}
           </div>
@@ -5100,6 +5105,7 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
             {/* 3 stacked bars icon */}
             <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><rect x="0" y="0.5" width="13" height="3" rx="1" fill="currentColor"/><rect x="0" y="5" width="13" height="3" rx="1" fill="currentColor"/><rect x="0" y="9.5" width="13" height="3" rx="1" fill="currentColor"/></svg>
           </button>
+          {isGamesMaster && (
           <button
             onMouseDown={e => e.preventDefault()}
             onClick={() => setFeedLayout('shapes')}
@@ -5110,6 +5116,7 @@ export default function GeoPostView({ session, headerCollapsed = false }) {
             {/* Triangle icon */}
             <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><polygon points="6.5,1 13,12 0,12" fill="currentColor"/></svg>
           </button>
+          )}
         </div>
         {/* Shape toggle: rounded (default) or square. Hidden in shape mode. Persists across viewmodes + reload. */}
         {feedLayout !== 'shapes' && (
