@@ -3,8 +3,8 @@ import { createPortal } from 'react-dom';
 
 const SEAM = 100;
 const BOTTOM_INIT_MT = -(SEAM - 20);
-// Shift koganebottom: right 120px (60+60), up 30px from natural centered position
-const BOTTOM_X = 120;
+// Shift koganebottom: right 140px, up 30px from natural centered position
+const BOTTOM_X = 140;
 const BOTTOM_Y_EXTRA = 30;
 
 const NUM = {
@@ -121,7 +121,7 @@ export default function KoganePopup({ onClose }) {
     closingRef.current = true;
     setClosing(true);
     setScreenH(0);
-    setTimeout(() => onClose?.(), 520);
+    setTimeout(() => onClose?.(), 1020);
   }, [onClose]);
 
   useEffect(() => {
@@ -163,7 +163,7 @@ export default function KoganePopup({ onClose }) {
   }, []);
 
   const heightTransition = closing
-    ? 'height 500ms cubic-bezier(0.7,0,1,0.9)'
+    ? 'height 1000ms cubic-bezier(0.7,0,1,0.9)'
     : expanded
       ? 'height 1100ms cubic-bezier(0.33,0,0.2,1)'
       : 'none';
@@ -217,7 +217,7 @@ export default function KoganePopup({ onClose }) {
     >
       <div className="fixed inset-0 bg-black/60" style={{ backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)', pointerEvents: 'none' }} />
 
-      <div className="relative z-10 flex flex-col items-center" style={{ paddingTop: `${Math.max(headerH - 30, 8)}px`, paddingBottom: '120px', cursor: 'default' }}>
+      <div className="relative z-10 flex flex-col items-center" style={{ paddingTop: `${Math.max(headerH - 130, 8)}px`, paddingBottom: '120px', cursor: 'default' }}>
         <div style={{ width: 'min(3600px, 144vw)', position: 'relative' }}>
 
           <button
@@ -226,9 +226,9 @@ export default function KoganePopup({ onClose }) {
             aria-label="Close"
           >✕</button>
 
-          {/* KOGANE TOP */}
+          {/* KOGANE TOP — 50% scale anchored to bottom center */}
           <img src={topSrc} alt="scroll top" onClick={triggerClose}
-            style={{ display: 'block', width: '100%', position: 'relative', zIndex: 4, transform: 'translateX(20px)', cursor: 'pointer' }}
+            style={{ display: 'block', width: '100%', position: 'relative', zIndex: 4, transform: 'translateX(20px) scale(0.5)', transformOrigin: 'bottom center', cursor: 'pointer' }}
           />
 
           {/* GREEN SCREEN */}
@@ -342,7 +342,7 @@ export default function KoganePopup({ onClose }) {
             </div>
           </div>
 
-          {/* KOGANE BOTTOM — centered + BOTTOM_X right + BOTTOM_Y_EXTRA up, click to close */}
+          {/* KOGANE BOTTOM — 20% bigger anchored to top center, +20px right, click to close */}
           <img src={bottomSrc} alt="scroll bottom" onClick={triggerClose}
             style={{
               display: 'block',
@@ -352,7 +352,8 @@ export default function KoganePopup({ onClose }) {
               position: 'relative',
               zIndex: 3,
               cursor: 'pointer',
-              transform: `translateX(${BOTTOM_X}px)`,
+              transform: `translateX(${BOTTOM_X}px) scale(1.2)`,
+              transformOrigin: 'top center',
             }}
           />
         </div>
