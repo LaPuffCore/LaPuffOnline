@@ -115,7 +115,7 @@ export default function KoganePopup({ onClose }) {
 
   // Images use stable versioned URLs (no cache-bust) — preloaded on mount and on site load
   const base = import.meta.env?.BASE_URL ?? '/';
-  const topSrc    = `${base}data/koganetop.png?v=5`;
+  const topSrc    = `${base}data/koganetop.png?v=6`;
   const bottomSrc = `${base}data/koganebottom.png?v=3`;
 
   const triggerClose = useCallback(() => {
