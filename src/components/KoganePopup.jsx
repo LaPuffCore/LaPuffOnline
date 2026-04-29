@@ -2,10 +2,10 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 
 const SEAM = 100;
-const BOTTOM_INIT_MT = -(SEAM - 20);
-// Shift koganebottom: right 170px, up 30px from natural centered position
-const BOTTOM_X = 170;
-const BOTTOM_Y_EXTRA = 30;
+const BOTTOM_INIT_MT = -(SEAM - 20) + 40; // +40px down = less initial overlap before expansion
+// Shift koganebottom: right 160px (-10), up 10px more (was 30, now 50)
+const BOTTOM_X = 160;
+const BOTTOM_Y_EXTRA = 50;
 
 const NUM = {
   color: '#8B0000',
@@ -165,7 +165,7 @@ export default function KoganePopup({ onClose }) {
   const heightTransition = closing
     ? 'height 1500ms cubic-bezier(0.7,0,1,0.9)'
     : expanded
-      ? 'height 1100ms cubic-bezier(0.33,0,0.2,1)'
+      ? 'height 3000ms cubic-bezier(0.33,0,0.2,1)'
       : 'none';
 
   const ruleStyle = {
@@ -217,7 +217,7 @@ export default function KoganePopup({ onClose }) {
     >
       <div className="fixed inset-0 bg-black/60" style={{ backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)', pointerEvents: 'none' }} />
 
-      <div className="relative z-10 flex flex-col items-center" style={{ paddingTop: '40px', paddingBottom: '120px', cursor: 'default' }}>
+      <div className="relative z-10 flex flex-col items-center" style={{ paddingTop: '60px', paddingBottom: '120px', cursor: 'default' }}>
         <div style={{ width: 'min(3600px, 144vw)', position: 'relative' }}>
 
           <button
@@ -226,9 +226,9 @@ export default function KoganePopup({ onClose }) {
             aria-label="Close"
           >✕</button>
 
-          {/* KOGANE TOP — 60% larger anchored to bottom center, 20px left */}
+          {/* KOGANE TOP — 60% larger anchored to bottom center, shifted down 40px */}
           <img src={topSrc} alt="scroll top" onClick={triggerClose}
-            style={{ display: 'block', width: '100%', position: 'relative', zIndex: 4, transform: 'translateX(0px) scale(0.8)', transformOrigin: 'bottom center', cursor: 'pointer' }}
+            style={{ display: 'block', width: '100%', position: 'relative', zIndex: 4, transform: 'translateX(0px) scale(0.8)', transformOrigin: 'bottom center', marginTop: '40px', cursor: 'pointer' }}
           />
 
           {/* GREEN SCREEN */}
@@ -292,7 +292,7 @@ export default function KoganePopup({ onClose }) {
               <div
                 ref={contentInnerRef}
                 style={{
-                  paddingTop: `${SEAM}px`, paddingBottom: `${SEAM}px`,
+                  paddingTop: `${SEAM + 20}px`, paddingBottom: `${SEAM}px`,
                   paddingLeft: '42px', paddingRight: '42px',
                   position: 'relative', zIndex: 12,
                   opacity: expanded && !closing ? 1 : 0,
