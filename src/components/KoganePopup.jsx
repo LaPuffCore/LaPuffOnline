@@ -5,7 +5,8 @@ const SEAM = 120;
 // Final expanded y position (more negative = higher on screen, overlaps screen more)
 const BOTTOM_END_MT = -160;
 // How much further DOWN kogane bottom sits before expansion (positive = lower)
-const BOTTOM_INIT_EXTRA_DOWN = 110;
+// Higher number = more gap / less initial overlap
+const BOTTOM_INIT_EXTRA_DOWN = 100;
 // X offset right for koganebottom (both positions)
 const BOTTOM_X = 150;
 
@@ -155,10 +156,15 @@ export default function KoganePopup({ onClose }) {
 
   // Track image load state — animation only starts when both images are loaded
   const [imagesReady, setImagesReady] = useState(false);
+  const [imagesVisible, setImagesVisible] = useState(false);
   const loadedCount = useRef(0);
   const handleImageLoad = useCallback(() => {
     loadedCount.current += 1;
-    if (loadedCount.current >= 2) setImagesReady(true);
+    if (loadedCount.current >= 2) {
+      setImagesVisible(true);
+      // Small rAF delay to ensure paint before starting opacity transition
+      requestAnimationFrame(() => setImagesReady(true));
+    }
   }, []);
 
   useEffect(() => {
@@ -227,7 +233,7 @@ export default function KoganePopup({ onClose }) {
     >
       <div className="fixed inset-0 bg-black/60" style={{ backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)', pointerEvents: 'none' }} />
 
-      <div className="relative z-10 flex flex-col items-center" style={{ paddingTop: '0px', paddingBottom: '120px', cursor: 'default' }}>
+      <div className="relative z-10 flex flex-col items-center" style={{ paddingTop: '0px', paddingBottom: '120px', cursor: 'default', transform: 'translateY(-60px)' }}>
         <div style={{ width: 'min(3600px, 144vw)', position: 'relative' }}>
 
           <button
@@ -236,9 +242,10 @@ export default function KoganePopup({ onClose }) {
             aria-label="Close"
           >✕</button>
 
-          {/* KOGANE TOP — scale(0.8) from bottom-center creates ~8.5vw layout gap at top; compensate with negative margin, then add 60px down for screen overlap */}
+          {/* KOGANE TOP — scale(0.8) from bottom-center, fade in on load */}
           <img src={topSrc} alt="scroll top" onClick={triggerClose} onLoad={handleImageLoad}
-            style={{ display: 'block', width: '100%', position: 'relative', zIndex: 4, transform: 'translateX(-5px) scale(0.8)', transformOrigin: 'bottom center', marginTop: 'calc(-8.5vw + 9px)', cursor: 'pointer' }}
+            fetchpriority="high" loading="eager"
+            style={{ display: 'block', width: '100%', position: 'relative', zIndex: 4, transform: 'translateX(-5px) scale(0.8)', transformOrigin: 'bottom center', marginTop: 'calc(-8.5vw + 9px)', cursor: 'pointer', opacity: imagesVisible ? 1 : 0, transition: 'opacity 400ms ease' }}
           />
 
           {/* GREEN SCREEN */}
@@ -352,21 +359,27 @@ export default function KoganePopup({ onClose }) {
             </div>
           </div>
 
-          {/* KOGANE BOTTOM — animates down before expansion, up to overlap when expanded, back to initial on close */}
+          {/* KOGANE BOTTOM — initial pos = BOTTOM_END_MT + INIT_EXTRA_DOWN, expands to BOTTOM_END_MT, retracts to exact initial on close */}
           <img src={bottomSrc} alt="scroll bottom" onClick={triggerClose} onLoad={handleImageLoad}
+            fetchpriority="high" loading="eager"
             style={{
               display: 'block',
               width: 'auto',
               margin: '0 auto',
+              // expanded && !closing = fully open position; everything else (initial + retracted) = same initial value
               marginTop: `${BOTTOM_END_MT + (expanded && !closing ? 0 : BOTTOM_INIT_EXTRA_DOWN)}px`,
               position: 'relative',
               zIndex: 3,
               cursor: 'pointer',
               transform: `translateX(${BOTTOM_X}px) scale(1.08)`,
               transformOrigin: 'top center',
-              transition: expanded
-                ? `margin-top ${closing ? '1500ms cubic-bezier(0.7,0,1,0.9)' : '3000ms cubic-bezier(0.33,0,0.2,1)'}`
-                : 'none',
+              opacity: imagesVisible ? 1 : 0,
+              transition: [
+                'opacity 400ms ease',
+                expanded
+                  ? `margin-top ${closing ? '1500ms cubic-bezier(0.7,0,1,0.9)' : '3000ms cubic-bezier(0.33,0,0.2,1)'}`
+                  : '',
+              ].filter(Boolean).join(', '),
             }}
           />
         </div>
