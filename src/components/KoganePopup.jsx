@@ -2,10 +2,12 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 
 const SEAM = 100;
-const BOTTOM_INIT_MT = -(SEAM - 20) + 80; // less initial overlap (more down before expansion)
-// Shift koganebottom: right 160px, up 90px from natural centered position
-const BOTTOM_X = 160;
-const BOTTOM_Y_EXTRA = 90;
+// Final expanded y position (more negative = higher on screen, overlaps screen more)
+const BOTTOM_END_MT = -130;
+// How much further DOWN kogane bottom sits before expansion (positive = lower)
+const BOTTOM_INIT_EXTRA_DOWN = 120;
+// X offset right for koganebottom (both positions)
+const BOTTOM_X = 150;
 
 const NUM = {
   color: '#8B0000',
@@ -228,7 +230,7 @@ export default function KoganePopup({ onClose }) {
 
           {/* KOGANE TOP — scale(0.8) from bottom-center creates ~8.5vw layout gap at top; compensate with negative margin, then add 60px down for screen overlap */}
           <img src={topSrc} alt="scroll top" onClick={triggerClose}
-            style={{ display: 'block', width: '100%', position: 'relative', zIndex: 4, transform: 'translateX(0px) scale(0.8)', transformOrigin: 'bottom center', marginTop: 'calc(-8.5vw + 60px)', cursor: 'pointer' }}
+            style={{ display: 'block', width: '100%', position: 'relative', zIndex: 4, transform: 'translateX(-5px) scale(0.8)', transformOrigin: 'bottom center', marginTop: 'calc(-8.5vw + 30px)', cursor: 'pointer' }}
           />
 
           {/* GREEN SCREEN */}
@@ -349,7 +351,7 @@ export default function KoganePopup({ onClose }) {
               display: 'block',
               width: 'auto',
               margin: '0 auto',
-              marginTop: `${BOTTOM_INIT_MT - BOTTOM_Y_EXTRA + (expanded ? 0 : 40)}px`,
+              marginTop: `${BOTTOM_END_MT + (expanded ? 0 : BOTTOM_INIT_EXTRA_DOWN)}px`,
               position: 'relative',
               zIndex: 3,
               cursor: 'pointer',
