@@ -1,12 +1,9 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 
-// Overlap of images into the green screen (content padding matches)
 const SEAM = 100;
-// Initial bottom-image marginTop: less than SEAM to reduce closed overlap by 20px
-const BOTTOM_INIT_MT = -(SEAM - 20); // -80px
+const BOTTOM_INIT_MT = -(SEAM - 20);
 
-// Red + black-shadow for roman numerals & ABC
 const NUM = {
   color: '#8B0000',
   textShadow: '0 2px 5px rgba(0,0,0,0.95), 0 1px 0 #000',
@@ -15,12 +12,12 @@ const NUM = {
   minWidth: '42px',
 };
 
-// Layered glass-green background
+// Slightly more transparent — reduced green layer opacity
 const GLASS_BG = [
-  'linear-gradient(160deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.04) 45%, rgba(255,255,255,0.11) 100%)',
-  'radial-gradient(ellipse at 28% 18%, rgba(255,255,255,0.14) 0%, transparent 52%)',
-  'radial-gradient(ellipse at 72% 82%, rgba(0,55,12,0.32) 0%, transparent 52%)',
-  'linear-gradient(180deg, rgba(0,210,65,0.72) 0%, rgba(0,155,40,0.82) 100%)',
+  'linear-gradient(160deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.03) 45%, rgba(255,255,255,0.09) 100%)',
+  'radial-gradient(ellipse at 28% 18%, rgba(255,255,255,0.11) 0%, transparent 52%)',
+  'radial-gradient(ellipse at 72% 82%, rgba(0,55,12,0.22) 0%, transparent 52%)',
+  'linear-gradient(180deg, rgba(0,195,58,0.54) 0%, rgba(0,135,32,0.64) 100%)',
   '#0a2a10',
 ].join(', ');
 
@@ -34,24 +31,57 @@ const GLASS_SHADOW = [
   '0 0 0 1.5px rgba(80,255,110,0.4)',
 ].join(', ');
 
-// Highlight keywords: Player(s), Orbiter(s), Participant(s) → UPPERCASE + underline
-const KW_RE = /\b(Players?|Orbiters?|Participants?)\b/g;
-function hl(text) {
+// ── Text processor ──────────────────────────────────────────────────────────
+// Bold phrases (longest first to avoid partial matches)
+const BOLD_PHRASES = [
+  'Clout Culling Games',
+  'Games Master LaPuff',
+  'Official Clout Colony',
+  'Clout Alias',
+  'giga-mogged',
+  'Simulated',
+  'motion',
+];
+// Underline+uppercase words
+const UL_WORDS = [
+  "Player's", "Players", "Player",
+  "Participants", "Participant",
+  "Orbiters", "Orbiter",
+  "Normies",
+  "Fallen Off",
+];
+
+// Build combined regex — bold phrases | underline words (all case-sensitive, word-boundary where applicable)
+const escapedBold = BOLD_PHRASES.map(p => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+const escapedUl   = UL_WORDS.map(p => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+const COMBINED_RE = new RegExp(
+  `(${escapedBold.join('|')})|(${escapedUl.join('|')})`,
+  'g'
+);
+
+function styleText(text) {
   const parts = [];
   let last = 0, m;
-  KW_RE.lastIndex = 0;
-  while ((m = KW_RE.exec(text)) !== null) {
+  COMBINED_RE.lastIndex = 0;
+  while ((m = COMBINED_RE.exec(text)) !== null) {
     if (m.index > last) parts.push(text.slice(last, m.index));
-    parts.push(
-      <span key={m.index} style={{ textDecoration: 'underline', fontWeight: 900 }}>
-        {m[0].toUpperCase()}
-      </span>
-    );
+    if (m[1]) {
+      // Bold phrase
+      parts.push(<strong key={m.index}>{m[1]}</strong>);
+    } else {
+      // Underline + uppercase word
+      parts.push(
+        <span key={m.index} style={{ textDecoration: 'underline', fontWeight: 900 }}>
+          {m[2].toUpperCase()}
+        </span>
+      );
+    }
     last = m.index + m[0].length;
   }
   if (last < text.length) parts.push(text.slice(last));
   return parts;
 }
+// ───────────────────────────────────────────────────────────────────────────
 
 export default function KoganePopup({ onClose }) {
   const [headerH, setHeaderH] = useState(72);
@@ -63,8 +93,9 @@ export default function KoganePopup({ onClose }) {
   const closingRef = useRef(false);
 
   const base = import.meta.env?.BASE_URL ?? '/';
-  const topSrc = `${base}data/koganetop.png`;
-  const bottomSrc = `${base}data/koganebottom.png`;
+  // ?v=2 busts browser cache for the newly replaced koganebottom.png
+  const topSrc    = `${base}data/koganetop.png?v=2`;
+  const bottomSrc = `${base}data/koganebottom.png?v=2`;
 
   const triggerClose = useCallback(() => {
     if (closingRef.current) return;
@@ -142,42 +173,32 @@ export default function KoganePopup({ onClose }) {
   };
 
   const rules = [
-    ['I.', 'Once a player has awakened their Clout Alias, they must declare their participation in the Clout Culling Games at a zip-colony of their choice within 28 days - these Players are the two types of either Orbiter or Participant.'],
-    ['II.', 'Any Players who break the previous rule will be subject to clout technique removal and coincidingly will be giga-mogged by other players.'],
-    ['III.', 'Orbiters who enter a colony without one chosen become Participants at the moment of entry and will be considered to have declared participation in the Clout Culling Games (Normies already inside a barrier at the start of the games will be given at least one chance to exit safely).'],
-    ['IV.', 'Players score points by engaging in more motion than other Players.'],
-    ['V.', 'Players who refuse to participate by either not joining or becoming inactive will be Simulated at a fraction of their potential and coincidingly will be giga-mogged by other Players.'],
-    ['VI.', 'The point value categories of a Player\'s motion is decided by Game Master LaPuff. As a general rule, in real life motion is weighted more than digital motion (though both are still counted).'],
+    ['I.',    "Once a player has awakened their Clout Alias, they must declare their participation in the Clout Culling Games at a zip-colony of their choice within 28 days - these Players are the two types of either Orbiter or Participant."],
+    ['II.',   "Any Players who break the previous rule will be subject to clout technique removal and coincidingly will be giga-mogged by other players."],
+    ['III.',  "Orbiters who enter a colony without one chosen become Participants at the moment of entry and will be considered to have declared participation in the Clout Culling Games (Normies already inside a barrier at the start of the games will be given at least one chance to exit safely)."],
+    ['IV.',   "Players score points by engaging in more motion than other Players."],
+    ['V.',    "Players who refuse to participate by either not joining or becoming inactive will be Simulated at a fraction of their potential and coincidingly will be giga-mogged by other Players."],
+    ['VI.',   "The point value categories of a Player's motion is decided by Games Master LaPuff. As a general rule, in real life motion is weighted more than digital motion (though both are still counted)."],
+    ['VII.',  "Players can expend a set amount of points as determined by Games Master LaPuff to engage one of the three following options:"],
+    ['VIII.', "In accordance with rule VII, Games Master LaPuff must accept any proposed new addition as long as it doesn't have a destructive effect on the Game."],
+    ['IX.',   "If a Player's score remains the same for 28 days they will be subject to clout removal and they will enter 'Fallen Off' status."],
   ];
 
   const subRules = [
-    ['A.', 'Players may add a rule to the Clout Culling Games provided that the rule described does not end the Games. Rules added may not be subtracted.'],
-    ['B.', 'Players may add a site function to the site which hosts the Clout Culling Games - if this function adds a way for Players to gain or lose points it will be accordingly balanced by Games Master LaPuff.'],
-    ['C.', 'Players may claim a zip region as theirs to form as an Official Clout Colony gaining a name of their choosing, color of their choosing, and other perks as to be determined by the development of the Game.'],
+    ['A.', "Players may add a rule to the Clout Culling Games provided that the rule described does not end the Games. Rules added may not be subtracted."],
+    ['B.', "Players may add a site function to the site which hosts the Clout Culling Games - if this function adds a way for Players to gain or lose points it will be accordingly balanced by Games Master LaPuff."],
+    ['C.', "Players may claim a zip region as theirs to form as an Official Clout Colony gaining a name of their choosing, color of their choosing, and other perks as to be determined by the development of the Game."],
   ];
 
   return createPortal(
     <div
       className="fixed inset-0 z-[100000]"
-      style={{
-        overflowY: 'auto',
-        overflowX: 'hidden',
-        overscrollBehavior: 'contain',
-        fontFamily: 'Nunito, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial',
-        cursor: 'pointer',
-      }}
+      style={{ overflowY: 'auto', overflowX: 'hidden', overscrollBehavior: 'contain', fontFamily: 'Nunito, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial', cursor: 'pointer' }}
       onClick={triggerClose}
     >
-      <div
-        className="fixed inset-0 bg-black/60"
-        style={{ backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)', pointerEvents: 'none' }}
-      />
+      <div className="fixed inset-0 bg-black/60" style={{ backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)', pointerEvents: 'none' }} />
 
-      <div
-        className="relative z-10 flex flex-col items-center"
-        style={{ paddingTop: `${headerH}px`, paddingBottom: '120px', cursor: 'default' }}
-      >
-        {/* Scroll assembly — min(3600px,144vw), clips horizontally on small viewports */}
+      <div className="relative z-10 flex flex-col items-center" style={{ paddingTop: `${headerH}px`, paddingBottom: '120px', cursor: 'default' }}>
         <div style={{ width: 'min(3600px, 144vw)', position: 'relative' }}>
 
           <button
@@ -186,64 +207,41 @@ export default function KoganePopup({ onClose }) {
             aria-label="Close"
           >✕</button>
 
-          {/* KOGANE TOP — z:4, shifted 20px right, click to close */}
-          <img
-            src={topSrc}
-            alt="scroll top"
-            onClick={triggerClose}
-            style={{
-              display: 'block',
-              width: '100%',
-              position: 'relative',
-              zIndex: 4,
-              transform: 'translateX(20px)',
-              cursor: 'pointer',
-            }}
+          {/* KOGANE TOP */}
+          <img src={topSrc} alt="scroll top" onClick={triggerClose}
+            style={{ display: 'block', width: '100%', position: 'relative', zIndex: 4, transform: 'translateX(20px)', cursor: 'pointer' }}
           />
 
-          {/* GREEN SCREEN — 1/3 width, centered, overlaps top by SEAM */}
-          <div style={{
-            display: 'flex',
-            justifyContent: 'center',
-            marginTop: `-${SEAM}px`,
-            position: 'relative',
-            zIndex: 2,
-          }}>
+          {/* GREEN SCREEN */}
+          <div style={{ display: 'flex', justifyContent: 'center', marginTop: `-${SEAM}px`, position: 'relative', zIndex: 2 }}>
             <div
               onClick={(e) => e.stopPropagation()}
               style={{
-                width: 'calc(100% / 3)',
-                minWidth: '390px',
+                width: 'calc(100% / 3)', minWidth: '390px',
                 height: expanded || closing ? `${screenH}px` : '0px',
                 overflow: 'hidden',
                 transition: heightTransition,
                 position: 'relative',
                 background: GLASS_BG,
                 boxShadow: GLASS_SHADOW,
-                border: '1.5px solid rgba(80,255,110,0.4)',
+                border: '1.5px solid rgba(80,255,110,0.35)',
                 borderRadius: '4px',
                 cursor: 'default',
-                animation: expanded && !closing
-                  ? 'kogane-flicker 9s ease-in-out infinite, kogane-pulse 5s ease-in-out infinite'
-                  : 'none',
+                animation: expanded && !closing ? 'kogane-flicker 9s ease-in-out infinite, kogane-pulse 5s ease-in-out infinite' : 'none',
               }}
             >
-              {/* Scanlines */}
               <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 10, backgroundImage: 'repeating-linear-gradient(0deg,rgba(0,0,0,0.045) 0px,rgba(0,0,0,0.045) 1px,transparent 1px,transparent 8px)', backgroundSize: '100% 8px', animation: 'kogane-scan 0.35s linear infinite' }} />
               <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 9, backgroundImage: 'repeating-linear-gradient(0deg,transparent 0px,transparent 28px,rgba(0,255,80,0.05) 28px,rgba(0,255,80,0.05) 30px)' }} />
-              <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '70px', pointerEvents: 'none', zIndex: 11, background: 'linear-gradient(180deg, rgba(255,255,255,0.20) 0%, transparent 100%)' }} />
-              <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '70px', pointerEvents: 'none', zIndex: 11, background: 'linear-gradient(0deg, rgba(0,60,10,0.35) 0%, transparent 100%)' }} />
-              <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 11, background: 'radial-gradient(ellipse at 50% 50%, transparent 45%, rgba(0,0,0,0.30) 100%)' }} />
+              <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '70px', pointerEvents: 'none', zIndex: 11, background: 'linear-gradient(180deg, rgba(255,255,255,0.18) 0%, transparent 100%)' }} />
+              <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '70px', pointerEvents: 'none', zIndex: 11, background: 'linear-gradient(0deg, rgba(0,60,10,0.30) 0%, transparent 100%)' }} />
+              <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 11, background: 'radial-gradient(ellipse at 50% 50%, transparent 45%, rgba(0,0,0,0.28) 100%)' }} />
 
               <div
                 ref={contentInnerRef}
                 style={{
-                  paddingTop: `${SEAM}px`,
-                  paddingBottom: `${SEAM}px`,
-                  paddingLeft: '42px',
-                  paddingRight: '42px',
-                  position: 'relative',
-                  zIndex: 12,
+                  paddingTop: `${SEAM}px`, paddingBottom: `${SEAM}px`,
+                  paddingLeft: '42px', paddingRight: '42px',
+                  position: 'relative', zIndex: 12,
                   opacity: expanded && !closing ? 1 : 0,
                   transition: closing ? 'opacity 200ms ease' : 'opacity 700ms ease 600ms',
                 }}
@@ -253,40 +251,29 @@ export default function KoganePopup({ onClose }) {
                 </h2>
 
                 <div style={{ fontSize: '27px', lineHeight: 1.8, color: '#071000' }}>
-
-                  {/* Rules I–VI */}
-                  {rules.map(([num, text]) => (
+                  {rules.slice(0, 7).map(([num, text]) => (
                     <div key={num} style={ruleStyle}>
                       <span style={NUM}>{num}</span>
-                      <span>{hl(text)}</span>
+                      <span>{styleText(text)}</span>
                     </div>
                   ))}
 
-                  {/* Rule VII + sub-rules A/B/C */}
-                  <div style={ruleStyle}>
-                    <span style={NUM}>VII.</span>
-                    <span>{hl('Players can expend a set amount of points as determined by Game Master LaPuff to engage one of the three following options:')}</span>
-                  </div>
+                  {/* Sub-rules A/B/C under VII */}
                   {subRules.map(([lbl, text]) => (
                     <div key={lbl} style={subStyle}>
                       <span style={{ ...NUM, minWidth: '36px' }}>{lbl}</span>
-                      <span>{hl(text)}</span>
+                      <span>{styleText(text)}</span>
                     </div>
                   ))}
 
-                  {/* Rules VIII–IX */}
-                  <div style={ruleStyle}>
-                    <span style={NUM}>VIII.</span>
-                    <span>{hl('In accordance with rule VII, Game Master LaPuff must accept any proposed new addition as long as it doesn\'t have a destructive effect on the Game.')}</span>
-                  </div>
-
-                  <div style={{ ...ruleStyle, marginBottom: '45px' }}>
-                    <span style={NUM}>IX.</span>
-                    <span>{hl('If a Player\'s score remains the same for 28 days they will be subject to clout removal and they will enter \'Fallen Off\' status.')}</span>
-                  </div>
+                  {rules.slice(7).map(([num, text]) => (
+                    <div key={num} style={{ ...ruleStyle, marginBottom: num === 'IX.' ? '45px' : '30px' }}>
+                      <span style={NUM}>{num}</span>
+                      <span>{styleText(text)}</span>
+                    </div>
+                  ))}
                 </div>
 
-                {/* Locked add-a-rule button */}
                 <div style={{ textAlign: 'center', paddingBottom: '12px' }}>
                   <button
                     onClick={(e) => { e.stopPropagation(); setShowLocked(v => !v); }}
@@ -302,20 +289,9 @@ export default function KoganePopup({ onClose }) {
             </div>
           </div>
 
-          {/* KOGANE BOTTOM — portrait (1220×1664), centered, 80px overlap (SEAM-20), click to close */}
-          <img
-            src={bottomSrc}
-            alt="scroll bottom"
-            onClick={triggerClose}
-            style={{
-              display: 'block',
-              width: 'auto',
-              margin: '0 auto',
-              marginTop: `${BOTTOM_INIT_MT}px`,
-              position: 'relative',
-              zIndex: 3,
-              cursor: 'pointer',
-            }}
+          {/* KOGANE BOTTOM — centered, ?v=2 cache bust */}
+          <img src={bottomSrc} alt="scroll bottom" onClick={triggerClose}
+            style={{ display: 'block', width: 'auto', margin: '0 auto', marginTop: `${BOTTOM_INIT_MT}px`, position: 'relative', zIndex: 3, cursor: 'pointer' }}
           />
         </div>
       </div>
