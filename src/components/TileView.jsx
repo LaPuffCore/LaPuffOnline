@@ -180,9 +180,9 @@ export default function TileView({ events, eventsLoading = false }) {
   // shared with GeoPostView, MapView topbar, FavoritesPage, CalendarPage via uiMode.js.
   const [tileShape, setTileShape] = useUIShape();
 
-  // Layout mode: 'wide' (default) full-screen 5-col grid, or 'narrow' constrained 4-col.
+  // Layout mode: 'narrow' (default) constrained 4-col grid, or 'wide' full-screen 5-col.
   const [tileLayout, setTileLayout] = useState(() => {
-    try { return localStorage.getItem('lapuff_tileview_layout') || 'wide'; } catch { return 'wide'; }
+    try { return localStorage.getItem('lapuff_tileview_layout') || 'narrow'; } catch { return 'narrow'; }
   });
   useEffect(() => {
     try { localStorage.setItem('lapuff_tileview_layout', tileLayout); } catch {}
