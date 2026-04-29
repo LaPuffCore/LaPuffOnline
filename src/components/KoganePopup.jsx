@@ -9,8 +9,13 @@ const BOTTOM_END_MT = -180;
 const BOTTOM_INIT_EXTRA_DOWN = 200;
 // X offset right for koganebottom (both positions)
 const BOTTOM_X = 153;
-// Scale factor at start/end of zoom animation — "300% smaller" = 1/3 of full size
-const ZOOM_START = 1 / 3;
+// Zoom start/end transform — images appear at 1/3 scale at top of viewport (40px padding).
+// translateY compensates for the negative marginTop on koganetop at 1/3 scale so the
+// visual top of the composition sits exactly 40px below the viewport top edge.
+// Math: visualTop@1/3 = -60px (wrapper offset) + marginTop * 0.333 ≈ -(57+2.833vw)px
+// → translateY needed = 40 - -(57+2.833vw) = calc(97px + 2.833vw)
+const ZOOM_START_TRANSFORM = 'translateY(calc(97px + 2.833vw)) scale(0.333)';
+const ZOOM_FULL_TRANSFORM  = 'translateY(0px) scale(1.0)';
 
 const NUM = {
   color: '#8B0000',
@@ -116,9 +121,12 @@ export default function KoganePopup({ onClose }) {
   const closingRef = useRef(false);
   const openTimersRef = useRef([]);
 
-  // Zoom state — starts at 1/3, grows to 1.0 on open; shrinks back to 1/3 on close
-  const [zoomScale, setZoomScale] = useState(ZOOM_START);
-  const [zoomTransitionStyle, setZoomTransitionStyle] = useState('none');
+  // Zoom transform — starts at ZOOM_START_TRANSFORM, grows to ZOOM_FULL on open, reverses on close
+  const [zoomTransform, setZoomTransform] = useState(ZOOM_START_TRANSFORM);
+  const [zoomTransition, setZoomTransition] = useState('none');
+  // Fade-out at end of close animation
+  const [zoomOpacity, setZoomOpacity] = useState(1);
+  const [zoomOpacityTransition, setZoomOpacityTransition] = useState('none');
   // Backdrop blur ramps from 0 to 10px as images fade in
   const [blurPx, setBlurPx] = useState(0);
 
@@ -135,13 +143,18 @@ export default function KoganePopup({ onClose }) {
     openTimersRef.current = [];
     setClosing(true);
     setScreenH(0);
-    // At 2000ms: screen fully retracted → start zoom-out to 1/3 over 1000ms
+    // At 2000ms: screen + koganebottom fully retracted (1500ms) → start zoom-out over 2000ms
     setTimeout(() => {
-      setZoomTransitionStyle('transform 1000ms cubic-bezier(0.7,0,1,0.9)');
-      requestAnimationFrame(() => requestAnimationFrame(() => setZoomScale(ZOOM_START)));
+      setZoomTransition('transform 2000ms cubic-bezier(0.7,0,1,0.9)');
+      requestAnimationFrame(() => requestAnimationFrame(() => setZoomTransform(ZOOM_START_TRANSFORM)));
     }, 2000);
-    // At 3000ms: fully closed
-    setTimeout(() => onClose?.(), 3000);
+    // At 4000ms: zoom done → fade out over 500ms
+    setTimeout(() => {
+      setZoomOpacityTransition('opacity 500ms ease');
+      requestAnimationFrame(() => requestAnimationFrame(() => setZoomOpacity(0)));
+    }, 4000);
+    // At 4500ms: fully closed
+    setTimeout(() => onClose?.(), 4500);
   }, [onClose]);
 
   useEffect(() => {
@@ -189,27 +202,27 @@ export default function KoganePopup({ onClose }) {
   useEffect(() => {
     if (!imagesReady) return;
     const timers = [];
-    // Phase 1 — after 500ms fade-in completes, start zoom-in from 1/3 → 1.0 (2000ms)
+    // Phase 1 — after 500ms fade-in, start zoom-in from start → full (2000ms)
     timers.push(setTimeout(() => {
       if (closingRef.current) return;
-      setZoomTransitionStyle('transform 2000ms cubic-bezier(0.33,0,0.2,1)');
-      // Double rAF ensures transition style is committed before scale changes
-      requestAnimationFrame(() => requestAnimationFrame(() => setZoomScale(1.0)));
+      setZoomTransition('transform 2000ms cubic-bezier(0.33,0,0.2,1)');
+      // Double rAF ensures transition style is committed before transform changes
+      requestAnimationFrame(() => requestAnimationFrame(() => setZoomTransform(ZOOM_FULL_TRANSFORM)));
     }, 500));
-    // Phase 2 — after fade(500) + zoom(2000) + 1s hold = 3500ms: expand screen
+    // Phase 2 — after fade(500) + zoom(2000) + 500ms hold = 3000ms: expand screen
     timers.push(setTimeout(() => {
       if (closingRef.current) return;
       const inner = contentInnerRef.current;
       const h = inner ? Math.max(inner.scrollHeight + 8, 300) : 1200;
       setScreenH(h);
       setExpanded(true);
-    }, 3500));
+    }, 3000));
     openTimersRef.current = timers;
     return () => timers.forEach(clearTimeout);
   }, [imagesReady]);
 
   const heightTransition = closing
-    ? 'height 1800ms cubic-bezier(0.7,0,1,0.9)'
+    ? 'height 1500ms cubic-bezier(0.7,0,1,0.9)'
     : expanded
       ? 'height 3000ms cubic-bezier(0.33,0,0.2,1)'
       : 'none';
@@ -275,7 +288,7 @@ export default function KoganePopup({ onClose }) {
           {/* ZOOM WRAPPER — scales the entire scroll composition uniformly from 1/3 → 1.0 on open, back to 1/3 on close.
               transform-origin '50% 0%' anchors to the top-center so images zoom up from the top of the composition.
               overflow:visible allows koganetop's negative marginTop to render above this container. */}
-          <div style={{ transform: `scale(${zoomScale})`, transformOrigin: '50% 0%', transition: zoomTransitionStyle, overflow: 'visible' }}>
+          <div style={{ transform: zoomTransform, transformOrigin: '50% 0%', transition: [zoomTransition, zoomOpacityTransition].filter(Boolean).join(', ') || 'none', opacity: zoomOpacity, overflow: 'visible' }}>
 
           {/* KOGANE TOP — scale(0.96) from bottom-center, clips horizontally and vertically off-screen as intended */}
           <img src={topSrc} alt="scroll top" onClick={triggerClose} onLoad={handleImageLoad}
@@ -305,6 +318,19 @@ export default function KoganePopup({ onClose }) {
               <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 10, backgroundImage: 'repeating-linear-gradient(0deg,rgba(0,0,0,0.032) 0px,rgba(0,0,0,0.032) 1px,transparent 1px,transparent 8px)', backgroundSize: '100% 8px', animation: 'kogane-scan 0.35s linear infinite' }} />
               {/* Subtle horizontal glow lines */}
               <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 9, backgroundImage: 'repeating-linear-gradient(0deg,transparent 0px,transparent 28px,rgba(100,255,0,0.04) 28px,rgba(100,255,0,0.04) 30px)' }} />
+
+              {/* Hexagonal etching pattern — fine outlined hex grid, futuristic texture below all effects */}
+              <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 8, overflow: 'hidden' }}>
+                <defs>
+                  <pattern id="kogane-hex-pat" x="0" y="0" width="34.64" height="60" patternUnits="userSpaceOnUse">
+                    {/* Two offset rows of hex outlines tile the entire surface */}
+                    <polygon points="17.32,0 34.64,10 34.64,30 17.32,40 0,30 0,10"            fill="none" stroke="rgba(100,255,0,0.09)" strokeWidth="0.7"/>
+                    <polygon points="0,30 17.32,40 17.32,60 0,70 -17.32,60 -17.32,40"          fill="none" stroke="rgba(100,255,0,0.09)" strokeWidth="0.7"/>
+                    <polygon points="34.64,30 51.96,40 51.96,60 34.64,70 17.32,60 17.32,40"    fill="none" stroke="rgba(100,255,0,0.09)" strokeWidth="0.7"/>
+                  </pattern>
+                </defs>
+                <rect x="0" y="0" width="100%" height="100%" fill="url(#kogane-hex-pat)"/>
+              </svg>
 
               {/* 3D DEPTH GEOMETRY — drawn as SVG overlay, no layout change */}
               <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 14, overflow: 'visible' }} preserveAspectRatio="none">
@@ -412,7 +438,7 @@ export default function KoganePopup({ onClose }) {
               transition: [
                 'opacity 500ms ease',
                 expanded
-                  ? `margin-top ${closing ? '1800ms cubic-bezier(0.7,0,1,0.9)' : '3000ms cubic-bezier(0.33,0,0.2,1)'}`
+                  ? `margin-top ${closing ? '1500ms cubic-bezier(0.7,0,1,0.9)' : '3000ms cubic-bezier(0.33,0,0.2,1)'}`
                   : '',
               ].filter(Boolean).join(', '),
             }}
