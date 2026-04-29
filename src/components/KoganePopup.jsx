@@ -1,14 +1,14 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 
-const SEAM = 120;
+const SEAM = 140;
 // Final expanded y position (more negative = higher on screen, overlaps screen more)
-const BOTTOM_END_MT = -160;
+const BOTTOM_END_MT = -180;
 // How much further DOWN kogane bottom sits before expansion (positive = lower)
 // Higher number = more gap / less initial overlap
 const BOTTOM_INIT_EXTRA_DOWN = 100;
 // X offset right for koganebottom (both positions)
-const BOTTOM_X = 150;
+const BOTTOM_X = 153;
 
 const NUM = {
   color: '#8B0000',
@@ -234,7 +234,7 @@ export default function KoganePopup({ onClose }) {
       <div className="fixed inset-0 bg-black/60" style={{ backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)', pointerEvents: 'none' }} />
 
       <div className="relative z-10 flex flex-col items-center" style={{ paddingTop: '0px', paddingBottom: '120px', cursor: 'default', transform: 'translateY(-60px)' }}>
-        <div style={{ width: 'min(3600px, 144vw)', position: 'relative' }}>
+        <div style={{ width: 'min(3600px, 144vw)', position: 'relative', overflow: 'visible' }}>
 
           <button
             onClick={(e) => { e.stopPropagation(); triggerClose(); }}
@@ -242,10 +242,10 @@ export default function KoganePopup({ onClose }) {
             aria-label="Close"
           >✕</button>
 
-          {/* KOGANE TOP — scale(0.8) from bottom-center, fade in on load */}
+          {/* KOGANE TOP — scale(1.2) from bottom-center (50% larger than previous 0.8), clips horizontally and vertically off-screen as intended */}
           <img src={topSrc} alt="scroll top" onClick={triggerClose} onLoad={handleImageLoad}
             fetchpriority="high" loading="eager"
-            style={{ display: 'block', width: '100%', position: 'relative', zIndex: 4, transform: 'translateX(-5px) scale(0.8)', transformOrigin: 'bottom center', marginTop: 'calc(-8.5vw + 9px)', cursor: 'pointer', opacity: imagesVisible ? 1 : 0, transition: 'opacity 400ms ease' }}
+            style={{ display: 'block', width: '100%', position: 'relative', zIndex: 4, transform: 'translateX(-5px) scale(1.2)', transformOrigin: 'bottom center', marginTop: 'calc(-8.5vw + 9px)', cursor: 'pointer', opacity: imagesVisible ? 1 : 0, transition: 'opacity 400ms ease' }}
           />
 
           {/* GREEN SCREEN */}
