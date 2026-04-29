@@ -327,3 +327,14 @@ html.lp-ui-square .lp-calendar-page *::before,
 html.lp-ui-square .lp-calendar-page *::after {
   border-radius: 0 !important;
 }
+
+/* ───────────────────────────────────────────────────────────────────
+   Topbar square mode — persists across ALL views (tiles, map, geo).
+   Rule must be global so it isn't lost when TileView unmounts.
+   html.tv-square-active is set by uiMode.js and survives view switches.
+   ─────────────────────────────────────────────────────────────────── */
+html.tv-square-active .lp-topbar *,
+html.tv-square-active .lp-topbar *::before,
+html.tv-square-active .lp-topbar *::after {
+  border-radius: 0 !important;
+}
