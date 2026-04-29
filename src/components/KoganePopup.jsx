@@ -2,10 +2,10 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 
 const SEAM = 100;
-const BOTTOM_INIT_MT = -(SEAM - 20) + 40; // +40px down = less initial overlap before expansion
-// Shift koganebottom: right 160px (-10), up 10px more (was 30, now 50)
+const BOTTOM_INIT_MT = -(SEAM - 20) + 80; // less initial overlap (more down before expansion)
+// Shift koganebottom: right 160px, up 90px from natural centered position
 const BOTTOM_X = 160;
-const BOTTOM_Y_EXTRA = 50;
+const BOTTOM_Y_EXTRA = 90;
 
 const NUM = {
   color: '#8B0000',
@@ -217,7 +217,7 @@ export default function KoganePopup({ onClose }) {
     >
       <div className="fixed inset-0 bg-black/60" style={{ backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)', pointerEvents: 'none' }} />
 
-      <div className="relative z-10 flex flex-col items-center" style={{ paddingTop: '60px', paddingBottom: '120px', cursor: 'default' }}>
+      <div className="relative z-10 flex flex-col items-center" style={{ paddingTop: '0px', paddingBottom: '120px', cursor: 'default' }}>
         <div style={{ width: 'min(3600px, 144vw)', position: 'relative' }}>
 
           <button
@@ -226,9 +226,9 @@ export default function KoganePopup({ onClose }) {
             aria-label="Close"
           >✕</button>
 
-          {/* KOGANE TOP — 60% larger anchored to bottom center, shifted down 40px */}
+          {/* KOGANE TOP — scale(0.8) from bottom-center creates ~8.5vw layout gap at top; compensate with negative margin, then add 60px down for screen overlap */}
           <img src={topSrc} alt="scroll top" onClick={triggerClose}
-            style={{ display: 'block', width: '100%', position: 'relative', zIndex: 4, transform: 'translateX(0px) scale(0.8)', transformOrigin: 'bottom center', marginTop: '40px', cursor: 'pointer' }}
+            style={{ display: 'block', width: '100%', position: 'relative', zIndex: 4, transform: 'translateX(0px) scale(0.8)', transformOrigin: 'bottom center', marginTop: 'calc(-8.5vw + 60px)', cursor: 'pointer' }}
           />
 
           {/* GREEN SCREEN */}
@@ -343,17 +343,19 @@ export default function KoganePopup({ onClose }) {
           </div>
 
           {/* KOGANE BOTTOM — 10% smaller anchored to top center, +30px right, click to close */}
+          {/* marginTop animates: extra 40px down before expansion, then settles to overlap position */}
           <img src={bottomSrc} alt="scroll bottom" onClick={triggerClose}
             style={{
               display: 'block',
               width: 'auto',
               margin: '0 auto',
-              marginTop: `${BOTTOM_INIT_MT - BOTTOM_Y_EXTRA}px`,
+              marginTop: `${BOTTOM_INIT_MT - BOTTOM_Y_EXTRA + (expanded ? 0 : 40)}px`,
               position: 'relative',
               zIndex: 3,
               cursor: 'pointer',
               transform: `translateX(${BOTTOM_X}px) scale(1.08)`,
               transformOrigin: 'top center',
+              transition: expanded ? `margin-top 3000ms cubic-bezier(0.33,0,0.2,1)` : 'none',
             }}
           />
         </div>
