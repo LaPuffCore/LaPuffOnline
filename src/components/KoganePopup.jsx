@@ -6,7 +6,7 @@ const SEAM = 140;
 const BOTTOM_END_MT = -180;
 // How much further DOWN kogane bottom sits before expansion (positive = lower)
 // Higher number = more gap / less initial overlap
-const BOTTOM_INIT_EXTRA_DOWN = 100;
+const BOTTOM_INIT_EXTRA_DOWN = 110;
 // X offset right for koganebottom (both positions)
 const BOTTOM_X = 153;
 
