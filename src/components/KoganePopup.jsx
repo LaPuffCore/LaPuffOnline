@@ -156,19 +156,19 @@ export default function KoganePopup({ onClose }) {
     openTimersRef.current = [];
     setClosing(true);
     setScreenH(0);
-    // At 2000ms: retraction done (1500ms) → zoom-out to ZOOM_START over 2000ms
+    // At 1700ms: zoom-out to ZOOM_START over 500ms
     setTimeout(() => {
-      setZoomTransition('transform 2000ms cubic-bezier(0.7,0,1,0.9)');
+      setZoomTransition('transform 500ms cubic-bezier(0.7,0,1,0.9)');
       requestAnimationFrame(() => requestAnimationFrame(() => setZoomTransform(ZOOM_START_TRANSFORM)));
-    }, 2000);
-    // At 4000ms: zoom done → fly off-screen in random direction over 500ms
+    }, 1700);
+    // At 2200ms: zoom done → fly off-screen in random direction over 500ms
     setTimeout(() => {
       const target = randomOffscreen();
       setZoomTransition('transform 500ms cubic-bezier(0.7,0,1,0.9)');
       requestAnimationFrame(() => requestAnimationFrame(() => setZoomTransform(target)));
-    }, 4000);
-    // At 4500ms: fully closed
-    setTimeout(() => onClose?.(), 4500);
+    }, 2200);
+    // At 2700ms: fully closed
+    setTimeout(() => onClose?.(), 2700);
   }, [onClose]);
 
   useEffect(() => {
@@ -217,20 +217,20 @@ export default function KoganePopup({ onClose }) {
     // Phase 0 — immediately fly in from offscreen → ZOOM_START over 1000ms
     setZoomTransition('transform 1000ms cubic-bezier(0.22,1,0.36,1)');
     requestAnimationFrame(() => requestAnimationFrame(() => setZoomTransform(ZOOM_START_TRANSFORM)));
-    // Phase 1 — after fly-in(1000ms): zoom to full size over 2000ms
+    // Phase 1 — after fly-in(1000ms): zoom to full size over 1000ms
     timers.push(setTimeout(() => {
       if (closingRef.current) return;
-      setZoomTransition('transform 2000ms cubic-bezier(0.33,0,0.2,1)');
+      setZoomTransition('transform 1000ms cubic-bezier(0.33,0,0.2,1)');
       requestAnimationFrame(() => requestAnimationFrame(() => setZoomTransform(ZOOM_FULL_TRANSFORM)));
     }, 1000));
-    // Phase 2 — after fly(1000) + zoom(2000) + 500ms hold = 3500ms: expand screen
+    // Phase 2 — after fly(1000) + zoom(1000) + 200ms hold = 2200ms: expand screen
     timers.push(setTimeout(() => {
       if (closingRef.current) return;
       const inner = contentInnerRef.current;
       const h = inner ? Math.max(inner.scrollHeight + 8, 300) : 1200;
       setScreenH(h);
       setExpanded(true);
-    }, 3500));
+    }, 2200));
     openTimersRef.current = timers;
     return () => timers.forEach(clearTimeout);
   }, [imagesReady]);
@@ -238,7 +238,7 @@ export default function KoganePopup({ onClose }) {
   const heightTransition = closing
     ? 'height 1500ms cubic-bezier(0.7,0,1,0.9)'
     : expanded
-      ? 'height 3000ms cubic-bezier(0.33,0,0.2,1)'
+      ? 'height 2000ms cubic-bezier(0.33,0,0.2,1)'
       : 'none';
 
   const ruleStyle = {
@@ -452,7 +452,7 @@ export default function KoganePopup({ onClose }) {
               transition: [
                 'opacity 500ms ease',
                 expanded
-                  ? `margin-top ${closing ? '1500ms cubic-bezier(0.7,0,1,0.9)' : '3000ms cubic-bezier(0.33,0,0.2,1)'}`
+                  ? `margin-top ${closing ? '1500ms cubic-bezier(0.7,0,1,0.9)' : '2000ms cubic-bezier(0.33,0,0.2,1)'}`
                   : '',
               ].filter(Boolean).join(', '),
             }}
