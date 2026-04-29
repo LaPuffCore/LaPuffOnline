@@ -156,19 +156,19 @@ export default function KoganePopup({ onClose }) {
     openTimersRef.current = [];
     setClosing(true);
     setScreenH(0);
-    // At 1700ms: zoom-out to ZOOM_START over 500ms
+    // At 1700ms: zoom-out to ZOOM_START over 1000ms
     setTimeout(() => {
-      setZoomTransition('transform 500ms cubic-bezier(0.7,0,1,0.9)');
+      setZoomTransition('transform 1000ms cubic-bezier(0.7,0,1,0.9)');
       requestAnimationFrame(() => requestAnimationFrame(() => setZoomTransform(ZOOM_START_TRANSFORM)));
     }, 1700);
-    // At 2200ms: zoom done → fly off-screen in random direction over 500ms
+    // At 2700ms: zoom done → fly off-screen in random direction over 1000ms
     setTimeout(() => {
       const target = randomOffscreen();
-      setZoomTransition('transform 500ms cubic-bezier(0.7,0,1,0.9)');
+      setZoomTransition('transform 1000ms cubic-bezier(0.7,0,1,0.9)');
       requestAnimationFrame(() => requestAnimationFrame(() => setZoomTransform(target)));
-    }, 2200);
-    // At 2700ms: fully closed
-    setTimeout(() => onClose?.(), 2700);
+    }, 2700);
+    // At 3700ms: fully closed
+    setTimeout(() => onClose?.(), 3700);
   }, [onClose]);
 
   useEffect(() => {
