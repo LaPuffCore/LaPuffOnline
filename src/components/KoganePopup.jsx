@@ -3,8 +3,8 @@ import { createPortal } from 'react-dom';
 
 const SEAM = 100;
 const BOTTOM_INIT_MT = -(SEAM - 20);
-// Shift koganebottom: right 60px, up 30px from natural centered position
-const BOTTOM_X = 60;
+// Shift koganebottom: right 120px (60+60), up 30px from natural centered position
+const BOTTOM_X = 120;
 const BOTTOM_Y_EXTRA = 30;
 
 const NUM = {
@@ -15,23 +15,38 @@ const NUM = {
   minWidth: '42px',
 };
 
-// Bright saturated lime green — all layers have transparency so content shows through
+// Brighter saturated lime — all layers transparent so content always shows through
 const GLASS_BG = [
-  'linear-gradient(160deg, rgba(255,255,255,0.14) 0%, rgba(255,255,255,0.02) 45%, rgba(255,255,255,0.07) 100%)',
-  'radial-gradient(ellipse at 28% 18%, rgba(220,255,100,0.12) 0%, transparent 52%)',
-  'radial-gradient(ellipse at 72% 82%, rgba(0,80,10,0.16) 0%, transparent 52%)',
-  'linear-gradient(180deg, rgba(100,255,0,0.52) 0%, rgba(60,230,0,0.58) 100%)',
-  'rgba(8, 40, 0, 0.55)',
+  // Diagonal light reflection streak — faint
+  'linear-gradient(160deg, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.01) 45%, rgba(255,255,255,0.05) 100%)',
+  // Top-left radial highlight — glass catch-light
+  'radial-gradient(ellipse at 28% 12%, rgba(220,255,120,0.10) 0%, transparent 48%)',
+  // Bottom-right depth shadow
+  'radial-gradient(ellipse at 72% 88%, rgba(0,60,5,0.12) 0%, transparent 48%)',
+  // Main lime tint — transparent
+  'linear-gradient(180deg, rgba(110,255,0,0.38) 0%, rgba(55,215,0,0.44) 100%)',
+  // Deep base — semi-transparent so backdrop shows
+  'rgba(4, 22, 0, 0.42)',
 ].join(', ');
 
+// 3D depth illusion via inset shadow geometry — lighter overall
 const GLASS_SHADOW = [
-  'inset 0 3px 0 rgba(255,255,255,0.40)',
-  'inset 0 -3px 0 rgba(0,60,10,0.45)',
-  'inset 3px 0 0 rgba(255,255,255,0.25)',
-  'inset -3px 0 0 rgba(0,40,10,0.35)',
-  'inset 0 0 60px rgba(80,255,0,0.14)',
-  '0 8px 40px rgba(80,255,0,0.22)',
-  '0 0 0 1.5px rgba(120,255,40,0.35)',
+  // Top bright bevel (lit edge)
+  'inset 0 4px 0 rgba(200,255,130,0.45)',
+  // Bottom dark bevel (shadow edge — gives depth)
+  'inset 0 -4px 0 rgba(0,40,5,0.35)',
+  // Left bright edge (perspective light)
+  'inset 5px 0 8px rgba(180,255,100,0.18)',
+  // Right dark edge (perspective shadow — makes it feel like screen curves away)
+  'inset -5px 0 12px rgba(0,30,0,0.30)',
+  // Inner ambient green glow
+  'inset 0 0 40px rgba(80,255,0,0.08)',
+  // Inner top-center bright spot (lit glass center)
+  'inset 0 20px 40px rgba(160,255,60,0.10)',
+  // Outer glow
+  '0 6px 32px rgba(80,255,0,0.18)',
+  // Outer border line
+  '0 0 0 1px rgba(120,255,40,0.28)',
 ].join(', ');
 
 // ── Text processor ──────────────────────────────────────────────────────────
@@ -202,7 +217,7 @@ export default function KoganePopup({ onClose }) {
     >
       <div className="fixed inset-0 bg-black/60" style={{ backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)', pointerEvents: 'none' }} />
 
-      <div className="relative z-10 flex flex-col items-center" style={{ paddingTop: `${headerH}px`, paddingBottom: '120px', cursor: 'default' }}>
+      <div className="relative z-10 flex flex-col items-center" style={{ paddingTop: `${Math.max(headerH - 30, 8)}px`, paddingBottom: '120px', cursor: 'default' }}>
         <div style={{ width: 'min(3600px, 144vw)', position: 'relative' }}>
 
           <button
@@ -234,11 +249,45 @@ export default function KoganePopup({ onClose }) {
                 animation: expanded && !closing ? 'kogane-flicker 9s ease-in-out infinite, kogane-pulse 5s ease-in-out infinite' : 'none',
               }}
             >
-              <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 10, backgroundImage: 'repeating-linear-gradient(0deg,rgba(0,0,0,0.045) 0px,rgba(0,0,0,0.045) 1px,transparent 1px,transparent 8px)', backgroundSize: '100% 8px', animation: 'kogane-scan 0.35s linear infinite' }} />
-              <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 9, backgroundImage: 'repeating-linear-gradient(0deg,transparent 0px,transparent 28px,rgba(0,255,80,0.05) 28px,rgba(0,255,80,0.05) 30px)' }} />
-              <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '70px', pointerEvents: 'none', zIndex: 11, background: 'linear-gradient(180deg, rgba(255,255,255,0.18) 0%, transparent 100%)' }} />
-              <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '70px', pointerEvents: 'none', zIndex: 11, background: 'linear-gradient(0deg, rgba(0,60,10,0.30) 0%, transparent 100%)' }} />
-              <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 11, background: 'radial-gradient(ellipse at 50% 50%, transparent 45%, rgba(0,0,0,0.28) 100%)' }} />
+              {/* Scanlines */}
+              <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 10, backgroundImage: 'repeating-linear-gradient(0deg,rgba(0,0,0,0.032) 0px,rgba(0,0,0,0.032) 1px,transparent 1px,transparent 8px)', backgroundSize: '100% 8px', animation: 'kogane-scan 0.35s linear infinite' }} />
+              {/* Subtle horizontal glow lines */}
+              <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 9, backgroundImage: 'repeating-linear-gradient(0deg,transparent 0px,transparent 28px,rgba(100,255,0,0.04) 28px,rgba(100,255,0,0.04) 30px)' }} />
+
+              {/* 3D DEPTH GEOMETRY — drawn as SVG overlay, no layout change */}
+              <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 14, overflow: 'visible' }} preserveAspectRatio="none">
+                {/* Top-left corner bracket — perspective foreshortened */}
+                <polyline points="18,18 18,52 28,42" fill="none" stroke="rgba(180,255,100,0.35)" strokeWidth="1.5" vectorEffect="non-scaling-stroke"/>
+                <polyline points="18,18 52,18 42,28" fill="none" stroke="rgba(180,255,100,0.35)" strokeWidth="1.5" vectorEffect="non-scaling-stroke"/>
+                {/* Top-right corner bracket */}
+                <polyline points="calc(100% - 18px),18 calc(100% - 18px),52 calc(100% - 28px),42" fill="none" stroke="rgba(180,255,100,0.28)" strokeWidth="1.5" vectorEffect="non-scaling-stroke"/>
+                <polyline points="calc(100% - 18px),18 calc(100% - 52px),18 calc(100% - 42px),28" fill="none" stroke="rgba(180,255,100,0.28)" strokeWidth="1.5" vectorEffect="non-scaling-stroke"/>
+                {/* Bottom-left corner bracket */}
+                <polyline points="18,calc(100% - 18px) 18,calc(100% - 52px) 28,calc(100% - 42px)" fill="none" stroke="rgba(80,200,40,0.22)" strokeWidth="1.5" vectorEffect="non-scaling-stroke"/>
+                <polyline points="18,calc(100% - 18px) 52,calc(100% - 18px) 42,calc(100% - 28px)" fill="none" stroke="rgba(80,200,40,0.22)" strokeWidth="1.5" vectorEffect="non-scaling-stroke"/>
+                {/* Bottom-right corner bracket */}
+                <polyline points="calc(100% - 18px),calc(100% - 18px) calc(100% - 18px),calc(100% - 52px) calc(100% - 28px),calc(100% - 42px)" fill="none" stroke="rgba(80,200,40,0.18)" strokeWidth="1.5" vectorEffect="non-scaling-stroke"/>
+                <polyline points="calc(100% - 18px),calc(100% - 18px) calc(100% - 52px),calc(100% - 18px) calc(100% - 42px),calc(100% - 28px)" fill="none" stroke="rgba(80,200,40,0.18)" strokeWidth="1.5" vectorEffect="non-scaling-stroke"/>
+                {/* Left edge depth line — slight taper simulating perspective */}
+                <line x1="8" y1="0%" x2="8" y2="100%" stroke="rgba(160,255,80,0.14)" strokeWidth="1" vectorEffect="non-scaling-stroke"/>
+                {/* Right edge depth line */}
+                <line x1="calc(100% - 8px)" y1="0%" x2="calc(100% - 8px)" y2="100%" stroke="rgba(0,40,0,0.22)" strokeWidth="1" vectorEffect="non-scaling-stroke"/>
+                {/* Top edge inner highlight */}
+                <line x1="0%" y1="7" x2="100%" y2="7" stroke="rgba(180,255,120,0.18)" strokeWidth="1" vectorEffect="non-scaling-stroke"/>
+                {/* Bottom edge inner shadow */}
+                <line x1="0%" y1="calc(100% - 7px)" x2="100%" y2="calc(100% - 7px)" stroke="rgba(0,30,0,0.20)" strokeWidth="1" vectorEffect="non-scaling-stroke"/>
+              </svg>
+
+              {/* Top bevel gradient */}
+              <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '60px', pointerEvents: 'none', zIndex: 11, background: 'linear-gradient(180deg, rgba(180,255,100,0.14) 0%, transparent 100%)' }} />
+              {/* Bottom depth gradient */}
+              <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '60px', pointerEvents: 'none', zIndex: 11, background: 'linear-gradient(0deg, rgba(0,40,5,0.22) 0%, transparent 100%)' }} />
+              {/* Left bright edge band */}
+              <div style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: '14px', pointerEvents: 'none', zIndex: 11, background: 'linear-gradient(90deg, rgba(160,255,80,0.13) 0%, transparent 100%)' }} />
+              {/* Right dark edge band */}
+              <div style={{ position: 'absolute', top: 0, bottom: 0, right: 0, width: '14px', pointerEvents: 'none', zIndex: 11, background: 'linear-gradient(270deg, rgba(0,30,0,0.18) 0%, transparent 100%)' }} />
+              {/* CRT vignette */}
+              <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 11, background: 'radial-gradient(ellipse at 50% 50%, transparent 42%, rgba(0,0,0,0.22) 100%)' }} />
 
               <div
                 ref={contentInnerRef}
