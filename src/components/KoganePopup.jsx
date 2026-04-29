@@ -1,11 +1,11 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 
-const SEAM = 100;
+const SEAM = 120;
 // Final expanded y position (more negative = higher on screen, overlaps screen more)
-const BOTTOM_END_MT = -130;
+const BOTTOM_END_MT = -160;
 // How much further DOWN kogane bottom sits before expansion (positive = lower)
-const BOTTOM_INIT_EXTRA_DOWN = 120;
+const BOTTOM_INIT_EXTRA_DOWN = 110;
 // X offset right for koganebottom (both positions)
 const BOTTOM_X = 150;
 
@@ -238,7 +238,7 @@ export default function KoganePopup({ onClose }) {
 
           {/* KOGANE TOP — scale(0.8) from bottom-center creates ~8.5vw layout gap at top; compensate with negative margin, then add 60px down for screen overlap */}
           <img src={topSrc} alt="scroll top" onClick={triggerClose} onLoad={handleImageLoad}
-            style={{ display: 'block', width: '100%', position: 'relative', zIndex: 4, transform: 'translateX(-5px) scale(0.8)', transformOrigin: 'bottom center', marginTop: 'calc(-8.5vw + 30px)', cursor: 'pointer' }}
+            style={{ display: 'block', width: '100%', position: 'relative', zIndex: 4, transform: 'translateX(-5px) scale(0.8)', transformOrigin: 'bottom center', marginTop: 'calc(-8.5vw + 9px)', cursor: 'pointer' }}
           />
 
           {/* GREEN SCREEN */}
@@ -352,20 +352,21 @@ export default function KoganePopup({ onClose }) {
             </div>
           </div>
 
-          {/* KOGANE BOTTOM — 10% smaller anchored to top center, +30px right, click to close */}
-          {/* marginTop animates: extra 40px down before expansion, then settles to overlap position */}
+          {/* KOGANE BOTTOM — animates down before expansion, up to overlap when expanded, back to initial on close */}
           <img src={bottomSrc} alt="scroll bottom" onClick={triggerClose} onLoad={handleImageLoad}
             style={{
               display: 'block',
               width: 'auto',
               margin: '0 auto',
-              marginTop: `${BOTTOM_END_MT + (expanded ? 0 : BOTTOM_INIT_EXTRA_DOWN)}px`,
+              marginTop: `${BOTTOM_END_MT + (expanded && !closing ? 0 : BOTTOM_INIT_EXTRA_DOWN)}px`,
               position: 'relative',
               zIndex: 3,
               cursor: 'pointer',
               transform: `translateX(${BOTTOM_X}px) scale(1.08)`,
               transformOrigin: 'top center',
-              transition: expanded ? `margin-top 3000ms cubic-bezier(0.33,0,0.2,1)` : 'none',
+              transition: expanded
+                ? `margin-top ${closing ? '1500ms cubic-bezier(0.7,0,1,0.9)' : '3000ms cubic-bezier(0.33,0,0.2,1)'}`
+                : 'none',
             }}
           />
         </div>
