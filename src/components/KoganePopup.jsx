@@ -3,6 +3,9 @@ import { createPortal } from 'react-dom';
 
 const SEAM = 100;
 const BOTTOM_INIT_MT = -(SEAM - 20);
+// Shift koganebottom: right 60px, up 30px from natural centered position
+const BOTTOM_X = 60;
+const BOTTOM_Y_EXTRA = 30;
 
 const NUM = {
   color: '#8B0000',
@@ -12,23 +15,23 @@ const NUM = {
   minWidth: '42px',
 };
 
-// Slightly more transparent — reduced green layer opacity
+// Bright saturated lime green — all layers have transparency so content shows through
 const GLASS_BG = [
-  'linear-gradient(160deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.03) 45%, rgba(255,255,255,0.09) 100%)',
-  'radial-gradient(ellipse at 28% 18%, rgba(255,255,255,0.11) 0%, transparent 52%)',
-  'radial-gradient(ellipse at 72% 82%, rgba(0,55,12,0.22) 0%, transparent 52%)',
-  'linear-gradient(180deg, rgba(0,195,58,0.54) 0%, rgba(0,135,32,0.64) 100%)',
-  '#0a2a10',
+  'linear-gradient(160deg, rgba(255,255,255,0.14) 0%, rgba(255,255,255,0.02) 45%, rgba(255,255,255,0.07) 100%)',
+  'radial-gradient(ellipse at 28% 18%, rgba(220,255,100,0.12) 0%, transparent 52%)',
+  'radial-gradient(ellipse at 72% 82%, rgba(0,80,10,0.16) 0%, transparent 52%)',
+  'linear-gradient(180deg, rgba(100,255,0,0.52) 0%, rgba(60,230,0,0.58) 100%)',
+  'rgba(8, 40, 0, 0.55)',
 ].join(', ');
 
 const GLASS_SHADOW = [
-  'inset 0 3px 0 rgba(255,255,255,0.55)',
-  'inset 0 -3px 0 rgba(0,60,10,0.65)',
-  'inset 3px 0 0 rgba(255,255,255,0.35)',
-  'inset -3px 0 0 rgba(0,40,10,0.55)',
-  'inset 0 0 60px rgba(0,120,30,0.20)',
-  '0 8px 40px rgba(0,200,60,0.28)',
-  '0 0 0 1.5px rgba(80,255,110,0.4)',
+  'inset 0 3px 0 rgba(255,255,255,0.40)',
+  'inset 0 -3px 0 rgba(0,60,10,0.45)',
+  'inset 3px 0 0 rgba(255,255,255,0.25)',
+  'inset -3px 0 0 rgba(0,40,10,0.35)',
+  'inset 0 0 60px rgba(80,255,0,0.14)',
+  '0 8px 40px rgba(80,255,0,0.22)',
+  '0 0 0 1.5px rgba(120,255,40,0.35)',
 ].join(', ');
 
 // ── Text processor ──────────────────────────────────────────────────────────
@@ -92,10 +95,11 @@ export default function KoganePopup({ onClose }) {
   const contentInnerRef = useRef(null);
   const closingRef = useRef(false);
 
+  // Stable cache-bust per mount — forces browser to skip cache on every page load (dev mode)
+  const cacheBust = useRef(Date.now());
   const base = import.meta.env?.BASE_URL ?? '/';
-  // ?v=2 busts browser cache for the newly replaced koganebottom.png
-  const topSrc    = `${base}data/koganetop.png?v=2`;
-  const bottomSrc = `${base}data/koganebottom.png?v=2`;
+  const topSrc    = `${base}data/koganetop.png?_=${cacheBust.current}`;
+  const bottomSrc = `${base}data/koganebottom.png?_=${cacheBust.current}`;
 
   const triggerClose = useCallback(() => {
     if (closingRef.current) return;
@@ -289,9 +293,18 @@ export default function KoganePopup({ onClose }) {
             </div>
           </div>
 
-          {/* KOGANE BOTTOM — centered, ?v=2 cache bust */}
+          {/* KOGANE BOTTOM — centered + BOTTOM_X right + BOTTOM_Y_EXTRA up, click to close */}
           <img src={bottomSrc} alt="scroll bottom" onClick={triggerClose}
-            style={{ display: 'block', width: 'auto', margin: '0 auto', marginTop: `${BOTTOM_INIT_MT}px`, position: 'relative', zIndex: 3, cursor: 'pointer' }}
+            style={{
+              display: 'block',
+              width: 'auto',
+              margin: '0 auto',
+              marginTop: `${BOTTOM_INIT_MT - BOTTOM_Y_EXTRA}px`,
+              position: 'relative',
+              zIndex: 3,
+              cursor: 'pointer',
+              transform: `translateX(${BOTTOM_X}px)`,
+            }}
           />
         </div>
       </div>
