@@ -112,11 +112,10 @@ export default function KoganePopup({ onClose }) {
   const contentInnerRef = useRef(null);
   const closingRef = useRef(false);
 
-  // Stable cache-bust per mount — forces browser to skip cache on every page load (dev mode)
-  const cacheBust = useRef(Date.now());
+  // Images use stable versioned URLs (no cache-bust) — preloaded on mount and on site load
   const base = import.meta.env?.BASE_URL ?? '/';
-  const topSrc    = `${base}data/koganetop.png?_=${cacheBust.current}`;
-  const bottomSrc = `${base}data/koganebottom.png?_=${cacheBust.current}`;
+  const topSrc    = `${base}data/koganetop.png?v=3`;
+  const bottomSrc = `${base}data/koganebottom.png?v=3`;
 
   const triggerClose = useCallback(() => {
     if (closingRef.current) return;
@@ -154,7 +153,16 @@ export default function KoganePopup({ onClose }) {
     return () => { document.getElementById('kogane-css')?.remove(); };
   }, []);
 
+  // Track image load state — animation only starts when both images are loaded
+  const [imagesReady, setImagesReady] = useState(false);
+  const loadedCount = useRef(0);
+  const handleImageLoad = useCallback(() => {
+    loadedCount.current += 1;
+    if (loadedCount.current >= 2) setImagesReady(true);
+  }, []);
+
   useEffect(() => {
+    if (!imagesReady) return;
     const t = setTimeout(() => {
       const inner = contentInnerRef.current;
       const h = inner ? Math.max(inner.scrollHeight + 8, 300) : 1200;
@@ -162,7 +170,7 @@ export default function KoganePopup({ onClose }) {
       setExpanded(true);
     }, 1500);
     return () => clearTimeout(t);
-  }, []);
+  }, [imagesReady]);
 
   const heightTransition = closing
     ? 'height 1500ms cubic-bezier(0.7,0,1,0.9)'
@@ -229,7 +237,7 @@ export default function KoganePopup({ onClose }) {
           >✕</button>
 
           {/* KOGANE TOP — scale(0.8) from bottom-center creates ~8.5vw layout gap at top; compensate with negative margin, then add 60px down for screen overlap */}
-          <img src={topSrc} alt="scroll top" onClick={triggerClose}
+          <img src={topSrc} alt="scroll top" onClick={triggerClose} onLoad={handleImageLoad}
             style={{ display: 'block', width: '100%', position: 'relative', zIndex: 4, transform: 'translateX(-5px) scale(0.8)', transformOrigin: 'bottom center', marginTop: 'calc(-8.5vw + 30px)', cursor: 'pointer' }}
           />
 
@@ -346,7 +354,7 @@ export default function KoganePopup({ onClose }) {
 
           {/* KOGANE BOTTOM — 10% smaller anchored to top center, +30px right, click to close */}
           {/* marginTop animates: extra 40px down before expansion, then settles to overlap position */}
-          <img src={bottomSrc} alt="scroll bottom" onClick={triggerClose}
+          <img src={bottomSrc} alt="scroll bottom" onClick={triggerClose} onLoad={handleImageLoad}
             style={{
               display: 'block',
               width: 'auto',

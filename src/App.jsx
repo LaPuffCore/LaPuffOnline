@@ -1,8 +1,7 @@
 import { Toaster } from "./components/ui/toaster" // Fixed @ alias
 import { useState, useEffect } from 'react';
 import { getApprovedEvents, syncSampleEvents, getAutoEvents } from './lib/supabase';
-import { SAMPLE_EVENTS } from './lib/sampleEvents';
-import {
+import { SAMPLE_EVENTS } from './lib/sampleEvents';import {
   SAMPLE_MODE,
   SYNC_SAMPLE_EVENTS_TO_SUPABASE,
   CLEAR_SUPABASE_SAMPLES_ON_DISABLE,
@@ -192,7 +191,21 @@ const AuthenticatedApp = () => {
   return <AppWithEvents />;
 };
 
+// Preload kogane popup images once at app start so they're in browser cache
+// when the popup is triggered. Runs once, no cleanup needed.
+const KOGANE_IMGS = [
+  `${import.meta.env.BASE_URL}data/koganetop.png?v=3`,
+  `${import.meta.env.BASE_URL}data/koganebottom.png?v=3`,
+];
+let koganePreloaded = false;
+function preloadKoganeImages() {
+  if (koganePreloaded) return;
+  koganePreloaded = true;
+  KOGANE_IMGS.forEach(src => { const img = new Image(); img.src = src; });
+}
+
 function App() {
+  useEffect(() => { preloadKoganeImages(); }, []);
   return (
     <AuthProvider>
       <ThemeProvider>
