@@ -199,7 +199,7 @@ export default function HamburgerMenu({ events, user, onAuthClick }) {
               onMouseLeave={(event) => { event.currentTarget.style.backgroundColor = 'transparent'; }}
             >
               <span className="text-xl">🎮</span>
-              <span>Clout Culling Games Rules</span>
+              <span className="whitespace-nowrap text-[13px]">Clout Culling Games Rules</span>
             </button>
 
             {user && (
