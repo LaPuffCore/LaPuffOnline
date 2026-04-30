@@ -10,11 +10,12 @@ const BOTTOM_INIT_EXTRA_DOWN = 200;
 const BOTTOM_X = 153;
 
 // ── Mobile variants (< 640px) ───────────────────────────────────────────────
-// Screen is narrower: seam, offsets, and text all scale down.
 const SEAM_M            = 70;
-const BOTTOM_END_MT_M   = -90;
+const BOTTOM_END_MT_M   = -80;   // was -90, +10px = koganebottom 10px lower on mobile
 const BOTTOM_INIT_EXTRA_DOWN_M = 100;
 const BOTTOM_X_M        = 50;
+const TOP_SCALE_M       = 1.92;  // koganetop at 2× size on mobile (0.96 × 2)
+const BOTTOM_SCALE_M    = 1.62;  // koganebottom at 1.5× size on mobile (1.08 × 1.5)
 
 // translateY for the small (1/3 scale) rest position.
 const ZOOM_Y_START   = 'calc(157px + 2.833vw)';
@@ -318,7 +319,7 @@ export default function KoganePopup({ onClose }) {
     >
       <div className="fixed inset-0 bg-black/60" style={{ backdropFilter: `blur(${blurPx}px)`, WebkitBackdropFilter: `blur(${blurPx}px)`, transition: 'backdrop-filter 500ms ease, -webkit-backdrop-filter 500ms ease', pointerEvents: 'none' }} />
 
-      <div className="relative z-10 flex flex-col items-center" style={{ paddingTop: '0px', paddingBottom: '120px', cursor: 'default', transform: 'translateY(-60px)' }}>
+      <div className="relative z-10 flex flex-col items-center" style={{ paddingTop: '0px', paddingBottom: '120px', cursor: 'default', transform: isMobile ? 'translateY(0px)' : 'translateY(-60px)' }}>
         <div style={{ width: isMobile ? '100vw' : 'min(3600px, 144vw)', position: 'relative', overflow: 'visible' }}>
 
           <button
@@ -332,10 +333,10 @@ export default function KoganePopup({ onClose }) {
               transformOrigin '50% 0%' keeps zoom anchored to top-center of composition. */}
           <div style={{ transform: zoomTransform, transformOrigin: '50% 0%', transition: zoomTransition, overflow: 'visible' }}>
 
-          {/* KOGANE TOP — scale(0.96) from bottom-center, clips horizontally and vertically off-screen as intended */}
+          {/* KOGANE TOP — scale from bottom-center; TOP_SCALE_M on mobile (2×), 0.96 on desktop */}
           <img src={topSrc} alt="scroll top" onClick={triggerClose} onLoad={handleImageLoad}
             fetchpriority="high" loading="eager"
-            style={{ display: 'block', width: '100%', position: 'relative', zIndex: 4, transform: 'translateX(-5px) scale(0.96)', transformOrigin: 'bottom center', marginTop: 'calc(-8.5vw + 9px)', cursor: 'pointer' }}
+            style={{ display: 'block', width: '100%', position: 'relative', zIndex: 4, transform: `translateX(-5px) scale(${isMobile ? TOP_SCALE_M : 0.96})`, transformOrigin: 'bottom center', marginTop: 'calc(-8.5vw + 9px)', cursor: 'pointer' }}
           />
 
           {/* GREEN SCREEN */}
@@ -466,7 +467,7 @@ export default function KoganePopup({ onClose }) {
               position: 'relative',
               zIndex: 3,
               cursor: 'pointer',
-              transform: `translateX(${bottomX}px) scale(1.08)`,
+              transform: `translateX(${bottomX}px) scale(${isMobile ? BOTTOM_SCALE_M : 1.08})`,
               transformOrigin: 'top center',
               opacity: 1,
               transition: [
