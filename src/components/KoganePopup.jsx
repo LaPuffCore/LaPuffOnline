@@ -189,8 +189,6 @@ export default function KoganePopup({ onClose }) {
   const bottomX      = isMobile ? BOTTOM_X_M : BOTTOM_X;
   const zoomStartXf  = isMobile ? ZOOM_START_TRANSFORM_M : ZOOM_START_TRANSFORM;
   const zoomFullXf   = isMobile ? ZOOM_FULL_TRANSFORM_M  : ZOOM_FULL_TRANSFORM;
-  // Mobile timing helper — multiply all ms values by ANIM_SPEED_M
-  const t = isMobile ? (ms) => Math.round(ms * ANIM_SPEED_M) : (ms) => ms;
 
   const [headerH, setHeaderH] = useState(72);
   const [screenH, setScreenH] = useState(0);
@@ -200,10 +198,6 @@ export default function KoganePopup({ onClose }) {
   const contentInnerRef = useRef(null);
   const closingRef = useRef(false);
   const openTimersRef = useRef([]);
-
-  // Mobile: GPU-composited clip-path replaces the laggy height transition.
-  // 'inset(0 0 100% 0)' = fully clipped (invisible), 'inset(0 0 0% 0)' = fully visible.
-  const [mobileClip, setMobileClip] = useState('inset(0 0 100% 0)');
 
   // Zoom transform — initialised to a random offscreen position, flies in to ZOOM_START on open
   const [zoomTransform, setZoomTransform] = useState(() => randomOffscreen(isMobile));
@@ -222,25 +216,26 @@ export default function KoganePopup({ onClose }) {
     openTimersRef.current.forEach(clearTimeout);
     openTimersRef.current = [];
     setClosing(true);
-    if (isMobile) {
-      requestAnimationFrame(() => requestAnimationFrame(() => setMobileClip('inset(0 0 100% 0)')));
-    } else {
-      setScreenH(0);
-    }
+    setScreenH(0);
     // At t(1700)ms: zoom-out to ZOOM_START over t(1000)ms
+    const tZoomOut = isMobile ? Math.round(1700 * ANIM_SPEED_M) : 1700;
+    const tZoomDur = isMobile ? Math.round(1000 * ANIM_SPEED_M) : 1000;
     setTimeout(() => {
-      setZoomTransition(`transform ${t(1000)}ms cubic-bezier(0.7,0,1,0.9)`);
+      setZoomTransition(`transform ${tZoomDur}ms cubic-bezier(0.7,0,1,0.9)`);
       requestAnimationFrame(() => requestAnimationFrame(() => setZoomTransform(zoomStartXf)));
-    }, t(1700));
+    }, tZoomOut);
     // At t(2700)ms: fly off-screen in random direction over t(1000)ms
+    const tFlyOut = isMobile ? Math.round(2700 * ANIM_SPEED_M) : 2700;
+    const tFlyDur = isMobile ? Math.round(1000 * ANIM_SPEED_M) : 1000;
     setTimeout(() => {
       const target = randomOffscreen(isMobile);
-      setZoomTransition(`transform ${t(1000)}ms cubic-bezier(0.7,0,1,0.9)`);
+      setZoomTransition(`transform ${tFlyDur}ms cubic-bezier(0.7,0,1,0.9)`);
       requestAnimationFrame(() => requestAnimationFrame(() => setZoomTransform(target)));
-    }, t(2700));
+    }, tFlyOut);
     // At t(3700)ms: fully closed
-    setTimeout(() => onClose?.(), t(3700));
-  }, [onClose, isMobile, zoomStartXf, t]);
+    const tClose = isMobile ? Math.round(3700 * ANIM_SPEED_M) : 3700;
+    setTimeout(() => onClose?.(), tClose);
+  }, [onClose, isMobile, zoomStartXf]);
 
   useEffect(() => {
     const hdr = document.querySelector('header');
@@ -285,38 +280,37 @@ export default function KoganePopup({ onClose }) {
   useEffect(() => {
     if (!imagesReady) return;
     const timers = [];
-    // Phase 0 — fly in from offscreen → ZOOM_START over t(1000)ms
-    setZoomTransition(`transform ${t(1000)}ms cubic-bezier(0.22,1,0.36,1)`);
+    const tFlyIn   = isMobile ? Math.round(1000 * ANIM_SPEED_M) : 1000;
+    const tZoomDur = isMobile ? Math.round(1000 * ANIM_SPEED_M) : 1000;
+    const tExpand  = isMobile ? Math.round(2200 * ANIM_SPEED_M) : 2200;
+    // Phase 0 — fly in from offscreen → ZOOM_START over tFlyIn ms
+    setZoomTransition(`transform ${tFlyIn}ms cubic-bezier(0.22,1,0.36,1)`);
     requestAnimationFrame(() => requestAnimationFrame(() => setZoomTransform(zoomStartXf)));
-    // Phase 1 — after fly-in: zoom to full size over t(1000)ms
+    // Phase 1 — after fly-in: zoom to full size over tZoomDur ms
     timers.push(setTimeout(() => {
       if (closingRef.current) return;
-      setZoomTransition(`transform ${t(1000)}ms cubic-bezier(0.33,0,0.2,1)`);
+      setZoomTransition(`transform ${tZoomDur}ms cubic-bezier(0.33,0,0.2,1)`);
       requestAnimationFrame(() => requestAnimationFrame(() => setZoomTransform(zoomFullXf)));
-    }, t(1000)));
-    // Phase 2 — after fly(t(1000)) + zoom(t(1000)) + t(200)ms hold = t(2200)ms: expand screen
+    }, tFlyIn));
+    // Phase 2 — after fly(tFlyIn) + zoom(tZoomDur) + 200ms hold = tExpand ms: expand screen
     timers.push(setTimeout(() => {
       if (closingRef.current) return;
       const inner = contentInnerRef.current;
       const h = inner ? Math.max(inner.scrollHeight + 8, 300) : 1200;
       setScreenH(h);
       setExpanded(true);
-      if (isMobile) {
-        requestAnimationFrame(() => requestAnimationFrame(() => setMobileClip('inset(0 0 0% 0)')));
-      }
-    }, t(2200)));
+    }, tExpand));
     openTimersRef.current = timers;
     return () => timers.forEach(clearTimeout);
   }, [imagesReady]);
 
+  const expandMs  = isMobile ? Math.round(2000 * ANIM_SPEED_M) : 2000;
+  const retractMs = isMobile ? Math.round(1500 * ANIM_SPEED_M) : 1500;
   const heightTransition = closing
-    ? 'height 1500ms cubic-bezier(0.7,0,1,0.9)'
+    ? `height ${retractMs}ms cubic-bezier(0.7,0,1,0.9)`
     : expanded
-      ? 'height 2000ms cubic-bezier(0.33,0,0.2,1)'
+      ? `height ${expandMs}ms cubic-bezier(0.33,0,0.2,1)`
       : 'none';
-  const clipTransition = closing
-    ? `clip-path ${t(1500)}ms cubic-bezier(0.7,0,1,0.9), -webkit-clip-path ${t(1500)}ms cubic-bezier(0.7,0,1,0.9)`
-    : `clip-path ${t(2000)}ms cubic-bezier(0.33,0,0.2,1), -webkit-clip-path ${t(2000)}ms cubic-bezier(0.33,0,0.2,1)`;
 
   const ruleStyle = {
     display: 'flex',
@@ -370,7 +364,7 @@ export default function KoganePopup({ onClose }) {
       style={{ overflowY: 'auto', overflowX: 'hidden', overscrollBehavior: 'contain', fontFamily: 'Nunito, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial', cursor: 'pointer' }}
       onClick={triggerClose}
     >
-      <div className="fixed inset-0 bg-black/60" style={{ backdropFilter: `blur(${blurPx}px)`, WebkitBackdropFilter: `blur(${blurPx}px)`, transition: 'backdrop-filter 500ms ease, -webkit-backdrop-filter 500ms ease', pointerEvents: 'none' }} />
+      <div className="fixed inset-0 bg-black/60" style={{ backdropFilter: isMobile ? undefined : `blur(${blurPx}px)`, WebkitBackdropFilter: isMobile ? undefined : `blur(${blurPx}px)`, transition: 'backdrop-filter 500ms ease, -webkit-backdrop-filter 500ms ease', pointerEvents: 'none' }} />
 
       <div className="relative z-10 flex flex-col items-center" style={{ paddingTop: '0px', paddingBottom: '120px', cursor: 'default', transform: isMobile ? `translateY(${POPUP_Y_OFFSET_M}px)` : 'translateY(-60px)' }}>
         <div style={{ width: isMobile ? '100vw' : 'min(3600px, 144vw)', position: 'relative', overflow: 'visible' }}>
@@ -405,18 +399,12 @@ export default function KoganePopup({ onClose }) {
               style={{
                 width: isMobile ? `${GREEN_SCREEN_WIDTH_M * 100}%` : 'calc(100% / 3)',
                 ...(isMobile ? {} : { minWidth: '390px' }),
-                // Mobile: height is set immediately (no transition) — clip-path handles reveal/retract
-                // Desktop: height transition (layout-based, works fine on desktop GPU)
-                height: isMobile
-                  ? `${screenH}px`
-                  : (expanded || closing ? `${screenH}px` : '0px'),
+                // Height transitions on all devices — this is what makes koganebottom track the expanding screen.
+                // On mobile we add will-change: height to hint the browser to promote to a GPU layer.
+                height: expanded || closing ? `${screenH}px` : '0px',
                 overflow: 'hidden',
-                transition: isMobile ? clipTransition : heightTransition,
-                ...(isMobile ? {
-                  clipPath: mobileClip,
-                  WebkitClipPath: mobileClip,
-                  willChange: 'clip-path',
-                } : {}),
+                transition: heightTransition,
+                willChange: isMobile ? 'height' : undefined,
                 position: 'relative',
                 background: GLASS_BG,
                 boxShadow: isMobile ? GLASS_SHADOW_M : GLASS_SHADOW,
@@ -424,13 +412,14 @@ export default function KoganePopup({ onClose }) {
                 borderRadius: '4px',
                 cursor: 'default',
                 // kogane-pulse uses filter: brightness/saturate — NOT GPU composited on mobile, skip it
+                // scanlines animation paused during height transition to reduce mobile GPU load
                 animation: expanded && !closing
                   ? `kogane-flicker 9s ease-in-out infinite${isMobile ? '' : ', kogane-pulse 5s ease-in-out infinite'}`
                   : 'none',
               }}
             >
-              {/* Scanlines */}
-              <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 10, backgroundImage: 'repeating-linear-gradient(0deg,rgba(0,0,0,0.032) 0px,rgba(0,0,0,0.032) 1px,transparent 1px,transparent 8px)', backgroundSize: '100% 8px', animation: 'kogane-scan 0.35s linear infinite' }} />
+              {/* Scanlines — paused on mobile during height animation to reduce GPU load */}
+              <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 10, backgroundImage: 'repeating-linear-gradient(0deg,rgba(0,0,0,0.032) 0px,rgba(0,0,0,0.032) 1px,transparent 1px,transparent 8px)', backgroundSize: '100% 8px', animation: (isMobile && !expanded) ? 'none' : 'kogane-scan 0.35s linear infinite' }} />
               {/* Subtle horizontal glow lines */}
               <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 9, backgroundImage: 'repeating-linear-gradient(0deg,transparent 0px,transparent 28px,rgba(100,255,0,0.04) 28px,rgba(100,255,0,0.04) 30px)' }} />
 
@@ -544,7 +533,7 @@ export default function KoganePopup({ onClose }) {
               transition: [
                 'opacity 500ms ease',
                 expanded
-                  ? `margin-top ${closing ? '1500ms cubic-bezier(0.7,0,1,0.9)' : '2000ms cubic-bezier(0.33,0,0.2,1)'}`
+                  ? `margin-top ${closing ? `${retractMs}ms cubic-bezier(0.7,0,1,0.9)` : `${expandMs}ms cubic-bezier(0.33,0,0.2,1)`}`
                   : '',
               ].filter(Boolean).join(', '),
             }}
