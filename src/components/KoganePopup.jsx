@@ -27,7 +27,7 @@ const BOTTOM_SCALE_M            = 1.40;
 // koganebottom horizontal offset in px (positive = right). Applied at all zoom levels.
 const BOTTOM_X_M                = 62;
 // koganebottom marginTop when fully EXPANDED (more negative = rides higher / overlaps screen more)
-const BOTTOM_END_MT_M           = -75;
+const BOTTOM_END_MT_M           = -95;
 // Extra downward gap for koganebottom when CLOSED/INITIAL (positive = further down from seam)
 const BOTTOM_INIT_EXTRA_DOWN_M  = 90;
 
@@ -35,7 +35,7 @@ const BOTTOM_INIT_EXTRA_DOWN_M  = 90;
 // Y position of the entire popup composition when at FULL/EXTENDED zoom (px, positive = lower on screen)
 const POPUP_Y_OFFSET_M          = 260;
 // translateY of the whole zoom wrapper at the SMALL (1/3 scale) resting position
-const ZOOM_Y_START_M_PX         = 160;   // px component
+const ZOOM_Y_START_M_PX         = 100;   // px component
 const ZOOM_Y_START_M_VW         = 2.833; // vw component (compensates for koganetop marginTop at small scale)
 // translateX of the whole zoom wrapper at the SMALL (1/3 scale) resting position (positive = right)
 const ZOOM_X_START_M            = 0;     // px — centre by default
@@ -366,14 +366,27 @@ export default function KoganePopup({ onClose }) {
     >
       <div className="fixed inset-0 bg-black/60" style={{ backdropFilter: isMobile ? undefined : `blur(${blurPx}px)`, WebkitBackdropFilter: isMobile ? undefined : `blur(${blurPx}px)`, transition: 'backdrop-filter 500ms ease, -webkit-backdrop-filter 500ms ease', pointerEvents: 'none' }} />
 
+      {/* Close button — fixed to viewport top-right on mobile so it never moves with scroll or animation */}
+      {isMobile ? (
+        <button
+          onClick={(e) => { e.stopPropagation(); triggerClose(); }}
+          className="fixed top-3 right-3 z-[100020] w-10 h-10 bg-black/70 text-white rounded-full font-black flex items-center justify-center border-2 border-white hover:bg-red-500 transition-colors"
+          aria-label="Close"
+          style={{ touchAction: 'manipulation' }}
+        >✕</button>
+      ) : null}
+
       <div className="relative z-10 flex flex-col items-center" style={{ paddingTop: '0px', paddingBottom: '120px', cursor: 'default', transform: isMobile ? `translateY(${POPUP_Y_OFFSET_M}px)` : 'translateY(-60px)' }}>
         <div style={{ width: isMobile ? '100vw' : 'min(3600px, 144vw)', position: 'relative', overflow: 'visible' }}>
 
-          <button
-            onClick={(e) => { e.stopPropagation(); triggerClose(); }}
-            className="absolute top-4 right-4 z-[100010] w-10 h-10 bg-black/70 text-white rounded-full font-black flex items-center justify-center border-2 border-white hover:bg-red-500 transition-colors"
-            aria-label="Close"
-          >✕</button>
+          {/* Desktop-only: absolute close button inside the scroll content */}
+          {!isMobile && (
+            <button
+              onClick={(e) => { e.stopPropagation(); triggerClose(); }}
+              className="absolute top-4 right-4 z-[100010] w-10 h-10 bg-black/70 text-white rounded-full font-black flex items-center justify-center border-2 border-white hover:bg-red-500 transition-colors"
+              aria-label="Close"
+            >✕</button>
+          )}
 
           {/* ZOOM WRAPPER — starts at random offscreen position, flies to ZOOM_START on open,
               zooms to ZOOM_FULL, then reverses on close (zoom-out then fly off-screen).

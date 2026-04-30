@@ -421,6 +421,10 @@ export default function TileView({ events, eventsLoading = false }) {
             border-left-width: 5px !important;
             border-right-width: 5px !important;
           }
+          /* Wide + Square: add left padding equal to scrollbar width (~17px) to visually center filterbar */
+          .tv-square:not(.tv-narrow) > .bg-white.sticky {
+            padding-left: calc(1rem + 17px) !important;
+          }
           .tv-square .tv-tile-grid {
             gap: 0 !important;
             padding-left: 0 !important;
