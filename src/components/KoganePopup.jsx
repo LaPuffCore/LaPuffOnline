@@ -11,11 +11,11 @@ const BOTTOM_X = 153;
 
 // ── Mobile variants (< 640px) ───────────────────────────────────────────────
 const SEAM_M            = 70;
-const BOTTOM_END_MT_M   = -80;   // was -90, +10px = koganebottom 10px lower on mobile
+const BOTTOM_END_MT_M   = -100;   // was -90, +10px = koganebottom 10px lower on mobile
 const BOTTOM_INIT_EXTRA_DOWN_M = 100;
 const BOTTOM_X_M        = 50;
-const TOP_SCALE_M       = 1.92;  // koganetop at 2× size on mobile (0.96 × 2)
-const BOTTOM_SCALE_M    = 1.62;  // koganebottom at 1.5× size on mobile (1.08 × 1.5)
+const TOP_SCALE_M       = 3.00;  // koganetop at 2× size on mobile (0.96 × 2)
+const BOTTOM_SCALE_M    = 1.50;  // koganebottom at 1.5× size on mobile (1.08 × 1.5)
 
 // translateY for the small (1/3 scale) rest position.
 const ZOOM_Y_START   = 'calc(157px + 2.833vw)';
