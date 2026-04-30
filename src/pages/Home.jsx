@@ -47,6 +47,7 @@ export default function Home({ events = [], eventsLoading = false }) {
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showHeader, setShowHeader] = useState(true);
   const [headerCollapsed, setHeaderCollapsed] = useState(false);
+  const [mapCacheLoading, setMapCacheLoading] = useState(false);
   const [logoHovered, setLogoHovered] = useState(false);
   // Topbar layout mode: 'narrow' (default, current centered look) or 'wide'
   // (left/center/right anchored to full screen edges). Toggled by the cloud
@@ -521,7 +522,16 @@ export default function Home({ events = [], eventsLoading = false }) {
             {/* Mobile: flex-1 fills space between logo and hamburger, justify-center centers content.
                 Desktop: restored to exactly 78764fc — scale-90→100, absolute centered. */}
             <div className="flex-1 flex items-center justify-center scale-90 md:flex-none md:scale-100 md:gap-2 md:absolute md:left-1/2 md:-translate-x-1/2">
-              <div className="bg-gray-100 border-2 md:border-3 border-black rounded-xl md:rounded-2xl p-0.5 md:p-1 flex items-center justify-center shadow-[2px_2px_0px_black] md:shadow-[3px_3px_0px_black] h-[46px] md:h-auto">
+              <div
+                className="bg-gray-100 border-2 md:border-3 border-black rounded-xl md:rounded-2xl p-0.5 md:p-1 flex items-center justify-center shadow-[2px_2px_0px_black] md:shadow-[3px_3px_0px_black] h-[46px] md:h-auto relative"
+                style={mapCacheLoading ? { opacity: 0.45, pointerEvents: 'none' } : {}}
+              >
+                {/* Lock overlay when map cache is loading */}
+                {mapCacheLoading && (
+                  <div className="absolute inset-0 flex items-center justify-center z-10 rounded-xl md:rounded-2xl" style={{ pointerEvents: 'none' }}>
+                    <span style={{ fontSize: 13 }}>🔒</span>
+                  </div>
+                )}
                 {/* Mobile: dark purple always, no hover, instant tap. Desktop: accentColor with hover. */}
                 <button
                   onPointerDown={e => { if (e.pointerType === 'touch') { e.preventDefault(); setPendingView('tiles'); startViewTransition(() => { setView('tiles'); setShowLeaderboard(false); setShowHeader(true); setPendingView(null); }); } }}
@@ -739,7 +749,7 @@ export default function Home({ events = [], eventsLoading = false }) {
                 </svg>
               </button>
             )}
-            <MapView events={events} headerCollapsed={headerCollapsed} />
+            <MapView events={events} headerCollapsed={headerCollapsed} onCacheLoadingChange={setMapCacheLoading} />
           </div>
         ) : view === 'geo' ? (
           <main className="h-full overflow-y-auto relative" onScroll={handleScroll}>

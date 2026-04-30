@@ -5,6 +5,7 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import { generateAutoTags } from '../lib/autoTags';
 import EventDetailPopup from './EventDetailPopup';
 import MapIntro from './MapIntro';
+import MapLoadingScreen from './MapLoadingScreen';
 import CRTEffect from './CRTEffect';
 import { getZipColonists, getBoroughColonists } from '../lib/pointsSystem';
 import { pingNYCLocation, getLastLocation } from '../lib/locationService';
@@ -19,6 +20,10 @@ const BOROUGH_GEOJSON_URL = './data/borough.geo.json';
 const BUILDING_FGB_URL = './data/final_building.fgb';
 const FGB_CACHE_NAME = 'lapuff-fgb-v4'; // v4: rebuilt with Hilbert R-tree spatial index
 const FGB_CACHE_KEY  = 'final_building.fgb';
+
+// MapLoadingScreen gate keys
+const MAP_CACHE_DONE_KEY     = 'lapuff_map_cache_v1';  // set once first full cache completes
+const MAP_CACHE_BUILDING_KEY = 'lapuff_map_cache_building'; // cleared on completion; if set on next load = corruption
 const MAPTILER_KEY = 'VjoJJ0mSCXFo9kFGYGxJ';
 
 const TIMESPAN_STEPS = [
@@ -1463,7 +1468,7 @@ function MapPostsPanelView({ panel, posts, reactions, sort, setSort, page, setPa
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
-export default function MapView({ events, headerCollapsed = false }) {
+export default function MapView({ events, headerCollapsed = false, onCacheLoadingChange }) {
   const [topoOn, setTopoOn] = useState(() => {
     try {
       const v = localStorage.getItem('lapuff_topo_on');
@@ -1531,6 +1536,12 @@ export default function MapView({ events, headerCollapsed = false }) {
   const [adjacency,     setAdjacency]     = useState([]);
   const [mapReady,      setMapReady]      = useState(false);
   const [entered,       setEntered]       = useState(false);
+  // MapLoadingScreen gate: show intermediary screen after MapIntro until cache is ready
+  const [cacheReady,    setCacheReady]    = useState(false);
+  const [cacheProgress, setCacheProgress] = useState(0);
+  const [cacheIsDone,   setCacheIsDone]   = useState(false);
+  const cacheStartTimeRef = useRef(null);
+  const isFirstMapLoad = !localStorage.getItem(MAP_CACHE_DONE_KEY);
   const [hoveredZip,    setHoveredZip]    = useState(null);
   const [hoveredBorough, setHoveredBorough] = useState(null);
   const [hoveredEvents, setHoveredEvents] = useState([]);
@@ -1713,6 +1724,70 @@ export default function MapView({ events, headerCollapsed = false }) {
       return { minX, minY, maxX, maxY };
     });
   }, [geoData]);
+
+  // MapLoadingScreen gate — start polling when user enters via MapIntro.
+  // Tracks 4 required data milestones; enforces 1s minimum display time.
+  // On corruption detection (building flag set but done flag not set): clears and forces full rebuild.
+  useEffect(() => {
+    if (!entered || cacheReady) return;
+
+    // Corruption guard: if a previous build was interrupted, force full rebuild
+    const wasBuilding = localStorage.getItem(MAP_CACHE_BUILDING_KEY);
+    const isDoneFlag  = localStorage.getItem(MAP_CACHE_DONE_KEY);
+    if (wasBuilding && !isDoneFlag) {
+      localStorage.removeItem(MAP_CACHE_BUILDING_KEY);
+      localStorage.removeItem(MAP_CACHE_DONE_KEY);
+      // Wipe FGB browser cache so it re-downloads fresh
+      caches.delete(FGB_CACHE_NAME).catch(() => {});
+    }
+    // Mark that a build is in progress
+    localStorage.setItem(MAP_CACHE_BUILDING_KEY, '1');
+
+    cacheStartTimeRef.current = Date.now();
+    onCacheLoadingChange?.(true);
+
+    const MIN_MS = 1000;
+    const poll = setInterval(() => {
+      const hasGeo   = !!geoDataRef.current;
+      const hasBoro  = !!boroughGeoDataRef.current;
+      const hasAdj   = adjacency?.length > 0;
+      const hasTiers = precomputedTiersRef.current && Object.keys(precomputedTiersRef.current).length >= 5;
+
+      let p = 0;
+      if (hasGeo)   p += 25;
+      if (hasBoro)  p += 15;
+      if (hasAdj)   p += 20;
+      if (hasTiers) p += 35;
+
+      const elapsed = Date.now() - cacheStartTimeRef.current;
+      // Pad progress smoothly over min duration when data is ready but time not yet elapsed
+      if (hasGeo && hasBoro && hasAdj && hasTiers && elapsed < MIN_MS) {
+        p = Math.max(p, Math.round((elapsed / MIN_MS) * 95));
+      }
+
+      setCacheProgress(Math.min(p, 95));
+
+      if (hasGeo && hasBoro && hasAdj && hasTiers && elapsed >= MIN_MS) {
+        clearInterval(poll);
+        setCacheProgress(100);
+        setCacheIsDone(true);
+        localStorage.setItem(MAP_CACHE_DONE_KEY, '1');
+        localStorage.removeItem(MAP_CACHE_BUILDING_KEY);
+      }
+    }, 100);
+
+    return () => clearInterval(poll);
+  }, [entered, adjacency]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // When cacheIsDone fires: wait 300ms (green flash in MapLoadingScreen) then reveal map
+  useEffect(() => {
+    if (!cacheIsDone) return;
+    const t = setTimeout(() => {
+      setCacheReady(true);
+      onCacheLoadingChange?.(false);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [cacheIsDone]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Map init — make canvas background transparent so CRT can show on edges
   useEffect(() => {
@@ -4005,7 +4080,17 @@ export default function MapView({ events, headerCollapsed = false }) {
 
       {!entered && <MapIntro onEnter={() => setEntered(true)} />}
 
-      {entered && (
+      {/* MapLoadingScreen — gate between MapIntro and map controls; runs all caching/preloading */}
+      {entered && !cacheReady && (
+        <MapLoadingScreen
+          progress={cacheProgress}
+          isFirstLoad={isFirstMapLoad}
+          isDone={cacheIsDone}
+          onComplete={() => {}} /* completion handled by cacheIsDone effect above */
+        />
+      )}
+
+      {entered && cacheReady && (
         <>
           {/* Controls — below header when expanded, below expand button when collapsed */}
           <div className={`absolute left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-2 transition-[top] duration-300 ${headerCollapsed ? 'top-[68px]' : 'top-[134px] md:top-[84px]'}`}>
@@ -4540,55 +4625,6 @@ export default function MapView({ events, headerCollapsed = false }) {
         </div>
       )}
 
-      {/* FGB cache status indicator — bottom-left corner with progress bar */}
-      {fgbCacheStatus !== 'idle' && (
-        <div
-          className="fixed z-50 flex flex-col gap-1.5 px-3 py-2 rounded-xl border border-white/20 bg-black/75 backdrop-blur-sm shadow-lg"
-          style={{
-            bottom: 28, left: 28, pointerEvents: 'none', minWidth: 180,
-            transition: 'opacity 0.4s ease',
-            opacity: fgbCacheStatus === 'done' ? 0 : 1,
-          }}
-        >
-          <div className="flex items-center gap-2">
-            {fgbCacheStatus === 'building' && (
-              <span className="text-white text-[11px] font-bold tracking-wide">Map cache is building</span>
-            )}
-            {fgbCacheStatus === 'paused' && (
-              <>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="white">
-                  <rect x="6" y="4" width="4" height="16" rx="1" />
-                  <rect x="14" y="4" width="4" height="16" rx="1" />
-                </svg>
-                <span className="text-white text-[11px] font-bold tracking-wide">Cache building is paused</span>
-              </>
-            )}
-            {fgbCacheStatus === 'done' && (
-              <>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="4 12 9 17 20 6" />
-                </svg>
-                <span className="text-[#4ade80] text-[11px] font-bold tracking-wide">Cache building complete</span>
-              </>
-            )}
-            {fgbCacheStatus === 'building' && (
-              <span className="text-white/60 text-[10px] font-semibold ml-auto">{Math.round(fgbCacheProgress)}%</span>
-            )}
-          </div>
-          {(fgbCacheStatus === 'building' || fgbCacheStatus === 'paused') && (
-            <div className="w-full h-1.5 rounded-full bg-white/15 overflow-hidden">
-              <div
-                className="h-full rounded-full"
-                style={{
-                  width: `${fgbCacheProgress}%`,
-                  backgroundColor: fgbCacheStatus === 'paused' ? '#f59e0b' : '#7C3AED',
-                  transition: 'width 0.3s ease',
-                }}
-              />
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 }
