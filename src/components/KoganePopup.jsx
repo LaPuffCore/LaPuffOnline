@@ -5,33 +5,46 @@ const SEAM = 140;
 // Final expanded y position (more negative = higher on screen, overlaps screen more)
 const BOTTOM_END_MT = -180;
 // How much further DOWN kogane bottom sits before expansion (positive = lower)
-// Higher number = more gap / less initial overlap
 const BOTTOM_INIT_EXTRA_DOWN = 200;
 // X offset right for koganebottom (both positions)
 const BOTTOM_X = 153;
-// translateY for the small (1/3 scale) rest position.
-// +60px added from previous iteration to push it down into view.
-// Controls where the small images sit AND where fly-in/out targets aim.
-const ZOOM_Y_START = 'calc(157px + 2.833vw)';
-// The on-screen resting transform at 1/3 scale (fly-in destination / fly-out origin)
-const ZOOM_START_TRANSFORM = `translateX(0px) translateY(${ZOOM_Y_START}) scale(0.333)`;
-const ZOOM_FULL_TRANSFORM  = 'translateX(0px) translateY(0px) scale(1.0)';
 
-// Pick a random offscreen direction at the small scale — same Y plane so it
-// swoops in/out laterally or diagonally, keeping composition aligned in Z.
-function randomOffscreen() {
-  const y = ZOOM_Y_START;
+// ── Mobile variants (< 640px) ───────────────────────────────────────────────
+// Screen is narrower: seam, offsets, and text all scale down.
+const SEAM_M            = 70;
+const BOTTOM_END_MT_M   = -90;
+const BOTTOM_INIT_EXTRA_DOWN_M = 100;
+const BOTTOM_X_M        = 50;
+
+// translateY for the small (1/3 scale) rest position.
+const ZOOM_Y_START   = 'calc(157px + 2.833vw)';
+const ZOOM_Y_START_M = 'calc(120px + 2.833vw)';  // mobile: slightly higher (viewport is same height but narrower)
+// On-screen resting transform at 1/3 scale — desktop vs mobile
+const ZOOM_START_TRANSFORM   = `translateX(0px) translateY(${ZOOM_Y_START}) scale(0.333)`;
+const ZOOM_START_TRANSFORM_M = `translateX(0px) translateY(${ZOOM_Y_START_M}) scale(0.333)`;
+const ZOOM_FULL_TRANSFORM    = 'translateX(0px) translateY(0px) scale(1.0)';
+
+// Pick a random offscreen direction — mobile-aware
+function randomOffscreen(mobile) {
+  const y = mobile ? ZOOM_Y_START_M : ZOOM_Y_START;
+  const s = '0.333';
   const opts = [
-    `translateX(-150vw) translateY(${y}) scale(0.333)`,
-    `translateX(150vw) translateY(${y}) scale(0.333)`,
-    `translateX(-110vw) translateY(-110vh) scale(0.333)`,
-    `translateX(110vw) translateY(-110vh) scale(0.333)`,
-    `translateX(0px) translateY(-130vh) scale(0.333)`,
-    `translateX(-110vw) translateY(110vh) scale(0.333)`,
-    `translateX(110vw) translateY(110vh) scale(0.333)`,
+    `translateX(-150vw) translateY(${y}) scale(${s})`,
+    `translateX(150vw) translateY(${y}) scale(${s})`,
+    `translateX(-110vw) translateY(-110vh) scale(${s})`,
+    `translateX(110vw) translateY(-110vh) scale(${s})`,
+    `translateX(0px) translateY(-130vh) scale(${s})`,
+    `translateX(-110vw) translateY(110vh) scale(${s})`,
+    `translateX(110vw) translateY(110vh) scale(${s})`,
   ];
   return opts[Math.floor(Math.random() * opts.length)];
 }
+
+// Mobile glass: simpler box-shadow — just border-line + subtle outer glow (no 3D bevel insets)
+const GLASS_SHADOW_M = [
+  '0 0 0 1.5px rgba(120,255,40,0.45)',
+  '0 4px 20px rgba(80,255,0,0.12)',
+].join(', ');
 
 const NUM = {
   color: '#8B0000',
@@ -128,6 +141,16 @@ function styleText(text) {
 // ───────────────────────────────────────────────────────────────────────────
 
 export default function KoganePopup({ onClose }) {
+  // Detect mobile once at mount — drives all mobile-specific sizing
+  const isMobile = useRef(typeof window !== 'undefined' && window.innerWidth < 640).current;
+
+  // Pick correct constants based on device
+  const seam          = isMobile ? SEAM_M : SEAM;
+  const bottomEndMt   = isMobile ? BOTTOM_END_MT_M : BOTTOM_END_MT;
+  const bottomInitDn  = isMobile ? BOTTOM_INIT_EXTRA_DOWN_M : BOTTOM_INIT_EXTRA_DOWN;
+  const bottomX       = isMobile ? BOTTOM_X_M : BOTTOM_X;
+  const zoomStartXf   = isMobile ? ZOOM_START_TRANSFORM_M : ZOOM_START_TRANSFORM;
+
   const [headerH, setHeaderH] = useState(72);
   const [screenH, setScreenH] = useState(0);
   const [expanded, setExpanded] = useState(false);
@@ -138,7 +161,7 @@ export default function KoganePopup({ onClose }) {
   const openTimersRef = useRef([]);
 
   // Zoom transform — initialised to a random offscreen position, flies in to ZOOM_START on open
-  const [zoomTransform, setZoomTransform] = useState(() => randomOffscreen());
+  const [zoomTransform, setZoomTransform] = useState(() => randomOffscreen(isMobile));
   const [zoomTransition, setZoomTransition] = useState('none');
   // Backdrop blur ramps from 0 to 10px when images load
   const [blurPx, setBlurPx] = useState(0);
@@ -159,17 +182,17 @@ export default function KoganePopup({ onClose }) {
     // At 1700ms: zoom-out to ZOOM_START over 1000ms
     setTimeout(() => {
       setZoomTransition('transform 1000ms cubic-bezier(0.7,0,1,0.9)');
-      requestAnimationFrame(() => requestAnimationFrame(() => setZoomTransform(ZOOM_START_TRANSFORM)));
+      requestAnimationFrame(() => requestAnimationFrame(() => setZoomTransform(zoomStartXf)));
     }, 1700);
     // At 2700ms: zoom done → fly off-screen in random direction over 1000ms
     setTimeout(() => {
-      const target = randomOffscreen();
+      const target = randomOffscreen(isMobile);
       setZoomTransition('transform 1000ms cubic-bezier(0.7,0,1,0.9)');
       requestAnimationFrame(() => requestAnimationFrame(() => setZoomTransform(target)));
     }, 2700);
     // At 3700ms: fully closed
     setTimeout(() => onClose?.(), 3700);
-  }, [onClose]);
+  }, [onClose, isMobile, zoomStartXf]);
 
   useEffect(() => {
     const hdr = document.querySelector('header');
@@ -216,7 +239,7 @@ export default function KoganePopup({ onClose }) {
     const timers = [];
     // Phase 0 — immediately fly in from offscreen → ZOOM_START over 1000ms
     setZoomTransition('transform 1000ms cubic-bezier(0.22,1,0.36,1)');
-    requestAnimationFrame(() => requestAnimationFrame(() => setZoomTransform(ZOOM_START_TRANSFORM)));
+    requestAnimationFrame(() => requestAnimationFrame(() => setZoomTransform(zoomStartXf)));
     // Phase 1 — after fly-in(1000ms): zoom to full size over 1000ms
     timers.push(setTimeout(() => {
       if (closingRef.current) return;
@@ -243,25 +266,30 @@ export default function KoganePopup({ onClose }) {
 
   const ruleStyle = {
     display: 'flex',
-    gap: '14px',
-    marginBottom: '30px',
+    gap: isMobile ? '8px' : '14px',
+    marginBottom: isMobile ? '16px' : '30px',
     fontWeight: 800,
-    fontSize: '27px',
-    lineHeight: 1.8,
+    fontSize: isMobile ? '15px' : '27px',
+    lineHeight: isMobile ? 1.5 : 1.8,
     color: '#071000',
     textShadow: '0 1px 2px rgba(0,0,0,0.28), 0 0 5px rgba(0,60,0,0.15)',
   };
 
   const subStyle = {
     display: 'flex',
-    gap: '14px',
-    marginBottom: '18px',
-    marginLeft: '56px',
+    gap: isMobile ? '8px' : '14px',
+    marginBottom: isMobile ? '12px' : '18px',
+    marginLeft: isMobile ? '20px' : '56px',
     fontWeight: 800,
-    fontSize: '27px',
-    lineHeight: 1.8,
+    fontSize: isMobile ? '15px' : '27px',
+    lineHeight: isMobile ? 1.5 : 1.8,
     color: '#071000',
     textShadow: '0 1px 2px rgba(0,0,0,0.28)',
+  };
+
+  const numStyle = {
+    ...NUM,
+    minWidth: isMobile ? '28px' : '42px',
   };
 
   const rules = [
@@ -291,7 +319,7 @@ export default function KoganePopup({ onClose }) {
       <div className="fixed inset-0 bg-black/60" style={{ backdropFilter: `blur(${blurPx}px)`, WebkitBackdropFilter: `blur(${blurPx}px)`, transition: 'backdrop-filter 500ms ease, -webkit-backdrop-filter 500ms ease', pointerEvents: 'none' }} />
 
       <div className="relative z-10 flex flex-col items-center" style={{ paddingTop: '0px', paddingBottom: '120px', cursor: 'default', transform: 'translateY(-60px)' }}>
-        <div style={{ width: 'min(3600px, 144vw)', position: 'relative', overflow: 'visible' }}>
+        <div style={{ width: isMobile ? '100vw' : 'min(3600px, 144vw)', position: 'relative', overflow: 'visible' }}>
 
           <button
             onClick={(e) => { e.stopPropagation(); triggerClose(); }}
@@ -311,17 +339,18 @@ export default function KoganePopup({ onClose }) {
           />
 
           {/* GREEN SCREEN */}
-          <div style={{ display: 'flex', justifyContent: 'center', marginTop: `-${SEAM}px`, position: 'relative', zIndex: 2 }}>
+          <div style={{ display: 'flex', justifyContent: 'center', marginTop: `-${seam}px`, position: 'relative', zIndex: 2 }}>
             <div
               onClick={(e) => e.stopPropagation()}
               style={{
-                width: 'calc(100% / 3)', minWidth: '390px',
+                width: isMobile ? '100%' : 'calc(100% / 3)',
+                ...(isMobile ? {} : { minWidth: '390px' }),
                 height: expanded || closing ? `${screenH}px` : '0px',
                 overflow: 'hidden',
                 transition: heightTransition,
                 position: 'relative',
                 background: GLASS_BG,
-                boxShadow: GLASS_SHADOW,
+                boxShadow: isMobile ? GLASS_SHADOW_M : GLASS_SHADOW,
                 border: '1.5px solid rgba(80,255,110,0.35)',
                 borderRadius: '4px',
                 cursor: 'default',
@@ -337,7 +366,6 @@ export default function KoganePopup({ onClose }) {
               <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 8, overflow: 'hidden' }}>
                 <defs>
                   <pattern id="kogane-hex-pat" x="0" y="0" width="34.64" height="60" patternUnits="userSpaceOnUse">
-                    {/* Two offset rows of hex outlines tile the entire surface */}
                     <polygon points="17.32,0 34.64,10 34.64,30 17.32,40 0,30 0,10"            fill="none" stroke="rgba(100,255,0,0.09)" strokeWidth="0.7"/>
                     <polygon points="0,30 17.32,40 17.32,60 0,70 -17.32,60 -17.32,40"          fill="none" stroke="rgba(100,255,0,0.09)" strokeWidth="0.7"/>
                     <polygon points="34.64,30 51.96,40 51.96,60 34.64,70 17.32,60 17.32,40"    fill="none" stroke="rgba(100,255,0,0.09)" strokeWidth="0.7"/>
@@ -346,59 +374,52 @@ export default function KoganePopup({ onClose }) {
                 <rect x="0" y="0" width="100%" height="100%" fill="url(#kogane-hex-pat)"/>
               </svg>
 
-              {/* 3D DEPTH GEOMETRY — drawn as SVG overlay, no layout change */}
-              <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 14, overflow: 'visible' }} preserveAspectRatio="none">
-                {/* Top-left corner bracket — perspective foreshortened */}
-                <polyline points="18,18 18,52 28,42" fill="none" stroke="rgba(180,255,100,0.35)" strokeWidth="1.5" vectorEffect="non-scaling-stroke"/>
-                <polyline points="18,18 52,18 42,28" fill="none" stroke="rgba(180,255,100,0.35)" strokeWidth="1.5" vectorEffect="non-scaling-stroke"/>
-                {/* Top-right corner bracket */}
-                <polyline points="calc(100% - 18px),18 calc(100% - 18px),52 calc(100% - 28px),42" fill="none" stroke="rgba(180,255,100,0.28)" strokeWidth="1.5" vectorEffect="non-scaling-stroke"/>
-                <polyline points="calc(100% - 18px),18 calc(100% - 52px),18 calc(100% - 42px),28" fill="none" stroke="rgba(180,255,100,0.28)" strokeWidth="1.5" vectorEffect="non-scaling-stroke"/>
-                {/* Bottom-left corner bracket */}
-                <polyline points="18,calc(100% - 18px) 18,calc(100% - 52px) 28,calc(100% - 42px)" fill="none" stroke="rgba(80,200,40,0.22)" strokeWidth="1.5" vectorEffect="non-scaling-stroke"/>
-                <polyline points="18,calc(100% - 18px) 52,calc(100% - 18px) 42,calc(100% - 28px)" fill="none" stroke="rgba(80,200,40,0.22)" strokeWidth="1.5" vectorEffect="non-scaling-stroke"/>
-                {/* Bottom-right corner bracket */}
-                <polyline points="calc(100% - 18px),calc(100% - 18px) calc(100% - 18px),calc(100% - 52px) calc(100% - 28px),calc(100% - 42px)" fill="none" stroke="rgba(80,200,40,0.18)" strokeWidth="1.5" vectorEffect="non-scaling-stroke"/>
-                <polyline points="calc(100% - 18px),calc(100% - 18px) calc(100% - 52px),calc(100% - 18px) calc(100% - 42px),calc(100% - 28px)" fill="none" stroke="rgba(80,200,40,0.18)" strokeWidth="1.5" vectorEffect="non-scaling-stroke"/>
-                {/* Left edge depth line — slight taper simulating perspective */}
-                <line x1="8" y1="0%" x2="8" y2="100%" stroke="rgba(160,255,80,0.14)" strokeWidth="1" vectorEffect="non-scaling-stroke"/>
-                {/* Right edge depth line */}
-                <line x1="calc(100% - 8px)" y1="0%" x2="calc(100% - 8px)" y2="100%" stroke="rgba(0,40,0,0.22)" strokeWidth="1" vectorEffect="non-scaling-stroke"/>
-                {/* Top edge inner highlight */}
-                <line x1="0%" y1="7" x2="100%" y2="7" stroke="rgba(180,255,120,0.18)" strokeWidth="1" vectorEffect="non-scaling-stroke"/>
-                {/* Bottom edge inner shadow */}
-                <line x1="0%" y1="calc(100% - 7px)" x2="100%" y2="calc(100% - 7px)" stroke="rgba(0,30,0,0.20)" strokeWidth="1" vectorEffect="non-scaling-stroke"/>
-              </svg>
+              {/* Desktop-only: 3D depth geometry — corner brackets + edge lines */}
+              {!isMobile && (
+                <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 14, overflow: 'visible' }} preserveAspectRatio="none">
+                  <polyline points="18,18 18,52 28,42" fill="none" stroke="rgba(180,255,100,0.35)" strokeWidth="1.5" vectorEffect="non-scaling-stroke"/>
+                  <polyline points="18,18 52,18 42,28" fill="none" stroke="rgba(180,255,100,0.35)" strokeWidth="1.5" vectorEffect="non-scaling-stroke"/>
+                  <polyline points="calc(100% - 18px),18 calc(100% - 18px),52 calc(100% - 28px),42" fill="none" stroke="rgba(180,255,100,0.28)" strokeWidth="1.5" vectorEffect="non-scaling-stroke"/>
+                  <polyline points="calc(100% - 18px),18 calc(100% - 52px),18 calc(100% - 42px),28" fill="none" stroke="rgba(180,255,100,0.28)" strokeWidth="1.5" vectorEffect="non-scaling-stroke"/>
+                  <polyline points="18,calc(100% - 18px) 18,calc(100% - 52px) 28,calc(100% - 42px)" fill="none" stroke="rgba(80,200,40,0.22)" strokeWidth="1.5" vectorEffect="non-scaling-stroke"/>
+                  <polyline points="18,calc(100% - 18px) 52,calc(100% - 18px) 42,calc(100% - 28px)" fill="none" stroke="rgba(80,200,40,0.22)" strokeWidth="1.5" vectorEffect="non-scaling-stroke"/>
+                  <polyline points="calc(100% - 18px),calc(100% - 18px) calc(100% - 18px),calc(100% - 52px) calc(100% - 28px),calc(100% - 42px)" fill="none" stroke="rgba(80,200,40,0.18)" strokeWidth="1.5" vectorEffect="non-scaling-stroke"/>
+                  <polyline points="calc(100% - 18px),calc(100% - 18px) calc(100% - 52px),calc(100% - 18px) calc(100% - 42px),calc(100% - 28px)" fill="none" stroke="rgba(80,200,40,0.18)" strokeWidth="1.5" vectorEffect="non-scaling-stroke"/>
+                  <line x1="8" y1="0%" x2="8" y2="100%" stroke="rgba(160,255,80,0.14)" strokeWidth="1" vectorEffect="non-scaling-stroke"/>
+                  <line x1="calc(100% - 8px)" y1="0%" x2="calc(100% - 8px)" y2="100%" stroke="rgba(0,40,0,0.22)" strokeWidth="1" vectorEffect="non-scaling-stroke"/>
+                  <line x1="0%" y1="7" x2="100%" y2="7" stroke="rgba(180,255,120,0.18)" strokeWidth="1" vectorEffect="non-scaling-stroke"/>
+                  <line x1="0%" y1="calc(100% - 7px)" x2="100%" y2="calc(100% - 7px)" stroke="rgba(0,30,0,0.20)" strokeWidth="1" vectorEffect="non-scaling-stroke"/>
+                </svg>
+              )}
 
-              {/* Top bevel gradient */}
-              <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '60px', pointerEvents: 'none', zIndex: 11, background: 'linear-gradient(180deg, rgba(180,255,100,0.14) 0%, transparent 100%)' }} />
-              {/* Bottom depth gradient */}
-              <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '60px', pointerEvents: 'none', zIndex: 11, background: 'linear-gradient(0deg, rgba(0,40,5,0.22) 0%, transparent 100%)' }} />
-              {/* Left bright edge band */}
-              <div style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: '14px', pointerEvents: 'none', zIndex: 11, background: 'linear-gradient(90deg, rgba(160,255,80,0.13) 0%, transparent 100%)' }} />
-              {/* Right dark edge band */}
-              <div style={{ position: 'absolute', top: 0, bottom: 0, right: 0, width: '14px', pointerEvents: 'none', zIndex: 11, background: 'linear-gradient(270deg, rgba(0,30,0,0.18) 0%, transparent 100%)' }} />
-              {/* CRT vignette */}
-              <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 11, background: 'radial-gradient(ellipse at 50% 50%, transparent 42%, rgba(0,0,0,0.22) 100%)' }} />
+              {/* Desktop-only: 3D bevel + vignette layers */}
+              {!isMobile && <>
+                <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '60px', pointerEvents: 'none', zIndex: 11, background: 'linear-gradient(180deg, rgba(180,255,100,0.14) 0%, transparent 100%)' }} />
+                <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '60px', pointerEvents: 'none', zIndex: 11, background: 'linear-gradient(0deg, rgba(0,40,5,0.22) 0%, transparent 100%)' }} />
+                <div style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: '14px', pointerEvents: 'none', zIndex: 11, background: 'linear-gradient(90deg, rgba(160,255,80,0.13) 0%, transparent 100%)' }} />
+                <div style={{ position: 'absolute', top: 0, bottom: 0, right: 0, width: '14px', pointerEvents: 'none', zIndex: 11, background: 'linear-gradient(270deg, rgba(0,30,0,0.18) 0%, transparent 100%)' }} />
+                <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 11, background: 'radial-gradient(ellipse at 50% 50%, transparent 42%, rgba(0,0,0,0.22) 100%)' }} />
+              </>}
 
               <div
                 ref={contentInnerRef}
                 style={{
-                  paddingTop: `${SEAM + 20}px`, paddingBottom: `${SEAM}px`,
-                  paddingLeft: '42px', paddingRight: '42px',
+                  paddingTop: `${seam + 20}px`, paddingBottom: `${seam}px`,
+                  paddingLeft: isMobile ? '14px' : '42px',
+                  paddingRight: isMobile ? '14px' : '42px',
                   position: 'relative', zIndex: 12,
                   opacity: expanded && !closing ? 1 : 0,
                   transition: closing ? 'opacity 200ms ease' : 'opacity 700ms ease 600ms',
                 }}
               >
-                <h2 style={{ textAlign: 'center', fontWeight: 900, fontSize: '33px', marginBottom: '30px', color: '#8B0000', textShadow: '0 2px 5px rgba(0,0,0,0.95), 0 1px 0 #000', letterSpacing: '0.04em' }}>
+                <h2 style={{ textAlign: 'center', fontWeight: 900, fontSize: isMobile ? '19px' : '33px', marginBottom: isMobile ? '16px' : '30px', color: '#8B0000', textShadow: '0 2px 5px rgba(0,0,0,0.95), 0 1px 0 #000', letterSpacing: '0.04em' }}>
                   CLOUT CULLING GAME RULES
                 </h2>
 
-                <div style={{ fontSize: '27px', lineHeight: 1.8, color: '#071000' }}>
+                <div style={{ fontSize: isMobile ? '15px' : '27px', lineHeight: isMobile ? 1.5 : 1.8, color: '#071000' }}>
                   {rules.slice(0, 7).map(([num, text]) => (
                     <div key={num} style={ruleStyle}>
-                      <span style={NUM}>{num}</span>
+                      <span style={numStyle}>{num}</span>
                       <span>{styleText(text)}</span>
                     </div>
                   ))}
@@ -406,14 +427,14 @@ export default function KoganePopup({ onClose }) {
                   {/* Sub-rules A/B/C under VII */}
                   {subRules.map(([lbl, text]) => (
                     <div key={lbl} style={subStyle}>
-                      <span style={{ ...NUM, minWidth: '36px' }}>{lbl}</span>
+                      <span style={{ ...numStyle, minWidth: isMobile ? '24px' : '36px' }}>{lbl}</span>
                       <span>{styleText(text)}</span>
                     </div>
                   ))}
 
                   {rules.slice(7).map(([num, text]) => (
-                    <div key={num} style={{ ...ruleStyle, marginBottom: num === 'IX.' ? '45px' : '30px' }}>
-                      <span style={NUM}>{num}</span>
+                    <div key={num} style={{ ...ruleStyle, marginBottom: num === 'IX.' ? (isMobile ? '24px' : '45px') : (isMobile ? '16px' : '30px') }}>
+                      <span style={numStyle}>{num}</span>
                       <span>{styleText(text)}</span>
                     </div>
                   ))}
@@ -422,31 +443,30 @@ export default function KoganePopup({ onClose }) {
                 <div style={{ textAlign: 'center', paddingBottom: '12px' }}>
                   <button
                     onClick={(e) => { e.stopPropagation(); setShowLocked(v => !v); }}
-                    style={{ background: 'rgba(0,0,0,0.15)', border: '2px solid rgba(0,0,0,0.25)', borderRadius: '16px', padding: '15px 30px', fontWeight: 900, fontSize: '22px', color: 'rgba(0,20,0,0.38)', cursor: 'not-allowed', fontFamily: 'inherit', filter: 'grayscale(0.4)' }}
+                    style={{ background: 'rgba(0,0,0,0.15)', border: '2px solid rgba(0,0,0,0.25)', borderRadius: '16px', padding: isMobile ? '10px 18px' : '15px 30px', fontWeight: 900, fontSize: isMobile ? '15px' : '22px', color: 'rgba(0,20,0,0.38)', cursor: 'not-allowed', fontFamily: 'inherit', filter: 'grayscale(0.4)' }}
                   >
                     🔒 Add A Rule For Clout Points
                   </button>
                   {showLocked && (
-                    <p style={{ marginTop: '12px', fontWeight: 800, fontSize: '21px', color: 'rgba(0,20,0,0.5)', textShadow: '0 1px 2px rgba(0,0,0,0.2)' }}>Not unlocked yet</p>
+                    <p style={{ marginTop: '12px', fontWeight: 800, fontSize: isMobile ? '14px' : '21px', color: 'rgba(0,20,0,0.5)', textShadow: '0 1px 2px rgba(0,0,0,0.2)' }}>Not unlocked yet</p>
                   )}
                 </div>
               </div>
             </div>
           </div>
 
-          {/* KOGANE BOTTOM — initial pos = BOTTOM_END_MT + INIT_EXTRA_DOWN, expands to BOTTOM_END_MT, retracts to exact initial on close */}
+          {/* KOGANE BOTTOM — initial pos = bottomEndMt + bottomInitDn, expands to bottomEndMt, retracts to exact initial on close */}
           <img src={bottomSrc} alt="scroll bottom" onClick={triggerClose} onLoad={handleImageLoad}
             fetchpriority="high" loading="eager"
             style={{
               display: 'block',
               width: 'auto',
               margin: '0 auto',
-              // expanded && !closing = fully open position; everything else (initial + retracted) = same initial value
-              marginTop: `${BOTTOM_END_MT + (expanded && !closing ? 0 : BOTTOM_INIT_EXTRA_DOWN)}px`,
+              marginTop: `${bottomEndMt + (expanded && !closing ? 0 : bottomInitDn)}px`,
               position: 'relative',
               zIndex: 3,
               cursor: 'pointer',
-              transform: `translateX(${BOTTOM_X}px) scale(1.08)`,
+              transform: `translateX(${bottomX}px) scale(1.08)`,
               transformOrigin: 'top center',
               opacity: 1,
               transition: [
