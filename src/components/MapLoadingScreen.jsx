@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
+import { runPhase2A } from '../lib/mapDataPipeline';
+import mapCacheStore from '../lib/mapCacheStore';
 
 const MESSAGES = [
   "Detecting Aura History…",
@@ -82,19 +84,82 @@ function shuffle(arr) {
   return a;
 }
 
-export default function MapLoadingScreen({ progress, isFirstLoad, isDone, onComplete }) {
+// MapLoadingScreen — two-phase pipeline gate.
+// Phase 2A: runs all pure data tasks (GeoJSON, adjacency, skeletons, tiers, FGB on desktop).
+//            Writes results to mapCacheStore. Calls onPhase2ADone when done.
+// Phase 2B: polls mapCacheStore.mapLibreReady + layersReady (set by MapView after GL init).
+//            Calls onComplete when both are set → Home reveals MapView.
+//
+// Props:
+//   events        — app event array passed down for tier computation
+//   onPhase2ADone — callback: Home mounts MapView when this fires
+//   onComplete    — callback: Home sets mapCacheReady=true → overlay disappears
+export default function MapLoadingScreen({ events, onPhase2ADone, onComplete }) {
+  const isMobile = window.innerWidth < 768;
+  const isFirstLoad = !localStorage.getItem('lapuff_map_cache_v1');
+
+  const [progress, setProgress] = useState(0);
+  const [isDone, setIsDone] = useState(false);
+
+  // Rotating messages
   const [currentMsg, setCurrentMsg] = useState(() => MESSAGES[Math.floor(Math.random() * MESSAGES.length)]);
   const [msgKey, setMsgKey] = useState(0);
   const shuffledRef = useRef(shuffle(MESSAGES));
-  const msgIdxRef = useRef(0);
-  const timerRef = useRef(null);
+  const msgIdxRef   = useRef(0);
+  const timerRef    = useRef(null);
 
-  // Message rotation
+  const phase2BPollRef = useRef(null);
+  const onPhase2ADoneRef = useRef(onPhase2ADone);
+  const onCompleteRef    = useRef(onComplete);
+  useEffect(() => { onPhase2ADoneRef.current = onPhase2ADone; }, [onPhase2ADone]);
+  useEffect(() => { onCompleteRef.current = onComplete; }, [onComplete]);
+
+  // Phase 2B progress ranges (after Phase 2A ends)
+  // Desktop: 93→100% | Mobile: 85→100%
+  const phase2AEnd = isMobile ? 85 : 93;
+
+  const startPhase2BPolling = useCallback(() => {
+    onPhase2ADoneRef.current?.();
+
+    phase2BPollRef.current = setInterval(() => {
+      const glReady = mapCacheStore.mapLibreReady;
+      const lrReady = mapCacheStore.layersReady;
+
+      if (glReady && !lrReady) {
+        // MapLibre canvas up, layers not yet added
+        setProgress(isMobile ? 92 : 96);
+      }
+      if (lrReady) {
+        clearInterval(phase2BPollRef.current);
+        setProgress(100);
+        setIsDone(true);
+      }
+    }, 100);
+  }, [isMobile]);
+
+  // ── Run Phase 2A on mount ────────────────────────────────────────────────
   useEffect(() => {
-    if (isDone) {
-      clearTimeout(timerRef.current);
-      return;
-    }
+    let cancelled = false;
+
+    runPhase2A(events, isMobile, (pct, _msg) => {
+      if (!cancelled) setProgress(Math.min(pct, phase2AEnd));
+    }).then(() => {
+      if (!cancelled) startPhase2BPolling();
+    }).catch(err => {
+      console.error('MapLoadingScreen Phase 2A failed:', err);
+      // On failure, still proceed — MapView will fall back to its own fetch effects
+      if (!cancelled) startPhase2BPolling();
+    });
+
+    return () => {
+      cancelled = true;
+      clearInterval(phase2BPollRef.current);
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Message rotation ─────────────────────────────────────────────────────
+  useEffect(() => {
+    if (isDone) { clearTimeout(timerRef.current); return; }
     const rotate = () => {
       msgIdxRef.current = (msgIdxRef.current + 1) % shuffledRef.current.length;
       if (msgIdxRef.current === 0) shuffledRef.current = shuffle(MESSAGES);
@@ -106,20 +171,20 @@ export default function MapLoadingScreen({ progress, isFirstLoad, isDone, onComp
     return () => clearTimeout(timerRef.current);
   }, [isDone]);
 
-  // Fire onComplete 300ms after isDone
+  // ── Fire onComplete 400ms after isDone (green flash) ────────────────────
   useEffect(() => {
     if (!isDone) return;
-    const t = setTimeout(onComplete, 300);
+    const t = setTimeout(() => onCompleteRef.current?.(), 400);
     return () => clearTimeout(t);
-  }, [isDone, onComplete]);
+  }, [isDone]);
 
   const barColor = isDone ? '#22c55e' : '#7C3AED';
-  const displayProgress = isDone ? 100 : progress;
 
   return (
+    // pointer-events: all blocks all interaction with MapView below
     <div
       className="absolute inset-0 flex flex-col items-center justify-center"
-      style={{ background: '#0d0000', zIndex: 50, fontFamily: 'Nunito, sans-serif' }}
+      style={{ background: '#0d0000', zIndex: 50, fontFamily: 'Nunito, sans-serif', pointerEvents: 'all' }}
     >
       <style>{`
         @keyframes mls-glow-blink {
@@ -127,38 +192,30 @@ export default function MapLoadingScreen({ progress, isFirstLoad, isDone, onComp
           50%  { opacity: 0.4; text-shadow: none; }
           100% { opacity: 1;   text-shadow: 0 0 8px #7C3AED, 0 0 16px #7C3AED; }
         }
-        .mls-msg {
-          animation: mls-glow-blink 400ms ease-in-out infinite;
-        }
+        .mls-msg { animation: mls-glow-blink 400ms ease-in-out infinite; }
       `}</style>
 
       {/* Title */}
-      <h1
-        className="text-white font-black text-2xl md:text-3xl mb-2 text-center px-6"
-        style={{ letterSpacing: '-0.02em' }}
-      >
-        {isDone ? '✅ Cache Complete' : 'Loading Map Cache'}
+      <h1 className="text-white font-black text-2xl md:text-3xl mb-2 text-center px-6" style={{ letterSpacing: '-0.02em' }}>
+        {isDone ? '✅ Map Ready' : 'Loading Map Cache'}
       </h1>
 
       {/* Subtitle */}
       {!isDone && (
         <p className="text-white/50 text-xs md:text-sm text-center px-8 mb-8 max-w-md">
           {isFirstLoad
-            ? 'This will be more intensive on first cache so that it can be much faster on any cache loads afterward'
-            : 'Reloading map cache…'}
+            ? 'First load builds a full cache — subsequent loads will be much faster'
+            : 'Validating and refreshing map cache…'}
         </p>
       )}
       {isDone && <div className="mb-8" />}
 
       {/* Progress bar */}
-      <div
-        className="w-72 md:w-96 h-3 rounded-full overflow-hidden"
-        style={{ background: 'rgba(255,255,255,0.1)' }}
-      >
+      <div className="w-72 md:w-96 h-3 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.1)' }}>
         <div
           style={{
             height: '100%',
-            width: `${displayProgress}%`,
+            width: `${progress}%`,
             background: barColor,
             borderRadius: 9999,
             transition: isDone ? 'background 0.15s ease, width 0.3s ease' : 'width 0.3s ease',
@@ -173,11 +230,7 @@ export default function MapLoadingScreen({ progress, isFirstLoad, isDone, onComp
           <span
             key={msgKey}
             className="mls-msg text-[#7C3AED] text-xs md:text-sm italic"
-            style={{
-              maxWidth: '100%',
-              display: 'block',
-              lineHeight: 1.4,
-            }}
+            style={{ maxWidth: '100%', display: 'block', lineHeight: 1.4 }}
           >
             {currentMsg}
           </span>

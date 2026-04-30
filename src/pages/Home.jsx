@@ -3,6 +3,8 @@ import { Link, useLocation } from 'react-router-dom';
 import EventSubmitForm from '../components/EventSubmitForm';
 import TileView from '../components/TileView';
 import MapView from '../components/MapView';
+import MapIntro from '../components/MapIntro';
+import MapLoadingScreen from '../components/MapLoadingScreen';
 import GeoPostView from '../components/GeoPostView';
 import HamburgerMenu from '../components/HamburgerMenu';
 import AuthModal from '../components/AuthModal';
@@ -47,7 +49,9 @@ export default function Home({ events = [], eventsLoading = false }) {
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showHeader, setShowHeader] = useState(true);
   const [headerCollapsed, setHeaderCollapsed] = useState(false);
-  const [mapCacheLoading, setMapCacheLoading] = useState(false);
+  const [mapEntered,     setMapEntered]     = useState(false);
+  const [mapPhase2ADone, setMapPhase2ADone] = useState(false);
+  const [mapCacheReady,  setMapCacheReady]  = useState(false);
   const [logoHovered, setLogoHovered] = useState(false);
   // Topbar layout mode: 'narrow' (default, current centered look) or 'wide'
   // (left/center/right anchored to full screen edges). Toggled by the cloud
@@ -524,10 +528,10 @@ export default function Home({ events = [], eventsLoading = false }) {
             <div className="flex-1 flex items-center justify-center scale-90 md:flex-none md:scale-100 md:gap-2 md:absolute md:left-1/2 md:-translate-x-1/2">
               <div
                 className="bg-gray-100 border-2 md:border-3 border-black rounded-xl md:rounded-2xl p-0.5 md:p-1 flex items-center justify-center shadow-[2px_2px_0px_black] md:shadow-[3px_3px_0px_black] h-[46px] md:h-auto relative"
-                style={mapCacheLoading ? { opacity: 0.45, pointerEvents: 'none' } : {}}
+                style={mapEntered && !mapCacheReady ? { opacity: 0.45, pointerEvents: 'none' } : {}}
               >
                 {/* Lock overlay when map cache is loading */}
-                {mapCacheLoading && (
+                {mapEntered && !mapCacheReady && (
                   <div className="absolute inset-0 flex items-center justify-center z-10 rounded-xl md:rounded-2xl" style={{ pointerEvents: 'none' }}>
                     <span style={{ fontSize: 13 }}>🔒</span>
                   </div>
@@ -749,7 +753,27 @@ export default function Home({ events = [], eventsLoading = false }) {
                 </svg>
               </button>
             )}
-            <MapView events={events} headerCollapsed={headerCollapsed} onCacheLoadingChange={setMapCacheLoading} />
+            {/* Map gate chain:
+                1. MapIntro   — shown until user presses Enter
+                2. MapLoadingScreen — shown while Phase 2A + 2B run; blocks all interaction
+                3. MapView    — mounts under LoadingScreen after Phase 2A (interactive=false until done) */}
+            {!mapEntered && (
+              <MapIntro onEnter={() => setMapEntered(true)} />
+            )}
+            {mapEntered && (
+              <MapView
+                events={events}
+                headerCollapsed={headerCollapsed}
+                interactive={mapCacheReady}
+              />
+            )}
+            {mapEntered && !mapCacheReady && (
+              <MapLoadingScreen
+                events={events}
+                onPhase2ADone={() => setMapPhase2ADone(true)}
+                onComplete={() => setMapCacheReady(true)}
+              />
+            )}
           </div>
         ) : view === 'geo' ? (
           <main className="h-full overflow-y-auto relative" onScroll={handleScroll}>

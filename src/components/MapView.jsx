@@ -4,8 +4,7 @@ import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { generateAutoTags } from '../lib/autoTags';
 import EventDetailPopup from './EventDetailPopup';
-import MapIntro from './MapIntro';
-import MapLoadingScreen from './MapLoadingScreen';
+import mapCacheStore from '../lib/mapCacheStore';
 import CRTEffect from './CRTEffect';
 import { getZipColonists, getBoroughColonists } from '../lib/pointsSystem';
 import { pingNYCLocation, getLastLocation } from '../lib/locationService';
@@ -1468,7 +1467,7 @@ function MapPostsPanelView({ panel, posts, reactions, sort, setSort, page, setPa
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
-export default function MapView({ events, headerCollapsed = false, onCacheLoadingChange }) {
+export default function MapView({ events, headerCollapsed = false, interactive = true }) {
   const [topoOn, setTopoOn] = useState(() => {
     try {
       const v = localStorage.getItem('lapuff_topo_on');
@@ -1520,6 +1519,8 @@ export default function MapView({ events, headerCollapsed = false, onCacheLoadin
   const real3dLayersCreatedRef = useRef(false); // true after first initReal3DLayers
   // Tracks whether _tier_0.._tier_4 have been baked into building properties
   const buildingTiersBakedRef = useRef(false);
+  // Interaction control — disabled during Phase 2B loading, enabled on reveal
+  const interactiveRef = useRef(interactive);
 
   // Persist topo toggle across sessions
   useEffect(() => {
@@ -1535,13 +1536,6 @@ export default function MapView({ events, headerCollapsed = false, onCacheLoadin
   const [boroughGeoData, setBoroughGeoData] = useState(null);
   const [adjacency,     setAdjacency]     = useState([]);
   const [mapReady,      setMapReady]      = useState(false);
-  const [entered,       setEntered]       = useState(false);
-  // MapLoadingScreen gate: show intermediary screen after MapIntro until cache is ready
-  const [cacheReady,    setCacheReady]    = useState(false);
-  const [cacheProgress, setCacheProgress] = useState(0);
-  const [cacheIsDone,   setCacheIsDone]   = useState(false);
-  const cacheStartTimeRef = useRef(null);
-  const isFirstMapLoad = !localStorage.getItem(MAP_CACHE_DONE_KEY);
   const [hoveredZip,    setHoveredZip]    = useState(null);
   const [hoveredBorough, setHoveredBorough] = useState(null);
   const [hoveredEvents, setHoveredEvents] = useState([]);
@@ -1637,8 +1631,19 @@ export default function MapView({ events, headerCollapsed = false, onCacheLoadin
     };
   }, []);
 
-  // GeoJSON
+  // GeoJSON — hydrate from mapCacheStore if Phase 2A ran, else fetch
   useEffect(() => {
+    // If Phase 2A already fetched and processed the GeoJSON, use it directly
+    if (mapCacheStore.geoData) {
+      const { features } = mapCacheStore.geoData;
+      setGeoData(mapCacheStore.geoData);
+      if (mapCacheStore.adjacency) setAdjacency(mapCacheStore.adjacency);
+      else setAdjacency(buildAdjacency(features));
+      if (mapCacheStore.zctaSkeleton) zctaSkeletonRef.current = mapCacheStore.zctaSkeleton;
+      else zctaSkeletonRef.current = buildZctaSkeleton(mapCacheStore.geoData);
+      if (mapCacheStore.zctaBboxes) zctaBboxesRef.current = mapCacheStore.zctaBboxes;
+      return;
+    }
     fetch(GEOJSON_URL).then(r => r.json()).then(data => {
       const features = [];
       let safezoneCounter = 0;
@@ -1686,8 +1691,15 @@ export default function MapView({ events, headerCollapsed = false, onCacheLoadin
     });
   }, []);
 
-  // Borough GeoJSON — load once
+  // Borough GeoJSON — hydrate from mapCacheStore if Phase 2A ran, else fetch
   useEffect(() => {
+    if (mapCacheStore.boroughGeoData) {
+      setBoroughGeoData(mapCacheStore.boroughGeoData);
+      if (mapCacheStore.boroughSkeleton) boroughSkeletonRef.current = mapCacheStore.boroughSkeleton;
+      else boroughSkeletonRef.current = buildBoroughSkeleton(mapCacheStore.boroughGeoData);
+      if (mapCacheStore.zipBoroughMap) zipBoroughMapRef.current = mapCacheStore.zipBoroughMap;
+      return;
+    }
     fetch(BOROUGH_GEOJSON_URL).then(r => r.json()).then(data => {
       setBoroughGeoData(data);
       boroughSkeletonRef.current = buildBoroughSkeleton(data);
@@ -1724,70 +1736,6 @@ export default function MapView({ events, headerCollapsed = false, onCacheLoadin
       return { minX, minY, maxX, maxY };
     });
   }, [geoData]);
-
-  // MapLoadingScreen gate — start polling when user enters via MapIntro.
-  // Tracks 4 required data milestones; enforces 1s minimum display time.
-  // On corruption detection (building flag set but done flag not set): clears and forces full rebuild.
-  useEffect(() => {
-    if (!entered || cacheReady) return;
-
-    // Corruption guard: if a previous build was interrupted, force full rebuild
-    const wasBuilding = localStorage.getItem(MAP_CACHE_BUILDING_KEY);
-    const isDoneFlag  = localStorage.getItem(MAP_CACHE_DONE_KEY);
-    if (wasBuilding && !isDoneFlag) {
-      localStorage.removeItem(MAP_CACHE_BUILDING_KEY);
-      localStorage.removeItem(MAP_CACHE_DONE_KEY);
-      // Wipe FGB browser cache so it re-downloads fresh
-      caches.delete(FGB_CACHE_NAME).catch(() => {});
-    }
-    // Mark that a build is in progress
-    localStorage.setItem(MAP_CACHE_BUILDING_KEY, '1');
-
-    cacheStartTimeRef.current = Date.now();
-    onCacheLoadingChange?.(true);
-
-    const MIN_MS = 1000;
-    const poll = setInterval(() => {
-      const hasGeo   = !!geoDataRef.current;
-      const hasBoro  = !!boroughGeoDataRef.current;
-      const hasAdj   = adjacency?.length > 0;
-      const hasTiers = precomputedTiersRef.current && Object.keys(precomputedTiersRef.current).length >= 5;
-
-      let p = 0;
-      if (hasGeo)   p += 25;
-      if (hasBoro)  p += 15;
-      if (hasAdj)   p += 20;
-      if (hasTiers) p += 35;
-
-      const elapsed = Date.now() - cacheStartTimeRef.current;
-      // Pad progress smoothly over min duration when data is ready but time not yet elapsed
-      if (hasGeo && hasBoro && hasAdj && hasTiers && elapsed < MIN_MS) {
-        p = Math.max(p, Math.round((elapsed / MIN_MS) * 95));
-      }
-
-      setCacheProgress(Math.min(p, 95));
-
-      if (hasGeo && hasBoro && hasAdj && hasTiers && elapsed >= MIN_MS) {
-        clearInterval(poll);
-        setCacheProgress(100);
-        setCacheIsDone(true);
-        localStorage.setItem(MAP_CACHE_DONE_KEY, '1');
-        localStorage.removeItem(MAP_CACHE_BUILDING_KEY);
-      }
-    }, 100);
-
-    return () => clearInterval(poll);
-  }, [entered, adjacency]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // When cacheIsDone fires: wait 300ms (green flash in MapLoadingScreen) then reveal map
-  useEffect(() => {
-    if (!cacheIsDone) return;
-    const t = setTimeout(() => {
-      setCacheReady(true);
-      onCacheLoadingChange?.(false);
-    }, 300);
-    return () => clearTimeout(t);
-  }, [cacheIsDone]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Map init — make canvas background transparent so CRT can show on edges
   useEffect(() => {
@@ -1826,6 +1774,7 @@ export default function MapView({ events, headerCollapsed = false, onCacheLoadin
     });
     map.on('load', () => {
       map.getCanvas().style.backgroundColor = 'transparent';
+      mapCacheStore.mapLibreReady = true;
       setMapReady(true);
     });
     return () => {
@@ -2191,6 +2140,8 @@ export default function MapView({ events, headerCollapsed = false, onCacheLoadin
     const map = mapRef.current;
     if (!map || !mapReady || !geoData) return;
     addLayers(map, geoData, satellite);
+    // Signal MapLoadingScreen Phase 2B that layers are ready → overlay will reveal the map
+    mapCacheStore.layersReady = true;
   }, [mapReady, geoData]);
 
   // Pre-create Real3D layers at map init so first toggle is instant (just a visibility flip).
@@ -2215,9 +2166,16 @@ export default function MapView({ events, headerCollapsed = false, onCacheLoadin
   }, [mapReady, geoData]);
 
   // Pre-compute tiers for all 5 timespans in background.
-  // This makes time slider changes near-instant: just read from pre-computed cache.
+  // Hydrate from mapCacheStore if Phase 2A already computed them; else compute fresh.
   useEffect(() => {
     if (!geoData || !adjacency || !events?.length) return;
+    // Hydrate from Phase 2A store if available (warm load — still recompute for fresh events)
+    if (mapCacheStore.precomputedTiers) {
+      precomputedTiersRef.current = mapCacheStore.precomputedTiers;
+      if (buildingFGBRef.current && buildingZctaMapRef.current) {
+        bakeAllTiersIntoBuildings();
+      }
+    }
     let cancelled = false;
     (async () => {
       const result = {};
@@ -2238,6 +2196,23 @@ export default function MapView({ events, headerCollapsed = false, onCacheLoadin
     })();
     return () => { cancelled = true; };
   }, [events, geoData, adjacency]);
+
+  // interactive prop — disable/enable all MapLibre handlers when changed.
+  // Set to false during Phase 2B loading so nothing can be accidentally interacted with.
+  useEffect(() => {
+    interactiveRef.current = interactive;
+    const map = mapRef.current;
+    if (!map) return;
+    const handlers = [
+      map.scrollZoom, map.boxZoom, map.dragRotate, map.dragPan,
+      map.keyboard, map.doubleClickZoom, map.touchZoomRotate, map.touchPitch,
+    ];
+    if (interactive) {
+      handlers.forEach(h => h?.enable?.());
+    } else {
+      handlers.forEach(h => h?.disable?.());
+    }
+  }, [interactive]);
 
   // Manage hover layers based on 3D/Real3D state.
   // 3D: hover on zcta-extrude + zcta-safezone-extrusion (fill-extrusion layers).
@@ -2947,6 +2922,13 @@ export default function MapView({ events, headerCollapsed = false, onCacheLoadin
   // Never caches parsed GeoJSON (too large, causes freeze on stringify/parse).
   async function buildFGBCache() {
     if (buildingFGBRef.current) { setFgbCacheStatus('done'); setFgbCacheProgress(100); return; }
+    // If Phase 2A already built the FGB cache, hydrate refs and skip full reparse
+    if (mapCacheStore.buildingFGB) {
+      buildingFGBRef.current = mapCacheStore.buildingFGB;
+      if (mapCacheStore.buildingZctaIndex) buildingZctaMapRef.current = mapCacheStore.buildingZctaIndex;
+      if (mapCacheStore.buildingTiersBaked) buildingTiersBakedRef.current = true;
+      setFgbCacheStatus('done'); setFgbCacheProgress(100); return;
+    }
     if (fgbLoadingRef.current) return;
     fgbLoadingRef.current = true;
     setFgbCacheStatus('building');
