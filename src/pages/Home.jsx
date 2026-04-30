@@ -508,7 +508,7 @@ export default function Home({ events = [], eventsLoading = false }) {
             <div className="flex items-center gap-1 md:gap-2 scale-90 md:scale-100 md:absolute md:left-1/2 md:-translate-x-1/2">
               <div className="bg-gray-100 border-2 md:border-3 border-black rounded-xl md:rounded-2xl p-0.5 md:p-1 flex items-center justify-center shadow-[2px_2px_0px_black] md:shadow-[3px_3px_0px_black]">
                 <button onClick={() => { setView('tiles'); setShowLeaderboard(false); setShowHeader(true); }}
-                  className="flex-1 md:flex-none px-2.5 py-1 md:px-4 md:py-2 rounded-lg md:rounded-xl text-xs md:text-sm font-black transition-all flex flex-col md:flex-row items-center justify-center gap-0 md:gap-1 md:min-w-[104px]"
+                  className="flex-none min-w-[52px] md:flex-none px-2.5 py-1.5 md:px-4 md:py-2 rounded-lg md:rounded-xl text-xs md:text-sm font-black transition-all flex flex-col md:flex-row items-center justify-center gap-0.5 md:gap-1 md:min-w-[104px]"
                   style={view === 'tiles' && !showLeaderboard ? { backgroundColor: accentColor, color: '#fff', boxShadow: '1px 1px 0px #333' } : {}}
                   onMouseEnter={e => { if (!(view === 'tiles' && !showLeaderboard)) e.currentTarget.style.backgroundColor = accentColor + '30'; }}
                   onMouseLeave={e => { if (!(view === 'tiles' && !showLeaderboard)) e.currentTarget.style.backgroundColor = ''; }}>
@@ -516,7 +516,7 @@ export default function Home({ events = [], eventsLoading = false }) {
                   <span className="leading-none text-[10px] md:text-sm">Tiles</span>
                 </button>
                 <button onClick={handleMapClick}
-                  className="flex-1 md:flex-none px-2.5 py-1 md:px-4 md:py-2 rounded-lg md:rounded-xl text-xs md:text-sm font-black transition-all flex flex-col md:flex-row items-center justify-center gap-0 md:gap-1 md:min-w-[104px]"
+                  className="flex-none min-w-[52px] md:flex-none px-2.5 py-1.5 md:px-4 md:py-2 rounded-lg md:rounded-xl text-xs md:text-sm font-black transition-all flex flex-col md:flex-row items-center justify-center gap-0.5 md:gap-1 md:min-w-[104px]"
                   style={view === 'map' && !showLeaderboard ? { backgroundColor: accentColor, color: '#fff', boxShadow: '1px 1px 0px #333' } : {}}
                   onMouseEnter={e => { if (!(view === 'map' && !showLeaderboard)) e.currentTarget.style.backgroundColor = accentColor + '30'; }}
                   onMouseLeave={e => { if (!(view === 'map' && !showLeaderboard)) e.currentTarget.style.backgroundColor = ''; }}>
@@ -524,12 +524,12 @@ export default function Home({ events = [], eventsLoading = false }) {
                   <span className="leading-none text-[10px] md:text-sm">Map</span>
                 </button>
                 <button onClick={() => { setView('geo'); setShowLeaderboard(false); }}
-                  className="flex-1 md:flex-none px-2.5 py-1 md:px-4 md:py-2 rounded-lg md:rounded-xl text-xs md:text-sm font-black transition-all flex flex-col md:flex-row items-center justify-center gap-0 md:gap-1 md:min-w-[104px]"
+                  className="flex-none px-2.5 py-1.5 md:px-4 md:py-2 rounded-lg md:rounded-xl text-xs md:text-sm font-black transition-all flex flex-col md:flex-row items-center justify-center gap-0.5 md:gap-1 md:min-w-[104px]"
                   style={view === 'geo' && !showLeaderboard ? { backgroundColor: accentColor, color: '#fff', boxShadow: '1px 1px 0px #333' } : {}}
                   onMouseEnter={e => { if (!(view === 'geo' && !showLeaderboard)) e.currentTarget.style.backgroundColor = accentColor + '30'; }}
                   onMouseLeave={e => { if (!(view === 'geo' && !showLeaderboard)) e.currentTarget.style.backgroundColor = ''; }}>
                   <span className="leading-none">🌍</span>
-                  <span className="leading-none text-[10px] md:text-sm">Geo-Post</span>
+                  <span className="leading-none text-[10px] md:text-sm whitespace-nowrap">Geo-Post</span>
                 </button>
               </div>
             </div>
