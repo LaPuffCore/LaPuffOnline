@@ -213,13 +213,13 @@ export default function EventTile({ event, onClick, onTagClick }) {
           </div>
         </div>
 
-        {/* Tag row limited to 3 to prevent line wrapping height shifts */}
-        <div className="flex flex-wrap gap-1">
+        {/* Tag row limited to 3; mobile: flex-nowrap + overflow-hidden so tags never wrap to a second row */}
+        <div className="flex flex-nowrap sm:flex-wrap gap-1 overflow-hidden">
           {tags.slice(0, 3).map(tag => (
             <button
               key={tag}
               onClick={e => handleTagClick(e, tag)}
-              className={`text-[9px] font-black px-2 py-0.5 rounded-full border-[2.5px] border-black shadow-[1px_1px_0px_black] transition-colors ${TAG_COLORS[tag] || 'bg-gray-100'}`}
+              className={`shrink text-[8px] sm:text-[9px] font-black px-1.5 sm:px-2 py-0.5 rounded-full border-[2.5px] border-black shadow-[1px_1px_0px_black] transition-colors whitespace-nowrap ${TAG_COLORS[tag] || 'bg-gray-100'}`}
             >
               {tag.toUpperCase()}
             </button>

@@ -522,13 +522,11 @@ export default function Home({ events = [], eventsLoading = false }) {
                   🗺️ Map
                 </button>
                 <button onClick={() => { setView('geo'); setShowLeaderboard(false); }}
-                  className="flex-[2] md:flex-none px-2.5 py-1 md:px-4 md:py-2 rounded-lg md:rounded-xl text-[8px] md:text-sm font-black transition-all flex flex-col md:flex-row items-center justify-center gap-0 md:gap-1 md:min-w-[104px]"
+                  className="flex-none px-2.5 py-1.5 md:px-4 md:py-2 rounded-lg md:rounded-xl text-xs md:text-sm font-black transition-all flex flex-row items-center justify-center gap-0 md:gap-1 md:min-w-[104px]"
                   style={view === 'geo' && !showLeaderboard ? { backgroundColor: accentColor, color: '#fff', boxShadow: '1px 1px 0px #333' } : {}}
                   onMouseEnter={e => { if (!(view === 'geo' && !showLeaderboard)) e.currentTarget.style.backgroundColor = accentColor + '30'; }}
                   onMouseLeave={e => { if (!(view === 'geo' && !showLeaderboard)) e.currentTarget.style.backgroundColor = ''; }}>
-                  <span className="text-xs md:text-sm leading-none">🌍</span>
-                  <span className="leading-none hidden md:inline"> Geo-Post</span>
-                  <span className="leading-none md:hidden text-[8px]">Geo-Post</span>
+                  🌍 Geo-Post
                 </button>
               </div>
             </div>
