@@ -33,7 +33,7 @@ const BOTTOM_INIT_EXTRA_DOWN_M  = 100;
 
 // ── Zoom position tuning ────────────────────────────────────────────────────
 // Y position of the entire popup composition when at FULL/EXTENDED zoom (px, positive = lower on screen)
-const POPUP_Y_OFFSET_M          = 0;
+const POPUP_Y_OFFSET_M          = 60;
 // translateY of the whole zoom wrapper at the SMALL (1/3 scale) resting position
 const ZOOM_Y_START_M_PX         = 120;   // px component
 const ZOOM_Y_START_M_VW         = 2.833; // vw component (compensates for koganetop marginTop at small scale)
@@ -42,9 +42,19 @@ const ZOOM_X_START_M            = 0;     // px — centre by default
 // Scale of the small resting position (1/3 = 0.333 of full size)
 const ZOOM_SCALE_SMALL_M        = 0.333;
 
+// ── Extra tuning knobs ───────────────────────────────────────────────────────
+// Animation speed multiplier (1.0 = same as desktop, 2.0 = twice as slow, 0.5 = twice as fast)
+const ANIM_SPEED_M              = 1.0;
+// Max zoom scale the popup reaches at its full/initial position (1.0 = 100% of natural size = current default)
+const ZOOM_FULL_SCALE_M         = 1.0;
+// Green screen panel width as a fraction of the viewport (1.0 = 100vw = current full-width default)
+const GREEN_SCREEN_WIDTH_M      = 1.0;
+
 // ── Derived strings — do not edit below this line, tune the constants above ──
 const ZOOM_Y_START_M         = `calc(${ZOOM_Y_START_M_PX}px + ${ZOOM_Y_START_M_VW}vw)`;
 const ZOOM_START_TRANSFORM_M = `translateX(${ZOOM_X_START_M}px) translateY(${ZOOM_Y_START_M}) scale(${ZOOM_SCALE_SMALL_M})`;
+// Full/initial zoom position for mobile — scale driven by ZOOM_FULL_SCALE_M
+const ZOOM_FULL_TRANSFORM_M  = `translateX(0px) translateY(0px) scale(${ZOOM_FULL_SCALE_M})`;
 
 // ── Desktop zoom constants (do not edit here, see desktop seam/bottom at top of file) ──
 const ZOOM_Y_START         = 'calc(157px + 2.833vw)';
@@ -178,6 +188,9 @@ export default function KoganePopup({ onClose }) {
   const bottomInitDn = isMobile ? BOTTOM_INIT_EXTRA_DOWN_M : BOTTOM_INIT_EXTRA_DOWN;
   const bottomX      = isMobile ? BOTTOM_X_M : BOTTOM_X;
   const zoomStartXf  = isMobile ? ZOOM_START_TRANSFORM_M : ZOOM_START_TRANSFORM;
+  const zoomFullXf   = isMobile ? ZOOM_FULL_TRANSFORM_M  : ZOOM_FULL_TRANSFORM;
+  // Mobile timing helper — multiply all ms values by ANIM_SPEED_M
+  const t = isMobile ? (ms) => Math.round(ms * ANIM_SPEED_M) : (ms) => ms;
 
   const [headerH, setHeaderH] = useState(72);
   const [screenH, setScreenH] = useState(0);
@@ -210,26 +223,24 @@ export default function KoganePopup({ onClose }) {
     openTimersRef.current = [];
     setClosing(true);
     if (isMobile) {
-      // Mobile: clip-path retract (closing state flip commits new transition in same batch;
-      // rAF+rAF ensures transition is painted before value changes)
       requestAnimationFrame(() => requestAnimationFrame(() => setMobileClip('inset(0 0 100% 0)')));
     } else {
-      setScreenH(0); // desktop: height transition handles retraction
+      setScreenH(0);
     }
-    // At 1700ms: zoom-out to ZOOM_START over 1000ms
+    // At t(1700)ms: zoom-out to ZOOM_START over t(1000)ms
     setTimeout(() => {
-      setZoomTransition('transform 1000ms cubic-bezier(0.7,0,1,0.9)');
+      setZoomTransition(`transform ${t(1000)}ms cubic-bezier(0.7,0,1,0.9)`);
       requestAnimationFrame(() => requestAnimationFrame(() => setZoomTransform(zoomStartXf)));
-    }, 1700);
-    // At 2700ms: fly off-screen in random direction over 1000ms
+    }, t(1700));
+    // At t(2700)ms: fly off-screen in random direction over t(1000)ms
     setTimeout(() => {
       const target = randomOffscreen(isMobile);
-      setZoomTransition('transform 1000ms cubic-bezier(0.7,0,1,0.9)');
+      setZoomTransition(`transform ${t(1000)}ms cubic-bezier(0.7,0,1,0.9)`);
       requestAnimationFrame(() => requestAnimationFrame(() => setZoomTransform(target)));
-    }, 2700);
-    // At 3700ms: fully closed
-    setTimeout(() => onClose?.(), 3700);
-  }, [onClose, isMobile, zoomStartXf]);
+    }, t(2700));
+    // At t(3700)ms: fully closed
+    setTimeout(() => onClose?.(), t(3700));
+  }, [onClose, isMobile, zoomStartXf, t]);
 
   useEffect(() => {
     const hdr = document.querySelector('header');
@@ -274,16 +285,16 @@ export default function KoganePopup({ onClose }) {
   useEffect(() => {
     if (!imagesReady) return;
     const timers = [];
-    // Phase 0 — immediately fly in from offscreen → ZOOM_START over 1000ms
-    setZoomTransition('transform 1000ms cubic-bezier(0.22,1,0.36,1)');
+    // Phase 0 — fly in from offscreen → ZOOM_START over t(1000)ms
+    setZoomTransition(`transform ${t(1000)}ms cubic-bezier(0.22,1,0.36,1)`);
     requestAnimationFrame(() => requestAnimationFrame(() => setZoomTransform(zoomStartXf)));
-    // Phase 1 — after fly-in(1000ms): zoom to full size over 1000ms
+    // Phase 1 — after fly-in: zoom to full size over t(1000)ms
     timers.push(setTimeout(() => {
       if (closingRef.current) return;
-      setZoomTransition('transform 1000ms cubic-bezier(0.33,0,0.2,1)');
-      requestAnimationFrame(() => requestAnimationFrame(() => setZoomTransform(ZOOM_FULL_TRANSFORM)));
-    }, 1000));
-    // Phase 2 — after fly(1000) + zoom(1000) + 200ms hold = 2200ms: expand screen
+      setZoomTransition(`transform ${t(1000)}ms cubic-bezier(0.33,0,0.2,1)`);
+      requestAnimationFrame(() => requestAnimationFrame(() => setZoomTransform(zoomFullXf)));
+    }, t(1000)));
+    // Phase 2 — after fly(t(1000)) + zoom(t(1000)) + t(200)ms hold = t(2200)ms: expand screen
     timers.push(setTimeout(() => {
       if (closingRef.current) return;
       const inner = contentInnerRef.current;
@@ -291,24 +302,21 @@ export default function KoganePopup({ onClose }) {
       setScreenH(h);
       setExpanded(true);
       if (isMobile) {
-        // Mobile: height is set immediately (no transition); clip-path handles the smooth reveal
         requestAnimationFrame(() => requestAnimationFrame(() => setMobileClip('inset(0 0 0% 0)')));
       }
-    }, 2200));
+    }, t(2200)));
     openTimersRef.current = timers;
     return () => timers.forEach(clearTimeout);
   }, [imagesReady]);
 
-  // Desktop: height CSS transition. Mobile: clip-path instead (GPU composited, no layout reflow).
   const heightTransition = closing
     ? 'height 1500ms cubic-bezier(0.7,0,1,0.9)'
     : expanded
       ? 'height 2000ms cubic-bezier(0.33,0,0.2,1)'
       : 'none';
-  // Mobile clip-path transition — open timing when expanding, close timing when retracting
   const clipTransition = closing
-    ? 'clip-path 1500ms cubic-bezier(0.7,0,1,0.9), -webkit-clip-path 1500ms cubic-bezier(0.7,0,1,0.9)'
-    : 'clip-path 2000ms cubic-bezier(0.33,0,0.2,1), -webkit-clip-path 2000ms cubic-bezier(0.33,0,0.2,1)';
+    ? `clip-path ${t(1500)}ms cubic-bezier(0.7,0,1,0.9), -webkit-clip-path ${t(1500)}ms cubic-bezier(0.7,0,1,0.9)`
+    : `clip-path ${t(2000)}ms cubic-bezier(0.33,0,0.2,1), -webkit-clip-path ${t(2000)}ms cubic-bezier(0.33,0,0.2,1)`;
 
   const ruleStyle = {
     display: 'flex',
@@ -395,7 +403,7 @@ export default function KoganePopup({ onClose }) {
             <div
               onClick={(e) => e.stopPropagation()}
               style={{
-                width: isMobile ? '100%' : 'calc(100% / 3)',
+                width: isMobile ? `${GREEN_SCREEN_WIDTH_M * 100}%` : 'calc(100% / 3)',
                 ...(isMobile ? {} : { minWidth: '390px' }),
                 // Mobile: height is set immediately (no transition) — clip-path handles reveal/retract
                 // Desktop: height transition (layout-based, works fine on desktop GPU)
