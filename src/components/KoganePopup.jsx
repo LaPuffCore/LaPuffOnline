@@ -23,13 +23,13 @@ const TOP_X_M                   = -3;
 const TOP_MARGIN_TOP_M          = 'calc(-8.5vw + 9px)';
 
 // koganebottom image scale at full/initial zoom (1.08 on desktop)
-const BOTTOM_SCALE_M            = 1.40;
+const BOTTOM_SCALE_M            = 1.45;
 // koganebottom horizontal offset in px (positive = right). Applied at all zoom levels.
 const BOTTOM_X_M                = 62;
 // koganebottom marginTop when fully EXPANDED (more negative = rides higher / overlaps screen more)
 const BOTTOM_END_MT_M           = -95;
 // Extra downward gap for koganebottom when CLOSED/INITIAL (positive = further down from seam)
-const BOTTOM_INIT_EXTRA_DOWN_M  = 90;
+const BOTTOM_INIT_EXTRA_DOWN_M  = 95;
 
 // ── Zoom position tuning ────────────────────────────────────────────────────
 // Y position of the entire popup composition when at FULL/EXTENDED zoom (px, positive = lower on screen)
@@ -217,23 +217,23 @@ export default function KoganePopup({ onClose }) {
     openTimersRef.current = [];
     setClosing(true);
     setScreenH(0);
-    // At t(1700)ms: zoom-out to ZOOM_START over t(1000)ms
-    const tZoomOut = isMobile ? Math.round(1700 * ANIM_SPEED_M) : 1700;
-    const tZoomDur = isMobile ? Math.round(1000 * ANIM_SPEED_M) : 1000;
+    // At 1200ms (mobile: scaled): zoom-out to ZOOM_START over 500ms
+    const tZoomOut = isMobile ? Math.round(1200 * ANIM_SPEED_M) : 1200;
+    const tZoomDur = isMobile ? Math.round(500 * ANIM_SPEED_M) : 500;
     setTimeout(() => {
       setZoomTransition(`transform ${tZoomDur}ms cubic-bezier(0.7,0,1,0.9)`);
       requestAnimationFrame(() => requestAnimationFrame(() => setZoomTransform(zoomStartXf)));
     }, tZoomOut);
-    // At t(2700)ms: fly off-screen in random direction over t(1000)ms
-    const tFlyOut = isMobile ? Math.round(2700 * ANIM_SPEED_M) : 2700;
-    const tFlyDur = isMobile ? Math.round(1000 * ANIM_SPEED_M) : 1000;
+    // At 1700ms: fly off-screen over 500ms
+    const tFlyOut = isMobile ? Math.round(1700 * ANIM_SPEED_M) : 1700;
+    const tFlyDur = isMobile ? Math.round(500 * ANIM_SPEED_M) : 500;
     setTimeout(() => {
       const target = randomOffscreen(isMobile);
       setZoomTransition(`transform ${tFlyDur}ms cubic-bezier(0.7,0,1,0.9)`);
       requestAnimationFrame(() => requestAnimationFrame(() => setZoomTransform(target)));
     }, tFlyOut);
-    // At t(3700)ms: fully closed
-    const tClose = isMobile ? Math.round(3700 * ANIM_SPEED_M) : 3700;
+    // At 2200ms: fully closed
+    const tClose = isMobile ? Math.round(2200 * ANIM_SPEED_M) : 2200;
     setTimeout(() => onClose?.(), tClose);
   }, [onClose, isMobile, zoomStartXf]);
 
@@ -305,7 +305,7 @@ export default function KoganePopup({ onClose }) {
   }, [imagesReady]);
 
   const expandMs  = isMobile ? Math.round(2000 * ANIM_SPEED_M) : 2000;
-  const retractMs = isMobile ? Math.round(1500 * ANIM_SPEED_M) : 1500;
+  const retractMs = isMobile ? Math.round(1000 * ANIM_SPEED_M) : 1000;
   const heightTransition = closing
     ? `height ${retractMs}ms cubic-bezier(0.7,0,1,0.9)`
     : expanded
