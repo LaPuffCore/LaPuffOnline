@@ -13,7 +13,7 @@ const BOTTOM_X = 153;
 // ── All mobile tuning happens here. Desktop constants above are untouched. ──
 
 // Green screen seam overlap with koganetop
-const SEAM_M                   = 80;
+const SEAM_M                   = 90;
 
 // koganetop image scale at full/initial zoom (0.96 on desktop)
 const TOP_SCALE_M               = 3.00;
@@ -25,15 +25,15 @@ const TOP_MARGIN_TOP_M          = 'calc(-8.5vw + 9px)';
 // koganebottom image scale at full/initial zoom (1.08 on desktop)
 const BOTTOM_SCALE_M            = 1.40;
 // koganebottom horizontal offset in px (positive = right). Applied at all zoom levels.
-const BOTTOM_X_M                = 65;
+const BOTTOM_X_M                = 62;
 // koganebottom marginTop when fully EXPANDED (more negative = rides higher / overlaps screen more)
-const BOTTOM_END_MT_M           = -60;
+const BOTTOM_END_MT_M           = -65;
 // Extra downward gap for koganebottom when CLOSED/INITIAL (positive = further down from seam)
-const BOTTOM_INIT_EXTRA_DOWN_M  = 100;
+const BOTTOM_INIT_EXTRA_DOWN_M  = 90;
 
 // ── Zoom position tuning ────────────────────────────────────────────────────
 // Y position of the entire popup composition when at FULL/EXTENDED zoom (px, positive = lower on screen)
-const POPUP_Y_OFFSET_M          = 120;
+const POPUP_Y_OFFSET_M          = 200;
 // translateY of the whole zoom wrapper at the SMALL (1/3 scale) resting position
 const ZOOM_Y_START_M_PX         = 160;   // px component
 const ZOOM_Y_START_M_VW         = 2.833; // vw component (compensates for koganetop marginTop at small scale)
