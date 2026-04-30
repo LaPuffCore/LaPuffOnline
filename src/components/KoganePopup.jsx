@@ -10,31 +10,58 @@ const BOTTOM_INIT_EXTRA_DOWN = 200;
 const BOTTOM_X = 153;
 
 // ── Mobile variants (< 640px) ───────────────────────────────────────────────
-const SEAM_M            = 70;
-const BOTTOM_END_MT_M   = -100;   // was -90, +10px = koganebottom 10px lower on mobile
-const BOTTOM_INIT_EXTRA_DOWN_M = 100;
-const BOTTOM_X_M        = 50;
-const TOP_SCALE_M       = 3.00;  // koganetop at 2× size on mobile (0.96 × 2)
-const BOTTOM_SCALE_M    = 1.50;  // koganebottom at 1.5× size on mobile (1.08 × 1.5)
+// ── All mobile tuning happens here. Desktop constants above are untouched. ──
 
-// translateY for the small (1/3 scale) rest position.
-const ZOOM_Y_START   = 'calc(157px + 2.833vw)';
-const ZOOM_Y_START_M = 'calc(120px + 2.833vw)';  // mobile: slightly higher (viewport is same height but narrower)
-// On-screen resting transform at 1/3 scale — desktop vs mobile
-const ZOOM_START_TRANSFORM   = `translateX(0px) translateY(${ZOOM_Y_START}) scale(0.333)`;
-const ZOOM_START_TRANSFORM_M = `translateX(0px) translateY(${ZOOM_Y_START_M}) scale(0.333)`;
-const ZOOM_FULL_TRANSFORM    = 'translateX(0px) translateY(0px) scale(1.0)';
+// Green screen seam overlap with koganetop
+const SEAM_M                   = 70;
+
+// koganetop image scale at full/initial zoom (0.96 on desktop)
+const TOP_SCALE_M               = 3.00;
+// koganetop horizontal offset in px (positive = right). Applied at all zoom levels.
+const TOP_X_M                   = -5;
+// koganetop marginTop in the layout (controls vertical gap/overlap with content above)
+const TOP_MARGIN_TOP_M          = 'calc(-8.5vw + 9px)';
+
+// koganebottom image scale at full/initial zoom (1.08 on desktop)
+const BOTTOM_SCALE_M            = 1.50;
+// koganebottom horizontal offset in px (positive = right). Applied at all zoom levels.
+const BOTTOM_X_M                = 50;
+// koganebottom marginTop when fully EXPANDED (more negative = rides higher / overlaps screen more)
+const BOTTOM_END_MT_M           = -100;
+// Extra downward gap for koganebottom when CLOSED/INITIAL (positive = further down from seam)
+const BOTTOM_INIT_EXTRA_DOWN_M  = 100;
+
+// ── Zoom position tuning ────────────────────────────────────────────────────
+// Y position of the entire popup composition when at FULL/EXTENDED zoom (px, positive = lower on screen)
+const POPUP_Y_OFFSET_M          = 0;
+// translateY of the whole zoom wrapper at the SMALL (1/3 scale) resting position
+const ZOOM_Y_START_M_PX         = 120;   // px component
+const ZOOM_Y_START_M_VW         = 2.833; // vw component (compensates for koganetop marginTop at small scale)
+// translateX of the whole zoom wrapper at the SMALL (1/3 scale) resting position (positive = right)
+const ZOOM_X_START_M            = 0;     // px — centre by default
+// Scale of the small resting position (1/3 = 0.333 of full size)
+const ZOOM_SCALE_SMALL_M        = 0.333;
+
+// ── Derived strings — do not edit below this line, tune the constants above ──
+const ZOOM_Y_START_M         = `calc(${ZOOM_Y_START_M_PX}px + ${ZOOM_Y_START_M_VW}vw)`;
+const ZOOM_START_TRANSFORM_M = `translateX(${ZOOM_X_START_M}px) translateY(${ZOOM_Y_START_M}) scale(${ZOOM_SCALE_SMALL_M})`;
+
+// ── Desktop zoom constants (do not edit here, see desktop seam/bottom at top of file) ──
+const ZOOM_Y_START         = 'calc(157px + 2.833vw)';
+const ZOOM_START_TRANSFORM = `translateX(0px) translateY(${ZOOM_Y_START}) scale(0.333)`;
+const ZOOM_FULL_TRANSFORM  = 'translateX(0px) translateY(0px) scale(1.0)';
 
 // Pick a random offscreen direction — mobile-aware
 function randomOffscreen(mobile) {
-  const y = mobile ? ZOOM_Y_START_M : ZOOM_Y_START;
-  const s = '0.333';
+  const y  = mobile ? ZOOM_Y_START_M   : ZOOM_Y_START;
+  const x  = mobile ? `${ZOOM_X_START_M}px` : '0px';
+  const s  = mobile ? ZOOM_SCALE_SMALL_M    : 0.333;
   const opts = [
     `translateX(-150vw) translateY(${y}) scale(${s})`,
     `translateX(150vw) translateY(${y}) scale(${s})`,
     `translateX(-110vw) translateY(-110vh) scale(${s})`,
     `translateX(110vw) translateY(-110vh) scale(${s})`,
-    `translateX(0px) translateY(-130vh) scale(${s})`,
+    `translateX(${x}) translateY(-130vh) scale(${s})`,
     `translateX(-110vw) translateY(110vh) scale(${s})`,
     `translateX(110vw) translateY(110vh) scale(${s})`,
   ];
@@ -146,11 +173,11 @@ export default function KoganePopup({ onClose }) {
   const isMobile = useRef(typeof window !== 'undefined' && window.innerWidth < 640).current;
 
   // Pick correct constants based on device
-  const seam          = isMobile ? SEAM_M : SEAM;
-  const bottomEndMt   = isMobile ? BOTTOM_END_MT_M : BOTTOM_END_MT;
-  const bottomInitDn  = isMobile ? BOTTOM_INIT_EXTRA_DOWN_M : BOTTOM_INIT_EXTRA_DOWN;
-  const bottomX       = isMobile ? BOTTOM_X_M : BOTTOM_X;
-  const zoomStartXf   = isMobile ? ZOOM_START_TRANSFORM_M : ZOOM_START_TRANSFORM;
+  const seam         = isMobile ? SEAM_M : SEAM;
+  const bottomEndMt  = isMobile ? BOTTOM_END_MT_M : BOTTOM_END_MT;
+  const bottomInitDn = isMobile ? BOTTOM_INIT_EXTRA_DOWN_M : BOTTOM_INIT_EXTRA_DOWN;
+  const bottomX      = isMobile ? BOTTOM_X_M : BOTTOM_X;
+  const zoomStartXf  = isMobile ? ZOOM_START_TRANSFORM_M : ZOOM_START_TRANSFORM;
 
   const [headerH, setHeaderH] = useState(72);
   const [screenH, setScreenH] = useState(0);
@@ -160,6 +187,10 @@ export default function KoganePopup({ onClose }) {
   const contentInnerRef = useRef(null);
   const closingRef = useRef(false);
   const openTimersRef = useRef([]);
+
+  // Mobile: GPU-composited clip-path replaces the laggy height transition.
+  // 'inset(0 0 100% 0)' = fully clipped (invisible), 'inset(0 0 0% 0)' = fully visible.
+  const [mobileClip, setMobileClip] = useState('inset(0 0 100% 0)');
 
   // Zoom transform — initialised to a random offscreen position, flies in to ZOOM_START on open
   const [zoomTransform, setZoomTransform] = useState(() => randomOffscreen(isMobile));
@@ -175,17 +206,22 @@ export default function KoganePopup({ onClose }) {
   const triggerClose = useCallback(() => {
     if (closingRef.current) return;
     closingRef.current = true;
-    // Cancel any pending open-phase timers immediately
     openTimersRef.current.forEach(clearTimeout);
     openTimersRef.current = [];
     setClosing(true);
-    setScreenH(0);
+    if (isMobile) {
+      // Mobile: clip-path retract (closing state flip commits new transition in same batch;
+      // rAF+rAF ensures transition is painted before value changes)
+      requestAnimationFrame(() => requestAnimationFrame(() => setMobileClip('inset(0 0 100% 0)')));
+    } else {
+      setScreenH(0); // desktop: height transition handles retraction
+    }
     // At 1700ms: zoom-out to ZOOM_START over 1000ms
     setTimeout(() => {
       setZoomTransition('transform 1000ms cubic-bezier(0.7,0,1,0.9)');
       requestAnimationFrame(() => requestAnimationFrame(() => setZoomTransform(zoomStartXf)));
     }, 1700);
-    // At 2700ms: zoom done → fly off-screen in random direction over 1000ms
+    // At 2700ms: fly off-screen in random direction over 1000ms
     setTimeout(() => {
       const target = randomOffscreen(isMobile);
       setZoomTransition('transform 1000ms cubic-bezier(0.7,0,1,0.9)');
@@ -254,16 +290,25 @@ export default function KoganePopup({ onClose }) {
       const h = inner ? Math.max(inner.scrollHeight + 8, 300) : 1200;
       setScreenH(h);
       setExpanded(true);
+      if (isMobile) {
+        // Mobile: height is set immediately (no transition); clip-path handles the smooth reveal
+        requestAnimationFrame(() => requestAnimationFrame(() => setMobileClip('inset(0 0 0% 0)')));
+      }
     }, 2200));
     openTimersRef.current = timers;
     return () => timers.forEach(clearTimeout);
   }, [imagesReady]);
 
+  // Desktop: height CSS transition. Mobile: clip-path instead (GPU composited, no layout reflow).
   const heightTransition = closing
     ? 'height 1500ms cubic-bezier(0.7,0,1,0.9)'
     : expanded
       ? 'height 2000ms cubic-bezier(0.33,0,0.2,1)'
       : 'none';
+  // Mobile clip-path transition — open timing when expanding, close timing when retracting
+  const clipTransition = closing
+    ? 'clip-path 1500ms cubic-bezier(0.7,0,1,0.9), -webkit-clip-path 1500ms cubic-bezier(0.7,0,1,0.9)'
+    : 'clip-path 2000ms cubic-bezier(0.33,0,0.2,1), -webkit-clip-path 2000ms cubic-bezier(0.33,0,0.2,1)';
 
   const ruleStyle = {
     display: 'flex',
@@ -319,7 +364,7 @@ export default function KoganePopup({ onClose }) {
     >
       <div className="fixed inset-0 bg-black/60" style={{ backdropFilter: `blur(${blurPx}px)`, WebkitBackdropFilter: `blur(${blurPx}px)`, transition: 'backdrop-filter 500ms ease, -webkit-backdrop-filter 500ms ease', pointerEvents: 'none' }} />
 
-      <div className="relative z-10 flex flex-col items-center" style={{ paddingTop: '0px', paddingBottom: '120px', cursor: 'default', transform: isMobile ? 'translateY(0px)' : 'translateY(-60px)' }}>
+      <div className="relative z-10 flex flex-col items-center" style={{ paddingTop: '0px', paddingBottom: '120px', cursor: 'default', transform: isMobile ? `translateY(${POPUP_Y_OFFSET_M}px)` : 'translateY(-60px)' }}>
         <div style={{ width: isMobile ? '100vw' : 'min(3600px, 144vw)', position: 'relative', overflow: 'visible' }}>
 
           <button
@@ -333,10 +378,16 @@ export default function KoganePopup({ onClose }) {
               transformOrigin '50% 0%' keeps zoom anchored to top-center of composition. */}
           <div style={{ transform: zoomTransform, transformOrigin: '50% 0%', transition: zoomTransition, overflow: 'visible' }}>
 
-          {/* KOGANE TOP — scale from bottom-center; TOP_SCALE_M on mobile (2×), 0.96 on desktop */}
+          {/* KOGANE TOP — TOP_X_M/TOP_SCALE_M on mobile, fixed values on desktop */}
           <img src={topSrc} alt="scroll top" onClick={triggerClose} onLoad={handleImageLoad}
             fetchpriority="high" loading="eager"
-            style={{ display: 'block', width: '100%', position: 'relative', zIndex: 4, transform: `translateX(-5px) scale(${isMobile ? TOP_SCALE_M : 0.96})`, transformOrigin: 'bottom center', marginTop: 'calc(-8.5vw + 9px)', cursor: 'pointer' }}
+            style={{
+              display: 'block', width: '100%', position: 'relative', zIndex: 4,
+              transform: `translateX(${isMobile ? TOP_X_M : -5}px) scale(${isMobile ? TOP_SCALE_M : 0.96})`,
+              transformOrigin: 'bottom center',
+              marginTop: isMobile ? TOP_MARGIN_TOP_M : 'calc(-8.5vw + 9px)',
+              cursor: 'pointer',
+            }}
           />
 
           {/* GREEN SCREEN */}
@@ -346,16 +397,28 @@ export default function KoganePopup({ onClose }) {
               style={{
                 width: isMobile ? '100%' : 'calc(100% / 3)',
                 ...(isMobile ? {} : { minWidth: '390px' }),
-                height: expanded || closing ? `${screenH}px` : '0px',
+                // Mobile: height is set immediately (no transition) — clip-path handles reveal/retract
+                // Desktop: height transition (layout-based, works fine on desktop GPU)
+                height: isMobile
+                  ? `${screenH}px`
+                  : (expanded || closing ? `${screenH}px` : '0px'),
                 overflow: 'hidden',
-                transition: heightTransition,
+                transition: isMobile ? clipTransition : heightTransition,
+                ...(isMobile ? {
+                  clipPath: mobileClip,
+                  WebkitClipPath: mobileClip,
+                  willChange: 'clip-path',
+                } : {}),
                 position: 'relative',
                 background: GLASS_BG,
                 boxShadow: isMobile ? GLASS_SHADOW_M : GLASS_SHADOW,
                 border: '1.5px solid rgba(80,255,110,0.35)',
                 borderRadius: '4px',
                 cursor: 'default',
-                animation: expanded && !closing ? 'kogane-flicker 9s ease-in-out infinite, kogane-pulse 5s ease-in-out infinite' : 'none',
+                // kogane-pulse uses filter: brightness/saturate — NOT GPU composited on mobile, skip it
+                animation: expanded && !closing
+                  ? `kogane-flicker 9s ease-in-out infinite${isMobile ? '' : ', kogane-pulse 5s ease-in-out infinite'}`
+                  : 'none',
               }}
             >
               {/* Scanlines */}
