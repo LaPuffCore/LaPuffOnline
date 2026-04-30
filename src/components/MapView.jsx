@@ -4060,22 +4060,9 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         style={{ zIndex: 3, background: 'transparent' }}
       />
 
-      {!entered && <MapIntro onEnter={() => setEntered(true)} />}
 
-      {/* MapLoadingScreen — gate between MapIntro and map controls; runs all caching/preloading */}
-      {entered && !cacheReady && (
-        <MapLoadingScreen
-          progress={cacheProgress}
-          isFirstLoad={isFirstMapLoad}
-          isDone={cacheIsDone}
-          onComplete={() => {}} /* completion handled by cacheIsDone effect above */
-        />
-      )}
-
-      {entered && cacheReady && (
-        <>
-          {/* Controls — below header when expanded, below expand button when collapsed */}
-          <div className={`absolute left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-2 transition-[top] duration-300 ${headerCollapsed ? 'top-[68px]' : 'top-[134px] md:top-[84px]'}`}>
+      {/* Controls — below header when expanded, below expand button when collapsed */}
+      <div className={`absolute left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-2 transition-[top] duration-300 ${headerCollapsed ? 'top-[68px]' : 'top-[134px] md:top-[84px]'}`}>
             <div className="flex items-center gap-2">
               <div className="flex items-center gap-1 bg-black/80 backdrop-blur border border-white/20 rounded-2xl px-3 py-1.5">
                 <span className="text-white text-xs font-black mr-1">📅</span>
@@ -4575,8 +4562,6 @@ export default function MapView({ events, headerCollapsed = false, interactive =
           )}
 
           {/* Location active marker removed per user request */}
-        </>
-      )}
 
       {selectedEvent && <EventDetailPopup event={selectedEvent} onClose={() => setSelectedEvent(null)} />}
 
