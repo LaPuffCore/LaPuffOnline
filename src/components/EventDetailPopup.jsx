@@ -293,7 +293,7 @@ export default function EventDetailPopup({ event, onClose, onNext, onPrev }) {
 
         {/* Popup Card */}
         <div
-          className="bg-white border-[4px] sm:border-[6px] rounded-[1.5rem] sm:rounded-[2rem] w-full max-w-xl shadow-[15px_15px_0px_rgba(0,0,0,0.2)] sm:shadow-[25px_25px_0px_rgba(0,0,0,0.2)] relative z-10 overflow-hidden flex flex-col mx-2 sm:mx-0"
+          className="lp-event-detail-card bg-white border-[4px] sm:border-[6px] rounded-[1.5rem] sm:rounded-[2rem] w-full max-w-xl shadow-[15px_15px_0px_rgba(0,0,0,0.2)] sm:shadow-[25px_25px_0px_rgba(0,0,0,0.2)] relative z-10 overflow-hidden flex flex-col mx-2 sm:mx-0"
           style={{ borderColor: borderColor }}
           onClick={e => e.stopPropagation()}
           onTouchStart={handleTouchStart}

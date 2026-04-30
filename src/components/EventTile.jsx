@@ -51,9 +51,11 @@ export default function EventTile({ event, onClick, onTagClick }) {
   const baseBorderColor = getTileAccentColor(event.hex_color, resolvedTheme);
   const borderColor = hovered ? (resolvedTheme?.accentColor || '#7C3AED') : baseBorderColor;
 
-  // Mobile title: hard-cap at 35 chars (32 + '...')
+  // Mobile title: hard-cap at 35 chars (32 + '...'), slightly more in square mode
   const rawTitle = event.event_name || '';
-  const displayTitle = isMobile && rawTitle.length > 32 ? rawTitle.slice(0, 32) + '...' : rawTitle;
+  const isSquareMode = isMobile && typeof document !== 'undefined' && document.documentElement.classList.contains('lp-ui-square');
+  const mobileCap = isSquareMode ? 37 : 32;
+  const displayTitle = isMobile && rawTitle.length > mobileCap ? rawTitle.slice(0, mobileCap) + '...' : rawTitle;
 
   // Normalization: 7-day expiry logic matches Popup exactly
   const isExpired = event.event_date && (Date.now() - new Date(event.event_date + 'T00:00:00').getTime()) > 7 * 86400000;

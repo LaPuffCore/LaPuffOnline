@@ -33,7 +33,8 @@ export default function Leaderboard({ onClose }) {
   const [activeRow, setActiveRow] = useState(null);
   const [isMobile, setIsMobile] = useState(false);
   const [signedInUser, setSignedInUser] = useState(null);
-  const [positionChanges, setPositionChanges] = useState({}); // trackId -> { oldRank, newRank }
+  const [positionChanges, setPositionChanges] = useState({});
+  const [heldRow, setHeldRow] = useState(null); // currently held row (touch & hold)
   const { resolvedTheme } = useSiteTheme();
 
   const USERS_PER_PAGE = 10;
@@ -166,6 +167,22 @@ export default function Leaderboard({ onClose }) {
     return 'text-fuchsia-100';
   }
 
+  // Always-on subtle tier background (applied to all non-placeholder rows)
+  function tierBaseRowClass(tier) {
+    if (tier === 'gold') return 'bg-yellow-300/12';
+    if (tier === 'silver') return 'bg-slate-300/10';
+    if (tier === 'bronze') return 'bg-orange-300/12';
+    return 'bg-violet-300/8';
+  }
+
+  // Always-on subtle text shadow per tier (non-active state)
+  function tierBaseShadow(tier) {
+    if (tier === 'gold') return '0 0 8px rgba(255,200,0,0.40)';
+    if (tier === 'silver') return '0 0 6px rgba(190,210,255,0.30)';
+    if (tier === 'bronze') return '0 0 6px rgba(230,140,80,0.30)';
+    return '0 0 5px rgba(170,120,255,0.25)';
+  }
+
   function trophyBadge(rank, tier) {
     if (rank > 10) return null;
 
@@ -214,7 +231,7 @@ export default function Leaderboard({ onClose }) {
       </div>
 
       {/* List */}
-      <div className="bg-white divide-y-2 divide-gray-100 min-h-[360px] md:min-h-[480px] max-h-[calc(100dvh-13.5rem)] md:max-h-[calc(100dvh-16rem)] overflow-y-auto overflow-x-hidden">
+      <div className="bg-white divide-y-2 divide-gray-100 min-h-[414px] md:min-h-[552px] max-h-[calc(100dvh-11.5rem)] md:max-h-[calc(100dvh-13.5rem)] overflow-y-auto overflow-x-hidden">
         {currentView.map((user, index) => (
           (() => {
             const rank = startIndex + index + 1;
@@ -226,8 +243,8 @@ export default function Leaderboard({ onClose }) {
             const posChange = positionChanges[user.username] || 'neutral';
             const rankDelta = typeof user.rank_change === 'number' ? user.rank_change : 0;
 
-            // Placeholder rows never show as "active"; only hover-glitch
-            const shouldShowActive = !isPlaceholder && (active || isSignedInUser);
+            // displayActive: glitch fires on tap (activeRow) or while held (heldRow)
+            const displayActive = !isPlaceholder && (heldRow === rowKey || active || isSignedInUser);
 
             const getTrackingIcon = () => {
               if (isPlaceholder) return <span className="text-gray-400 font-black">−</span>;
@@ -255,35 +272,43 @@ export default function Leaderboard({ onClose }) {
             key={rowKey}
             onMouseEnter={() => { if (!isMobile) setActiveRow(rowKey); }}
             onMouseLeave={() => { if (!isMobile && !isSignedInUser) setActiveRow(null); }}
-            onTouchStart={() => { if (isMobile) setActiveRow(rowKey); }}
+            onPointerDown={() => { if (isMobile && !isPlaceholder) setHeldRow(rowKey); }}
+            onPointerUp={() => { if (isMobile) setHeldRow(null); }}
+            onPointerCancel={() => { if (isMobile) setHeldRow(null); }}
             onClick={() => { if (isMobile) setActiveRow(prev => prev === rowKey ? null : rowKey); }}
-            className={`px-2.5 py-2 md:p-3 grid grid-cols-[16px_20px_1fr_auto_62px] md:grid-cols-[16px_20px_1fr_auto_72px] items-center gap-2 transition-all duration-200 ${shouldShowActive ? tierActiveRowClass(tier, isSignedInUser) : (isPlaceholder ? (active ? 'bg-gray-200/60' : '') : (user.isSample ? 'bg-cyan-50/60 hover:bg-cyan-100/70' : 'hover:bg-violet-50'))}`}
+            className={`px-2.5 py-2 md:p-3 grid grid-cols-[16px_20px_1fr_auto_62px] md:grid-cols-[16px_20px_1fr_auto_72px] items-center gap-2 transition-all duration-200 select-none
+              ${isPlaceholder
+                ? (active ? 'bg-gray-200/60' : '')
+                : displayActive
+                  ? tierActiveRowClass(tier, isSignedInUser)
+                  : `${tierBaseRowClass(tier)} ${user.isSample ? 'hover:bg-cyan-100/70' : 'hover:brightness-95'}`
+              }`}
           >
             {/* Tracking column */}
             <span className="text-xs font-black w-4 h-4 flex items-center justify-center">
               {getTrackingIcon()}
             </span>
 
-            <span className={`font-black text-[10px] md:text-[11px] w-5 ${shouldShowActive ? 'text-white/85' : (isPlaceholder ? 'text-gray-300' : 'text-gray-400')}`}>{rank}</span>
+            <span className={`font-black text-[10px] md:text-[11px] w-5 ${displayActive ? 'text-white/85' : (isPlaceholder ? 'text-gray-300' : 'text-gray-400')}`}>{rank}</span>
 
             <div className="min-w-0 flex items-center gap-1.5">
               <p
                 className={`relative font-extrabold text-[12px] md:text-sm leading-none uppercase tracking-[0.06em] truncate ${
                   isPlaceholder
                     ? `${active ? 'null-glitch' : ''} text-gray-300`
-                    : (shouldShowActive ? `chroma-glitch ${tierActiveTextClass(tier)}` : 'text-black')
+                    : (displayActive ? `chroma-glitch ${tierActiveTextClass(tier)}` : 'text-black')
                 }`}
                 style={{
                   fontFamily: "'Orbitron','Rajdhani','Audiowide',monospace",
-                  textShadow: isPlaceholder ? 'none' : tierShadow(tier, shouldShowActive),
-                  transform: shouldShowActive ? 'translateX(0.2px)' : 'none',
+                  textShadow: isPlaceholder ? 'none' : (displayActive ? tierShadow(tier, true) : tierBaseShadow(tier)),
+                  transform: displayActive ? 'translateX(0.2px)' : 'none',
                 }}
               >
                 {user.username}
               </p>
               {user.isSample && !isPlaceholder && (
                 <span
-                  className={`text-[8px] font-black uppercase tracking-wider px-1 py-0.5 rounded border ${shouldShowActive ? 'bg-white/20 border-white/40 text-white' : 'bg-cyan-200/70 border-cyan-500/60 text-cyan-900'}`}
+                  className={`text-[8px] font-black uppercase tracking-wider px-1 py-0.5 rounded border ${displayActive ? 'bg-white/20 border-white/40 text-white' : 'bg-cyan-200/70 border-cyan-500/60 text-cyan-900'}`}
                   title="Sample / simulation account"
                 >
                   SIM
@@ -291,14 +316,14 @@ export default function Leaderboard({ onClose }) {
               )}
             </div>
 
-            <div className={`flex items-center gap-1.5 px-2 py-1 rounded-lg border justify-self-end ${shouldShowActive ? 'bg-black/25 border-white/25' : (isPlaceholder ? 'bg-gray-50 border-gray-200' : 'bg-gray-100 border-black/5')}`}>
+            <div className={`flex items-center gap-1.5 px-2 py-1 rounded-lg border justify-self-end ${displayActive ? 'bg-black/25 border-white/25' : (isPlaceholder ? 'bg-gray-50 border-gray-200' : 'bg-gray-100 border-black/5')}`}>
               <Zap className={`w-3 h-3 ${isPlaceholder ? 'text-gray-300 fill-gray-300' : 'text-yellow-500 fill-yellow-500'}`} />
-              <span className={`font-black text-xs md:text-sm ${shouldShowActive ? 'text-white' : (isPlaceholder ? 'text-gray-300' : 'text-black')}`}>
+              <span className={`font-black text-xs md:text-sm ${displayActive ? 'text-white' : (isPlaceholder ? 'text-gray-300' : 'text-black')}`}>
                 {isPlaceholder ? '[null]' : (typeof user.clout_points === 'number' ? user.clout_points.toLocaleString() : user.clout_points)}
               </span>
             </div>
 
-            <div className={`justify-self-end text-[10px] md:text-[11px] font-black ${shouldShowActive ? 'text-white/90' : (isPlaceholder ? 'text-gray-300' : 'text-gray-600')}`}>
+            <div className={`justify-self-end text-[10px] md:text-[11px] font-black ${displayActive ? 'text-white/90' : (isPlaceholder ? 'text-gray-300' : 'text-gray-600')}`}>
               {isPlaceholder ? '[null]' : (user.home_zip ? user.home_zip : <span className="italic font-bold">[----]</span>)}
             </div>
           </div>

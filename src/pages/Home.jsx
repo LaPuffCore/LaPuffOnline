@@ -521,35 +521,35 @@ export default function Home({ events = [], eventsLoading = false }) {
             {/* Mobile: flex-1 fills space between logo and hamburger, justify-center centers content.
                 Desktop: restored to exactly 78764fc — scale-90→100, absolute centered. */}
             <div className="flex-1 flex items-center justify-center scale-90 md:flex-none md:scale-100 md:gap-2 md:absolute md:left-1/2 md:-translate-x-1/2">
-              <div className="bg-gray-100 border-2 md:border-3 border-black rounded-xl md:rounded-2xl p-0.5 md:p-1 flex items-center justify-center shadow-[2px_2px_0px_black] md:shadow-[3px_3px_0px_black] h-11 md:h-auto">
-                {/* Active = current view OR pendingView (instant tap visual feedback via useTransition) */}
+              <div className="bg-gray-100 border-2 md:border-3 border-black rounded-xl md:rounded-2xl p-0.5 md:p-1 flex items-center justify-center shadow-[2px_2px_0px_black] md:shadow-[3px_3px_0px_black] h-[46px] md:h-auto">
+                {/* Mobile: dark purple always, no hover, instant tap. Desktop: accentColor with hover. */}
                 <button
                   onPointerDown={e => { if (e.pointerType === 'touch') { e.preventDefault(); setPendingView('tiles'); startViewTransition(() => { setView('tiles'); setShowLeaderboard(false); setShowHeader(true); setPendingView(null); }); } }}
                   onClick={() => { setView('tiles'); setShowLeaderboard(false); setShowHeader(true); }}
-                  className="flex-1 md:flex-none h-full md:h-auto px-2 py-0 md:px-4 md:py-2 rounded-lg md:rounded-xl text-xs md:text-sm font-black transition-all flex flex-col md:flex-row items-center justify-center gap-0.5 md:gap-0 md:min-w-[104px]"
-                  style={{ touchAction: 'manipulation', ...((pendingView === 'tiles' || (view === 'tiles' && pendingView === null)) && !showLeaderboard ? { backgroundColor: accentColor, color: '#fff', boxShadow: '1px 1px 0px #333' } : {}) }}
-                  onMouseEnter={e => { if (!(view === 'tiles' && !showLeaderboard)) e.currentTarget.style.backgroundColor = accentColor + '30'; }}
-                  onMouseLeave={e => { if (!(view === 'tiles' && !showLeaderboard)) e.currentTarget.style.backgroundColor = ''; }}>
+                  className="flex-1 md:flex-none h-full md:h-auto px-3 py-0 md:px-4 md:py-2 rounded-lg md:rounded-xl text-xs md:text-sm font-black flex flex-col md:flex-row items-center justify-center gap-0.5 md:gap-0 md:min-w-[104px] md:transition-all"
+                  style={{ touchAction: 'manipulation', ...((pendingView === 'tiles' || (view === 'tiles' && pendingView === null)) && !showLeaderboard ? { backgroundColor: window.innerWidth < 768 ? '#5B21B6' : accentColor, color: '#fff', boxShadow: '1px 1px 0px #333' } : {}) }}
+                  onMouseEnter={e => { if (window.innerWidth >= 768 && !(view === 'tiles' && !showLeaderboard)) e.currentTarget.style.backgroundColor = accentColor + '30'; }}
+                  onMouseLeave={e => { if (window.innerWidth >= 768 && !(view === 'tiles' && !showLeaderboard)) e.currentTarget.style.backgroundColor = ''; }}>
                   <span className="leading-none md:mr-1">🎴</span>
                   <span className="leading-none text-[10px] md:text-sm">Tiles</span>
                 </button>
                 <button
                   onPointerDown={e => { if (e.pointerType === 'touch') { e.preventDefault(); setPendingView('map'); startViewTransition(() => { handleMapClick(); setPendingView(null); }); } }}
                   onClick={handleMapClick}
-                  className="flex-1 md:flex-none h-full md:h-auto px-2 py-0 md:px-4 md:py-2 rounded-lg md:rounded-xl text-xs md:text-sm font-black transition-all flex flex-col md:flex-row items-center justify-center gap-0.5 md:gap-0 md:min-w-[104px]"
-                  style={{ touchAction: 'manipulation', ...((pendingView === 'map' || (view === 'map' && pendingView === null)) && !showLeaderboard ? { backgroundColor: accentColor, color: '#fff', boxShadow: '1px 1px 0px #333' } : {}) }}
-                  onMouseEnter={e => { if (!(view === 'map' && !showLeaderboard)) e.currentTarget.style.backgroundColor = accentColor + '30'; }}
-                  onMouseLeave={e => { if (!(view === 'map' && !showLeaderboard)) e.currentTarget.style.backgroundColor = ''; }}>
+                  className="flex-1 md:flex-none h-full md:h-auto px-3 py-0 md:px-4 md:py-2 rounded-lg md:rounded-xl text-xs md:text-sm font-black flex flex-col md:flex-row items-center justify-center gap-0.5 md:gap-0 md:min-w-[104px] md:transition-all"
+                  style={{ touchAction: 'manipulation', ...((pendingView === 'map' || (view === 'map' && pendingView === null)) && !showLeaderboard ? { backgroundColor: window.innerWidth < 768 ? '#5B21B6' : accentColor, color: '#fff', boxShadow: '1px 1px 0px #333' } : {}) }}
+                  onMouseEnter={e => { if (window.innerWidth >= 768 && !(view === 'map' && !showLeaderboard)) e.currentTarget.style.backgroundColor = accentColor + '30'; }}
+                  onMouseLeave={e => { if (window.innerWidth >= 768 && !(view === 'map' && !showLeaderboard)) e.currentTarget.style.backgroundColor = ''; }}>
                   <span className="leading-none md:mr-1">🗺️</span>
                   <span className="leading-none text-[10px] md:text-sm">Map</span>
                 </button>
                 <button
                   onPointerDown={e => { if (e.pointerType === 'touch') { e.preventDefault(); setPendingView('geo'); startViewTransition(() => { setView('geo'); setShowLeaderboard(false); setPendingView(null); }); } }}
                   onClick={() => { setView('geo'); setShowLeaderboard(false); }}
-                  className="flex-none h-full md:h-auto px-2 py-0 md:px-4 md:py-2 rounded-lg md:rounded-xl text-xs md:text-sm font-black transition-all flex flex-col md:flex-row items-center justify-center gap-0.5 md:gap-1 md:min-w-[104px]"
-                  style={{ touchAction: 'manipulation', ...((pendingView === 'geo' || (view === 'geo' && pendingView === null)) && !showLeaderboard ? { backgroundColor: accentColor, color: '#fff', boxShadow: '1px 1px 0px #333' } : {}) }}
-                  onMouseEnter={e => { if (!(view === 'geo' && !showLeaderboard)) e.currentTarget.style.backgroundColor = accentColor + '30'; }}
-                  onMouseLeave={e => { if (!(view === 'geo' && !showLeaderboard)) e.currentTarget.style.backgroundColor = ''; }}>
+                  className="flex-none h-full md:h-auto px-3 py-0 md:px-4 md:py-2 rounded-lg md:rounded-xl text-xs md:text-sm font-black flex flex-col md:flex-row items-center justify-center gap-0.5 md:gap-1 md:min-w-[104px] md:transition-all"
+                  style={{ touchAction: 'manipulation', ...((pendingView === 'geo' || (view === 'geo' && pendingView === null)) && !showLeaderboard ? { backgroundColor: window.innerWidth < 768 ? '#5B21B6' : accentColor, color: '#fff', boxShadow: '1px 1px 0px #333' } : {}) }}
+                  onMouseEnter={e => { if (window.innerWidth >= 768 && !(view === 'geo' && !showLeaderboard)) e.currentTarget.style.backgroundColor = accentColor + '30'; }}
+                  onMouseLeave={e => { if (window.innerWidth >= 768 && !(view === 'geo' && !showLeaderboard)) e.currentTarget.style.backgroundColor = ''; }}>
                   <span className="leading-none md:mr-0.5">🌍</span>
                   <span className="leading-none text-[10px] md:text-sm whitespace-nowrap">Geo-Post</span>
                 </button>

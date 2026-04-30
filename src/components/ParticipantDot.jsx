@@ -389,8 +389,12 @@ export default function ParticipantDot({ onStatusChange }) {
       <button
         onClick={(e) => {
           e.stopPropagation();
-          if (manualOpen) closePopup();
-          else openPrompt();
+          if (manualOpen) {
+            // Do not close while verifying location — wait for result
+            if (stage !== 'validating') closePopup();
+            return;
+          }
+          openPrompt();
         }}
         onMouseEnter={() => { setHoverOpen(true); setBtnHovered(true); }}
         onMouseLeave={() => setBtnHovered(false)}
@@ -421,7 +425,7 @@ export default function ParticipantDot({ onStatusChange }) {
         <div
           ref={popupRef}
           onMouseEnter={() => setHoverOpen(true)}
-          className="absolute top-12 left-0 sm:left-auto sm:right-0 md:right-auto md:left-0 md:translate-x-0 z-50 bg-black text-white text-[11px] rounded-2xl px-3 py-3 w-72 max-w-[calc(100vw-1rem)] font-bold shadow-lg whitespace-normal leading-snug"
+          className="absolute top-12 left-0 sm:left-auto sm:right-0 md:right-auto md:left-0 md:translate-x-0 z-[99999] bg-black text-white text-[11px] rounded-2xl px-3 py-3 w-72 max-w-[calc(100vw-1rem)] font-bold shadow-lg whitespace-normal leading-snug"
         >
           {stage === 'result' && (
             <button

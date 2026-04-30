@@ -429,8 +429,7 @@ export default function TileView({ events, eventsLoading = false }) {
             margin-right: 18px !important;
             padding-left: 1rem !important;
             padding-right: 1rem !important;
-          }
-          .tv-square .tv-tile-grid {
+          }          .tv-square .tv-tile-grid {
             gap: 0 !important;
             padding-left: 0 !important;
             padding-right: 0 !important;
@@ -475,6 +474,67 @@ export default function TileView({ events, eventsLoading = false }) {
           .tv-square.tv-narrow .tv-tile-grid,
           .tv-square.tv-narrow .tv-upcoming-section {
             max-width: 80rem !important;
+          }
+        }
+
+        /* ─── MOBILE SQUARE MODE (max-width: 767px) ─── flush tiles, square UI ─── */
+        @media (max-width: 767px) {
+          /* All elements lose rounded corners */
+          .tv-square *, .tv-square *::before, .tv-square *::after {
+            border-radius: 0 !important;
+          }
+          .tv-square { max-width: 100%; overflow-x: hidden; }
+
+          /* Filter bar: square outline */
+          .tv-square > .bg-white.sticky {
+            box-shadow: none !important;
+            border: 2px solid black !important;
+            border-radius: 0 !important;
+          }
+
+          /* Tile grid: flush, no gaps, no padding */
+          .tv-square .tv-tile-grid {
+            gap: 0 !important;
+            padding-left: 0 !important;
+            padding-right: 0 !important;
+            margin-left: 0 !important;
+            margin-right: 0 !important;
+            max-width: 100% !important;
+            overflow-x: hidden !important;
+          }
+          .tv-square .tv-tile-grid > * {
+            transform: none !important;
+            margin: 0 !important;
+          }
+
+          /* Event tile: square borders, flush edges */
+          .tv-square .lp-tile-card {
+            box-shadow: none !important;
+            border-radius: 0 !important;
+            border-width: 3px !important;
+            box-sizing: border-box !important;
+            transform: none !important;
+          }
+          .tv-square .lp-tile-card:hover,
+          .tv-square .lp-tile-card:active {
+            transform: none !important;
+          }
+
+          /* Content area: slightly more breathing room */
+          .tv-square .lp-tile-card .lp-tile-content {
+            padding: 8px 10px 10px !important;
+          }
+        }
+
+        /* Mobile EventDetailPopup — square mode (targets portal via html class) */
+        @media (max-width: 767px) {
+          html.tv-square-active .lp-event-detail-card {
+            border-radius: 0 !important;
+            box-shadow: 12px 12px 0px rgba(0,0,0,0.25) !important;
+          }
+          html.tv-square-active .lp-event-detail-card,
+          html.tv-square-active .lp-event-detail-card * {
+            border-radius: 0 !important;
           }
         }
       `}</style>
