@@ -362,7 +362,9 @@ export default function TileView({ events, eventsLoading = false }) {
     ? () => setSelectedEvent(filtered[currentEventIndex - 1]) 
     : null;
 
-  const displayed = filtered.slice(0, page * PAGE_SIZE);
+  // Narrow layout shows 8 events (2 rows × 4 cols) before Show More; wide/default shows PAGE_SIZE (10)
+  const effectivePageSize = tileLayout === 'narrow' ? 8 : PAGE_SIZE;
+  const displayed = filtered.slice(0, page * effectivePageSize);
   const hasMore = displayed.length < filtered.length;
 
   const popularEmojis = useMemo(() => {
