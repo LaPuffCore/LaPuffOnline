@@ -13,29 +13,29 @@ const BOTTOM_X = 153;
 // ── All mobile tuning happens here. Desktop constants above are untouched. ──
 
 // Green screen seam overlap with koganetop
-const SEAM_M                   = 70;
+const SEAM_M                   = 80;
 
 // koganetop image scale at full/initial zoom (0.96 on desktop)
 const TOP_SCALE_M               = 3.00;
 // koganetop horizontal offset in px (positive = right). Applied at all zoom levels.
-const TOP_X_M                   = 0;
+const TOP_X_M                   = -2;
 // koganetop marginTop in the layout (controls vertical gap/overlap with content above)
 const TOP_MARGIN_TOP_M          = 'calc(-8.5vw + 9px)';
 
 // koganebottom image scale at full/initial zoom (1.08 on desktop)
 const BOTTOM_SCALE_M            = 1.40;
 // koganebottom horizontal offset in px (positive = right). Applied at all zoom levels.
-const BOTTOM_X_M                = 70;
+const BOTTOM_X_M                = 65;
 // koganebottom marginTop when fully EXPANDED (more negative = rides higher / overlaps screen more)
-const BOTTOM_END_MT_M           = -70;
+const BOTTOM_END_MT_M           = -60;
 // Extra downward gap for koganebottom when CLOSED/INITIAL (positive = further down from seam)
-const BOTTOM_INIT_EXTRA_DOWN_M  = 120;
+const BOTTOM_INIT_EXTRA_DOWN_M  = 100;
 
 // ── Zoom position tuning ────────────────────────────────────────────────────
 // Y position of the entire popup composition when at FULL/EXTENDED zoom (px, positive = lower on screen)
-const POPUP_Y_OFFSET_M          = 60;
+const POPUP_Y_OFFSET_M          = 120;
 // translateY of the whole zoom wrapper at the SMALL (1/3 scale) resting position
-const ZOOM_Y_START_M_PX         = 120;   // px component
+const ZOOM_Y_START_M_PX         = 160;   // px component
 const ZOOM_Y_START_M_VW         = 2.833; // vw component (compensates for koganetop marginTop at small scale)
 // translateX of the whole zoom wrapper at the SMALL (1/3 scale) resting position (positive = right)
 const ZOOM_X_START_M            = 0;     // px — centre by default
@@ -44,7 +44,7 @@ const ZOOM_SCALE_SMALL_M        = 0.333;
 
 // ── Extra tuning knobs ───────────────────────────────────────────────────────
 // Animation speed multiplier (1.0 = same as desktop, 2.0 = twice as slow, 0.5 = twice as fast)
-const ANIM_SPEED_M              = 2.0;
+const ANIM_SPEED_M              = 1.0;
 // Max zoom scale the popup reaches at its full/initial position (1.0 = 100% of natural size = current default)
 const ZOOM_FULL_SCALE_M         = 1.0;
 // Green screen panel width as a fraction of the viewport (1.0 = 100vw = current full-width default)
