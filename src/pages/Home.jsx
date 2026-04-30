@@ -504,15 +504,16 @@ export default function Home({ events = [], eventsLoading = false }) {
               )}
             </div>
 
-            {/* View Toggles — center */}
-            {/* Mobile: -ml-2 shifts left; -mt-[10px] pt-[10px] extends touch capture upward into header seam */}
-            <div className="flex items-center gap-1 md:gap-2 md:absolute md:left-1/2 md:-translate-x-1/2 -ml-2 md:ml-0 -mt-[10px] pt-[10px] md:mt-0 md:pt-0">
-              <div className="bg-gray-100 border-2 md:border-3 border-black rounded-xl md:rounded-2xl p-0.5 md:p-1 flex items-center justify-center shadow-[2px_2px_0px_black] md:shadow-[3px_3px_0px_black] h-9 md:h-auto">
+            {/* View Toggles — centered between logo group and actions on mobile; absolute center on desktop */}
+            <div className="flex-1 flex justify-center md:flex-none md:absolute md:left-1/2 md:-translate-x-1/2">
+              <div className="bg-gray-100 border-2 md:border-3 border-black rounded-xl md:rounded-2xl p-0.5 md:p-1 flex items-center justify-center shadow-[2px_2px_0px_black] md:shadow-[3px_3px_0px_black] h-11 md:h-auto">
                 <button
+                  onPointerDown={e => { if (e.pointerType === 'touch') { e.preventDefault(); setView('tiles'); setShowLeaderboard(false); setShowHeader(true); } }}
                   onClick={() => { setView('tiles'); setShowLeaderboard(false); setShowHeader(true); }}
-                  className="flex-none min-w-[52px] md:flex-none h-full md:h-auto px-3 py-0 md:px-4 md:py-2 rounded-lg md:rounded-xl text-xs md:text-sm font-black transition-colors flex flex-col items-center justify-center gap-0.5 md:gap-1 md:min-w-[104px]"
+                  className="flex-none min-w-[44px] md:flex-none h-full md:h-auto px-2 py-0 md:px-4 md:py-2 rounded-lg md:rounded-xl text-xs md:text-sm font-black flex flex-col items-center justify-center gap-0.5 md:gap-1 md:min-w-[104px]"
                   style={{
                     touchAction: 'manipulation',
+                    transition: 'background-color 80ms',
                     ...(view === 'tiles' && !showLeaderboard ? { backgroundColor: accentColor, color: '#fff', boxShadow: '1px 1px 0px #333' } : {}),
                   }}
                   onMouseEnter={e => { if (!(view === 'tiles' && !showLeaderboard)) e.currentTarget.style.backgroundColor = accentColor + '30'; }}
@@ -521,10 +522,12 @@ export default function Home({ events = [], eventsLoading = false }) {
                   <span className="leading-none text-[10px] md:text-sm">Tiles</span>
                 </button>
                 <button
+                  onPointerDown={e => { if (e.pointerType === 'touch') { e.preventDefault(); handleMapClick(); } }}
                   onClick={handleMapClick}
-                  className="flex-none min-w-[52px] md:flex-none h-full md:h-auto px-3 py-0 md:px-4 md:py-2 rounded-lg md:rounded-xl text-xs md:text-sm font-black transition-colors flex flex-col items-center justify-center gap-0.5 md:gap-1 md:min-w-[104px]"
+                  className="flex-none min-w-[44px] md:flex-none h-full md:h-auto px-2 py-0 md:px-4 md:py-2 rounded-lg md:rounded-xl text-xs md:text-sm font-black flex flex-col items-center justify-center gap-0.5 md:gap-1 md:min-w-[104px]"
                   style={{
                     touchAction: 'manipulation',
+                    transition: 'background-color 80ms',
                     ...(view === 'map' && !showLeaderboard ? { backgroundColor: accentColor, color: '#fff', boxShadow: '1px 1px 0px #333' } : {}),
                   }}
                   onMouseEnter={e => { if (!(view === 'map' && !showLeaderboard)) e.currentTarget.style.backgroundColor = accentColor + '30'; }}
@@ -533,10 +536,12 @@ export default function Home({ events = [], eventsLoading = false }) {
                   <span className="leading-none text-[10px] md:text-sm">Map</span>
                 </button>
                 <button
+                  onPointerDown={e => { if (e.pointerType === 'touch') { e.preventDefault(); setView('geo'); setShowLeaderboard(false); } }}
                   onClick={() => { setView('geo'); setShowLeaderboard(false); }}
-                  className="flex-none h-full md:h-auto px-3 py-0 md:px-4 md:py-2 rounded-lg md:rounded-xl text-xs md:text-sm font-black transition-colors flex flex-col items-center justify-center gap-0.5 md:gap-1 md:min-w-[104px]"
+                  className="flex-none h-full md:h-auto px-2 py-0 md:px-4 md:py-2 rounded-lg md:rounded-xl text-xs md:text-sm font-black flex flex-col items-center justify-center gap-0.5 md:gap-1 md:min-w-[104px]"
                   style={{
                     touchAction: 'manipulation',
+                    transition: 'background-color 80ms',
                     ...(view === 'geo' && !showLeaderboard ? { backgroundColor: accentColor, color: '#fff', boxShadow: '1px 1px 0px #333' } : {}),
                   }}
                   onMouseEnter={e => { if (!(view === 'geo' && !showLeaderboard)) e.currentTarget.style.backgroundColor = accentColor + '30'; }}
