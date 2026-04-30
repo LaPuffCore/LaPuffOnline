@@ -101,16 +101,41 @@ export default function MapLoadingScreen({ events, onPhase2ADone, onComplete }) 
   const [progress, setProgress] = useState(0);
   const [isDone, setIsDone] = useState(false);
 
-  // Rotating messages
+  // Rotating messages — fully independent of all other state/effects
+  // Uses its own RAF-based loop so React state updates never interrupt it
   const [currentMsg, setCurrentMsg] = useState(() => MESSAGES[Math.floor(Math.random() * MESSAGES.length)]);
-  const [msgKey, setMsgKey] = useState(0);
-  const shuffledRef = useRef(shuffle(MESSAGES));
-  const msgIdxRef   = useRef(0);
-  const timerRef    = useRef(null);
+  const [msgFade, setMsgFade] = useState(true);
+  const msgIdxRef    = useRef(0);
+  const shuffledRef  = useRef(shuffle(MESSAGES));
+  const msgTimerRef  = useRef(null);
+  const isDoneRef    = useRef(false);
 
-  const phase2BPollRef = useRef(null);
-  const onPhase2ADoneRef = useRef(onPhase2ADone);
-  const onCompleteRef    = useRef(onComplete);
+  // Message rotation runs on its own timer, never reset by progress/isDone state changes
+  useEffect(() => {
+    const scheduleNext = () => {
+      if (isDoneRef.current) return;
+      const delay = 600 + Math.random() * 600;
+      msgTimerRef.current = setTimeout(() => {
+        if (isDoneRef.current) return;
+        // Fade out, swap message, fade in
+        setMsgFade(false);
+        setTimeout(() => {
+          msgIdxRef.current = (msgIdxRef.current + 1) % shuffledRef.current.length;
+          if (msgIdxRef.current === 0) shuffledRef.current = shuffle(MESSAGES);
+          setCurrentMsg(shuffledRef.current[msgIdxRef.current]);
+          setMsgFade(true);
+          scheduleNext();
+        }, 150);
+      }, delay);
+    };
+    scheduleNext();
+    return () => clearTimeout(msgTimerRef.current);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const phase2BPollRef    = useRef(null);
+  const mountTimeRef      = useRef(Date.now());
+  const onPhase2ADoneRef  = useRef(onPhase2ADone);
+  const onCompleteRef     = useRef(onComplete);
   useEffect(() => { onPhase2ADoneRef.current = onPhase2ADone; }, [onPhase2ADone]);
   useEffect(() => { onCompleteRef.current = onComplete; }, [onComplete]);
 
@@ -126,13 +151,18 @@ export default function MapLoadingScreen({ events, onPhase2ADone, onComplete }) 
       const lrReady = mapCacheStore.layersReady;
 
       if (glReady && !lrReady) {
-        // MapLibre canvas up, layers not yet added
         setProgress(isMobile ? 92 : 96);
       }
       if (lrReady) {
         clearInterval(phase2BPollRef.current);
         setProgress(100);
-        setIsDone(true);
+        // Enforce 2s minimum display time so loading screen never flickers out
+        const elapsed = Date.now() - mountTimeRef.current;
+        const remain  = Math.max(0, 2000 - elapsed);
+        setTimeout(() => {
+          isDoneRef.current = true;
+          setIsDone(true);
+        }, remain);
       }
     }, 100);
   }, [isMobile]);
@@ -156,20 +186,6 @@ export default function MapLoadingScreen({ events, onPhase2ADone, onComplete }) 
       clearInterval(phase2BPollRef.current);
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ── Message rotation ─────────────────────────────────────────────────────
-  useEffect(() => {
-    if (isDone) { clearTimeout(timerRef.current); return; }
-    const rotate = () => {
-      msgIdxRef.current = (msgIdxRef.current + 1) % shuffledRef.current.length;
-      if (msgIdxRef.current === 0) shuffledRef.current = shuffle(MESSAGES);
-      setCurrentMsg(shuffledRef.current[msgIdxRef.current]);
-      setMsgKey(k => k + 1);
-      timerRef.current = setTimeout(rotate, 500 + Math.random() * 500);
-    };
-    timerRef.current = setTimeout(rotate, 500 + Math.random() * 500);
-    return () => clearTimeout(timerRef.current);
-  }, [isDone]);
 
   // ── Fire onComplete 400ms after isDone (green flash) ────────────────────
   useEffect(() => {
@@ -225,17 +241,20 @@ export default function MapLoadingScreen({ events, onPhase2ADone, onComplete }) 
       </div>
 
       {/* Rotating messages */}
-      {!isDone && (
-        <div className="mt-6 h-10 flex items-center justify-center px-8 max-w-lg text-center">
-          <span
-            key={msgKey}
-            className="mls-msg text-[#7C3AED] text-xs md:text-sm italic"
-            style={{ maxWidth: '100%', display: 'block', lineHeight: 1.4 }}
-          >
-            {currentMsg}
-          </span>
-        </div>
-      )}
+      <div className="mt-6 h-10 flex items-center justify-center px-8 max-w-lg text-center">
+        <span
+          className="mls-msg text-[#7C3AED] text-xs md:text-sm italic"
+          style={{
+            maxWidth: '100%',
+            display: 'block',
+            lineHeight: 1.4,
+            opacity: isDone ? 0 : (msgFade ? 1 : 0),
+            transition: 'opacity 0.15s ease',
+          }}
+        >
+          {currentMsg}
+        </span>
+      </div>
     </div>
   );
 }

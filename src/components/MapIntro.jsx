@@ -9,8 +9,8 @@ export default function MapIntro({ onEnter }) {
 
   function handleEnter() {
     setPhase('opening');
-    setTimeout(() => setPhase('fading'), 1200);
-    setTimeout(() => requestAnimationFrame(onEnter), 2000);
+    setTimeout(() => setPhase('fading'), 600);
+    setTimeout(() => requestAnimationFrame(onEnter), 1000);
   }
 
   const doorsOpen = phase === 'opening' || phase === 'fading';
@@ -82,7 +82,7 @@ export default function MapIntro({ onEnter }) {
           width: '51%',
           background: 'linear-gradient(135deg, #1a0000 0%, #3a0000 40%, #1a0000 100%)',
           transform: doorsOpen ? 'translateX(-105%)' : 'translateX(0)',
-          transition: 'transform 1.2s cubic-bezier(0.7,0,0.3,1)',
+          transition: 'transform 0.6s cubic-bezier(0.7,0,0.3,1)',
           clipPath: 'polygon(0 0, 100% 0, 93% 100%, 0 100%)',
           borderRight: '3px solid #8b0000',
           boxShadow: doorShadowLeft,
@@ -108,7 +108,7 @@ export default function MapIntro({ onEnter }) {
           width: '51%',
           background: 'linear-gradient(225deg, #1a0000 0%, #3a0000 40%, #1a0000 100%)',
           transform: doorsOpen ? 'translateX(105%)' : 'translateX(0)',
-          transition: 'transform 1.2s cubic-bezier(0.7,0,0.3,1)',
+          transition: 'transform 0.6s cubic-bezier(0.7,0,0.3,1)',
           clipPath: 'polygon(7% 0, 100% 0, 100% 100%, 0 100%)',
           borderLeft: '3px solid #8b0000',
           boxShadow: doorShadowRight,

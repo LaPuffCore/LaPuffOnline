@@ -5,6 +5,7 @@ import TileView from '../components/TileView';
 import MapView from '../components/MapView';
 import MapIntro from '../components/MapIntro';
 import MapLoadingScreen from '../components/MapLoadingScreen';
+import mapCacheStore from '../lib/mapCacheStore';
 import GeoPostView from '../components/GeoPostView';
 import HamburgerMenu from '../components/HamburgerMenu';
 import AuthModal from '../components/AuthModal';
@@ -109,6 +110,20 @@ export default function Home({ events = [], eventsLoading = false }) {
   const collapsedAsMinimal = headerCollapsed && isTiles;
   const collapsedAsHidden = headerCollapsed && (isMap || isGeo);
   const displayName = user?.username || user?.user_metadata?.username || user?.email?.split('@')[0] || 'Account';
+
+  // Reset map gate states whenever user navigates away from map view.
+  // This ensures MapIntro + LoadingScreen replay on every map entry, and
+  // MapView is fully unmounted (zero background compute) while in other views.
+  useEffect(() => {
+    if (!isMap) {
+      setMapEntered(false);
+      setMapPhase2ADone(false);
+      setMapCacheReady(false);
+      // Reset GL-ready signals so Phase 2B polling starts fresh on re-entry
+      mapCacheStore.mapLibreReady = false;
+      mapCacheStore.layersReady = false;
+    }
+  }, [isMap]);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
