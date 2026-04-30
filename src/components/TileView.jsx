@@ -421,9 +421,14 @@ export default function TileView({ events, eventsLoading = false }) {
             border-left-width: 5px !important;
             border-right-width: 5px !important;
           }
-          /* Wide + Square: add left padding equal to scrollbar width (~17px) to visually center filterbar */
+          /* Wide + Square: inset the entire filterbar (incl. border) 18px each side via margin.
+             18px ≈ scrollbar width, so when scrollbar appears it fills the right gap and
+             the visual gaps on both sides remain equal. padding-left/right reset to px-4. */
           .tv-square:not(.tv-narrow) > .bg-white.sticky {
-            padding-left: calc(1rem + 17px) !important;
+            margin-left: 18px !important;
+            margin-right: 18px !important;
+            padding-left: 1rem !important;
+            padding-right: 1rem !important;
           }
           .tv-square .tv-tile-grid {
             gap: 0 !important;
