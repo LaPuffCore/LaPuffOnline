@@ -42,7 +42,7 @@ export default function MapIntro({ onEnter }) {
       {/* Title — ABOVE the doors, fades out after doors open */}
       <div
         className="absolute inset-0 flex flex-col items-center justify-center z-20 pointer-events-none px-4 text-center"
-        style={{ transition: 'opacity 0.8s ease-out', opacity: titleFading ? 0 : 1 }}
+        style={{ transition: 'opacity 0.5s ease-out', opacity: titleFading ? 0 : 1 }}
       >
         <p className="text-red-500 font-black text-xs tracking-[0.4em] uppercase mb-3 opacity-60">Welcome to</p>
         <h1 className="font-black text-5xl md:text-7xl text-white leading-none tracking-tight"
@@ -82,7 +82,7 @@ export default function MapIntro({ onEnter }) {
           width: '51%',
           background: 'linear-gradient(135deg, #1a0000 0%, #3a0000 40%, #1a0000 100%)',
           transform: doorsOpen ? 'translateX(-105%)' : 'translateX(0)',
-          transition: 'transform 0.6s cubic-bezier(0.7,0,0.3,1)',
+          transition: 'transform 1.0s cubic-bezier(0.7,0,0.3,1)',
           clipPath: 'polygon(0 0, 100% 0, 93% 100%, 0 100%)',
           borderRight: '3px solid #8b0000',
           boxShadow: doorShadowLeft,
@@ -108,7 +108,7 @@ export default function MapIntro({ onEnter }) {
           width: '51%',
           background: 'linear-gradient(225deg, #1a0000 0%, #3a0000 40%, #1a0000 100%)',
           transform: doorsOpen ? 'translateX(105%)' : 'translateX(0)',
-          transition: 'transform 0.6s cubic-bezier(0.7,0,0.3,1)',
+          transition: 'transform 1.0s cubic-bezier(0.7,0,0.3,1)',
           clipPath: 'polygon(7% 0, 100% 0, 100% 100%, 0 100%)',
           borderLeft: '3px solid #8b0000',
           boxShadow: doorShadowRight,

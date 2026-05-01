@@ -102,30 +102,24 @@ export default function MapLoadingScreen({ events, onPhase2ADone, onComplete }) 
   const [isDone, setIsDone] = useState(false);
 
   // Rotating messages — fully independent of all other state/effects
-  // Uses its own RAF-based loop so React state updates never interrupt it
+  // Simple direct text swap — no inline opacity fighting the CSS animation
   const [currentMsg, setCurrentMsg] = useState(() => MESSAGES[Math.floor(Math.random() * MESSAGES.length)]);
-  const [msgFade, setMsgFade] = useState(true);
   const msgIdxRef    = useRef(0);
   const shuffledRef  = useRef(shuffle(MESSAGES));
   const msgTimerRef  = useRef(null);
   const isDoneRef    = useRef(false);
 
-  // Message rotation runs on its own timer, never reset by progress/isDone state changes
+  // Independent rotation loop — never reset by progress/isDone state changes
   useEffect(() => {
     const scheduleNext = () => {
       if (isDoneRef.current) return;
-      const delay = 600 + Math.random() * 600;
+      const delay = 700 + Math.random() * 700;
       msgTimerRef.current = setTimeout(() => {
         if (isDoneRef.current) return;
-        // Fade out, swap message, fade in
-        setMsgFade(false);
-        setTimeout(() => {
-          msgIdxRef.current = (msgIdxRef.current + 1) % shuffledRef.current.length;
-          if (msgIdxRef.current === 0) shuffledRef.current = shuffle(MESSAGES);
-          setCurrentMsg(shuffledRef.current[msgIdxRef.current]);
-          setMsgFade(true);
-          scheduleNext();
-        }, 150);
+        msgIdxRef.current = (msgIdxRef.current + 1) % shuffledRef.current.length;
+        if (msgIdxRef.current === 0) shuffledRef.current = shuffle(MESSAGES);
+        setCurrentMsg(shuffledRef.current[msgIdxRef.current]);
+        scheduleNext();
       }, delay);
     };
     scheduleNext();
@@ -204,11 +198,14 @@ export default function MapLoadingScreen({ events, onPhase2ADone, onComplete }) 
     >
       <style>{`
         @keyframes mls-glow-blink {
-          0%   { opacity: 1;   text-shadow: 0 0 8px #7C3AED, 0 0 16px #7C3AED; }
-          50%  { opacity: 0.4; text-shadow: none; }
-          100% { opacity: 1;   text-shadow: 0 0 8px #7C3AED, 0 0 16px #7C3AED; }
+          0%   { opacity: 1; }
+          50%  { opacity: 0.35; }
+          100% { opacity: 1; }
         }
-        .mls-msg { animation: mls-glow-blink 400ms ease-in-out infinite; }
+        .mls-msg {
+          animation: mls-glow-blink 600ms ease-in-out infinite;
+          will-change: opacity;
+        }
       `}</style>
 
       {/* Title */}
@@ -231,11 +228,16 @@ export default function MapLoadingScreen({ events, onPhase2ADone, onComplete }) 
         <div
           style={{
             height: '100%',
-            width: `${progress}%`,
+            width: '100%',
             background: barColor,
             borderRadius: 9999,
-            transition: isDone ? 'background 0.15s ease, width 0.3s ease' : 'width 0.3s ease',
+            transformOrigin: 'left center',
+            transform: `scaleX(${progress / 100})`,
+            transition: isDone
+              ? 'background 0.15s ease, transform 0.3s ease'
+              : 'transform 0.3s ease',
             boxShadow: isDone ? '0 0 12px #22c55e' : '0 0 10px #7C3AED88',
+            willChange: 'transform',
           }}
         />
       </div>
@@ -248,8 +250,7 @@ export default function MapLoadingScreen({ events, onPhase2ADone, onComplete }) 
             maxWidth: '100%',
             display: 'block',
             lineHeight: 1.4,
-            opacity: isDone ? 0 : (msgFade ? 1 : 0),
-            transition: 'opacity 0.15s ease',
+            visibility: isDone ? 'hidden' : 'visible',
           }}
         >
           {currentMsg}

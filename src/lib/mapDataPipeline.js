@@ -21,6 +21,7 @@ export const TIMESPAN_STEPS = [
 ];
 
 const FGB_YIELD_CHUNK = 10000;
+const PIP_YIELD_CHUNK  = 2000;  // smaller chunks for PiP so the main thread breathes more often
 const FGB_ESTIMATED_TOTAL = 381000;
 
 // ── Ring / winding helpers ────────────────────────────────────────────────────
@@ -440,7 +441,7 @@ async function buildZctaIndexMap(zctaFeatures, buildingFeatures, onProgress) {
       }
       if (idxMap[i] >= 0) break;
     }
-    if (i % FGB_YIELD_CHUNK === 0 && i > 0) {
+    if (i % PIP_YIELD_CHUNK === 0 && i > 0) {
       if (onProgress) onProgress(i);
       await new Promise(r => setTimeout(r, 0));
     }
