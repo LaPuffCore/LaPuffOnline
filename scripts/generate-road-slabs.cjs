@@ -27,31 +27,56 @@ const BBOX = { minLat: 40.47, minLng: -74.27, maxLat: 40.93, maxLng: -73.68 };
 
 // Buffer half-widths in meters per road class, per zoom range.
 // 3 merged tiers (each sub-class gets the same buffer as the tier's primary class):
-//   Tier A: motorway + trunk   → motorway size
-//   Tier B: primary + secondary → primary size
-//   Tier C: tertiary + residential + unclassified → tertiary size
+//   Tier 0: motorway + trunk + _links   → motorway size
+//   Tier 1: primary + secondary + _links → primary size
+//   Tier 2: tertiary + residential + unclassified + _links + living_street → tertiary size
+// NEAR (z12+) is 30% smaller than what would otherwise be used.
 const BUFFER_METERS_NEAR = {
-  motorway:      33,
-  trunk:         33,   // same as motorway
-  primary:       20,
-  secondary:     20,   // same as primary
-  tertiary:      11,
-  residential:   11,   // same as tertiary
-  unclassified:  11,   // same as tertiary
+  motorway:         23,   // 33 × 0.70 ≈ 23
+  trunk:            23,
+  motorway_link:    18,   // ramps narrower than parent
+  trunk_link:       18,
+  primary:          14,   // 20 × 0.70 = 14
+  secondary:        14,
+  primary_link:     11,
+  secondary_link:   11,
+  tertiary:          8,   // 11 × 0.70 ≈ 8
+  residential:       8,
+  unclassified:      8,
+  tertiary_link:     7,
+  living_street:     6,
 };
 const BUFFER_METERS_FAR = {
-  motorway:      46,
-  trunk:         46,   // same as motorway
-  primary:       40,
-  secondary:     40,   // same as primary
-  tertiary:      22,
-  residential:   22,   // same as tertiary
-  unclassified:  22,   // same as tertiary
+  motorway:         46,
+  trunk:            46,
+  motorway_link:    38,
+  trunk_link:       38,
+  primary:          40,
+  secondary:        40,
+  primary_link:     32,
+  secondary_link:   32,
+  tertiary:         22,
+  residential:      22,
+  unclassified:     22,
+  tertiary_link:    17,
+  living_street:    15,
 };
 
-// Road tiers that get confined to the 5 boroughs via midpoint PiP.
-// motorway/trunk use BBOX check instead (bridges cross water, not land).
-const BOROUGH_CONFINED = new Set(['primary', 'secondary', 'tertiary', 'residential', 'unclassified']);
+// Baked tier index (integer property) for GPU-side filter in MapLibre:
+//   0 = motorway tier
+//   1 = primary tier
+//   2 = tertiary tier
+const ROAD_TIER = {
+  motorway: 0, trunk: 0, motorway_link: 0, trunk_link: 0,
+  primary: 1, secondary: 1, primary_link: 1, secondary_link: 1,
+  tertiary: 2, residential: 2, unclassified: 2, tertiary_link: 2, living_street: 2,
+};
+
+// Roads that use "any vertex in borough polygon" check (cross-borough roads need this).
+// motorway/trunk/_links use BBOX check (bridges cross water, polygon would drop them).
+const BOROUGH_ANY_VERTEX = new Set(['primary', 'secondary', 'primary_link', 'secondary_link']);
+// Roads that use midpoint PiP (denser classes — midpoint avoids NJ/CT clutter).
+const BOROUGH_MIDPOINT = new Set(['tertiary', 'residential', 'unclassified', 'tertiary_link', 'living_street']);
 
 // Road classes to include (skip service/path/cycleway — too many, too narrow to matter)
 const ROAD_CLASSES = Object.keys(BUFFER_METERS_NEAR);
@@ -292,16 +317,25 @@ async function main() {
     // - Borough-confined roads (primary/secondary/tertiary/residential): drop if midpoint outside.
     // - Motorway/trunk: clip to borough boundary, producing multiple sub-linestrings.
     let coordSets; // array of [lng,lat][] to buffer
-    if (BOROUGH_CONFINED.has(highway)) {
+    if (BOROUGH_ANY_VERTEX.has(highway)) {
+      // primary/secondary and their _links: keep if any vertex is inside any borough polygon.
+      // This preserves cross-borough roads (bridges between Manhattan–Brooklyn, etc.)
+      // without letting NJ/CT primary roads bleed in (they have no vertices inside boroughs).
+      const anyInBorough = rawCoords.some(([lng, lat]) => pointInBoroughs(lng, lat));
+      if (!anyInBorough) { droppedOutsideBoroughs++; continue; }
+      const simplified = dpSimplify(rawCoords, 0.00003);
+      if (simplified.length < 2) { skipped++; continue; }
+      coordSets = [simplified];
+    } else if (BOROUGH_MIDPOINT.has(highway)) {
+      // tertiary+ classes: midpoint PiP keeps denser local streets without NJ/CT spillover.
       const mid = rawCoords[Math.floor(rawCoords.length / 2)];
       if (!pointInBoroughs(mid[0], mid[1])) { droppedOutsideBoroughs++; continue; }
-      // Simplify entire line then buffer as one piece
       const simplified = dpSimplify(rawCoords, 0.00003);
       if (simplified.length < 2) { skipped++; continue; }
       coordSets = [simplified];
     } else {
-      // Motorway/trunk: keep if ANY vertex is within the NYC BBOX.
-      // Using BBOX (not borough PiP) preserves bridges that run over water.
+      // Motorway/trunk and their _links: keep if ANY vertex is within the NYC BBOX.
+      // BBOX (not borough PiP) preserves bridges that run over water/between boroughs.
       if (!anyVertexInBbox(rawCoords)) { droppedOutsideBoroughs++; continue; }
       const simplified = dpSimplify(rawCoords, 0.00003);
       if (simplified.length < 2) { skipped++; continue; }
@@ -316,7 +350,7 @@ async function main() {
         features.push({
           type: 'Feature',
           geometry: { type: 'Polygon', coordinates: rings },
-          properties: { highway, bufM, wayId: way.id, _z },
+          properties: { highway, bufM, wayId: way.id, _z, _tier: ROAD_TIER[highway] },
         });
       }
     }

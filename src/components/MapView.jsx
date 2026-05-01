@@ -14,6 +14,7 @@ import { SAMPLE_MODE } from '../lib/sampleConfig';
 import { getSampleUsersForZip } from '../lib/sampleUsers';
 import { deserialize as fgbDeserialize } from 'flatgeobuf/lib/mjs/geojson.js';
 import { fetchGeoPostFeed, fetchReactionsForPosts } from '../lib/supabase';
+import { roadFGBFeaturesRef } from '../lib/mapDataPipeline';
 
 const GEOJSON_URL = './data/MODZCTA_2010_WGS1984.geo.json';
 const BOROUGH_GEOJSON_URL = './data/borough.geo.json';
@@ -21,7 +22,7 @@ const BUILDING_FGB_URL = './data/final_building.fgb';
 const ROAD_FGB_URL     = './data/roads_buffered.fgb';
 const FGB_CACHE_NAME = 'lapuff-fgb-v4'; // v4: rebuilt with Hilbert R-tree spatial index
 const FGB_CACHE_KEY  = 'final_building.fgb';
-const ROADS_FGB_CACHE_NAME = 'lapuff-roads-v6';
+const ROADS_FGB_CACHE_NAME = 'lapuff-roads-v7';
 const ROADS_FGB_CACHE_KEY  = 'roads_buffered.fgb';
 
 // MapLoadingScreen gate keys
@@ -3244,49 +3245,67 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     })();
   }
 
+  // Crossfade helpers for road slabs — z11.5–12.5 overlap window.
+  // Far slabs fade out, near slabs fade in. Both tile-resident in the overlap.
+  function roadFarOpacityExpr(baseOp) {
+    return ['interpolate', ['linear'], ['zoom'], 11.5, baseOp, 12.5, 0];
+  }
+  function roadNearOpacityExpr(baseOp) {
+    return ['interpolate', ['linear'], ['zoom'], 11.5, 0, 12.5, baseOp];
+  }
+
   // Create fgb-buildings source + building layers. Source starts empty.
   // Data loaded separately via deferred loading (instant toggle).
   function addBuildingLayers(map, isHeatmap, tsIdx = 0) {
     // ── Road slabs (fill-extrusion ribbons) ────────────────────────────────
-    // Buffered polygon ribbons 0.5m tall. fill-extrusions share the same GPU
-    // depth pass as buildings — walls correctly occlude roads at pitched angles.
-    // 3 layers mirror old zoom tiers: motorway z9+, primary z10+, tertiary z11+.
-    // Heatmap ON: all roads become 50% opaque black → naturally absorbs zone color.
+    // Buffered polygon ribbons. fill-extrusions share the same GPU depth pass
+    // as buildings — walls correctly occlude roads at pitched angles.
+    // 3 tiers × 2 zoom variants = 6 layers total.
+    // Far (_z='f'): wider slabs, z(minz)→z12.5 (fade out at z11.5–12.5)
+    // Near (_z='n'): calibrated slabs, z11.5+ (fade in at z11.5–12.5)
+    // Heatmap ON: all roads #000000 @ 0.4 opacity → naturally dark over zone color.
+    // Colors: motorway=#a80000, primary+tertiary=#ff2200 (matches 2D zip outline red).
     if (!map.getSource('fgb-roads')) {
       map.addSource('fgb-roads', {
         type: 'geojson',
         data: { type: 'FeatureCollection', features: [] },
       });
 
-      // Deferred road data load — cache-first, non-blocking.
-      // Phase 2A already fetched + stored raw bytes; this is usually an instant cache hit.
+      // Deferred road data load — pipeline pre-deserializes during loading screen,
+      // so this is usually a zero-work instant assignment.
       setTimeout(async () => {
         if (!map.getSource('fgb-roads')) return;
         try {
-          let buf = null;
-          if ('caches' in window) {
-            try {
-              const cache = await caches.open(ROADS_FGB_CACHE_NAME);
-              const cached = await cache.match(ROADS_FGB_CACHE_KEY);
-              if (cached) buf = new Uint8Array(await cached.arrayBuffer());
-            } catch (_e) { /* ignore — fall through to network */ }
-          }
-          if (!buf) {
-            const resp = await fetch(ROAD_FGB_URL);
-            if (!resp.ok) return;
-            const ab = await resp.arrayBuffer();
-            buf = new Uint8Array(ab);
+          // Use pre-deserialized features from loading screen if available (D)
+          let features = roadFGBFeaturesRef.current;
+          if (!features) {
+            // Fallback: deserialize from cache or network
+            let buf = null;
             if ('caches' in window) {
               try {
                 const cache = await caches.open(ROADS_FGB_CACHE_NAME);
-                await cache.put(ROADS_FGB_CACHE_KEY, new Response(ab.slice(0), {
-                  headers: { 'Content-Type': 'application/octet-stream' },
-                }));
-              } catch (_e) { /* ignore */ }
+                const cached = await cache.match(ROADS_FGB_CACHE_KEY);
+                if (cached) buf = new Uint8Array(await cached.arrayBuffer());
+              } catch (_e) { /* ignore — fall through to network */ }
             }
+            if (!buf) {
+              const resp = await fetch(ROAD_FGB_URL);
+              if (!resp.ok) return;
+              const ab = await resp.arrayBuffer();
+              buf = new Uint8Array(ab);
+              if ('caches' in window) {
+                try {
+                  const cache = await caches.open(ROADS_FGB_CACHE_NAME);
+                  await cache.put(ROADS_FGB_CACHE_KEY, new Response(ab.slice(0), {
+                    headers: { 'Content-Type': 'application/octet-stream' },
+                  }));
+                } catch (_e) { /* ignore */ }
+              }
+            }
+            features = [];
+            for await (const feature of fgbDeserialize(buf)) features.push(feature);
+            roadFGBFeaturesRef.current = features;
           }
-          const features = [];
-          for await (const feature of fgbDeserialize(buf)) features.push(feature);
           if (map.getSource('fgb-roads')) {
             map.getSource('fgb-roads').setData({ type: 'FeatureCollection', features });
           }
@@ -3294,58 +3313,49 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       }, 0);
     }
 
-    // Road slab tiers — 6 highway classes × 2 zoom ranges = 12 layers.
-    // 3 merged road tiers — each tier uses matching filter for its sub-classes.
-    // Far (_z='f'): wider slabs, hard cutoff maxzoom 12.
-    // Near (_z='n'): calibrated slabs, hard cutoff minzoom 12.
-    // Hard cutoff (no cross-fade): MapLibre's tile pre-compute makes this seamless.
-    // Tier minzooms: motorway+trunk=9, primary+secondary=11, tertiary+=12
+    // 3 merged road tiers × 2 zoom variants (far + near) = 6 layers.
+    // Far (_z='f'): wider slabs, z(minz)→z12.5, fade out in z11.5–12.5 crossfade window.
+    // Near (_z='n'): calibrated slabs, z11.5+, fade in over z11.5–12.5.
+    // Filter uses baked _tier integer property (faster GPU evaluation than match).
+    // Colors: motorway=#a80000, primary+tertiary both=#ff2200 (2D zip outline red).
     const ROAD_TIERS = [
-      {
-        id: 'motorway', minz: 9,
-        matchValues: ['motorway', 'trunk'],
-        colorOff: '#a80000', opacityOff: 0.95, height: 0.6,
-      },
-      {
-        id: 'primary', minz: 11,
-        matchValues: ['primary', 'secondary'],
-        colorOff: '#c01000', opacityOff: 0.92, height: 0.4,
-      },
-      {
-        id: 'tertiary', minz: 12,
-        matchValues: ['tertiary', 'residential', 'unclassified'],
-        colorOff: '#d81c00', opacityOff: 0.88, height: 0.2,
-      },
+      { id: 'motorway', tierNum: 0, minz: 9,  colorOff: '#a80000', opacityOff: 0.95, height: 0.6 },
+      { id: 'primary',  tierNum: 1, minz: 11, colorOff: '#ff2200', opacityOff: 0.92, height: 0.4 },
+      { id: 'tertiary', tierNum: 2, minz: 12, colorOff: '#ff2200', opacityOff: 0.88, height: 0.2 },
     ];
     const HM_OPACITY = 0.4;
     for (const tier of ROAD_TIERS) {
-      const baseFilter = ['match', ['get', 'highway'], tier.matchValues, true, false];
-      // Far version: wider slabs, z(minz) → z12
+      const tierFilter = ['==', ['get', '_tier'], tier.tierNum];
+      // Far version: wider slabs, fade out at z11.5–12.5
       const farId = `real3d-roads-${tier.id}-far-slab`;
       if (!map.getLayer(farId)) {
         map.addLayer({
           id: farId, type: 'fill-extrusion', source: 'fgb-roads',
-          minzoom: tier.minz, maxzoom: 12,
-          filter: ['all', baseFilter, ['==', ['get', '_z'], 'f']],
+          minzoom: tier.minz, maxzoom: 12.5,
+          filter: ['all', tierFilter, ['==', ['get', '_z'], 'f']],
           paint: {
             'fill-extrusion-color':   isHeatmap ? '#000000' : tier.colorOff,
             'fill-extrusion-height':  tier.height, 'fill-extrusion-base': 0,
-            'fill-extrusion-opacity': isHeatmap ? HM_OPACITY : tier.opacityOff,
+            'fill-extrusion-opacity': isHeatmap
+              ? roadFarOpacityExpr(HM_OPACITY)
+              : roadFarOpacityExpr(tier.opacityOff),
             'fill-extrusion-vertical-gradient': false,
           },
         });
       }
-      // Near version: tighter slabs, z12+
+      // Near version: tighter slabs, fade in at z11.5–12.5
       const nearId = `real3d-roads-${tier.id}-slab`;
       if (!map.getLayer(nearId)) {
         map.addLayer({
           id: nearId, type: 'fill-extrusion', source: 'fgb-roads',
-          minzoom: 12,
-          filter: ['all', baseFilter, ['==', ['get', '_z'], 'n']],
+          minzoom: 11.5,
+          filter: ['all', tierFilter, ['==', ['get', '_z'], 'n']],
           paint: {
             'fill-extrusion-color':   isHeatmap ? '#000000' : tier.colorOff,
             'fill-extrusion-height':  tier.height, 'fill-extrusion-base': 0,
-            'fill-extrusion-opacity': isHeatmap ? HM_OPACITY : tier.opacityOff,
+            'fill-extrusion-opacity': isHeatmap
+              ? roadNearOpacityExpr(HM_OPACITY)
+              : roadNearOpacityExpr(tier.opacityOff),
             'fill-extrusion-vertical-gradient': false,
           },
         });
@@ -3597,6 +3607,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady || !real3D) return;
+    if (!real3dLayersCreatedRef.current) return; // layers not yet initialized — skip
     const isMob = window.innerWidth < 768;
     if (isMob) {
       // Mobile: re-fetch viewport so tier columns are re-baked with current heatmap context
@@ -3610,25 +3621,33 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       }
     }
 
-    // Road slab heatmap toggle — 6 layers (3 merged tiers × far + near).
+    // Road slab heatmap toggle — 6 layers (3 tiers × far + near).
+    // Opacity is a zoom-interpolate crossfade expression (A), not a scalar.
     const ROAD_TIER_COLORS = [
       { base: 'motorway', colorOff: '#a80000', opacityOff: 0.95 },
-      { base: 'primary',  colorOff: '#c01000', opacityOff: 0.92 },
-      { base: 'tertiary', colorOff: '#d81c00', opacityOff: 0.88 },
+      { base: 'primary',  colorOff: '#ff2200', opacityOff: 0.92 },
+      { base: 'tertiary', colorOff: '#ff2200', opacityOff: 0.88 },
     ];
     const HM_OPACITY = 0.4;
     ROAD_TIER_COLORS.forEach(({ base, colorOff, opacityOff }) => {
-      for (const [suffix, isHM_opacity] of [['far-slab', opacityOff], ['slab', opacityOff]]) {
-        const id = `real3d-roads-${base}-${suffix}`;
-        if (map.getLayer(id)) {
-          map.setPaintProperty(id, 'fill-extrusion-color',   heatmap ? '#000000' : colorOff);
-          map.setPaintProperty(id, 'fill-extrusion-opacity', heatmap ? HM_OPACITY : isHM_opacity);
-        }
+      const farId  = `real3d-roads-${base}-far-slab`;
+      const nearId = `real3d-roads-${base}-slab`;
+      if (map.getLayer(farId)) {
+        map.setPaintProperty(farId, 'fill-extrusion-color',   heatmap ? '#000000' : colorOff);
+        map.setPaintProperty(farId, 'fill-extrusion-opacity', heatmap
+          ? roadFarOpacityExpr(HM_OPACITY) : roadFarOpacityExpr(opacityOff));
+      }
+      if (map.getLayer(nearId)) {
+        map.setPaintProperty(nearId, 'fill-extrusion-color',   heatmap ? '#000000' : colorOff);
+        map.setPaintProperty(nearId, 'fill-extrusion-opacity', heatmap
+          ? roadNearOpacityExpr(HM_OPACITY) : roadNearOpacityExpr(opacityOff));
       }
     });
 
+    // Use satelliteRef to avoid stale closure — satellite is not in this effect's deps
+    const isSat = satelliteRef?.current ?? satellite;
     if (map.getLayer('zcta-safezone-extrusion')) {
-      map.setPaintProperty('zcta-safezone-extrusion', 'fill-extrusion-opacity', satellite ? 0.22 : 1.0);
+      map.setPaintProperty('zcta-safezone-extrusion', 'fill-extrusion-opacity', isSat ? 0.22 : 1.0);
     }
   }, [heatmap, real3D, mapReady]);
 

@@ -13,10 +13,14 @@ export const BUILDING_FGB_URL   = './data/final_building.fgb';
 export const ROAD_FGB_URL       = './data/roads_buffered.fgb';
 export const FGB_CACHE_NAME     = 'lapuff-fgb-v4';
 export const FGB_CACHE_KEY      = 'final_building.fgb';
-export const ROADS_FGB_CACHE_NAME = 'lapuff-roads-v6';
+export const ROADS_FGB_CACHE_NAME = 'lapuff-roads-v7';
 export const ROADS_FGB_CACHE_KEY  = 'roads_buffered.fgb';
 export const MAP_CACHE_DONE_KEY     = 'lapuff_map_cache_v1';
 export const MAP_CACHE_BUILDING_KEY = 'lapuff_map_cache_building';
+
+// In-memory ref: populated during Phase 2A so Real3D activation uses it directly
+// instead of re-running the expensive FGB deserialize loop (D optimization).
+export const roadFGBFeaturesRef = { current: null };
 
 export const TIMESPAN_STEPS = [
   { label: '1d', days: 1 }, { label: '7d', days: 7 }, { label: '30d', days: 30 },
@@ -473,19 +477,31 @@ async function bakeAllTiersIntoBuildingsData(buildingFGB, zctaIndexMap, precompu
   return buildingFGB;
 }
 
-// ── Road FGB cache (both mobile + desktop in Phase 2A: bytes only, no parse) ─
+// ── Road FGB cache (Phase 2A: cache raw bytes + pre-deserialize into memory) ─
 async function cacheRoadFGB() {
   if (!('caches' in window)) return;
   try {
     const cache = await caches.open(ROADS_FGB_CACHE_NAME);
-    // Already cached — skip
-    if (await cache.match(ROADS_FGB_CACHE_KEY)) return;
-    const resp = await fetch(ROAD_FGB_URL);
-    if (!resp.ok) return;
-    const ab = await resp.arrayBuffer();
-    await cache.put(ROADS_FGB_CACHE_KEY, new Response(ab, {
-      headers: { 'Content-Type': 'application/octet-stream' },
-    }));
+    let buf = null;
+    const cached = await cache.match(ROADS_FGB_CACHE_KEY);
+    if (cached) {
+      // Already cached — grab bytes for in-memory deserialization
+      buf = new Uint8Array(await cached.arrayBuffer());
+    } else {
+      const resp = await fetch(ROAD_FGB_URL);
+      if (!resp.ok) return;
+      const ab = await resp.arrayBuffer();
+      buf = new Uint8Array(ab);
+      await cache.put(ROADS_FGB_CACHE_KEY, new Response(ab.slice(0), {
+        headers: { 'Content-Type': 'application/octet-stream' },
+      }));
+    }
+    // Pre-deserialize into memory — Real3D activation reads this ref directly (instant setData)
+    if (!roadFGBFeaturesRef.current) {
+      const features = [];
+      for await (const feature of fgbDeserialize(buf)) features.push(feature);
+      roadFGBFeaturesRef.current = features;
+    }
   } catch (e) { /* silent — MapView will fall back to direct fetch */ }
 }
 
