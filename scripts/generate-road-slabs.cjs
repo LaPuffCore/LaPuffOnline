@@ -30,22 +30,22 @@ const BBOX = { minLat: 40.47, minLng: -74.27, maxLat: 40.93, maxLng: -73.68 };
 // _NEAR = z12+ (tighter, z13-calibrated for street-level accuracy)
 // At lat 40.7° z13: 14.45 m/px. NEAR targets match old PMTiles visual widths at z13.
 const BUFFER_METERS_NEAR = {
-  motorway:      65,
-  trunk:         55,
+  motorway:      33,
+  trunk:         28,
+  primary:       20,
+  secondary:     16,
+  tertiary:      11,
+  residential:    9,
+  unclassified:   8,
+};
+const BUFFER_METERS_FAR = {
+  motorway:      46,
+  trunk:         39,
   primary:       40,
   secondary:     32,
   tertiary:      22,
   residential:   18,
   unclassified:  15,
-};
-const BUFFER_METERS_FAR = {
-  motorway:      91, // 130m * 0.7 — 30% narrower at z9-12 per user request
-  trunk:         77, // 110m * 0.7 — 30% narrower at z9-12 per user request
-  primary:       80,
-  secondary:     64,
-  tertiary:      44,
-  residential:   36,
-  unclassified:  30,
 };
 
 // Road tiers that get confined to the 5 boroughs (motorway/trunk use linestring clipping instead).
@@ -251,43 +251,27 @@ async function main() {
   }
 
   /**
-   * Clip a linestring to borough bounds, returning an array of sub-linestrings
-   * that lie INSIDE the boroughs. Each transition (inside→outside or outside→inside)
-   * is approximated via a midpoint so slabs don't extend past the borough edge by more
-   * than ~half a segment length.
+   * Clip a linestring to borough bounds using first-to-last borough vertex.
+   * Keeps everything between the first vertex inside any borough and the last
+   * vertex inside any borough — this naturally preserves cross-borough roads
+   * (e.g. Verrazzano Bridge: Staten Island → water → Brooklyn) without dropping
+   * the inter-borough water section.
    */
   function clipLineToBoroughs(coords) {
-    const segments = [];
-    let current = null;
+    let firstIdx = -1, lastIdx = -1;
     for (let i = 0; i < coords.length; i++) {
-      const pt = coords[i];
-      const inside = pointInBoroughs(pt[0], pt[1]);
-      if (inside) {
-        if (!current) {
-          // Just entered: approximate entry point
-          if (i > 0) {
-            const prev = coords[i - 1];
-            const mid = [(prev[0] + pt[0]) / 2, (prev[1] + pt[1]) / 2];
-            current = pointInBoroughs(mid[0], mid[1]) ? [mid, pt] : [pt];
-          } else {
-            current = [pt];
-          }
-        } else {
-          current.push(pt);
-        }
-      } else {
-        if (current) {
-          // Just exited: approximate exit point
-          const prev = coords[i - 1];
-          const mid = [(prev[0] + pt[0]) / 2, (prev[1] + pt[1]) / 2];
-          if (pointInBoroughs(mid[0], mid[1])) current.push(mid);
-          if (current.length >= 2) segments.push(current);
-          current = null;
-        }
+      if (pointInBoroughs(coords[i][0], coords[i][1])) {
+        if (firstIdx === -1) firstIdx = i;
+        lastIdx = i;
       }
     }
-    if (current && current.length >= 2) segments.push(current);
-    return segments;
+    if (firstIdx === -1) return []; // No vertex in any borough — skip entirely
+    // Include one vertex before firstIdx and one after lastIdx (if they exist)
+    // so the slab extends slightly past the edge vertex toward the actual boundary.
+    const start = Math.max(0, firstIdx - 1);
+    const end   = Math.min(coords.length - 1, lastIdx + 1);
+    const clipped = coords.slice(start, end + 1);
+    return clipped.length >= 2 ? [clipped] : [];
   }
 
   // ── 1. Download ───────────────────────────────────────────────────────────
