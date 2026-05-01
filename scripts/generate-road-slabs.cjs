@@ -26,20 +26,18 @@ const { geojson: { serialize } } = require('flatgeobuf');
 const BBOX = { minLat: 40.47, minLng: -74.27, maxLat: 40.93, maxLng: -73.68 };
 
 // Buffer widths in meters per road class (half-width = distance from centerline to edge).
-// Calibrated to z13 (focal Real3D zoom — handoff where 3D buildings appear).
-// At lat 40.7° z13: 14.45 m/px. half-width = target_visual_px × 14.45 / 2.
-// Targets match old PMTiles line widths from commit 67130a6 at z13:
-//   motor   9.0px → 65m half (130m total)
-//   primary 5.6px → 40m half ( 80m total)
-//   tertiary 3.1px → 22m half ( 44m total)
+// 2x of the z13-calibrated baseline so roads are visible at z9-z12 (where they
+// were previously sub-pixel). At z14+ this makes roads thicker than PMTiles —
+// tunable down later if too prominent at street level.
+// Tiers split into 6 paired-but-distinct widths for sleek visual variance.
 const BUFFER_METERS = {
-  motorway:       65,
-  trunk:          65,
-  primary:        40,
-  secondary:      32,
-  tertiary:       22,
-  residential:    18,
-  unclassified:   15,
+  motorway:      130,  // 2.0x of 65
+  trunk:         110,  // 0.85x of motor (slightly thinner)
+  primary:        80,  // 2.0x of 40
+  secondary:      64,  // 0.80x of primary
+  tertiary:       44,  // 2.0x of 22
+  residential:    36,  // 0.82x of tertiary
+  unclassified:   30,  // 2.0x of 15
 };
 
 // Road tiers that get confined to the 5 boroughs (motorway/trunk pass through unrestricted).
