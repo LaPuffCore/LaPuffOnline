@@ -21,6 +21,8 @@ const BUILDING_FGB_URL = './data/final_building.fgb';
 const ROAD_FGB_URL     = './data/roads_buffered.fgb';
 const FGB_CACHE_NAME = 'lapuff-fgb-v4'; // v4: rebuilt with Hilbert R-tree spatial index
 const FGB_CACHE_KEY  = 'final_building.fgb';
+const ROADS_FGB_CACHE_NAME = 'lapuff-roads-v1';
+const ROADS_FGB_CACHE_KEY  = 'roads_buffered.fgb';
 
 // MapLoadingScreen gate keys
 const MAP_CACHE_DONE_KEY     = 'lapuff_map_cache_v1';  // set once first full cache completes
@@ -946,7 +948,9 @@ const NYC_BBOX_GEOM = {
 const REAL3D_ALL_LAYER_IDS = [
   'real3d-water',
   'real3d-park',
-  'real3d-roads-slab',
+  'real3d-roads-motorway-slab',
+  'real3d-roads-primary-slab',
+  'real3d-roads-tertiary-slab',
   'real3d-landuse-baseplate',
   'real3d-buildings', 'real3d-buildings-outline', 'real3d-buildings-baseplate',
 ];
@@ -3239,41 +3243,104 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   // Data loaded separately via deferred loading (instant toggle).
   function addBuildingLayers(map, isHeatmap, tsIdx = 0) {
     // ── Road slabs (fill-extrusion ribbons) ────────────────────────────────
-    // Roads are polygon ribbons 0.5m tall. Because they're fill-extrusions they
-    // participate in the same GPU depth pass as buildings — building walls correctly
-    // occlude roads that are "behind" them when viewed at a pitched angle.
+    // Buffered polygon ribbons 0.5m tall. fill-extrusions share the same GPU
+    // depth pass as buildings — walls correctly occlude roads at pitched angles.
+    // 3 layers mirror old zoom tiers: motorway z9+, primary z10+, tertiary z11+.
+    // Heatmap ON: all roads become 50% opaque black → naturally absorbs zone color.
     if (!map.getSource('fgb-roads')) {
       map.addSource('fgb-roads', {
         type: 'geojson',
         data: { type: 'FeatureCollection', features: [] },
       });
-    }
-    if (!map.getLayer('real3d-roads-slab')) {
-      map.addLayer({
-        id: 'real3d-roads-slab', type: 'fill-extrusion',
-        source: 'fgb-roads',
-        minzoom: 9,
-        paint: {
-          'fill-extrusion-color': isHeatmap ? '#3a1800' : '#1a0800',
-          'fill-extrusion-height': 0.5,
-          'fill-extrusion-base': 0,
-          'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'], 9, 0.6, 12, 0.85],
-          'fill-extrusion-vertical-gradient': false,
-        },
-      });
-      // Deferred road data load — non-blocking
+
+      // Deferred road data load — cache-first, non-blocking.
+      // Phase 2A already fetched + stored raw bytes; this is usually an instant cache hit.
       setTimeout(async () => {
         if (!map.getSource('fgb-roads')) return;
         try {
-          const resp = await fetch(ROAD_FGB_URL);
-          if (!resp.ok) return;
+          let buf = null;
+          if ('caches' in window) {
+            try {
+              const cache = await caches.open(ROADS_FGB_CACHE_NAME);
+              const cached = await cache.match(ROADS_FGB_CACHE_KEY);
+              if (cached) buf = new Uint8Array(await cached.arrayBuffer());
+            } catch (_e) { /* ignore — fall through to network */ }
+          }
+          if (!buf) {
+            const resp = await fetch(ROAD_FGB_URL);
+            if (!resp.ok) return;
+            const ab = await resp.arrayBuffer();
+            buf = new Uint8Array(ab);
+            if ('caches' in window) {
+              try {
+                const cache = await caches.open(ROADS_FGB_CACHE_NAME);
+                await cache.put(ROADS_FGB_CACHE_KEY, new Response(ab.slice(0), {
+                  headers: { 'Content-Type': 'application/octet-stream' },
+                }));
+              } catch (_e) { /* ignore */ }
+            }
+          }
           const features = [];
-          for await (const feature of fgbDeserialize(resp.body)) features.push(feature);
+          for await (const feature of fgbDeserialize(buf)) features.push(feature);
           if (map.getSource('fgb-roads')) {
             map.getSource('fgb-roads').setData({ type: 'FeatureCollection', features });
           }
         } catch (e) { console.warn('Road slab load failed:', e.message); }
       }, 0);
+    }
+
+    // Tier 1 — Motorway + Trunk: z9+, unrestricted (highways cross borough boundaries)
+    if (!map.getLayer('real3d-roads-motorway-slab')) {
+      map.addLayer({
+        id: 'real3d-roads-motorway-slab', type: 'fill-extrusion',
+        source: 'fgb-roads', minzoom: 9,
+        filter: ['match', ['get', 'highway'], ['motorway', 'trunk'], true, false],
+        paint: {
+          'fill-extrusion-color': isHeatmap ? '#000000' : '#bb1800',
+          'fill-extrusion-height': 0.5,
+          'fill-extrusion-base': 0,
+          'fill-extrusion-opacity': isHeatmap ? 0.5 : 0.9,
+          'fill-extrusion-vertical-gradient': false,
+        },
+      });
+    }
+
+    // Tier 2 — Primary + Secondary: z10+, NYC stencil
+    if (!map.getLayer('real3d-roads-primary-slab')) {
+      map.addLayer({
+        id: 'real3d-roads-primary-slab', type: 'fill-extrusion',
+        source: 'fgb-roads', minzoom: 10,
+        filter: ['all',
+          ['match', ['get', 'highway'], ['primary', 'secondary'], true, false],
+          ['within', NYC_BBOX_GEOM],
+        ],
+        paint: {
+          'fill-extrusion-color': isHeatmap ? '#000000' : '#cc1800',
+          'fill-extrusion-height': 0.5,
+          'fill-extrusion-base': 0,
+          'fill-extrusion-opacity': isHeatmap ? 0.5 : 0.75,
+          'fill-extrusion-vertical-gradient': false,
+        },
+      });
+    }
+
+    // Tier 3 — Tertiary + Residential + Unclassified: z11+, NYC stencil
+    if (!map.getLayer('real3d-roads-tertiary-slab')) {
+      map.addLayer({
+        id: 'real3d-roads-tertiary-slab', type: 'fill-extrusion',
+        source: 'fgb-roads', minzoom: 11,
+        filter: ['all',
+          ['match', ['get', 'highway'], ['tertiary', 'residential', 'unclassified'], true, false],
+          ['within', NYC_BBOX_GEOM],
+        ],
+        paint: {
+          'fill-extrusion-color': isHeatmap ? '#000000' : '#771100',
+          'fill-extrusion-height': 0.5,
+          'fill-extrusion-base': 0,
+          'fill-extrusion-opacity': isHeatmap ? 0.5 : 0.65,
+          'fill-extrusion-vertical-gradient': false,
+        },
+      });
     }
 
     // ── Building layers ─────────────────────────────────────────────────────
@@ -3534,11 +3601,21 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       }
     }
 
+    // Road slab heatmap toggle — 3 layers
+    // Heatmap ON: all roads → 50% opaque black (naturally blends with zone color below)
+    // Heatmap OFF: restore tier-differentiated red colors + opacities
+    const roadSlabs = [
+      { id: 'real3d-roads-motorway-slab', colorOff: '#bb1800', opacityOff: 0.9  },
+      { id: 'real3d-roads-primary-slab',  colorOff: '#cc1800', opacityOff: 0.75 },
+      { id: 'real3d-roads-tertiary-slab', colorOff: '#771100', opacityOff: 0.65 },
+    ];
+    roadSlabs.forEach(({ id, colorOff, opacityOff }) => {
+      if (map.getLayer(id)) {
+        map.setPaintProperty(id, 'fill-extrusion-color',   heatmap ? '#000000' : colorOff);
+        map.setPaintProperty(id, 'fill-extrusion-opacity', heatmap ? 0.5       : opacityOff);
+      }
+    });
 
-
-    if (map.getLayer('real3d-roads-slab')) {
-      map.setPaintProperty('real3d-roads-slab', 'fill-extrusion-color', heatmap ? '#3a1800' : '#1a0800');
-    }
     if (map.getLayer('zcta-safezone-extrusion')) {
       map.setPaintProperty('zcta-safezone-extrusion', 'fill-extrusion-opacity', satellite ? 0.22 : 1.0);
     }

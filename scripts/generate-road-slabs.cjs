@@ -27,13 +27,13 @@ const BBOX = { minLat: 40.47, minLng: -74.27, maxLat: 40.93, maxLng: -73.68 };
 
 // Buffer widths in meters per road class (half-width = distance from centerline to edge)
 const BUFFER_METERS = {
-  motorway:       9,   // wide multi-lane highway
-  trunk:          9,
-  primary:        6,
-  secondary:      5,
-  tertiary:       3,
-  residential:    2.5,
-  unclassified:   2.5,
+  motorway:       13,  // ~26m total → z16 ≈ 14.4px (old: 14px)
+  trunk:          13,
+  primary:         8,  // ~16m total → z16 ≈ 8.9px  (old: 9px)
+  secondary:       7,  // ~14m total
+  tertiary:        5.5,// ~11m total → z16 ≈ 6.1px  (old: 6px)
+  residential:     5,  // ~10m total
+  unclassified:    4.5,// ~9m total
 };
 
 // Road classes to include (skip service/path/cycleway — too many, too narrow to matter)

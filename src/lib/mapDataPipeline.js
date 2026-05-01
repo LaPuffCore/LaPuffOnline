@@ -10,8 +10,11 @@ import mapCacheStore from './mapCacheStore';
 export const GEOJSON_URL        = './data/MODZCTA_2010_WGS1984.geo.json';
 export const BOROUGH_GEOJSON_URL = './data/borough.geo.json';
 export const BUILDING_FGB_URL   = './data/final_building.fgb';
+export const ROAD_FGB_URL       = './data/roads_buffered.fgb';
 export const FGB_CACHE_NAME     = 'lapuff-fgb-v4';
 export const FGB_CACHE_KEY      = 'final_building.fgb';
+export const ROADS_FGB_CACHE_NAME = 'lapuff-roads-v1';
+export const ROADS_FGB_CACHE_KEY  = 'roads_buffered.fgb';
 export const MAP_CACHE_DONE_KEY     = 'lapuff_map_cache_v1';
 export const MAP_CACHE_BUILDING_KEY = 'lapuff_map_cache_building';
 
@@ -470,6 +473,22 @@ async function bakeAllTiersIntoBuildingsData(buildingFGB, zctaIndexMap, precompu
   return buildingFGB;
 }
 
+// ── Road FGB cache (both mobile + desktop in Phase 2A: bytes only, no parse) ─
+async function cacheRoadFGB() {
+  if (!('caches' in window)) return;
+  try {
+    const cache = await caches.open(ROADS_FGB_CACHE_NAME);
+    // Already cached — skip
+    if (await cache.match(ROADS_FGB_CACHE_KEY)) return;
+    const resp = await fetch(ROAD_FGB_URL);
+    if (!resp.ok) return;
+    const ab = await resp.arrayBuffer();
+    await cache.put(ROADS_FGB_CACHE_KEY, new Response(ab, {
+      headers: { 'Content-Type': 'application/octet-stream' },
+    }));
+  } catch (e) { /* silent — MapView will fall back to direct fetch */ }
+}
+
 // ── FGB sub-pipeline (desktop only) ──────────────────────────────────────────
 
 async function runFGBPipeline(zctaFeatures, precomputedTiers, P, onProgress) {
@@ -571,26 +590,28 @@ export async function runPhase2A(events, isMobile, onProgress) {
   const startTime = Date.now();
 
   // Progress ranges per platform
-  // Desktop: 12 steps total (2A: 0→93%, 2B: 93→100%)
-  // Mobile:  7 steps total  (2A: 0→85%, 2B: 85→100%)
+  // Desktop: 13 steps total (2A: 0→93%, 2B: 93→100%)
+  // Mobile:  8 steps total  (2A: 0→85%, 2B: 85→100%)
   const P = isMobile ? {
-    zcta:     [0,  20],
-    adj:      [20, 35],
-    skel:     [35, 43],
-    boro:     [43, 57],
-    boroSkel: [57, 67],
-    tiers:    [67, 85],
+    zcta:      [0,  20],
+    adj:       [20, 35],
+    skel:      [35, 43],
+    boro:      [43, 57],
+    boroSkel:  [57, 67],
+    tiers:     [67, 83],
+    roadCache: [83, 85],
   } : {
-    zcta:     [0,  12],
-    adj:      [12, 20],
-    skel:     [20, 24],
-    boro:     [24, 30],
-    boroSkel: [30, 34],
-    tiers:    [34, 42],
-    fgbFetch: [42, 55],
-    fgbParse: [55, 72],
-    pip:      [72, 85],
-    bake:     [85, 93],
+    zcta:      [0,  12],
+    adj:       [12, 20],
+    skel:      [20, 24],
+    boro:      [24, 30],
+    boroSkel:  [30, 34],
+    tiers:     [34, 42],
+    roadCache: [42, 44],
+    fgbFetch:  [44, 56],
+    fgbParse:  [56, 72],
+    pip:       [72, 85],
+    bake:      [85, 93],
   };
 
   const report = (pct, msg) => onProgress?.(pct, msg);
@@ -674,6 +695,13 @@ export async function runPhase2A(events, isMobile, onProgress) {
   mapCacheStore.boroughSkeleton = boroughSkeleton;
   mapCacheStore.zipBoroughMap  = zipBoroughMap;
   mapCacheStore.precomputedTiers = precomputedTiers;
+
+  // ── Road FGB bytes → Cache API (both mobile + desktop) ───────────────────
+  // Phase 2A caches the raw bytes so MapView can skip the network fetch at
+  // Real3D activation time. Parsing happens later on-demand.
+  report(P.roadCache[0], 'Caching road geometry...');
+  await cacheRoadFGB();
+  report(P.roadCache[1], 'Road data cached');
 
   // ── Steps 7-10: Desktop FGB pipeline ─────────────────────────────────────
   if (!isMobile) {
