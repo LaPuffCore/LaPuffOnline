@@ -4391,6 +4391,11 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       {/* Controls — below header when expanded, below expand button when collapsed */}
       <div className={`absolute left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-2 transition-[top] duration-300 ${headerCollapsed ? 'top-[68px]' : 'top-[134px] md:top-[84px]'}`}>
             <div className="flex items-center gap-2">
+              <button onClick={() => setShowRegion(v => !v)}
+                className={`px-2 py-1 rounded-xl text-xs font-black border transition-all bg-black/80 backdrop-blur ${showRegion ? 'bg-[#7C3AED] border-[#7C3AED] text-white' : 'border-white/20 text-white hover:border-white/60'}`}
+                title={showRegion ? 'Hide borough regions' : 'Show borough regions'}>
+                🏝️
+              </button>
               <div className="flex items-center gap-1 bg-black/80 backdrop-blur border border-white/20 rounded-2xl px-3 py-1.5">
                 <span className="text-white text-xs font-black mr-1">📅</span>
                 {TIMESPAN_STEPS.map((s, i) => (
@@ -4404,11 +4409,6 @@ export default function MapView({ events, headerCollapsed = false, interactive =
                 className={`px-2 py-1 rounded-xl text-xs font-black border transition-all bg-black/80 backdrop-blur ${showPins ? 'bg-[#7C3AED] border-[#7C3AED] text-white' : 'border-white/20 text-white hover:border-white/60'}`}
                 title={showPins ? 'Hide event pins' : 'Show event pins'}>
                 📍
-              </button>
-              <button onClick={() => setShowRegion(v => !v)}
-                className={`px-2 py-1 rounded-xl text-xs font-black border transition-all bg-black/80 backdrop-blur ${showRegion ? 'bg-[#7C3AED] border-[#7C3AED] text-white' : 'border-white/20 text-white hover:border-white/60'}`}
-                title={showRegion ? 'Hide borough regions' : 'Show borough regions'}>
-                🌍
               </button>
             </div>
             {/* Row 2: Heatmap + Satellite + 3D + Real3D — single row on mobile, all 4 */}
