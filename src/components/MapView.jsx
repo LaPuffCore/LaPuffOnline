@@ -1587,6 +1587,10 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   const aftersMarkersRef = useRef([]);
   // Selected afters event for check-in popup
   const [aftersCheckInEvent, setAftersCheckInEvent] = useState(null);
+  // Valhalla walking route — abort controller, debounce timer, and session cache
+  const valhallaAbortRef  = useRef(null);   // AbortController for in-flight request
+  const valhallaTimerRef  = useRef(null);   // debounce timer handle
+  const valhallaRouteCache = useRef(new Map()); // eventId → GeoJSON LineString (session cache)
 
   // Auto-dismiss cache indicator 2 seconds after "done"
   useEffect(() => {
@@ -3682,6 +3686,9 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     pillMarkersRef.current = [];
     aftersMarkersRef.current.forEach(m => m.remove());
     aftersMarkersRef.current = [];
+    // Cancel any pending Valhalla request and debounce timer on re-run
+    if (valhallaTimerRef.current) { clearTimeout(valhallaTimerRef.current); valhallaTimerRef.current = null; }
+    if (valhallaAbortRef.current) { valhallaAbortRef.current.abort(); valhallaAbortRef.current = null; }
     // Clear route line
     if (map.getSource('afters-route')) map.getSource('afters-route').setData({ type: 'FeatureCollection', features: [] });
 
@@ -3986,43 +3993,71 @@ export default function MapView({ events, headerCollapsed = false, interactive =
 
           aftersMarkersRef.current.push(aftersMarker);
 
-          // Draw route line between main pin and afters pin using OSRM
+          // Draw walking route between main pin and afters pin using Valhalla
           const mainLat = parseFloat(evt.lat), mainLng = parseFloat(evt.lng);
           if (!isNaN(mainLat) && !isNaN(mainLng)) {
-            const routeUrl = `https://router.project-osrm.org/route/v1/walking/${mainLng},${mainLat};${aLng},${aLat}?overview=full&geometries=geojson`;
-            fetch(routeUrl)
-              .then(r => r.json())
-              .then(data => {
-                const routeCoords = data?.routes?.[0]?.geometry;
-                if (!routeCoords) return;
-                const geojson = { type: 'FeatureCollection', features: [{ type: 'Feature', geometry: routeCoords, properties: {} }] };
-                if (map.getSource('afters-route')) {
-                  map.getSource('afters-route').setData(geojson);
-                } else {
-                  map.addSource('afters-route', { type: 'geojson', data: geojson });
-                  map.addLayer({
-                    id: 'afters-route-line',
-                    type: 'line',
-                    source: 'afters-route',
-                    layout: { 'line-join': 'round', 'line-cap': 'round' },
-                    paint: {
-                      'line-color': '#7c3aed',
-                      'line-width': 3,
-                      'line-dasharray': [3, 4],
-                      'line-opacity': 0.8,
-                    },
+            const cacheKey = String(evt.id);
+            const applyRouteGeojson = (geojson) => {
+              if (map.getSource('afters-route')) {
+                map.getSource('afters-route').setData(geojson);
+              } else {
+                map.addSource('afters-route', { type: 'geojson', data: geojson });
+                map.addLayer({
+                  id: 'afters-route-line', type: 'line', source: 'afters-route',
+                  layout: { 'line-join': 'round', 'line-cap': 'round' },
+                  paint: { 'line-color': '#7c3aed', 'line-width': 3, 'line-dasharray': [3, 4], 'line-opacity': 0.8 },
+                });
+              }
+            };
+            const straightLineGeojson = () => ({
+              type: 'FeatureCollection',
+              features: [{ type: 'Feature', geometry: { type: 'LineString', coordinates: [[mainLng, mainLat], [aLng, aLat]] }, properties: {} }],
+            });
+            // Session cache hit — apply immediately, no network call
+            if (valhallaRouteCache.current.has(cacheKey)) {
+              applyRouteGeojson(valhallaRouteCache.current.get(cacheKey));
+            } else {
+              // Debounce: cancel any pending timer so only the last event in the loop fires
+              if (valhallaTimerRef.current) clearTimeout(valhallaTimerRef.current);
+              valhallaTimerRef.current = setTimeout(() => {
+                // Abort any previous in-flight request
+                if (valhallaAbortRef.current) valhallaAbortRef.current.abort();
+                valhallaAbortRef.current = new AbortController();
+                fetch('https://valhalla1.openstreetmap.de/route', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    locations: [{ lon: mainLng, lat: mainLat }, { lon: aLng, lat: aLat }],
+                    costing: 'pedestrian',
+                  }),
+                  signal: valhallaAbortRef.current.signal,
+                })
+                  .then(r => { if (!r.ok) throw new Error(`Valhalla ${r.status}`); return r.json(); })
+                  .then(data => {
+                    const shape = data?.trip?.legs?.[0]?.shape;
+                    if (!shape) throw new Error('No route shape');
+                    // Decode Valhalla encoded polyline (precision 6, [lng,lat] output for MapLibre)
+                    const coords = [];
+                    let idx = 0, lat6 = 0, lng6 = 0;
+                    while (idx < shape.length) {
+                      let result = 1, shift = 0, b;
+                      do { b = shape.charCodeAt(idx++) - 63 - 1; result += b << shift; shift += 5; } while (b >= 0x1f);
+                      lat6 += (result & 1) ? ~(result >> 1) : (result >> 1);
+                      result = 1; shift = 0;
+                      do { b = shape.charCodeAt(idx++) - 63 - 1; result += b << shift; shift += 5; } while (b >= 0x1f);
+                      lng6 += (result & 1) ? ~(result >> 1) : (result >> 1);
+                      coords.push([lng6 / 1e6, lat6 / 1e6]);
+                    }
+                    const geojson = { type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'LineString', coordinates: coords }, properties: {} }] };
+                    valhallaRouteCache.current.set(cacheKey, geojson);
+                    applyRouteGeojson(geojson);
+                  })
+                  .catch(err => {
+                    if (err?.name === 'AbortError') return; // intentionally cancelled, no fallback
+                    applyRouteGeojson(straightLineGeojson());
                   });
-                }
-              })
-              .catch(() => {
-                // Fallback: straight dotted line
-                const geojson = { type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'LineString', coordinates: [[mainLng, mainLat], [aLng, aLat]] }, properties: {} }] };
-                if (map.getSource('afters-route')) map.getSource('afters-route').setData(geojson);
-                else {
-                  map.addSource('afters-route', { type: 'geojson', data: geojson });
-                  map.addLayer({ id: 'afters-route-line', type: 'line', source: 'afters-route', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#7c3aed', 'line-width': 3, 'line-dasharray': [3, 4], 'line-opacity': 0.8 } });
-                }
-              });
+              }, 500);
+            }
           }
         }
       }
