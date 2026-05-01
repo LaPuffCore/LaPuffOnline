@@ -22,7 +22,7 @@ const BUILDING_FGB_URL = './data/final_building.fgb';
 const ROAD_FGB_URL     = './data/roads_buffered.fgb';
 const FGB_CACHE_NAME = 'lapuff-fgb-v4'; // v4: rebuilt with Hilbert R-tree spatial index
 const FGB_CACHE_KEY  = 'final_building.fgb';
-const ROADS_FGB_CACHE_NAME = 'lapuff-roads-v8';
+const ROADS_FGB_CACHE_NAME = 'lapuff-roads-v9';
 const ROADS_FGB_CACHE_KEY  = 'roads_buffered.fgb';
 
 // MapLoadingScreen gate keys
@@ -2207,14 +2207,13 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     setReal3DLayersVisible(map, false);
   }, [mapReady, geoData]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Gear 2 — MapView Active: start desktop FGB cache after map is ready.
-  // Brief 500ms settle so the initial 2D map frame renders and ZCTA tiles paint before the heavy parse starts.
+  // Gear 2 — MapView Active: start desktop FGB cache as soon as map is ready.
+  // Phase 2A already parsed the FGB during MapLoadingScreen — this is a synchronous ref hydration (near-instant).
   // Mobile: defer entirely to Real3D toggle (Gear 3) — raw bytes already staged by Gear 1.
   useEffect(() => {
     if (!mapReady || !geoData) return;
     if (window.innerWidth < 768) return; // mobile: Gear 3 handles cache on Real3D activation
-    const t = setTimeout(() => buildFGBCache(), 500);
-    return () => clearTimeout(t);
+    buildFGBCache();
   }, [mapReady, geoData]);
 
   // Pre-compute tiers for all 5 timespans in background.
@@ -2984,7 +2983,16 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       buildingFGBRef.current = mapCacheStore.buildingFGB;
       if (mapCacheStore.buildingZctaIndex) buildingZctaMapRef.current = mapCacheStore.buildingZctaIndex;
       if (mapCacheStore.buildingTiersBaked) buildingTiersBakedRef.current = true;
-      setFgbCacheStatus('done'); setFgbCacheProgress(100); return;
+      if (mapCacheStore.precomputedTiers && !precomputedTiersRef.current)
+        precomputedTiersRef.current = mapCacheStore.precomputedTiers;
+      setFgbCacheStatus('done'); setFgbCacheProgress(100);
+      // Safety net: if Real3D was activated before this ran (race), push data now
+      const map = mapRef.current;
+      if (map && real3DRef.current && map.getSource('fgb-buildings') && map.getStyle()) {
+        map.getSource('fgb-buildings').setData(buildingFGBRef.current);
+        refreshBuildingColors();
+      }
+      return;
     }
     if (fgbLoadingRef.current) return;
     fgbLoadingRef.current = true;
@@ -3241,8 +3249,10 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     };
     try {
       const features = [];
+      let count = 0;
       for await (const f of fgbDeserialize(ROAD_FGB_URL, rect)) {
         if (f?.geometry) features.push(f);
+        if (++count % 500 === 0) await new Promise(r => setTimeout(r, 0)); // yield to avoid main-thread freeze
       }
       if (map.getSource('fgb-roads') && map.getStyle()) {
         map.getSource('fgb-roads').setData({ type: 'FeatureCollection', features });
@@ -3322,8 +3332,9 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         data: { type: 'FeatureCollection', features: [] },
       });
 
-      // Deferred road data load — pipeline pre-deserializes during loading screen,
-      // so this is usually a zero-work instant assignment on desktop.
+      // Deferred road data load — staggered 100ms after building load (which fires at 0ms)
+      // to prevent road deserialization from blocking building setData on desktop.
+      // Pipeline pre-deserializes during loading screen, so this is usually a zero-work instant assignment.
       // Mobile uses viewport-only range queries via fetchViewportRoads.
       setTimeout(async () => {
         if (!map.getSource('fgb-roads')) return;
@@ -3367,7 +3378,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
             map.getSource('fgb-roads').setData({ type: 'FeatureCollection', features });
           }
         } catch (e) { console.warn('Road slab load failed:', e.message); }
-      }, 0);
+      }, 100); // 100ms after building load (0ms) to prevent blocking building setData
     }
 
     // 3 merged road tiers × 2 zoom variants (far + near) = 6 layers.
@@ -3530,20 +3541,28 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     // Viewport listener for instant render when cache isn't ready.
     // Skip fetch when Real3D layers are hidden — no visible output to fill.
     // Mobile gets higher debounce to reduce GPU pressure during rapid pinch-zoom.
+    // Roads fire 200ms after buildings to prevent competing setData calls.
     let vpTimer = null;
+    let vpRoadTimer = null;
     let zoomSettleTimer = null;
     const isMob = window.innerWidth < 768;
     const VP_DEBOUNCE = isMob ? 350 : 200;
     const onViewportChange = () => {
       if (!real3DRef.current) return; // Real3D not active, skip unnecessary fetch
       if (vpTimer) clearTimeout(vpTimer);
+      if (vpRoadTimer) clearTimeout(vpRoadTimer);
       if (zoomSettleTimer) clearTimeout(zoomSettleTimer);
       // Cancel in-flight fetches during rapid zoom changes
       zoomSettleTimer = setTimeout(() => {
         vpTimer = setTimeout(() => {
           fetchViewportBuildings(mapRef.current);
-          if (isMob) fetchViewportRoads(mapRef.current); // mobile: road viewport fetch
         }, VP_DEBOUNCE);
+        if (isMob) {
+          // Road fetch staggered 200ms after buildings to avoid competing GPU setData calls
+          vpRoadTimer = setTimeout(() => {
+            fetchViewportRoads(mapRef.current);
+          }, VP_DEBOUNCE + 200);
+        }
       }, isMob ? 100 : 0);
     };
     map.on('moveend', onViewportChange);
@@ -3552,6 +3571,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       map.off('moveend', onViewportChange);
       map.off('zoomend', onViewportChange);
       if (vpTimer) clearTimeout(vpTimer);
+      if (vpRoadTimer) clearTimeout(vpRoadTimer);
       if (zoomSettleTimer) clearTimeout(zoomSettleTimer);
     };
 
