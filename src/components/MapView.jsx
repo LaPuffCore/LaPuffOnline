@@ -2782,6 +2782,11 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       if (map.getLayer('sat-layer')) map.removeLayer('sat-layer');
       if (map.getSource('sat-source')) map.removeSource('sat-source');
     }
+
+    // Water opacity: 0.5 when satellite on (so imagery shows through), 0.6 otherwise
+    if (map.getLayer('real3d-water')) {
+      map.setPaintProperty('real3d-water', 'fill-opacity', satellite ? 0.5 : 0.6);
+    }
   }, [satellite, real3D, mapReady]);
 
 
