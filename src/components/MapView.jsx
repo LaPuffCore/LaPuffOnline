@@ -18,6 +18,7 @@ import { fetchGeoPostFeed, fetchReactionsForPosts } from '../lib/supabase';
 const GEOJSON_URL = './data/MODZCTA_2010_WGS1984.geo.json';
 const BOROUGH_GEOJSON_URL = './data/borough.geo.json';
 const BUILDING_FGB_URL = './data/final_building.fgb';
+const ROAD_FGB_URL     = './data/roads_buffered.fgb';
 const FGB_CACHE_NAME = 'lapuff-fgb-v4'; // v4: rebuilt with Hilbert R-tree spatial index
 const FGB_CACHE_KEY  = 'final_building.fgb';
 
@@ -31,11 +32,10 @@ const PMTILES_URL = 'https://objectstorage.us-ashburn-1.oraclecloud.com/p/yGTOMC
 const _pmtilesProtocol = new PMTilesProtocol();
 maplibregl.addProtocol('pmtiles', _pmtilesProtocol.tile.bind(_pmtilesProtocol));
 
-// The 6 OpenMapTiles-sourced layers used in Real3D mode (water, parks, roads, landuse).
-// Referenced by removeOpenmaptilesSourceAndLayers for clean teardown on Real3D toggle-off.
+// The 6 OpenMapTiles-sourced layers used in Real3D mode (water, parks, landuse).
+// Roads removed — replaced by fill-extrusion slabs from roads_buffered.fgb.
 const REAL3D_OMT_LAYER_IDS = [
   'real3d-water', 'real3d-park',
-  'real3d-roads-motorway', 'real3d-roads-primary', 'real3d-roads-tertiary',
   'real3d-landuse-baseplate',
 ];
 
@@ -942,13 +942,11 @@ const NYC_BBOX_GEOM = {
   ]],
 };
 
-// All Real3D layer IDs — used for cleanup. Includes per-tier heatmap layer IDs.
+// All Real3D layer IDs — used for cleanup.
 const REAL3D_ALL_LAYER_IDS = [
   'real3d-water',
   'real3d-park',
-  'real3d-roads-motorway',
-  'real3d-roads-primary',
-  'real3d-roads-tertiary',
+  'real3d-roads-slab',
   'real3d-landuse-baseplate',
   'real3d-buildings', 'real3d-buildings-outline', 'real3d-buildings-baseplate',
 ];
@@ -3240,6 +3238,45 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   // Create fgb-buildings source + building layers. Source starts empty.
   // Data loaded separately via deferred loading (instant toggle).
   function addBuildingLayers(map, isHeatmap, tsIdx = 0) {
+    // ── Road slabs (fill-extrusion ribbons) ────────────────────────────────
+    // Roads are polygon ribbons 0.5m tall. Because they're fill-extrusions they
+    // participate in the same GPU depth pass as buildings — building walls correctly
+    // occlude roads that are "behind" them when viewed at a pitched angle.
+    if (!map.getSource('fgb-roads')) {
+      map.addSource('fgb-roads', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] },
+      });
+    }
+    if (!map.getLayer('real3d-roads-slab')) {
+      map.addLayer({
+        id: 'real3d-roads-slab', type: 'fill-extrusion',
+        source: 'fgb-roads',
+        minzoom: 9,
+        paint: {
+          'fill-extrusion-color': isHeatmap ? '#3a1800' : '#1a0800',
+          'fill-extrusion-height': 0.5,
+          'fill-extrusion-base': 0,
+          'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'], 9, 0.6, 12, 0.85],
+          'fill-extrusion-vertical-gradient': false,
+        },
+      });
+      // Deferred road data load — non-blocking
+      setTimeout(async () => {
+        if (!map.getSource('fgb-roads')) return;
+        try {
+          const resp = await fetch(ROAD_FGB_URL);
+          if (!resp.ok) return;
+          const features = [];
+          for await (const feature of fgbDeserialize(resp.body)) features.push(feature);
+          if (map.getSource('fgb-roads')) {
+            map.getSource('fgb-roads').setData({ type: 'FeatureCollection', features });
+          }
+        } catch (e) { console.warn('Road slab load failed:', e.message); }
+      }, 0);
+    }
+
+    // ── Building layers ─────────────────────────────────────────────────────
     if (!map.getSource('fgb-buildings')) {
       map.addSource('fgb-buildings', {
         type: 'geojson',
@@ -3278,7 +3315,6 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       });
     }
 
-    if (map.getLayer('real3d-roads-motorway')) map.moveLayer('real3d-roads-motorway');
     if (map.getLayer('borough-outline')) map.moveLayer('borough-outline');
 
     // Deferred data loading — does not block Real3D toggle.
@@ -3319,42 +3355,6 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         source: 'openmaptiles', 'source-layer': 'landuse',
         filter: ['all', ['==', ['get', 'class'], 'park'], ['within', NYC_BBOX_GEOM]],
         paint: { 'fill-color': '#081408', 'fill-opacity': 0.8 },
-      });
-
-      map.addLayer({
-        id: 'real3d-roads-motorway', type: 'line',
-        source: 'openmaptiles', 'source-layer': 'transportation',
-        minzoom: 9, maxzoom: 14, // hide when full buildings appear (zoom 14+) — lines can't depth-test against fill-extrusions
-        filter: ['match', ['get', 'class'], ['motorway', 'trunk'], true, false],
-        paint: {
-          'line-color': isHeatmap ? '#884400' : '#ff2200',
-          'line-width': ['interpolate', ['linear'], ['zoom'], 9, 1.5, 13, 6],
-          'line-blur': 1.5, 'line-opacity': 0.9,
-        },
-      });
-
-      map.addLayer({
-        id: 'real3d-roads-primary', type: 'line',
-        source: 'openmaptiles', 'source-layer': 'transportation',
-        minzoom: 10, maxzoom: 13, // hide when baseplates appear (zoom 13+)
-        filter: ['all', ['match', ['get', 'class'], ['primary', 'secondary'], true, false], ['within', NYC_BBOX_GEOM]],
-        paint: {
-          'line-color': isHeatmap ? '#662200' : '#cc1800',
-          'line-width': ['interpolate', ['linear'], ['zoom'], 10, 0.5, 13, 4],
-          'line-blur': 0.8, 'line-opacity': 0.75,
-        },
-      });
-
-      map.addLayer({
-        id: 'real3d-roads-tertiary', type: 'line',
-        source: 'openmaptiles', 'source-layer': 'transportation',
-        minzoom: 11, maxzoom: 13, // hide when baseplates appear (zoom 13+)
-        filter: ['all', ['match', ['get', 'class'], ['tertiary', 'minor', 'residential'], true, false], ['within', NYC_BBOX_GEOM]],
-        paint: {
-          'line-color': isHeatmap ? '#553300' : '#771100',
-          'line-width': ['interpolate', ['linear'], ['zoom'], 11, 0.3, 13, 2.5],
-          'line-blur': 0.3, 'line-opacity': 0.65,
-        },
       });
 
       map.addLayer({
@@ -3412,7 +3412,6 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       if (zoomSettleTimer) clearTimeout(zoomSettleTimer);
     };
 
-    if (map.getLayer('real3d-roads-motorway')) map.moveLayer('real3d-roads-motorway');
     if (map.getLayer('borough-outline')) map.moveLayer('borough-outline');
 
     real3dLayersCreatedRef.current = true;
@@ -3456,9 +3455,6 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         } else {
           refreshBuildingColors();
         }
-        if (map.getLayer('real3d-roads-motorway')) map.setPaintProperty('real3d-roads-motorway', 'line-color', isHm ? '#884400' : '#ff2200');
-        if (map.getLayer('real3d-roads-primary')) map.setPaintProperty('real3d-roads-primary', 'line-color', isHm ? '#662200' : '#cc1800');
-        if (map.getLayer('real3d-roads-tertiary')) map.setPaintProperty('real3d-roads-tertiary', 'line-color', isHm ? '#553300' : '#771100');
       }
       map.setLight({ anchor: 'map' });
       map.easeTo({ pitch: 55, bearing: -17, duration: 700 });
@@ -3504,9 +3500,6 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       if (cancelled) return;
 
       // Step 4: Apply road colors
-      if (map.getLayer('real3d-roads-motorway')) map.setPaintProperty('real3d-roads-motorway', 'line-color', isHm ? '#884400' : '#ff2200');
-      if (map.getLayer('real3d-roads-primary')) map.setPaintProperty('real3d-roads-primary', 'line-color', isHm ? '#662200' : '#cc1800');
-      if (map.getLayer('real3d-roads-tertiary')) map.setPaintProperty('real3d-roads-tertiary', 'line-color', isHm ? '#553300' : '#771100');
 
       // Step 5: JIT viewport fetch — R-Tree bbox range query, only buildings in current viewport.
       // Buildings appear at z13+ (baseplates) and z14+ (extrusions) — skip fetch when zoomed out.
@@ -3540,14 +3533,11 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         refreshBuildingColors();
       }
     }
-    if (map.getLayer('real3d-roads-motorway')) {
-      map.setPaintProperty('real3d-roads-motorway', 'line-color', heatmap ? '#884400' : '#ff2200');
-    }
-    if (map.getLayer('real3d-roads-primary')) {
-      map.setPaintProperty('real3d-roads-primary', 'line-color', heatmap ? '#662200' : '#cc1800');
-    }
-    if (map.getLayer('real3d-roads-tertiary')) {
-      map.setPaintProperty('real3d-roads-tertiary', 'line-color', heatmap ? '#553300' : '#771100');
+
+
+
+    if (map.getLayer('real3d-roads-slab')) {
+      map.setPaintProperty('real3d-roads-slab', 'fill-extrusion-color', heatmap ? '#3a1800' : '#1a0800');
     }
     if (map.getLayer('zcta-safezone-extrusion')) {
       map.setPaintProperty('zcta-safezone-extrusion', 'fill-extrusion-opacity', satellite ? 0.22 : 1.0);
