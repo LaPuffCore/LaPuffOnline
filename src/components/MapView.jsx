@@ -2,6 +2,7 @@ import { createPortal } from 'react-dom';
 import { useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
+import { Protocol as PMTilesProtocol } from 'pmtiles';
 import { generateAutoTags } from '../lib/autoTags';
 import EventDetailPopup from './EventDetailPopup';
 import mapCacheStore from '../lib/mapCacheStore';
@@ -24,6 +25,21 @@ const FGB_CACHE_KEY  = 'final_building.fgb';
 const MAP_CACHE_DONE_KEY     = 'lapuff_map_cache_v1';  // set once first full cache completes
 const MAP_CACHE_BUILDING_KEY = 'lapuff_map_cache_building'; // cleared on completion; if set on next load = corruption
 const MAPTILER_KEY = 'VjoJJ0mSCXFo9kFGYGxJ';
+
+// PMTiles — self-hosted OpenMapTiles vector tiles on OCI
+// PAR URL (read-only) — safe to embed, no broader OCI access.
+// Toggle via the ⏳ button in the map controls to switch Real3D source from MapTiler to OCI.
+const PMTILES_URL = 'https://objectstorage.us-ashburn-1.oraclecloud.com/p/yGTOMC4N2uc1uIGkliFRgP51VbnPm96W8vebh_sOqeoGil3PErp8dvWmy74pEH70/n/idfnjqqb9g0p/b/nyc-map-data/o/nyc_final.pmtiles';
+// Register the pmtiles:// protocol with MapLibre once at module load.
+const _pmtilesProtocol = new PMTilesProtocol();
+maplibregl.addProtocol('pmtiles', _pmtilesProtocol.tile.bind(_pmtilesProtocol));
+
+// The 6 OpenMapTiles-sourced layers (shared by both MapTiler and PMTiles source modes)
+const REAL3D_OMT_LAYER_IDS = [
+  'real3d-water', 'real3d-park',
+  'real3d-roads-motorway', 'real3d-roads-primary', 'real3d-roads-tertiary',
+  'real3d-landuse-baseplate',
+];
 
 const TIMESPAN_STEPS = [
   { label: '1d', days: 1 }, { label: '7d', days: 7 }, { label: '30d', days: 30 },
@@ -1492,6 +1508,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   // FIX ADDITIVE STATE: refs for satellite and real3D for use in async callbacks
   const real3DRef       = useRef(false);
   const satelliteRef    = useRef(false);
+  const usePmTilesRef   = useRef(false); // mirrors usePmTiles state for use in closures
   // FIX REAL3D: store computed withHeat GeoJSON for zoom-based outline re-generation
   const withHeatRef     = useRef(null);
   // FIX REAL3D: cleanup handle for building tier assignment event listeners
@@ -1532,6 +1549,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   const [satellite,     setSatellite]     = useState(false);
   const [threeD,        setThreeD]        = useState(false);
   const [real3D,        setReal3D]        = useState(false);
+  const [usePmTiles,    setUsePmTiles]    = useState(false); // ⏳ toggle: PMTiles OCI vs MapTiler
   const [geoData,       setGeoData]       = useState(null);
   const [boroughGeoData, setBoroughGeoData] = useState(null);
   const [adjacency,     setAdjacency]     = useState([]);
@@ -1604,6 +1622,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   threeDRef.current    = threeD;
   real3DRef.current    = real3D;
   satelliteRef.current = satellite;
+  usePmTilesRef.current = usePmTiles;
   timespanIdxRef.current = timespanIdx;
   geoDataRef.current   = geoData;
   boroughGeoDataRef.current = boroughGeoData;
@@ -1615,6 +1634,29 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     window.addEventListener('resize', check);
     return () => window.removeEventListener('resize', check);
   }, []);
+
+  // Pre-warm PMTiles header into HTTP cache when map is ready.
+  // Fetches just the first 16KB (PMTiles header) so the first Real3D PMTiles
+  // activation finds the header already cached — tiles load faster.
+  useEffect(() => {
+    if (!mapReady) return;
+    fetch(PMTILES_URL, { headers: { Range: 'bytes=0-16383' } }).catch(() => {});
+  }, [mapReady]);
+
+  // ⏳ PMTiles mid-session source swap effect.
+  // When usePmTiles changes while Real3D is active and layers already exist,
+  // tear down the openmaptiles source + 6 layers and re-create with the new URL.
+  // FGB buildings are unaffected (different source).
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady || !real3dLayersCreatedRef.current || !real3D) return;
+    removeOpenmaptilesSourceAndLayers(map);
+    addOpenmaptilesSourceAndLayers(map, heatmapRef.current, timespanIdxRef.current ?? 2, usePmTiles);
+    // Restore layer ordering: motorway on top, borough-outline topmost.
+    if (map.getLayer('real3d-roads-motorway')) map.moveLayer('real3d-roads-motorway');
+    if (map.getLayer('borough-outline')) map.moveLayer('borough-outline');
+    refreshBuildingColors();
+  }, [usePmTiles]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const onOnline = () => {
@@ -2155,7 +2197,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     const map = mapRef.current;
     if (!map || !mapReady || !geoData) return;
     if (real3dLayersCreatedRef.current) return;
-    initReal3DLayers(map, heatmapRef.current, timespanIdxRef.current ?? 2);
+    initReal3DLayers(map, heatmapRef.current, timespanIdxRef.current ?? 2, usePmTilesRef.current);
     setReal3DLayersVisible(map, false);
   }, [mapReady, geoData]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -3278,18 +3320,17 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     }, 0);
   }
 
-  // Initialize Real3D layers ONCE. After first call, all subsequent activations
-  // just toggle visibility — no WebGL context rebuild, no source re-creation.
-  function initReal3DLayers(map, isHeatmap, tsIdx = 0) {
-    map.setLight({ anchor: 'map' });
-
-    if (!map.getSource('openmaptiles')) {
-      try {
-        map.addSource('openmaptiles', { type: 'vector', url: `https://api.maptiler.com/tiles/v3/tiles.json?key=${MAPTILER_KEY}` });
-      } catch (err) { console.warn('Real3D source add failed:', err); return; }
-    }
-
+  // ─── OpenMapTiles source + 6 layers ────────────────────────────────────────
+  // Shared by both MapTiler and PMTiles modes — layer specs are identical since
+  // both use the OpenMapTiles schema (same source-layer names).
+  function addOpenmaptilesSourceAndLayers(map, isHeatmap, tsIdx = 0, pmMode = false) {
+    if (map.getSource('openmaptiles')) return; // already exists
     try {
+      const sourceUrl = pmMode
+        ? `pmtiles://${PMTILES_URL}`
+        : `https://api.maptiler.com/tiles/v3/tiles.json?key=${MAPTILER_KEY}`;
+      map.addSource('openmaptiles', { type: 'vector', url: sourceUrl });
+
       const waterBeforeId = map.getLayer('heat-underlay') ? 'heat-underlay' : undefined;
       map.addLayer({
         id: 'real3d-water', type: 'fill',
@@ -3350,39 +3391,56 @@ export default function MapView({ events, headerCollapsed = false, interactive =
           'fill-opacity': ['interpolate', ['linear'], ['zoom'], 9, 0, 10, 0.45, 12.5, 0.45, 13, 0],
         },
       });
+    } catch (err) { console.warn('addOpenmaptilesSourceAndLayers failed:', err); }
+  }
 
-      addBuildingLayers(map, isHeatmap, tsIdx);
+  // Tear down the OpenMapTiles source + its 6 dependent layers so they can be
+  // re-created with a different source URL (MapTiler ↔ PMTiles hot-swap).
+  function removeOpenmaptilesSourceAndLayers(map) {
+    REAL3D_OMT_LAYER_IDS.forEach(id => {
+      if (map.getLayer(id)) map.removeLayer(id);
+    });
+    if (map.getSource('openmaptiles')) map.removeSource('openmaptiles');
+  }
 
-      // Viewport listener for instant render when cache isn't ready.
-      // Skip fetch when Real3D layers are hidden — no visible output to fill.
-      // Mobile gets higher debounce to reduce GPU pressure during rapid pinch-zoom.
-      let vpTimer = null;
-      let zoomSettleTimer = null;
-      const isMob = window.innerWidth < 768;
-      const VP_DEBOUNCE = isMob ? 350 : 200;
-      const onViewportChange = () => {
-        if (!real3DRef.current) return; // Real3D not active, skip unnecessary fetch
-        if (vpTimer) clearTimeout(vpTimer);
-        if (zoomSettleTimer) clearTimeout(zoomSettleTimer);
-        // Cancel in-flight fetches during rapid zoom changes
-        zoomSettleTimer = setTimeout(() => {
-          vpTimer = setTimeout(() => fetchViewportBuildings(mapRef.current), VP_DEBOUNCE);
-        }, isMob ? 100 : 0);
-      };
-      map.on('moveend', onViewportChange);
-      map.on('zoomend', onViewportChange);
-      buildingAssignCleanupRef.current = () => {
-        map.off('moveend', onViewportChange);
-        map.off('zoomend', onViewportChange);
-        if (vpTimer) clearTimeout(vpTimer);
-        if (zoomSettleTimer) clearTimeout(zoomSettleTimer);
-      };
+  // Initialize Real3D layers ONCE. After first call, all subsequent activations
+  // just toggle visibility — no WebGL context rebuild, no source re-creation.
+  // pmMode: if true, uses PMTiles OCI source instead of MapTiler.
+  function initReal3DLayers(map, isHeatmap, tsIdx = 0, pmMode = false) {
+    map.setLight({ anchor: 'map' });
+    addOpenmaptilesSourceAndLayers(map, isHeatmap, tsIdx, pmMode);
 
-      if (map.getLayer('real3d-roads-motorway')) map.moveLayer('real3d-roads-motorway');
-      if (map.getLayer('borough-outline')) map.moveLayer('borough-outline');
+    addBuildingLayers(map, isHeatmap, tsIdx);
 
-      real3dLayersCreatedRef.current = true;
-    } catch (err) { console.error('Real3D layer init failed:', err); }
+    // Viewport listener for instant render when cache isn't ready.
+    // Skip fetch when Real3D layers are hidden — no visible output to fill.
+    // Mobile gets higher debounce to reduce GPU pressure during rapid pinch-zoom.
+    let vpTimer = null;
+    let zoomSettleTimer = null;
+    const isMob = window.innerWidth < 768;
+    const VP_DEBOUNCE = isMob ? 350 : 200;
+    const onViewportChange = () => {
+      if (!real3DRef.current) return; // Real3D not active, skip unnecessary fetch
+      if (vpTimer) clearTimeout(vpTimer);
+      if (zoomSettleTimer) clearTimeout(zoomSettleTimer);
+      // Cancel in-flight fetches during rapid zoom changes
+      zoomSettleTimer = setTimeout(() => {
+        vpTimer = setTimeout(() => fetchViewportBuildings(mapRef.current), VP_DEBOUNCE);
+      }, isMob ? 100 : 0);
+    };
+    map.on('moveend', onViewportChange);
+    map.on('zoomend', onViewportChange);
+    buildingAssignCleanupRef.current = () => {
+      map.off('moveend', onViewportChange);
+      map.off('zoomend', onViewportChange);
+      if (vpTimer) clearTimeout(vpTimer);
+      if (zoomSettleTimer) clearTimeout(zoomSettleTimer);
+    };
+
+    if (map.getLayer('real3d-roads-motorway')) map.moveLayer('real3d-roads-motorway');
+    if (map.getLayer('borough-outline')) map.moveLayer('borough-outline');
+
+    real3dLayersCreatedRef.current = true;
   }
 
   // Show/hide all Real3D layers. No source or layer destruction.
@@ -3415,7 +3473,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     // Desktop: immediate (sync) path — unchanged
     if (!isMob) {
       if (!real3dLayersCreatedRef.current) {
-        initReal3DLayers(map, isHm, timespanIdxRef.current ?? 2);
+        initReal3DLayers(map, isHm, timespanIdxRef.current ?? 2, usePmTilesRef.current);
       } else {
         setReal3DLayersVisible(map, true);
         if (!buildingTiersBakedRef.current && buildingFGBRef.current && buildingZctaMapRef.current && precomputedTiersRef.current) {
@@ -3458,7 +3516,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       // Step 2: Create layers if needed (lightweight — just WebGL setup, no data)
       setReal3dLoadProgress('Preparing Real3D layers…');
       if (!real3dLayersCreatedRef.current) {
-        initReal3DLayers(map, isHm, timespanIdxRef.current ?? 2);
+        initReal3DLayers(map, isHm, timespanIdxRef.current ?? 2, usePmTilesRef.current);
       } else {
         setReal3DLayersVisible(map, true);
       }
@@ -4112,6 +4170,11 @@ export default function MapView({ events, headerCollapsed = false, interactive =
                 className={`px-2 py-1 rounded-xl text-xs font-black border transition-all bg-black/80 backdrop-blur ${showPins ? 'bg-[#7C3AED] border-[#7C3AED] text-white' : 'border-white/20 text-white hover:border-white/60'}`}
                 title={showPins ? 'Hide event pins' : 'Show event pins'}>
                 📍
+              </button>
+              <button onClick={() => setUsePmTiles(v => !v)}
+                className={`px-2 py-1 rounded-xl text-xs font-black border transition-all bg-black/80 backdrop-blur ${usePmTiles ? 'bg-yellow-400 border-yellow-400 text-black' : 'border-white/20 text-white hover:border-yellow-300'}`}
+                title={usePmTiles ? 'PMTiles ON — self-hosted OCI tiles (click to revert to MapTiler)' : 'Switch Real3D source to self-hosted PMTiles (OCI)'}>
+                ⏳
               </button>
             </div>
             {/* Row 2: Heatmap + Satellite + 3D + Real3D — single row on mobile, all 4 */}
