@@ -22,7 +22,7 @@ const BUILDING_FGB_URL = './data/final_building.fgb';
 const ROAD_FGB_URL     = './data/roads_buffered.fgb';
 const FGB_CACHE_NAME = 'lapuff-fgb-v4'; // v4: rebuilt with Hilbert R-tree spatial index
 const FGB_CACHE_KEY  = 'final_building.fgb';
-const ROADS_FGB_CACHE_NAME = 'lapuff-roads-v7';
+const ROADS_FGB_CACHE_NAME = 'lapuff-roads-v8';
 const ROADS_FGB_CACHE_KEY  = 'roads_buffered.fgb';
 
 // MapLoadingScreen gate keys
@@ -112,6 +112,25 @@ function midTierColor(tier) {
   if (tier >= 2) return HEAT_MID_COLORS.warm;
   if (tier >= 1) return HEAT_MID_COLORS.cool;
   return HEAT_MID_COLORS.cold;
+}
+
+// Borough overlay — geographic centers (WSG84) in the same order as borough.geo.json:
+//   Manhattan (0), Staten Island (1), Bronx (2), Queens (3), Brooklyn (4)
+const BOROUGH_DATA = [
+  { name: 'Manhattan',     lng: -73.9712, lat: 40.7831 },
+  { name: 'Staten Island', lng: -74.1502, lat: 40.5795 },
+  { name: 'Bronx',         lng: -73.8648, lat: 40.8448 },
+  { name: 'Queens',        lng: -73.7949, lat: 40.7282 },
+  { name: 'Brooklyn',      lng: -73.9442, lat: 40.6782 },
+];
+
+// Heat rank label + color for borough overlay (absolute tier → label)
+function tierHeatLabel(tier) {
+  if (tier >= 4) return { label: 'Hottest Zone', color: '#cc0d00' };
+  if (tier >= 3) return { label: 'Hot Zone',     color: '#dd6600' };
+  if (tier >= 2) return { label: 'Warm Zone',    color: '#f5c800' };
+  if (tier >= 1) return { label: 'Cool Zone',    color: '#00dd66' };
+  return                 { label: 'Cold Zone',    color: '#00ccdd' };
 }
 
 
@@ -1593,6 +1612,10 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   const [real3dLoadProgress, setReal3dLoadProgress] = useState('');
   // Event pin markers toggle
   const [showPins, setShowPins] = useState(false);
+  // Borough region overlay toggle
+  const [showRegion, setShowRegion] = useState(false);
+  const regionMarkersRef = useRef([]);
+  const regionZoomHandlerRef = useRef(null);
   const [hoveredPinEvent, setHoveredPinEvent] = useState(null);
   const [hoveredPinPos, setHoveredPinPos] = useState(null);
   const pinEventsLookupRef = useRef(new Map());
@@ -3192,6 +3215,43 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     }
   }
 
+  // Viewport-only road fetch for mobile — mirrors fetchViewportBuildings but simpler.
+  // Roads already have _tier and _z baked at FGB generation time — no ZCTA PiP needed.
+  // Desktop skips this (roadFGBFeaturesRef.current is populated and used directly).
+  async function fetchViewportRoads(map) {
+    if (!map || !map.getStyle() || !map.getSource('fgb-roads')) return;
+    const isMob = window.innerWidth < 768;
+    if (!isMob && roadFGBFeaturesRef.current) return; // desktop: full cache ready
+
+    const zoom = map.getZoom();
+    if (zoom < 9) {
+      if (isMob) map.getSource('fgb-roads').setData({ type: 'FeatureCollection', features: [] });
+      return;
+    }
+
+    const bounds = map.getBounds();
+    const lngSpan = bounds.getEast() - bounds.getWest();
+    const latSpan = bounds.getNorth() - bounds.getSouth();
+    const pad = 0.3;
+    const rect = {
+      minX: bounds.getWest()  - lngSpan * pad,
+      minY: bounds.getSouth() - latSpan * pad,
+      maxX: bounds.getEast()  + lngSpan * pad,
+      maxY: bounds.getNorth() + latSpan * pad,
+    };
+    try {
+      const features = [];
+      for await (const f of fgbDeserialize(ROAD_FGB_URL, rect)) {
+        if (f?.geometry) features.push(f);
+      }
+      if (map.getSource('fgb-roads') && map.getStyle()) {
+        map.getSource('fgb-roads').setData({ type: 'FeatureCollection', features });
+      }
+    } catch (e) {
+      if (e.name !== 'AbortError') console.warn('Road viewport fetch failed:', e);
+    }
+  }
+
   // Bake all 5 timespan tiers into building properties (_tier_0.._tier_4).
   // After this, GPU reads ['get', '_tier_X'] directly — no feature-state or setData needed on timespan change.
   // Only called when BOTH pre-computed tiers AND building ZCTA index are ready.
@@ -3245,15 +3305,6 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     })();
   }
 
-  // Crossfade helpers for road slabs — z11.5–12.5 overlap window.
-  // Far slabs fade out, near slabs fade in. Both tile-resident in the overlap.
-  function roadFarOpacityExpr(baseOp) {
-    return ['interpolate', ['linear'], ['zoom'], 11.5, baseOp, 12.5, 0];
-  }
-  function roadNearOpacityExpr(baseOp) {
-    return ['interpolate', ['linear'], ['zoom'], 11.5, 0, 12.5, baseOp];
-  }
-
   // Create fgb-buildings source + building layers. Source starts empty.
   // Data loaded separately via deferred loading (instant toggle).
   function addBuildingLayers(map, isHeatmap, tsIdx = 0) {
@@ -3261,10 +3312,10 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     // Buffered polygon ribbons. fill-extrusions share the same GPU depth pass
     // as buildings — walls correctly occlude roads at pitched angles.
     // 3 tiers × 2 zoom variants = 6 layers total.
-    // Far (_z='f'): wider slabs, z(minz)→z12.5 (fade out at z11.5–12.5)
-    // Near (_z='n'): calibrated slabs, z11.5+ (fade in at z11.5–12.5)
+    // Far (_z='f'): wider slabs, minz→z12 (hard cutoff)
+    // Near (_z='n'): calibrated slabs, z12+
     // Heatmap ON: all roads #000000 @ 0.4 opacity → naturally dark over zone color.
-    // Colors: motorway=#a80000, primary+tertiary=#ff2200 (matches 2D zip outline red).
+    // Colors: motorway/primary=#850000 (dark red), tertiary=#cc1100 (mid red).
     if (!map.getSource('fgb-roads')) {
       map.addSource('fgb-roads', {
         type: 'geojson',
@@ -3272,14 +3323,20 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       });
 
       // Deferred road data load — pipeline pre-deserializes during loading screen,
-      // so this is usually a zero-work instant assignment.
+      // so this is usually a zero-work instant assignment on desktop.
+      // Mobile uses viewport-only range queries via fetchViewportRoads.
       setTimeout(async () => {
         if (!map.getSource('fgb-roads')) return;
         try {
-          // Use pre-deserialized features from loading screen if available (D)
+          const isMob = window.innerWidth < 768;
           let features = roadFGBFeaturesRef.current;
           if (!features) {
-            // Fallback: deserialize from cache or network
+            if (isMob) {
+              // Mobile: viewport-only fetch — never loads full dataset to avoid OOM
+              fetchViewportRoads(map);
+              return;
+            }
+            // Desktop fallback: deserialize from cache or network
             let buf = null;
             if ('caches' in window) {
               try {
@@ -3314,48 +3371,45 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     }
 
     // 3 merged road tiers × 2 zoom variants (far + near) = 6 layers.
-    // Far (_z='f'): wider slabs, z(minz)→z12.5, fade out in z11.5–12.5 crossfade window.
-    // Near (_z='n'): calibrated slabs, z11.5+, fade in over z11.5–12.5.
+    // Hard z12 cutoff — no crossfade to avoid anti-aliasing artifacts.
+    // Far (_z='f'): wider slabs, minz→z12.
+    // Near (_z='n'): tighter slabs, z12+.
     // Filter uses baked _tier integer property (faster GPU evaluation than match).
-    // Colors: motorway=#a80000, primary+tertiary both=#ff2200 (2D zip outline red).
+    // Colors: motorway/primary=#850000, tertiary=#cc1100.
     const ROAD_TIERS = [
-      { id: 'motorway', tierNum: 0, minz: 9,  colorOff: '#a80000', opacityOff: 0.95, height: 0.6 },
-      { id: 'primary',  tierNum: 1, minz: 11, colorOff: '#ff2200', opacityOff: 0.92, height: 0.4 },
-      { id: 'tertiary', tierNum: 2, minz: 12, colorOff: '#ff2200', opacityOff: 0.88, height: 0.2 },
+      { id: 'motorway', tierNum: 0, minz: 9,  colorOff: '#850000', opacityOff: 0.95, height: 0.6 },
+      { id: 'primary',  tierNum: 1, minz: 11, colorOff: '#850000', opacityOff: 0.92, height: 0.4 },
+      { id: 'tertiary', tierNum: 2, minz: 12, colorOff: '#cc1100', opacityOff: 0.88, height: 0.2 },
     ];
     const HM_OPACITY = 0.4;
     for (const tier of ROAD_TIERS) {
       const tierFilter = ['==', ['get', '_tier'], tier.tierNum];
-      // Far version: wider slabs, fade out at z11.5–12.5
+      // Far version: wider slabs, hard maxzoom 12
       const farId = `real3d-roads-${tier.id}-far-slab`;
       if (!map.getLayer(farId)) {
         map.addLayer({
           id: farId, type: 'fill-extrusion', source: 'fgb-roads',
-          minzoom: tier.minz, maxzoom: 12.5,
+          minzoom: tier.minz, maxzoom: 12,
           filter: ['all', tierFilter, ['==', ['get', '_z'], 'f']],
           paint: {
             'fill-extrusion-color':   isHeatmap ? '#000000' : tier.colorOff,
             'fill-extrusion-height':  tier.height, 'fill-extrusion-base': 0,
-            'fill-extrusion-opacity': isHeatmap
-              ? roadFarOpacityExpr(HM_OPACITY)
-              : roadFarOpacityExpr(tier.opacityOff),
+            'fill-extrusion-opacity': isHeatmap ? HM_OPACITY : tier.opacityOff,
             'fill-extrusion-vertical-gradient': false,
           },
         });
       }
-      // Near version: tighter slabs, fade in at z11.5–12.5
+      // Near version: tighter slabs, hard minzoom 12
       const nearId = `real3d-roads-${tier.id}-slab`;
       if (!map.getLayer(nearId)) {
         map.addLayer({
           id: nearId, type: 'fill-extrusion', source: 'fgb-roads',
-          minzoom: 11.5,
+          minzoom: 12,
           filter: ['all', tierFilter, ['==', ['get', '_z'], 'n']],
           paint: {
             'fill-extrusion-color':   isHeatmap ? '#000000' : tier.colorOff,
             'fill-extrusion-height':  tier.height, 'fill-extrusion-base': 0,
-            'fill-extrusion-opacity': isHeatmap
-              ? roadNearOpacityExpr(HM_OPACITY)
-              : roadNearOpacityExpr(tier.opacityOff),
+            'fill-extrusion-opacity': isHeatmap ? HM_OPACITY : tier.opacityOff,
             'fill-extrusion-vertical-gradient': false,
           },
         });
@@ -3486,7 +3540,10 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       if (zoomSettleTimer) clearTimeout(zoomSettleTimer);
       // Cancel in-flight fetches during rapid zoom changes
       zoomSettleTimer = setTimeout(() => {
-        vpTimer = setTimeout(() => fetchViewportBuildings(mapRef.current), VP_DEBOUNCE);
+        vpTimer = setTimeout(() => {
+          fetchViewportBuildings(mapRef.current);
+          if (isMob) fetchViewportRoads(mapRef.current); // mobile: road viewport fetch
+        }, VP_DEBOUNCE);
       }, isMob ? 100 : 0);
     };
     map.on('moveend', onViewportChange);
@@ -3621,12 +3678,11 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       }
     }
 
-    // Road slab heatmap toggle — 6 layers (3 tiers × far + near).
-    // Opacity is a zoom-interpolate crossfade expression (A), not a scalar.
+    // Road slab heatmap toggle — 6 layers (3 tiers × far + near). Scalar opacity (no crossfade).
     const ROAD_TIER_COLORS = [
-      { base: 'motorway', colorOff: '#a80000', opacityOff: 0.95 },
-      { base: 'primary',  colorOff: '#ff2200', opacityOff: 0.92 },
-      { base: 'tertiary', colorOff: '#ff2200', opacityOff: 0.88 },
+      { base: 'motorway', colorOff: '#850000', opacityOff: 0.95 },
+      { base: 'primary',  colorOff: '#850000', opacityOff: 0.92 },
+      { base: 'tertiary', colorOff: '#cc1100', opacityOff: 0.88 },
     ];
     const HM_OPACITY = 0.4;
     ROAD_TIER_COLORS.forEach(({ base, colorOff, opacityOff }) => {
@@ -3634,13 +3690,11 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       const nearId = `real3d-roads-${base}-slab`;
       if (map.getLayer(farId)) {
         map.setPaintProperty(farId, 'fill-extrusion-color',   heatmap ? '#000000' : colorOff);
-        map.setPaintProperty(farId, 'fill-extrusion-opacity', heatmap
-          ? roadFarOpacityExpr(HM_OPACITY) : roadFarOpacityExpr(opacityOff));
+        map.setPaintProperty(farId, 'fill-extrusion-opacity', heatmap ? HM_OPACITY : opacityOff);
       }
       if (map.getLayer(nearId)) {
         map.setPaintProperty(nearId, 'fill-extrusion-color',   heatmap ? '#000000' : colorOff);
-        map.setPaintProperty(nearId, 'fill-extrusion-opacity', heatmap
-          ? roadNearOpacityExpr(HM_OPACITY) : roadNearOpacityExpr(opacityOff));
+        map.setPaintProperty(nearId, 'fill-extrusion-opacity', heatmap ? HM_OPACITY : opacityOff);
       }
     });
 
@@ -4195,6 +4249,114 @@ export default function MapView({ events, headerCollapsed = false, interactive =
 
   }, [showPins, events, mapReady, timespanIdx]);
 
+  // Borough region overlay — creates MapLibre Marker boxes for each NYC borough.
+  // Shows future event count, participant count (async), and heat rank when heatmap is ON.
+  // Zoom-responsive scale: larger at z9-10, smaller at z13+.
+  useEffect(() => {
+    const map = mapRef.current;
+
+    // Cleanup existing markers + zoom listener
+    regionMarkersRef.current.forEach(m => m.remove());
+    regionMarkersRef.current = [];
+    if (regionZoomHandlerRef.current && map) {
+      map.off('zoom', regionZoomHandlerRef.current);
+      regionZoomHandlerRef.current = null;
+    }
+
+    if (!showRegion || !map || !mapReady) return;
+
+    const nowDay = new Date(); nowDay.setHours(0, 0, 0, 0);
+    const avgTiers = boroughAvgTiersRef.current || [];
+    const domBoxes = {};
+
+    BOROUGH_DATA.forEach((bd, idx) => {
+      const eventCount = (events || []).filter(e =>
+        !e._auto && !e._sample &&
+        e.borough === bd.name &&
+        new Date(e.event_date + 'T00:00:00') >= nowDay
+      ).length;
+      const tier = avgTiers[idx] ?? -1;
+      const rank = (heatmap && tier >= 0) ? tierHeatLabel(tier) : null;
+
+      const el = document.createElement('div');
+      el.style.cssText = [
+        'background:rgba(0,0,0,0.72)',
+        'color:#fff',
+        'font-family:Nunito,sans-serif',
+        'border:1.5px solid rgba(255,255,255,0.22)',
+        'border-radius:10px',
+        'padding:8px 14px',
+        'pointer-events:none',
+        'z-index:99999',
+        'font-size:13px',
+        'font-weight:700',
+        'text-align:center',
+        'min-width:140px',
+        'backdrop-filter:blur(4px)',
+        '-webkit-backdrop-filter:blur(4px)',
+        'transform-origin:bottom center',
+      ].join(';');
+
+      const nameEl = document.createElement('div');
+      nameEl.textContent = bd.name;
+      nameEl.style.cssText = 'font-size:15px;font-weight:900;margin-bottom:5px;letter-spacing:0.01em;';
+      el.appendChild(nameEl);
+
+      const evEl = document.createElement('div');
+      evEl.textContent = `🎉 ${eventCount} upcoming`;
+      evEl.style.cssText = 'font-size:12px;opacity:0.9;margin-bottom:3px;';
+      el.appendChild(evEl);
+
+      const pEl = document.createElement('div');
+      pEl.textContent = '👥 loading…';
+      pEl.style.cssText = 'font-size:12px;opacity:0.75;';
+      el.appendChild(pEl);
+      domBoxes[bd.name] = { pEl };
+
+      if (rank) {
+        const hEl = document.createElement('div');
+        hEl.textContent = `🔥 ${rank.label}`;
+        hEl.style.cssText = `font-size:11px;font-weight:900;margin-top:5px;color:${rank.color};`;
+        el.appendChild(hEl);
+      }
+
+      const marker = new maplibregl.Marker({ element: el, offset: [0, -52], anchor: 'bottom' })
+        .setLngLat([bd.lng, bd.lat])
+        .addTo(map);
+      regionMarkersRef.current.push(marker);
+    });
+
+    // Zoom-responsive sizing
+    const updateScale = () => {
+      const z = map.getZoom();
+      const scale = Math.min(1.25, Math.max(0.6, 1.25 - (z - 9) * 0.13));
+      regionMarkersRef.current.forEach(m => {
+        m.getElement().style.transform = `scale(${scale.toFixed(3)})`;
+      });
+    };
+    updateScale();
+    regionZoomHandlerRef.current = updateScale;
+    map.on('zoom', updateScale);
+
+    // Async: load participant counts per borough
+    BOROUGH_DATA.forEach(async (bd) => {
+      try {
+        const colonists = await getBoroughColonists(bd.name);
+        const box = domBoxes[bd.name];
+        if (box?.pEl) box.pEl.textContent = `👥 ${colonists.length} in borough`;
+      } catch (_e) { /* ignore */ }
+    });
+
+    return () => {
+      regionMarkersRef.current.forEach(m => m.remove());
+      regionMarkersRef.current = [];
+      if (regionZoomHandlerRef.current && map) {
+        map.off('zoom', regionZoomHandlerRef.current);
+        regionZoomHandlerRef.current = null;
+      }
+    };
+  }, [showRegion, mapReady, heatmap]);
+
   useEffect(() => {
     const h = e => { if (e.key === 'Escape') { setHoloFeature(null); setSideZip(null); setSideEvents([]); setSideColonists([]); setSideBorough(null); setSideBoroughEvents([]); setSideBoroughColonists([]); } };
     window.addEventListener('keydown', h);
@@ -4242,6 +4404,11 @@ export default function MapView({ events, headerCollapsed = false, interactive =
                 className={`px-2 py-1 rounded-xl text-xs font-black border transition-all bg-black/80 backdrop-blur ${showPins ? 'bg-[#7C3AED] border-[#7C3AED] text-white' : 'border-white/20 text-white hover:border-white/60'}`}
                 title={showPins ? 'Hide event pins' : 'Show event pins'}>
                 📍
+              </button>
+              <button onClick={() => setShowRegion(v => !v)}
+                className={`px-2 py-1 rounded-xl text-xs font-black border transition-all bg-black/80 backdrop-blur ${showRegion ? 'bg-[#7C3AED] border-[#7C3AED] text-white' : 'border-white/20 text-white hover:border-white/60'}`}
+                title={showRegion ? 'Hide borough regions' : 'Show borough regions'}>
+                🌍
               </button>
             </div>
             {/* Row 2: Heatmap + Satellite + 3D + Real3D — single row on mobile, all 4 */}

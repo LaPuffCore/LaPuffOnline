@@ -13,7 +13,7 @@ export const BUILDING_FGB_URL   = './data/final_building.fgb';
 export const ROAD_FGB_URL       = './data/roads_buffered.fgb';
 export const FGB_CACHE_NAME     = 'lapuff-fgb-v4';
 export const FGB_CACHE_KEY      = 'final_building.fgb';
-export const ROADS_FGB_CACHE_NAME = 'lapuff-roads-v7';
+export const ROADS_FGB_CACHE_NAME = 'lapuff-roads-v8';
 export const ROADS_FGB_CACHE_KEY  = 'roads_buffered.fgb';
 export const MAP_CACHE_DONE_KEY     = 'lapuff_map_cache_v1';
 export const MAP_CACHE_BUILDING_KEY = 'lapuff_map_cache_building';
@@ -496,8 +496,10 @@ async function cacheRoadFGB() {
         headers: { 'Content-Type': 'application/octet-stream' },
       }));
     }
-    // Pre-deserialize into memory — Real3D activation reads this ref directly (instant setData)
-    if (!roadFGBFeaturesRef.current) {
+    // Pre-deserialize into memory on desktop only — Real3D reads this ref directly (instant setData).
+    // Mobile skips deserialization: uses viewport-only FGB range queries to avoid OOM.
+    const isMob = typeof window !== 'undefined' && window.innerWidth < 768;
+    if (!isMob && !roadFGBFeaturesRef.current) {
       const features = [];
       for await (const feature of fgbDeserialize(buf)) features.push(feature);
       roadFGBFeaturesRef.current = features;

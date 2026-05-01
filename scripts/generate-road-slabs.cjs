@@ -32,19 +32,19 @@ const BBOX = { minLat: 40.47, minLng: -74.27, maxLat: 40.93, maxLng: -73.68 };
 //   Tier 2: tertiary + residential + unclassified + _links + living_street → tertiary size
 // NEAR (z12+) is 30% smaller than what would otherwise be used.
 const BUFFER_METERS_NEAR = {
-  motorway:         23,   // 33 × 0.70 ≈ 23
-  trunk:            23,
-  motorway_link:    18,   // ramps narrower than parent
-  trunk_link:       18,
-  primary:          14,   // 20 × 0.70 = 14
-  secondary:        14,
-  primary_link:     11,
-  secondary_link:   11,
-  tertiary:          8,   // 11 × 0.70 ≈ 8
-  residential:       8,
-  unclassified:      8,
-  tertiary_link:     7,
-  living_street:     6,
+  motorway:         14,   // 23 × 0.60 ≈ 14
+  trunk:            14,
+  motorway_link:    11,   // ramps narrower than parent
+  trunk_link:       11,
+  primary:           8,   // 14 × 0.60 ≈ 8
+  secondary:         8,
+  primary_link:      7,
+  secondary_link:    7,
+  tertiary:          5,   // 8 × 0.60 ≈ 5
+  residential:       5,
+  unclassified:      5,
+  tertiary_link:     4,
+  living_street:     4,
 };
 const BUFFER_METERS_FAR = {
   motorway:         46,
@@ -358,23 +358,61 @@ async function main() {
 
   console.log(`Buffered ${features.length} features from ${(features.length / 2) | 0} road segments (skipped ${skipped} invalid, dropped ${droppedOutsideBoroughs} outside boroughs).`);
 
+  // ── 2b. Simplify polygons (Douglas-Peucker, ≈1m tolerance) ──────────────
+  // Reduces vertex count on road ribbons without changing visible shape at z9–z14.
+  const SIMPLIFY_TOLERANCE = 0.000009; // ~1m in degrees at NYC latitude
+
+  function perpDist(px, py, ax, ay, bx, by) {
+    const dx = bx - ax, dy = by - ay;
+    if (dx === 0 && dy === 0) return Math.hypot(px - ax, py - ay);
+    const t = ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy);
+    return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+  }
+  function dpSimplify(pts, tol) {
+    if (pts.length <= 2) return pts;
+    let maxD = 0, maxI = 0;
+    for (let i = 1; i < pts.length - 1; i++) {
+      const d = perpDist(pts[i][0], pts[i][1], pts[0][0], pts[0][1], pts[pts.length - 1][0], pts[pts.length - 1][1]);
+      if (d > maxD) { maxD = d; maxI = i; }
+    }
+    if (maxD > tol) {
+      const L = dpSimplify(pts.slice(0, maxI + 1), tol);
+      const R = dpSimplify(pts.slice(maxI), tol);
+      return [...L.slice(0, -1), ...R];
+    }
+    return [pts[0], pts[pts.length - 1]];
+  }
+
+  let simplifiedCount = 0;
+  features.forEach(f => {
+    const ring = f.geometry.coordinates[0];
+    const pts = ring.slice(0, -1); // drop closing point before simplify
+    const simp = dpSimplify(pts, SIMPLIFY_TOLERANCE);
+    if (simp.length >= 3 && simp.length < pts.length) {
+      f.geometry.coordinates[0] = [...simp, simp[0]]; // re-close ring
+      simplifiedCount++;
+    }
+  });
+  console.log(`  Simplified ${simplifiedCount} polygons.`);
+
   // Filter out any features with degenerate rings (< 4 points = uncloseable polygon)
   const validFeatures = features.filter(f => f.geometry.coordinates[0].length >= 4);
   if (validFeatures.length < features.length) {
     console.log(`  (filtered ${features.length - validFeatures.length} degenerate polygons)`);
   }
 
-  // ── 3. Serialize to FlatGeobuf ────────────────────────────────────────────
-  console.log('Serializing to FlatGeobuf…');
+  // ── 3. Serialize to FlatGeobuf (with Hilbert R-tree spatial index) ────────
+  console.log('Serializing to FlatGeobuf (with spatial index)…');
 
   const featureCollection = { type: 'FeatureCollection', features: validFeatures };
 
   // flatgeobuf serialize yields individual bytes — batch into 64KB chunks before writing
+  // true = create Hilbert R-tree spatial index (enables fast HTTP Range bbox queries on mobile)
   const ws = fs.createWriteStream(outPath);
   const BATCH = 65536;
   let batch = [];
   let bytesWritten = 0;
-  for await (const byte of serialize(featureCollection)) {
+  for await (const byte of serialize(featureCollection, true)) {
     batch.push(byte);
     if (batch.length >= BATCH) {
       ws.write(Buffer.from(batch));
