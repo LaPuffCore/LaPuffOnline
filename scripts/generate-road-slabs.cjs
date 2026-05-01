@@ -25,26 +25,34 @@ const { geojson: { serialize } } = require('flatgeobuf');
 // NYC bounding box
 const BBOX = { minLat: 40.47, minLng: -74.27, maxLat: 40.93, maxLng: -73.68 };
 
-// Buffer widths in meters per road class (half-width = distance from centerline to edge).
-// 2x of the z13-calibrated baseline so roads are visible at z9-z12 (where they
-// were previously sub-pixel). At z14+ this makes roads thicker than PMTiles —
-// tunable down later if too prominent at street level.
-// Tiers split into 6 paired-but-distinct widths for sleek visual variance.
-const BUFFER_METERS = {
-  motorway:      130,  // 2.0x of 65
-  trunk:         110,  // 0.85x of motor (slightly thinner)
-  primary:        80,  // 2.0x of 40
-  secondary:      64,  // 0.80x of primary
-  tertiary:       44,  // 2.0x of 22
-  residential:    36,  // 0.82x of tertiary
-  unclassified:   30,  // 2.0x of 15
+// Buffer half-widths in meters per road class, per zoom range.
+// _FAR = z9-z12 (2x wider so roads are visible at far zooms)
+// _NEAR = z12+ (tighter, z13-calibrated for street-level accuracy)
+// At lat 40.7° z13: 14.45 m/px. NEAR targets match old PMTiles visual widths at z13.
+const BUFFER_METERS_NEAR = {
+  motorway:      65,
+  trunk:         55,
+  primary:       40,
+  secondary:     32,
+  tertiary:      22,
+  residential:   18,
+  unclassified:  15,
+};
+const BUFFER_METERS_FAR = {
+  motorway:     130,
+  trunk:        110,
+  primary:       80,
+  secondary:     64,
+  tertiary:      44,
+  residential:   36,
+  unclassified:  30,
 };
 
 // Road tiers that get confined to the 5 boroughs (motorway/trunk pass through unrestricted).
 const BOROUGH_CONFINED = new Set(['primary', 'secondary', 'tertiary', 'residential', 'unclassified']);
 
 // Road classes to include (skip service/path/cycleway — too many, too narrow to matter)
-const ROAD_CLASSES = Object.keys(BUFFER_METERS);
+const ROAD_CLASSES = Object.keys(BUFFER_METERS_NEAR);
 
 const LAT_M = 111320; // meters per degree latitude (constant)
 
@@ -246,7 +254,10 @@ async function main() {
   const ways = await downloadRoads();
 
   // ── 2. Convert to buffered GeoJSON features ───────────────────────────────
-  console.log('Buffering road LineStrings into polygon slabs…');
+  // Each road way produces TWO polygon features:
+  //   _z=0 (far): 2x wider buffer, shown at z9-z12
+  //   _z=1 (near): calibrated buffer, shown at z12+
+  console.log('Buffering road LineStrings into polygon slabs (far + near versions)…');
 
   const features = [];
   let skipped = 0;
@@ -256,8 +267,7 @@ async function main() {
     if (!way.geometry || way.geometry.length < 2) { skipped++; continue; }
 
     const highway = way.tags?.highway;
-    const bufM = BUFFER_METERS[highway];
-    if (!bufM) { skipped++; continue; }
+    if (!BUFFER_METERS_NEAR[highway]) { skipped++; continue; }
 
     // Convert Overpass geom ([{lat,lon}]) to GeoJSON [lng, lat]
     const rawCoords = way.geometry.map(pt => [pt.lon, pt.lat]);
@@ -273,21 +283,19 @@ async function main() {
     const coords = dpSimplify(rawCoords, 0.00003);
     if (coords.length < 2) { skipped++; continue; }
 
-    const rings = bufferLineString(coords, bufM);
-    if (!rings) { skipped++; continue; }
-
-    features.push({
-      type: 'Feature',
-      geometry: { type: 'Polygon', coordinates: rings },
-      properties: {
-        highway,
-        bufM,
-        wayId: way.id,
-      },
-    });
+    // Emit far (_z=0) and near (_z=1) versions
+    for (const [_z, bufM] of [[0, BUFFER_METERS_FAR[highway]], [1, BUFFER_METERS_NEAR[highway]]]) {
+      const rings = bufferLineString(coords, bufM);
+      if (!rings) continue;
+      features.push({
+        type: 'Feature',
+        geometry: { type: 'Polygon', coordinates: rings },
+        properties: { highway, bufM, wayId: way.id, _z },
+      });
+    }
   }
 
-  console.log(`Buffered ${features.length} ways (skipped ${skipped} invalid, dropped ${droppedOutsideBoroughs} outside boroughs).`);
+  console.log(`Buffered ${features.length} features from ${features.length / 2 | 0} ways (skipped ${skipped} invalid, dropped ${droppedOutsideBoroughs} outside boroughs).`);
 
   // Filter out any features with degenerate rings (< 4 points = uncloseable polygon)
   const validFeatures = features.filter(f => f.geometry.coordinates[0].length >= 4);

@@ -21,7 +21,7 @@ const BUILDING_FGB_URL = './data/final_building.fgb';
 const ROAD_FGB_URL     = './data/roads_buffered.fgb';
 const FGB_CACHE_NAME = 'lapuff-fgb-v4'; // v4: rebuilt with Hilbert R-tree spatial index
 const FGB_CACHE_KEY  = 'final_building.fgb';
-const ROADS_FGB_CACHE_NAME = 'lapuff-roads-v2';
+const ROADS_FGB_CACHE_NAME = 'lapuff-roads-v3';
 const ROADS_FGB_CACHE_KEY  = 'roads_buffered.fgb';
 
 // MapLoadingScreen gate keys
@@ -948,12 +948,12 @@ const NYC_BBOX_GEOM = {
 const REAL3D_ALL_LAYER_IDS = [
   'real3d-water',
   'real3d-park',
-  'real3d-roads-motorway-slab',
-  'real3d-roads-trunk-slab',
-  'real3d-roads-primary-slab',
-  'real3d-roads-secondary-slab',
-  'real3d-roads-tertiary-slab',
-  'real3d-roads-residential-slab',
+  'real3d-roads-motorway-far-slab',   'real3d-roads-motorway-slab',
+  'real3d-roads-trunk-far-slab',      'real3d-roads-trunk-slab',
+  'real3d-roads-primary-far-slab',    'real3d-roads-primary-slab',
+  'real3d-roads-secondary-far-slab',  'real3d-roads-secondary-slab',
+  'real3d-roads-tertiary-far-slab',   'real3d-roads-tertiary-slab',
+  'real3d-roads-residential-far-slab','real3d-roads-residential-slab',
   'real3d-landuse-baseplate',
   'real3d-buildings', 'real3d-buildings-outline', 'real3d-buildings-baseplate',
 ];
@@ -3292,33 +3292,49 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       }, 0);
     }
 
-    // Road slab tiers — 6 layers, each one highway class.
-    // Color spec: range from #a80000 (motorway, darkest) → #e62000 (residential, lightest).
-    // All ≤ default red #ff2200 (borough/zcta outline) so roads never out-saturate the outlines.
-    // Heatmap ON: all roads → #000000 @ 0.5 (blends with zone color below).
-    // Pre-confined to 5 boroughs at FGB generation time (motorway/trunk pass through unrestricted).
+    // Road slab tiers — 6 highway classes × 2 zoom ranges = 12 layers.
+    // _far layers (_z=0): 2x wider buffers, shown z9-z12 (far zoom visibility)
+    // _near layers (_z=1): z13-calibrated buffers, shown z12+ (street-level accuracy)
+    // Borough confinement baked into FGB at generation time (motorway/trunk unrestricted).
+    // Color spec: #a80000 (motorway, floor) → #e62000 (residential, just under #ff2200 outline red)
     const ROAD_TIERS = [
       { hwy: 'motorway',    minz: 9,  colorOff: '#a80000', opacityOff: 0.95 },
       { hwy: 'trunk',       minz: 9,  colorOff: '#b40800', opacityOff: 0.95 },
       { hwy: 'primary',     minz: 10, colorOff: '#c01000', opacityOff: 0.92 },
       { hwy: 'secondary',   minz: 10, colorOff: '#cc1800', opacityOff: 0.90 },
       { hwy: 'tertiary',    minz: 11, colorOff: '#d81c00', opacityOff: 0.88 },
-      // residential layer also includes 'unclassified' (sparse class, similar visual scale)
       { hwy: 'residential', minz: 11, colorOff: '#e62000', opacityOff: 0.85 },
     ];
     for (const tier of ROAD_TIERS) {
-      const id = `real3d-roads-${tier.hwy}-slab`;
-      if (!map.getLayer(id)) {
-        const matchValues = tier.hwy === 'residential'
-          ? ['residential', 'unclassified']
-          : [tier.hwy];
+      const matchValues = tier.hwy === 'residential'
+        ? ['residential', 'unclassified']
+        : [tier.hwy];
+      const baseFilter = ['match', ['get', 'highway'], matchValues, true, false];
+      // Far version: wide buffers, z9(or 10/11) → 12
+      const farId = `real3d-roads-${tier.hwy}-far-slab`;
+      if (!map.getLayer(farId)) {
         map.addLayer({
-          id, type: 'fill-extrusion', source: 'fgb-roads', minzoom: tier.minz,
-          filter: ['match', ['get', 'highway'], matchValues, true, false],
+          id: farId, type: 'fill-extrusion', source: 'fgb-roads',
+          minzoom: tier.minz, maxzoom: 12,
+          filter: ['all', baseFilter, ['==', ['get', '_z'], 0]],
           paint: {
             'fill-extrusion-color':   isHeatmap ? '#000000' : tier.colorOff,
-            'fill-extrusion-height':  0.5,
-            'fill-extrusion-base':    0,
+            'fill-extrusion-height':  0.5, 'fill-extrusion-base': 0,
+            'fill-extrusion-opacity': isHeatmap ? 0.5 : tier.opacityOff,
+            'fill-extrusion-vertical-gradient': false,
+          },
+        });
+      }
+      // Near version: calibrated buffers, z12+
+      const nearId = `real3d-roads-${tier.hwy}-slab`;
+      if (!map.getLayer(nearId)) {
+        map.addLayer({
+          id: nearId, type: 'fill-extrusion', source: 'fgb-roads',
+          minzoom: 12,
+          filter: ['all', baseFilter, ['==', ['get', '_z'], 1]],
+          paint: {
+            'fill-extrusion-color':   isHeatmap ? '#000000' : tier.colorOff,
+            'fill-extrusion-height':  0.5, 'fill-extrusion-base': 0,
             'fill-extrusion-opacity': isHeatmap ? 0.5 : tier.opacityOff,
             'fill-extrusion-vertical-gradient': false,
           },
@@ -3584,17 +3600,20 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       }
     }
 
-    // Road slab heatmap toggle — 6 layers (motorway → residential)
-    // Heatmap ON: all roads → 50% opaque black (blends with zone color below).
-    // Heatmap OFF: tier-differentiated reds. Floor #a80000 (motor), ceiling just under #ff2200.
-    const roadSlabs = [
-      { id: 'real3d-roads-motorway-slab',    colorOff: '#a80000', opacityOff: 0.95 },
-      { id: 'real3d-roads-trunk-slab',       colorOff: '#b40800', opacityOff: 0.95 },
-      { id: 'real3d-roads-primary-slab',     colorOff: '#c01000', opacityOff: 0.92 },
-      { id: 'real3d-roads-secondary-slab',   colorOff: '#cc1800', opacityOff: 0.90 },
-      { id: 'real3d-roads-tertiary-slab',    colorOff: '#d81c00', opacityOff: 0.88 },
-      { id: 'real3d-roads-residential-slab', colorOff: '#e62000', opacityOff: 0.85 },
+    // Road slab heatmap toggle — 12 layers (6 tiers × far + near zoom ranges).
+    // Heatmap ON: all roads → 50% opaque black. Heatmap OFF: tier reds.
+    const ROAD_TIER_COLORS = [
+      { base: 'motorway',    colorOff: '#a80000', opacityOff: 0.95 },
+      { base: 'trunk',       colorOff: '#b40800', opacityOff: 0.95 },
+      { base: 'primary',     colorOff: '#c01000', opacityOff: 0.92 },
+      { base: 'secondary',   colorOff: '#cc1800', opacityOff: 0.90 },
+      { base: 'tertiary',    colorOff: '#d81c00', opacityOff: 0.88 },
+      { base: 'residential', colorOff: '#e62000', opacityOff: 0.85 },
     ];
+    const roadSlabs = ROAD_TIER_COLORS.flatMap(({ base, colorOff, opacityOff }) => [
+      { id: `real3d-roads-${base}-far-slab`, colorOff, opacityOff },
+      { id: `real3d-roads-${base}-slab`,     colorOff, opacityOff },
+    ]);
     roadSlabs.forEach(({ id, colorOff, opacityOff }) => {
       if (map.getLayer(id)) {
         map.setPaintProperty(id, 'fill-extrusion-color',   heatmap ? '#000000' : colorOff);
