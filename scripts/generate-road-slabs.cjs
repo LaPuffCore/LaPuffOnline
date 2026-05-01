@@ -25,16 +25,25 @@ const { geojson: { serialize } } = require('flatgeobuf');
 // NYC bounding box
 const BBOX = { minLat: 40.47, minLng: -74.27, maxLat: 40.93, maxLng: -73.68 };
 
-// Buffer widths in meters per road class (half-width = distance from centerline to edge)
+// Buffer widths in meters per road class (half-width = distance from centerline to edge).
+// Calibrated to z13 (focal Real3D zoom — handoff where 3D buildings appear).
+// At lat 40.7° z13: 14.45 m/px. half-width = target_visual_px × 14.45 / 2.
+// Targets match old PMTiles line widths from commit 67130a6 at z13:
+//   motor   9.0px → 65m half (130m total)
+//   primary 5.6px → 40m half ( 80m total)
+//   tertiary 3.1px → 22m half ( 44m total)
 const BUFFER_METERS = {
-  motorway:       42,  // 84m total → z14 = 11.6px (old: 11.7px ✅)
-  trunk:          42,
-  primary:        26,  // 52m total → z14 = 7.2px  (old: 7.3px ✅)
-  secondary:      20,  // 40m total
-  tertiary:       16,  // 32m total → z14 = 4.4px  (old: 4.3px ✅)
-  residential:    13,  // 26m total
-  unclassified:   11,  // 22m total
+  motorway:       65,
+  trunk:          65,
+  primary:        40,
+  secondary:      32,
+  tertiary:       22,
+  residential:    18,
+  unclassified:   15,
 };
+
+// Road tiers that get confined to the 5 boroughs (motorway/trunk pass through unrestricted).
+const BOROUGH_CONFINED = new Set(['primary', 'secondary', 'tertiary', 'residential', 'unclassified']);
 
 // Road classes to include (skip service/path/cycleway — too many, too narrow to matter)
 const ROAD_CLASSES = Object.keys(BUFFER_METERS);
@@ -185,6 +194,55 @@ async function downloadRoads() {
 
 async function main() {
   const outPath = path.resolve(__dirname, '../public/data/roads_buffered.fgb');
+  const boroughPath = path.resolve(__dirname, '../public/data/borough.geo.json');
+
+  // ── 0. Load borough geometry for confinement filter ───────────────────────
+  console.log('Loading borough.geo.json for confinement filter…');
+  const boroughGeo = JSON.parse(fs.readFileSync(boroughPath, 'utf8'));
+  // Flatten to a list of {ring, holes} polygons (one per outer ring across all MultiPolygons)
+  const boroughPolys = [];
+  for (const f of boroughGeo.features) {
+    const g = f.geometry;
+    if (g.type === 'Polygon') {
+      boroughPolys.push({ outer: g.coordinates[0], holes: g.coordinates.slice(1) });
+    } else if (g.type === 'MultiPolygon') {
+      for (const poly of g.coordinates) {
+        boroughPolys.push({ outer: poly[0], holes: poly.slice(1) });
+      }
+    }
+  }
+  // Pre-compute each polygon's bbox for early-exit
+  for (const p of boroughPolys) {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const [x, y] of p.outer) {
+      if (x < minX) minX = x; if (x > maxX) maxX = x;
+      if (y < minY) minY = y; if (y > maxY) maxY = y;
+    }
+    p.bbox = [minX, minY, maxX, maxY];
+  }
+  console.log(`  Loaded ${boroughPolys.length} borough sub-polygons.`);
+
+  function pointInRing(x, y, ring) {
+    let inside = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const [xi, yi] = ring[i], [xj, yj] = ring[j];
+      const intersect = ((yi > y) !== (yj > y)) &&
+        (x < ((xj - xi) * (y - yi)) / ((yj - yi) || 1e-12) + xi);
+      if (intersect) inside = !inside;
+    }
+    return inside;
+  }
+  function pointInBoroughs(lng, lat) {
+    for (const p of boroughPolys) {
+      const [minX, minY, maxX, maxY] = p.bbox;
+      if (lng < minX || lng > maxX || lat < minY || lat > maxY) continue;
+      if (!pointInRing(lng, lat, p.outer)) continue;
+      let inHole = false;
+      for (const h of p.holes) { if (pointInRing(lng, lat, h)) { inHole = true; break; } }
+      if (!inHole) return true;
+    }
+    return false;
+  }
 
   // ── 1. Download ───────────────────────────────────────────────────────────
   const ways = await downloadRoads();
@@ -194,6 +252,7 @@ async function main() {
 
   const features = [];
   let skipped = 0;
+  let droppedOutsideBoroughs = 0;
 
   for (const way of ways) {
     if (!way.geometry || way.geometry.length < 2) { skipped++; continue; }
@@ -204,6 +263,13 @@ async function main() {
 
     // Convert Overpass geom ([{lat,lon}]) to GeoJSON [lng, lat]
     const rawCoords = way.geometry.map(pt => [pt.lon, pt.lat]);
+
+    // Borough confinement: drop non-motorway/trunk roads whose midpoint is outside the 5 boroughs.
+    // Motorway and trunk always kept (highways legitimately cross borough boundaries).
+    if (BOROUGH_CONFINED.has(highway)) {
+      const mid = rawCoords[Math.floor(rawCoords.length / 2)];
+      if (!pointInBoroughs(mid[0], mid[1])) { droppedOutsideBoroughs++; continue; }
+    }
 
     // Simplify before buffering (tolerance ≈ 3m in degrees)
     const coords = dpSimplify(rawCoords, 0.00003);
@@ -223,7 +289,7 @@ async function main() {
     });
   }
 
-  console.log(`Buffered ${features.length} ways (skipped ${skipped} invalid/short).`);
+  console.log(`Buffered ${features.length} ways (skipped ${skipped} invalid, dropped ${droppedOutsideBoroughs} outside boroughs).`);
 
   // Filter out any features with degenerate rings (< 4 points = uncloseable polygon)
   const validFeatures = features.filter(f => f.geometry.coordinates[0].length >= 4);

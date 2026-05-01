@@ -3296,7 +3296,23 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         source: 'fgb-roads', minzoom: 9,
         filter: ['match', ['get', 'highway'], ['motorway', 'trunk'], true, false],
         paint: {
-          'fill-extrusion-color': isHeatmap ? '#000000' : '#bb1800',
+          'fill-extrusion-color': isHeatmap ? '#000000' : '#a80000',
+          'fill-extrusion-height': 0.5,
+          'fill-extrusion-base': 0,
+          'fill-extrusion-opacity': isHeatmap ? 0.5 : 0.95,
+          'fill-extrusion-vertical-gradient': false,
+        },
+      });
+    }
+
+    // Tier 2 — Primary + Secondary: z10+, pre-confined to 5 boroughs at FGB generation time
+    if (!map.getLayer('real3d-roads-primary-slab')) {
+      map.addLayer({
+        id: 'real3d-roads-primary-slab', type: 'fill-extrusion',
+        source: 'fgb-roads', minzoom: 10,
+        filter: ['match', ['get', 'highway'], ['primary', 'secondary'], true, false],
+        paint: {
+          'fill-extrusion-color': isHeatmap ? '#000000' : '#c41e1e',
           'fill-extrusion-height': 0.5,
           'fill-extrusion-base': 0,
           'fill-extrusion-opacity': isHeatmap ? 0.5 : 0.9,
@@ -3305,39 +3321,17 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       });
     }
 
-    // Tier 2 — Primary + Secondary: z10+, NYC stencil
-    if (!map.getLayer('real3d-roads-primary-slab')) {
-      map.addLayer({
-        id: 'real3d-roads-primary-slab', type: 'fill-extrusion',
-        source: 'fgb-roads', minzoom: 10,
-        filter: ['all',
-          ['match', ['get', 'highway'], ['primary', 'secondary'], true, false],
-          ['within', NYC_BBOX_GEOM],
-        ],
-        paint: {
-          'fill-extrusion-color': isHeatmap ? '#000000' : '#cc1800',
-          'fill-extrusion-height': 0.5,
-          'fill-extrusion-base': 0,
-          'fill-extrusion-opacity': isHeatmap ? 0.5 : 0.75,
-          'fill-extrusion-vertical-gradient': false,
-        },
-      });
-    }
-
-    // Tier 3 — Tertiary + Residential + Unclassified: z11+, NYC stencil
+    // Tier 3 — Tertiary + Residential + Unclassified: z11+, pre-confined to 5 boroughs
     if (!map.getLayer('real3d-roads-tertiary-slab')) {
       map.addLayer({
         id: 'real3d-roads-tertiary-slab', type: 'fill-extrusion',
         source: 'fgb-roads', minzoom: 11,
-        filter: ['all',
-          ['match', ['get', 'highway'], ['tertiary', 'residential', 'unclassified'], true, false],
-          ['within', NYC_BBOX_GEOM],
-        ],
+        filter: ['match', ['get', 'highway'], ['tertiary', 'residential', 'unclassified'], true, false],
         paint: {
-          'fill-extrusion-color': isHeatmap ? '#000000' : '#771100',
+          'fill-extrusion-color': isHeatmap ? '#000000' : '#d83838',
           'fill-extrusion-height': 0.5,
           'fill-extrusion-base': 0,
-          'fill-extrusion-opacity': isHeatmap ? 0.5 : 0.65,
+          'fill-extrusion-opacity': isHeatmap ? 0.5 : 0.85,
           'fill-extrusion-vertical-gradient': false,
         },
       });
@@ -3603,11 +3597,11 @@ export default function MapView({ events, headerCollapsed = false, interactive =
 
     // Road slab heatmap toggle — 3 layers
     // Heatmap ON: all roads → 50% opaque black (naturally blends with zone color below)
-    // Heatmap OFF: restore tier-differentiated red colors + opacities
+    // Heatmap OFF: tier-differentiated reds. Motor/trunk is the floor (#a80000), others lighter.
     const roadSlabs = [
-      { id: 'real3d-roads-motorway-slab', colorOff: '#bb1800', opacityOff: 0.9  },
-      { id: 'real3d-roads-primary-slab',  colorOff: '#cc1800', opacityOff: 0.75 },
-      { id: 'real3d-roads-tertiary-slab', colorOff: '#771100', opacityOff: 0.65 },
+      { id: 'real3d-roads-motorway-slab', colorOff: '#a80000', opacityOff: 0.95 },
+      { id: 'real3d-roads-primary-slab',  colorOff: '#c41e1e', opacityOff: 0.9  },
+      { id: 'real3d-roads-tertiary-slab', colorOff: '#d83838', opacityOff: 0.85 },
     ];
     roadSlabs.forEach(({ id, colorOff, opacityOff }) => {
       if (map.getLayer(id)) {
