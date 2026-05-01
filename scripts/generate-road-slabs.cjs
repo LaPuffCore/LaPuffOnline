@@ -39,8 +39,8 @@ const BUFFER_METERS_NEAR = {
   unclassified:  15,
 };
 const BUFFER_METERS_FAR = {
-  motorway:     130,
-  trunk:        110,
+  motorway:      91, // 130m * 0.7 — 30% narrower at z9-12 per user request
+  trunk:         77, // 110m * 0.7 — 30% narrower at z9-12 per user request
   primary:       80,
   secondary:     64,
   tertiary:      44,
@@ -48,7 +48,7 @@ const BUFFER_METERS_FAR = {
   unclassified:  30,
 };
 
-// Road tiers that get confined to the 5 boroughs (motorway/trunk pass through unrestricted).
+// Road tiers that get confined to the 5 boroughs (motorway/trunk use linestring clipping instead).
 const BOROUGH_CONFINED = new Set(['primary', 'secondary', 'tertiary', 'residential', 'unclassified']);
 
 // Road classes to include (skip service/path/cycleway — too many, too narrow to matter)
@@ -250,13 +250,54 @@ async function main() {
     return false;
   }
 
+  /**
+   * Clip a linestring to borough bounds, returning an array of sub-linestrings
+   * that lie INSIDE the boroughs. Each transition (inside→outside or outside→inside)
+   * is approximated via a midpoint so slabs don't extend past the borough edge by more
+   * than ~half a segment length.
+   */
+  function clipLineToBoroughs(coords) {
+    const segments = [];
+    let current = null;
+    for (let i = 0; i < coords.length; i++) {
+      const pt = coords[i];
+      const inside = pointInBoroughs(pt[0], pt[1]);
+      if (inside) {
+        if (!current) {
+          // Just entered: approximate entry point
+          if (i > 0) {
+            const prev = coords[i - 1];
+            const mid = [(prev[0] + pt[0]) / 2, (prev[1] + pt[1]) / 2];
+            current = pointInBoroughs(mid[0], mid[1]) ? [mid, pt] : [pt];
+          } else {
+            current = [pt];
+          }
+        } else {
+          current.push(pt);
+        }
+      } else {
+        if (current) {
+          // Just exited: approximate exit point
+          const prev = coords[i - 1];
+          const mid = [(prev[0] + pt[0]) / 2, (prev[1] + pt[1]) / 2];
+          if (pointInBoroughs(mid[0], mid[1])) current.push(mid);
+          if (current.length >= 2) segments.push(current);
+          current = null;
+        }
+      }
+    }
+    if (current && current.length >= 2) segments.push(current);
+    return segments;
+  }
+
   // ── 1. Download ───────────────────────────────────────────────────────────
   const ways = await downloadRoads();
 
-  // ── 2. Convert to buffered GeoJSON features ───────────────────────────────
   // Each road way produces TWO polygon features:
-  //   _z=0 (far): 2x wider buffer, shown at z9-z12
-  //   _z=1 (near): calibrated buffer, shown at z12+
+  //   _z='f' (far): 2x wider buffer, shown at z9-z12
+  //   _z='n' (near): calibrated buffer, shown at z12+
+  // Motorway/trunk are clipped to borough boundary (not excluded like other roads).
+  // _z uses strings ('f'/'n') not integers to avoid MapLibre filter falsy-zero issues.
   console.log('Buffering road LineStrings into polygon slabs (far + near versions)…');
 
   const features = [];
@@ -272,30 +313,40 @@ async function main() {
     // Convert Overpass geom ([{lat,lon}]) to GeoJSON [lng, lat]
     const rawCoords = way.geometry.map(pt => [pt.lon, pt.lat]);
 
-    // Borough confinement: drop non-motorway/trunk roads whose midpoint is outside the 5 boroughs.
-    // Motorway and trunk always kept (highways legitimately cross borough boundaries).
+    // Determine which linestring segments to buffer.
+    // - Borough-confined roads (primary/secondary/tertiary/residential): drop if midpoint outside.
+    // - Motorway/trunk: clip to borough boundary, producing multiple sub-linestrings.
+    let coordSets; // array of [lng,lat][] to buffer
     if (BOROUGH_CONFINED.has(highway)) {
       const mid = rawCoords[Math.floor(rawCoords.length / 2)];
       if (!pointInBoroughs(mid[0], mid[1])) { droppedOutsideBoroughs++; continue; }
+      // Simplify entire line then buffer as one piece
+      const simplified = dpSimplify(rawCoords, 0.00003);
+      if (simplified.length < 2) { skipped++; continue; }
+      coordSets = [simplified];
+    } else {
+      // Motorway/trunk: clip to borough, then simplify each sub-segment
+      const clipped = clipLineToBoroughs(rawCoords);
+      if (clipped.length === 0) { droppedOutsideBoroughs++; continue; }
+      coordSets = clipped.map(seg => dpSimplify(seg, 0.00003)).filter(seg => seg.length >= 2);
+      if (coordSets.length === 0) { skipped++; continue; }
     }
 
-    // Simplify before buffering (tolerance ≈ 3m in degrees)
-    const coords = dpSimplify(rawCoords, 0.00003);
-    if (coords.length < 2) { skipped++; continue; }
-
-    // Emit far (_z=0) and near (_z=1) versions
-    for (const [_z, bufM] of [[0, BUFFER_METERS_FAR[highway]], [1, BUFFER_METERS_NEAR[highway]]]) {
-      const rings = bufferLineString(coords, bufM);
-      if (!rings) continue;
-      features.push({
-        type: 'Feature',
-        geometry: { type: 'Polygon', coordinates: rings },
-        properties: { highway, bufM, wayId: way.id, _z },
-      });
+    // Emit far (_z='f') and near (_z='n') versions for each segment
+    for (const coords of coordSets) {
+      for (const [_z, bufM] of [['f', BUFFER_METERS_FAR[highway]], ['n', BUFFER_METERS_NEAR[highway]]]) {
+        const rings = bufferLineString(coords, bufM);
+        if (!rings) continue;
+        features.push({
+          type: 'Feature',
+          geometry: { type: 'Polygon', coordinates: rings },
+          properties: { highway, bufM, wayId: way.id, _z },
+        });
+      }
     }
   }
 
-  console.log(`Buffered ${features.length} features from ${features.length / 2 | 0} ways (skipped ${skipped} invalid, dropped ${droppedOutsideBoroughs} outside boroughs).`);
+  console.log(`Buffered ${features.length} features from ${(features.length / 2) | 0} road segments (skipped ${skipped} invalid, dropped ${droppedOutsideBoroughs} outside boroughs).`);
 
   // Filter out any features with degenerate rings (< 4 points = uncloseable polygon)
   const validFeatures = features.filter(f => f.geometry.coordinates[0].length >= 4);

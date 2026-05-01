@@ -21,7 +21,7 @@ const BUILDING_FGB_URL = './data/final_building.fgb';
 const ROAD_FGB_URL     = './data/roads_buffered.fgb';
 const FGB_CACHE_NAME = 'lapuff-fgb-v4'; // v4: rebuilt with Hilbert R-tree spatial index
 const FGB_CACHE_KEY  = 'final_building.fgb';
-const ROADS_FGB_CACHE_NAME = 'lapuff-roads-v3';
+const ROADS_FGB_CACHE_NAME = 'lapuff-roads-v4';
 const ROADS_FGB_CACHE_KEY  = 'roads_buffered.fgb';
 
 // MapLoadingScreen gate keys
@@ -3298,12 +3298,12 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     // Borough confinement baked into FGB at generation time (motorway/trunk unrestricted).
     // Color spec: #a80000 (motorway, floor) → #e62000 (residential, just under #ff2200 outline red)
     const ROAD_TIERS = [
-      { hwy: 'motorway',    minz: 9,  colorOff: '#a80000', opacityOff: 0.95 },
-      { hwy: 'trunk',       minz: 9,  colorOff: '#b40800', opacityOff: 0.95 },
-      { hwy: 'primary',     minz: 10, colorOff: '#c01000', opacityOff: 0.92 },
-      { hwy: 'secondary',   minz: 10, colorOff: '#cc1800', opacityOff: 0.90 },
-      { hwy: 'tertiary',    minz: 11, colorOff: '#d81c00', opacityOff: 0.88 },
-      { hwy: 'residential', minz: 11, colorOff: '#e62000', opacityOff: 0.85 },
+      { hwy: 'motorway',    minz: 9,  colorOff: '#a80000', opacityOff: 0.95, height: 0.6 },
+      { hwy: 'trunk',       minz: 9,  colorOff: '#b40800', opacityOff: 0.95, height: 0.5 },
+      { hwy: 'primary',     minz: 10, colorOff: '#c01000', opacityOff: 0.92, height: 0.4 },
+      { hwy: 'secondary',   minz: 10, colorOff: '#cc1800', opacityOff: 0.90, height: 0.3 },
+      { hwy: 'tertiary',    minz: 11, colorOff: '#d81c00', opacityOff: 0.88, height: 0.2 },
+      { hwy: 'residential', minz: 11, colorOff: '#e62000', opacityOff: 0.85, height: 0.1 },
     ];
     for (const tier of ROAD_TIERS) {
       const matchValues = tier.hwy === 'residential'
@@ -3316,11 +3316,11 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         map.addLayer({
           id: farId, type: 'fill-extrusion', source: 'fgb-roads',
           minzoom: tier.minz, maxzoom: 12,
-          filter: ['all', baseFilter, ['==', ['get', '_z'], 0]],
+          filter: ['all', baseFilter, ['==', ['get', '_z'], 'f']],
           paint: {
             'fill-extrusion-color':   isHeatmap ? '#000000' : tier.colorOff,
-            'fill-extrusion-height':  0.5, 'fill-extrusion-base': 0,
-            'fill-extrusion-opacity': isHeatmap ? 0.5 : tier.opacityOff,
+            'fill-extrusion-height':  tier.height, 'fill-extrusion-base': 0,
+            'fill-extrusion-opacity': isHeatmap ? 0.25 : tier.opacityOff,
             'fill-extrusion-vertical-gradient': false,
           },
         });
@@ -3331,11 +3331,11 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         map.addLayer({
           id: nearId, type: 'fill-extrusion', source: 'fgb-roads',
           minzoom: 12,
-          filter: ['all', baseFilter, ['==', ['get', '_z'], 1]],
+          filter: ['all', baseFilter, ['==', ['get', '_z'], 'n']],
           paint: {
             'fill-extrusion-color':   isHeatmap ? '#000000' : tier.colorOff,
-            'fill-extrusion-height':  0.5, 'fill-extrusion-base': 0,
-            'fill-extrusion-opacity': isHeatmap ? 0.5 : tier.opacityOff,
+            'fill-extrusion-height':  tier.height, 'fill-extrusion-base': 0,
+            'fill-extrusion-opacity': isHeatmap ? 0.25 : tier.opacityOff,
             'fill-extrusion-vertical-gradient': false,
           },
         });
@@ -3617,7 +3617,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     roadSlabs.forEach(({ id, colorOff, opacityOff }) => {
       if (map.getLayer(id)) {
         map.setPaintProperty(id, 'fill-extrusion-color',   heatmap ? '#000000' : colorOff);
-        map.setPaintProperty(id, 'fill-extrusion-opacity', heatmap ? 0.5       : opacityOff);
+        map.setPaintProperty(id, 'fill-extrusion-opacity', heatmap ? 0.25      : opacityOff);
       }
     });
 
