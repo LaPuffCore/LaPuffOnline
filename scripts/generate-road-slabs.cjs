@@ -26,29 +26,31 @@ const { geojson: { serialize } } = require('flatgeobuf');
 const BBOX = { minLat: 40.47, minLng: -74.27, maxLat: 40.93, maxLng: -73.68 };
 
 // Buffer half-widths in meters per road class, per zoom range.
-// _FAR = z9-z12 (2x wider so roads are visible at far zooms)
-// _NEAR = z12+ (tighter, z13-calibrated for street-level accuracy)
-// At lat 40.7° z13: 14.45 m/px. NEAR targets match old PMTiles visual widths at z13.
+// 3 merged tiers (each sub-class gets the same buffer as the tier's primary class):
+//   Tier A: motorway + trunk   → motorway size
+//   Tier B: primary + secondary → primary size
+//   Tier C: tertiary + residential + unclassified → tertiary size
 const BUFFER_METERS_NEAR = {
   motorway:      33,
-  trunk:         28,
+  trunk:         33,   // same as motorway
   primary:       20,
-  secondary:     16,
+  secondary:     20,   // same as primary
   tertiary:      11,
-  residential:    9,
-  unclassified:   8,
+  residential:   11,   // same as tertiary
+  unclassified:  11,   // same as tertiary
 };
 const BUFFER_METERS_FAR = {
   motorway:      46,
-  trunk:         39,
+  trunk:         46,   // same as motorway
   primary:       40,
-  secondary:     32,
+  secondary:     40,   // same as primary
   tertiary:      22,
-  residential:   18,
-  unclassified:  15,
+  residential:   22,   // same as tertiary
+  unclassified:  22,   // same as tertiary
 };
 
-// Road tiers that get confined to the 5 boroughs (motorway/trunk use linestring clipping instead).
+// Road tiers that get confined to the 5 boroughs via midpoint PiP.
+// motorway/trunk use BBOX check instead (bridges cross water, not land).
 const BOROUGH_CONFINED = new Set(['primary', 'secondary', 'tertiary', 'residential', 'unclassified']);
 
 // Road classes to include (skip service/path/cycleway — too many, too narrow to matter)
@@ -251,27 +253,16 @@ async function main() {
   }
 
   /**
-   * Clip a linestring to borough bounds using first-to-last borough vertex.
-   * Keeps everything between the first vertex inside any borough and the last
-   * vertex inside any borough — this naturally preserves cross-borough roads
-   * (e.g. Verrazzano Bridge: Staten Island → water → Brooklyn) without dropping
-   * the inter-borough water section.
+   * For motorway/trunk: keep the road if ANY vertex lies within the NYC BBOX.
+   * We use BBOX (not borough polygons) because bridges run over water, so their
+   * vertices may not be inside any borough polygon. BBOX is permissive enough
+   * to include all NYC-area highways without dropping bridges.
    */
-  function clipLineToBoroughs(coords) {
-    let firstIdx = -1, lastIdx = -1;
-    for (let i = 0; i < coords.length; i++) {
-      if (pointInBoroughs(coords[i][0], coords[i][1])) {
-        if (firstIdx === -1) firstIdx = i;
-        lastIdx = i;
-      }
-    }
-    if (firstIdx === -1) return []; // No vertex in any borough — skip entirely
-    // Include one vertex before firstIdx and one after lastIdx (if they exist)
-    // so the slab extends slightly past the edge vertex toward the actual boundary.
-    const start = Math.max(0, firstIdx - 1);
-    const end   = Math.min(coords.length - 1, lastIdx + 1);
-    const clipped = coords.slice(start, end + 1);
-    return clipped.length >= 2 ? [clipped] : [];
+  function anyVertexInBbox(coords) {
+    return coords.some(([lng, lat]) =>
+      lng >= BBOX.minLng && lng <= BBOX.maxLng &&
+      lat >= BBOX.minLat && lat <= BBOX.maxLat
+    );
   }
 
   // ── 1. Download ───────────────────────────────────────────────────────────
@@ -309,11 +300,12 @@ async function main() {
       if (simplified.length < 2) { skipped++; continue; }
       coordSets = [simplified];
     } else {
-      // Motorway/trunk: clip to borough, then simplify each sub-segment
-      const clipped = clipLineToBoroughs(rawCoords);
-      if (clipped.length === 0) { droppedOutsideBoroughs++; continue; }
-      coordSets = clipped.map(seg => dpSimplify(seg, 0.00003)).filter(seg => seg.length >= 2);
-      if (coordSets.length === 0) { skipped++; continue; }
+      // Motorway/trunk: keep if ANY vertex is within the NYC BBOX.
+      // Using BBOX (not borough PiP) preserves bridges that run over water.
+      if (!anyVertexInBbox(rawCoords)) { droppedOutsideBoroughs++; continue; }
+      const simplified = dpSimplify(rawCoords, 0.00003);
+      if (simplified.length < 2) { skipped++; continue; }
+      coordSets = [simplified];
     }
 
     // Emit far (_z='f') and near (_z='n') versions for each segment
