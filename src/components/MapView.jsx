@@ -22,7 +22,7 @@ const BUILDING_FGB_URL = './data/final_building.fgb';
 const ROAD_FGB_URL     = './data/roads_buffered.fgb';
 const FGB_CACHE_NAME = 'lapuff-fgb-v4'; // v4: rebuilt with Hilbert R-tree spatial index
 const FGB_CACHE_KEY  = 'final_building.fgb';
-const ROADS_FGB_CACHE_NAME = 'lapuff-roads-v9';
+const ROADS_FGB_CACHE_NAME = 'lapuff-roads-v10';
 const ROADS_FGB_CACHE_KEY  = 'roads_buffered.fgb';
 
 // MapLoadingScreen gate keys
