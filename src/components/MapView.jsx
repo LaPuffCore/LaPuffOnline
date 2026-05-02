@@ -46,21 +46,19 @@ maplibregl.addProtocol('pmtiles', _pmtilesProtocol.tile.bind(_pmtilesProtocol));
 // occlusion of road slabs because both share the fill-extrusion GPU pass.
 // Set to false to roll back to FGB pipeline (FGB code remains intact, just dormant).
 const USE_PMTILES_REAL3D = true;
+// When true, buildings use FGB (381K polygons, no tile-seam AA) even while roads use PMTiles.
+const USE_FGB_BUILDINGS = true;
 
-// The OpenMapTiles-sourced layers used in Real3D mode (water, parks, landuse, building, roads).
-// In PMTiles mode this includes building + road layers per fclass.
+// The OpenMapTiles-sourced layers used in Real3D mode (water + PMTiles roads).
 const REAL3D_OMT_LAYER_IDS = [
-  'real3d-water', 'real3d-park',
-  'real3d-landuse-baseplate',
-  // PMTiles roads (USE_PMTILES_REAL3D=true) — one fill (z9-12) + one extrusion (z12+) per fclass
+  'real3d-water',
+  // PMTiles roads — one fill (z9→z14, 2D) + one extrusion (z13+, 3D) per fclass
   'real3d-pm-roads-motorway-fill', 'real3d-pm-roads-motorway',
   'real3d-pm-roads-trunk-fill',    'real3d-pm-roads-trunk',
   'real3d-pm-roads-primary-fill',  'real3d-pm-roads-primary',
   'real3d-pm-roads-secondary-fill','real3d-pm-roads-secondary',
   'real3d-pm-roads-tertiary-fill', 'real3d-pm-roads-tertiary',
   'real3d-pm-roads-residential-fill','real3d-pm-roads-residential',
-  // PMTiles buildings (USE_PMTILES_REAL3D=true)
-  'real3d-pm-buildings', 'real3d-pm-buildings-baseplate',
 ];
 
 const TIMESPAN_STEPS = [
@@ -988,20 +986,17 @@ const NYC_BBOX_GEOM = {
 // All Real3D layer IDs — used for cleanup.
 const REAL3D_ALL_LAYER_IDS = [
   'real3d-water',
-  'real3d-park',
   'real3d-roads-motorway-far-slab',   'real3d-roads-motorway-slab',
   'real3d-roads-primary-far-slab',    'real3d-roads-primary-slab',
   'real3d-roads-tertiary-far-slab',   'real3d-roads-tertiary-slab',
-  'real3d-landuse-baseplate',
   'real3d-buildings', 'real3d-buildings-outline', 'real3d-buildings-baseplate',
-  // PMTiles mode
+  // PMTiles roads
   'real3d-pm-roads-motorway-fill', 'real3d-pm-roads-motorway',
   'real3d-pm-roads-trunk-fill',    'real3d-pm-roads-trunk',
   'real3d-pm-roads-primary-fill',  'real3d-pm-roads-primary',
   'real3d-pm-roads-secondary-fill','real3d-pm-roads-secondary',
   'real3d-pm-roads-tertiary-fill', 'real3d-pm-roads-tertiary',
   'real3d-pm-roads-residential-fill','real3d-pm-roads-residential',
-  'real3d-pm-buildings', 'real3d-pm-buildings-baseplate',
 ];
 
 // Douglas-Peucker line simplification — reduces coordinate count while preserving shape.
@@ -3351,9 +3346,11 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   function addBuildingLayers(map, isHeatmap, tsIdx = 0) {
     // PMTILES MODE: roads + buildings come from PMTiles sources added in
     // addOpenmaptilesSourceAndLayers. FGB pipeline is dormant — bail early.
-    if (USE_PMTILES_REAL3D) return;
+    if (USE_PMTILES_REAL3D && !USE_FGB_BUILDINGS) return;
 
     // ── Road slabs (fill-extrusion ribbons) ────────────────────────────────
+    // PMTiles roads replace FGB road slabs — skip this section when PMTiles roads are active.
+    if (!USE_PMTILES_REAL3D) {
     // Buffered polygon ribbons. fill-extrusions share the same GPU depth pass
     // as buildings — walls correctly occlude roads at pitched angles.
     // 3 tiers × 2 zoom variants = 6 layers total.
@@ -3461,6 +3458,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         });
       }
     }
+    } // end if (!USE_PMTILES_REAL3D) — FGB road slabs
 
     // ── Building layers ─────────────────────────────────────────────────────
     if (!map.getSource('fgb-buildings')) {
@@ -3536,28 +3534,13 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         paint: { 'fill-color': '#0e1f35', 'fill-opacity': 0.6 },
       }, waterBeforeId);
 
-      map.addLayer({
-        id: 'real3d-park', type: 'fill',
-        source: 'openmaptiles', 'source-layer': 'landuse',
-        filter: ['all', ['==', ['get', 'class'], 'park'], ['within', NYC_BBOX_GEOM]],
-        paint: { 'fill-color': '#081408', 'fill-opacity': 0.8 },
-      });
-
-      map.addLayer({
-        id: 'real3d-landuse-baseplate', type: 'fill',
-        source: 'openmaptiles', 'source-layer': 'landuse',
-        maxzoom: 13,
-        filter: ['all', ['match', ['get', 'class'], ['residential', 'commercial', 'industrial', 'retail'], true, false], ['within', NYC_BBOX_GEOM]],
-        paint: {
-          'fill-color': baseplateColorExpr(isHeatmap, tsIdx),
-          'fill-opacity': ['interpolate', ['linear'], ['zoom'], 9, 0, 10, 0.45, 12.5, 0.45, 13, 0],
-        },
-      });
-
-      // ── PMTILES ROADS + BUILDINGS (Real3D mode) ──────────────────────────
-      // Both rendered as fill-extrusion → buildings depth-occlude roads.
-      // Order in stack: water → park → landuse-baseplate → roads → buildings
-      // → buildings get drawn on top of roads at pitched view (correct).
+      // ── PMTILES ROADS (Real3D mode) ──────────────────────────────────────────
+      // Dual-layer per fclass: 2D fill (z9→z14) + 3D extrusion (z13→z14+).
+      // SEAMLESS HANDOFF: both layers overlap at z13-z14 with an opacity crossfade.
+      // Fill fades OUT (opacityFull→0) from z13 to z14.
+      // Extrusion fades IN (0→opacityFull) from z13 to z14.
+      // 2D fill and fill-extrusion are separate GPU passes — zero Z-fighting in the overlap zone.
+      // At z14+ buildings occlude 3D road slabs via shared depth buffer.
       if (USE_PMTILES_REAL3D) {
         if (!map.getSource('roads-pm')) {
           map.addSource('roads-pm', { type: 'vector', url: `pmtiles://${ROADS_PMTILES_URL}` });
@@ -3582,104 +3565,40 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         for (const r of ROAD_FCLASSES) {
           const fillId = `real3d-pm-roads-${r.fclass}-fill`;
           const extId  = `real3d-pm-roads-${r.fclass}`;
-          // 2D fill: covers full zoom range before buildings (z9/11/12 → z14).
-          // Full polygon footprint, antialiased, zero 3D overhead.
+          // 2D fill: full polygon footprint, antialiased, zero 3D overhead.
+          // Opacity crossfade: full at r.minz→z13, fades to 0 at z14 (seamless handoff to extrusion).
           if (!map.getLayer(fillId)) {
             map.addLayer({
               id: fillId, type: 'fill',
               source: 'roads-pm', 'source-layer': ROADS_PMTILES_LAYER,
-              minzoom: r.minz, maxzoom: 14,
+              minzoom: r.minz,
               filter: ['==', ['get', 'fclass'], r.fclass],
               paint: {
-                'fill-color':      isHeatmap ? '#000000' : r.colorOff,
-                'fill-opacity':    isHeatmap ? HM_OPACITY : r.opacityOff,
-                'fill-antialias':  true,
+                'fill-color':     isHeatmap ? '#000000' : r.colorOff,
+                'fill-opacity':   ['interpolate', ['linear'], ['zoom'], 13, isHeatmap ? HM_OPACITY : r.opacityOff, 14, 0],
+                'fill-antialias': true,
               },
             });
           }
-          // 3D extrusion: only at z14+ so buildings can properly occlude road slabs.
+          // 3D extrusion: fades IN from z13→z14, then full opacity for building occlusion at z14+.
+          // Crossfade with fill layer in z13-z14 zone — no Z-fight (separate GPU passes).
           if (!map.getLayer(extId)) {
             map.addLayer({
               id: extId, type: 'fill-extrusion',
               source: 'roads-pm', 'source-layer': ROADS_PMTILES_LAYER,
-              minzoom: 14,
+              minzoom: 13,
               filter: ['==', ['get', 'fclass'], r.fclass],
               paint: {
                 'fill-extrusion-color':   isHeatmap ? '#000000' : r.colorOff,
                 'fill-extrusion-height':  HEIGHT_EXPR,
                 'fill-extrusion-base':    0,
-                'fill-extrusion-opacity': isHeatmap ? HM_OPACITY : r.opacityOff,
+                'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'], 13, 0, 14, isHeatmap ? HM_OPACITY : r.opacityOff],
                 'fill-extrusion-vertical-gradient': false,
               },
             });
           }
         }
-
-        // Buildings: standard OMT 'building' source-layer from nyc_final.pmtiles.
-        // Flush to ground (base 0), grows by render_height.
-        // NO ['within'] filter — failure #8: fill-extrusion on vector tile source = all features disappear.
-        // Some NJ/Westchester edge buildings appear; custom NYC-clipped PMTiles will fix this.
-        //
-        // Antialiasing / Z-fighting fix: opacity 0.9 (not 1.0) forces MapLibre framebuffer
-        // compositing pass which eliminates tile-seam Z-fighting artifacts between adjacent buildings.
-        // This is the correct fix (same principle as fill-extrusion-opacity < 1.0 trick in the
-        // general MapView notes — framebuffer compositing hides GPU tile seams).
-        //
-        // Baseplate fade strategy:
-        //   Baseplate fades IN (z13→z13.5) then OUT (z13.9→z14) so there's never overlap
-        //   with full-height buildings at exactly z14. Buildings fade IN (z14→z14.5) for a
-        //   smooth handoff. This eliminates the hard-cut flicker at the z14 boundary.
-        const BLDG_HEIGHT = ['coalesce', ['get', 'render_height'], 8];
-        const BLDG_SHADE7 = ['%', ['coalesce', ['id'], 0], 7];
-        const BLDG_COLOR_OFF = ['case',
-          ['==', BLDG_SHADE7, 0], '#0d0101',
-          ['==', BLDG_SHADE7, 1], '#1a0303',
-          ['==', BLDG_SHADE7, 2], '#260606',
-          ['==', BLDG_SHADE7, 3], '#330909',
-          ['==', BLDG_SHADE7, 4], '#400c0c',
-          ['==', BLDG_SHADE7, 5], '#1f0404',
-          '#7a1818',
-        ];
-        const BASEPLATE_OFF = '#260606';
-        const BASEPLATE_ON  = '#220505';
-        const BLDG_COLOR_ON = '#220505';
-
-        if (!map.getLayer('real3d-pm-buildings-baseplate')) {
-          map.addLayer({
-            id: 'real3d-pm-buildings-baseplate', type: 'fill-extrusion',
-            source: 'openmaptiles', 'source-layer': 'building',
-            minzoom: 13, maxzoom: 14,
-            paint: {
-              'fill-extrusion-color': isHeatmap ? BASEPLATE_ON : BASEPLATE_OFF,
-              'fill-extrusion-height': 1,
-              'fill-extrusion-base': 0,
-              // Hard 0.8 opacity — no fade transition. maxzoom:14 gives the hard cutoff.
-              'fill-extrusion-opacity': 0.8,
-              'fill-extrusion-vertical-gradient': false,
-            },
-          });
-        }
-        if (!map.getLayer('real3d-pm-buildings')) {
-          map.addLayer({
-            id: 'real3d-pm-buildings', type: 'fill-extrusion',
-            source: 'openmaptiles', 'source-layer': 'building',
-            minzoom: 14,
-            paint: {
-              'fill-extrusion-color': isHeatmap ? BLDG_COLOR_ON : BLDG_COLOR_OFF,
-              'fill-extrusion-height': BLDG_HEIGHT,
-              'fill-extrusion-base': 0,
-              // Hard 1.0 opacity — full depth-buffer occlusion of road slabs. No transition.
-              // minzoom:14 gives the hard appearance. Baseplate is gone by maxzoom:14 above
-              // so no two layers ever overlap.
-              // NOTE: remaining tile-edge AA (thin seams at tile boundaries) is inherent to
-              // PMTiles vector tiles splitting building polygons at tile edges. This was absent
-              // with FGB (single complete GeoJSON polygons, no tile seams). Will be resolved
-              // when custom NYC-clipped PMTiles is generated.
-              'fill-extrusion-opacity': 1.0,
-              'fill-extrusion-vertical-gradient': false,
-            },
-          });
-        }
+        // Buildings: FGB path (USE_FGB_BUILDINGS=true) — no PMTiles buildings added here.
       }
     } catch (err) { console.warn('addOpenmaptilesSourceAndLayers failed:', err); }
   }
@@ -3852,7 +3771,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     if (!real3dLayersCreatedRef.current) return; // layers not yet initialized — skip
 
     if (USE_PMTILES_REAL3D) {
-      // PMTiles mode: roads + buildings paint update via setPaintProperty (no setData possible).
+      // PMTiles roads: update color + zoom-interpolated opacity expressions.
       const ROAD_FCLASS_PAINT = [
         { fclass: 'motorway',    colorOff: '#850000', opacityOff: 0.95 },
         { fclass: 'trunk',       colorOff: '#850000', opacityOff: 0.95 },
@@ -3867,83 +3786,61 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         const extId  = `real3d-pm-roads-${fclass}`;
         if (map.getLayer(fillId)) {
           map.setPaintProperty(fillId, 'fill-color',   heatmap ? '#000000' : colorOff);
-          map.setPaintProperty(fillId, 'fill-opacity', heatmap ? HM_OPACITY : opacityOff);
+          map.setPaintProperty(fillId, 'fill-opacity',
+            ['interpolate', ['linear'], ['zoom'], 13, heatmap ? HM_OPACITY : opacityOff, 14, 0]);
         }
         if (map.getLayer(extId)) {
           map.setPaintProperty(extId, 'fill-extrusion-color',   heatmap ? '#000000' : colorOff);
-          map.setPaintProperty(extId, 'fill-extrusion-opacity', heatmap ? HM_OPACITY : opacityOff);
+          map.setPaintProperty(extId, 'fill-extrusion-opacity',
+            ['interpolate', ['linear'], ['zoom'], 13, 0, 14, heatmap ? HM_OPACITY : opacityOff]);
         }
       });
-      // Full-height buildings: heatmap=uniform dark, off=shade-clustered red palette.
-      const BLDG_SHADE7 = ['%', ['coalesce', ['id'], 0], 7];
-      const BLDG_COLOR_OFF = ['case',
-        ['==', BLDG_SHADE7, 0], '#0d0101',
-        ['==', BLDG_SHADE7, 1], '#1a0303',
-        ['==', BLDG_SHADE7, 2], '#260606',
-        ['==', BLDG_SHADE7, 3], '#330909',
-        ['==', BLDG_SHADE7, 4], '#400c0c',
-        ['==', BLDG_SHADE7, 5], '#1f0404',
-        '#7a1818',
-      ];
-      const BLDG_COLOR_ON = '#220505';
-      if (map.getLayer('real3d-pm-buildings')) {
-        map.setPaintProperty('real3d-pm-buildings', 'fill-extrusion-color',
-          heatmap ? BLDG_COLOR_ON : BLDG_COLOR_OFF);
-      }
-      // Baseplate: single solid color (NOT clustered) — middle red off, dark red on.
-      if (map.getLayer('real3d-pm-buildings-baseplate')) {
-        map.setPaintProperty('real3d-pm-buildings-baseplate', 'fill-extrusion-color',
-          heatmap ? '#220505' : '#260606');
-      }
-      // Landuse baseplate: shared with FGB path, still uses tier expression.
-      if (map.getLayer('real3d-landuse-baseplate')) {
-        map.setPaintProperty('real3d-landuse-baseplate', 'fill-color', baseplateColorExpr(heatmap, timespanIdxRef.current ?? 2));
-      }
-      // Safezone opacity (shared)
+      // Safezone opacity (shared between PMTiles + FGB paths)
       const isSat = satelliteRef?.current ?? satellite;
       if (map.getLayer('zcta-safezone-extrusion')) {
         map.setPaintProperty('zcta-safezone-extrusion', 'fill-extrusion-opacity', isSat ? 0.22 : 1.0);
       }
-      return;
     }
 
-    const isMob = window.innerWidth < 768;
-    if (isMob) {
-      // Mobile: re-fetch viewport so tier columns are re-baked with current heatmap context
-      if (map.getZoom() >= 13) fetchViewportBuildings(map);
-    } else {
-      // Desktop: safety bake if prerequisites exist but not yet baked, else GPU-only refresh
-      if (!buildingTiersBakedRef.current && buildingFGBRef.current && buildingZctaMapRef.current && precomputedTiersRef.current) {
-        bakeAllTiersIntoBuildings();
+    // FGB buildings paint — runs when buildings use FGB (USE_FGB_BUILDINGS=true)
+    if (!USE_PMTILES_REAL3D || USE_FGB_BUILDINGS) {
+      const isMob = window.innerWidth < 768;
+      if (isMob) {
+        if (map.getZoom() >= 13) fetchViewportBuildings(map);
       } else {
-        refreshBuildingColors();
+        if (!buildingTiersBakedRef.current && buildingFGBRef.current && buildingZctaMapRef.current && precomputedTiersRef.current) {
+          bakeAllTiersIntoBuildings();
+        } else {
+          refreshBuildingColors();
+        }
       }
     }
 
-    // Road slab heatmap toggle — 6 layers (3 tiers × far + near). Scalar opacity (no crossfade).
-    const ROAD_TIER_COLORS = [
-      { base: 'motorway', colorOff: '#850000', opacityOff: 0.95 },
-      { base: 'primary',  colorOff: '#850000', opacityOff: 0.92 },
-      { base: 'tertiary', colorOff: '#cc1100', opacityOff: 0.88 },
-    ];
-    const HM_OPACITY = 0.4;
-    ROAD_TIER_COLORS.forEach(({ base, colorOff, opacityOff }) => {
-      const farId  = `real3d-roads-${base}-far-slab`;
-      const nearId = `real3d-roads-${base}-slab`;
-      if (map.getLayer(farId)) {
-        map.setPaintProperty(farId, 'fill-extrusion-color',   heatmap ? '#000000' : colorOff);
-        map.setPaintProperty(farId, 'fill-extrusion-opacity', heatmap ? HM_OPACITY : opacityOff);
+    // FGB road slab paint — only when FGB roads are active
+    if (!USE_PMTILES_REAL3D) {
+      const HM_OPACITY = 0.4;
+      const ROAD_TIER_COLORS = [
+        { base: 'motorway', colorOff: '#850000', opacityOff: 0.95 },
+        { base: 'primary',  colorOff: '#850000', opacityOff: 0.92 },
+        { base: 'tertiary', colorOff: '#cc1100', opacityOff: 0.88 },
+      ];
+      ROAD_TIER_COLORS.forEach(({ base, colorOff, opacityOff }) => {
+        const farId  = `real3d-roads-${base}-far-slab`;
+        const nearId = `real3d-roads-${base}-slab`;
+        if (map.getLayer(farId)) {
+          map.setPaintProperty(farId, 'fill-extrusion-color',   heatmap ? '#000000' : colorOff);
+          map.setPaintProperty(farId, 'fill-extrusion-opacity', heatmap ? HM_OPACITY : opacityOff);
+        }
+        if (map.getLayer(nearId)) {
+          map.setPaintProperty(nearId, 'fill-extrusion-color',   heatmap ? '#000000' : colorOff);
+          map.setPaintProperty(nearId, 'fill-extrusion-opacity', heatmap ? HM_OPACITY : opacityOff);
+        }
+      });
+      // Safezone (only in pure FGB path — PMTiles path handles it above)
+      const isSat = satelliteRef?.current ?? satellite;
+      if (map.getLayer('zcta-safezone-extrusion')) {
+        map.setPaintProperty('zcta-safezone-extrusion', 'fill-extrusion-opacity', isSat ? 0.22 : 1.0);
       }
-      if (map.getLayer(nearId)) {
-        map.setPaintProperty(nearId, 'fill-extrusion-color',   heatmap ? '#000000' : colorOff);
-        map.setPaintProperty(nearId, 'fill-extrusion-opacity', heatmap ? HM_OPACITY : opacityOff);
-      }
-    });
-
-    // Use satelliteRef to avoid stale closure — satellite is not in this effect's deps
-    const isSat = satelliteRef?.current ?? satellite;
-    if (map.getLayer('zcta-safezone-extrusion')) {
-      map.setPaintProperty('zcta-safezone-extrusion', 'fill-extrusion-opacity', isSat ? 0.22 : 1.0);
     }
   }, [heatmap, real3D, mapReady]);
 
@@ -3952,14 +3849,6 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     const map = mapRef.current;
     if (!map || !mapReady || !real3D) return;
     if (!heatmapRef.current) return;
-    if (USE_PMTILES_REAL3D) {
-      // PMTiles: only landuse baseplate uses tier-based color (FGB-baked per-zip building
-      // tinting is not available with PMTiles vector tiles — buildings stay uniform).
-      if (map.getLayer('real3d-landuse-baseplate')) {
-        map.setPaintProperty('real3d-landuse-baseplate', 'fill-color', baseplateColorExpr(true, timespanIdx));
-      }
-      return;
-    }
     const isMob = window.innerWidth < 768;
     if (isMob) {
       // Mobile: re-fetch viewport to rebake with updated timespanIdx

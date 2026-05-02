@@ -26,6 +26,9 @@ export const ROADS_PMTILES_URL = 'https://objectstorage.us-ashburn-1.oraclecloud
 // Mirror flag — keep in sync with MapView.jsx USE_PMTILES_REAL3D.
 // When true, Phase 2A skips FGB pipeline (saves ~12s on cold load) and pre-warms PMTiles instead.
 export const USE_PMTILES_REAL3D = true;
+// Mirror flag — keep in sync with MapView.jsx USE_FGB_BUILDINGS.
+// When true, FGB building pipeline runs even in PMTiles mode (roads PMTiles, buildings FGB).
+export const USE_FGB_BUILDINGS = true;
 
 // In-memory ref: populated during Phase 2A so Real3D activation uses it directly
 // instead of re-running the expensive FGB deserialize loop (D optimization).
