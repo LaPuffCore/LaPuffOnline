@@ -14,14 +14,13 @@ import { SAMPLE_MODE } from '../lib/sampleConfig';
 import { getSampleUsersForZip } from '../lib/sampleUsers';
 import { deserialize as fgbDeserialize } from 'flatgeobuf/lib/mjs/geojson.js';
 import { fetchGeoPostFeed, fetchReactionsForPosts } from '../lib/supabase';
-import { roadFGBFeaturesRef } from '../lib/mapDataPipeline';
+import { roadFGBFeaturesRef, BOROUGH_FGBS, FGB_CACHE_NAME as PIPELINE_FGB_CACHE_NAME } from '../lib/mapDataPipeline';
 
 const GEOJSON_URL = './data/MODZCTA_2010_WGS1984.geo.json';
 const BOROUGH_GEOJSON_URL = './data/borough.geo.json';
-const BUILDING_FGB_URL = './data/final_building.fgb';
 const ROAD_FGB_URL     = './data/roads_buffered.fgb';
-const FGB_CACHE_NAME = 'lapuff-fgb-v4'; // v4: rebuilt with Hilbert R-tree spatial index
-const FGB_CACHE_KEY  = 'final_building.fgb';
+// Building FGBs are imported from mapDataPipeline (BOROUGH_FGBS array).
+// FGB_CACHE_NAME imported as PIPELINE_FGB_CACHE_NAME.
 const ROADS_FGB_CACHE_NAME = 'lapuff-roads-v10';
 const ROADS_FGB_CACHE_KEY  = 'roads_buffered.fgb';
 
@@ -1569,8 +1568,9 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   // Pre-computed tiers for all 5 timespans — slider reads from here (no recomputation)
   const precomputedTiersRef = useRef(null); // { [timespanIdx]: { tiers, zipMap, maxCount } }
   // FGB building data — full-file load, cached forever after first parse
-  const buildingFGBRef      = useRef(null);  // parsed FeatureCollection (all 381K buildings)
+  const buildingFGBRef      = useRef(null);  // parsed FeatureCollection (merged from all boroughs)
   const buildingZctaMapRef  = useRef(null);  // Int16Array: building index → ZCTA feature index (-1 = not found)
+  const zipToZctaIdxMapRef  = useRef(null);  // {[MODZCTA]: zctaFeatureIdx} — built once, reused for mobile viewport PiP
   const fgbLoadingRef       = useRef(false); // prevents concurrent loads
   // Pre-computed ZCTA bounding boxes — used in fetchViewportBuildings for O(1) bbox shortcut before expensive PiP.
   // Calculated once when geoData loads, stored as parallel array to geoDataRef.current.features.
@@ -1681,12 +1681,9 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   }, []);
 
   // Pre-warm PMTiles headers into HTTP cache when map is ready.
-  // Both nyc_final.pmtiles (water/park/landuse/buildings) and realfinaldeciroads.pmtiles (roads).
-  // The first 16KB contains the PMTiles header + root directory, which MapLibre needs
-  // before fetching any tiles. Pre-warming makes Real3D activation feel instant.
+  // Pre-warm roads PMTiles header — MapLibre needs first 16KB before fetching any road tiles.
   useEffect(() => {
     if (!mapReady) return;
-    fetch(PMTILES_URL,       { headers: { Range: 'bytes=0-16383' } }).catch(() => {});
     fetch(ROADS_PMTILES_URL, { headers: { Range: 'bytes=0-16383' } }).catch(() => {});
   }, [mapReady]);
 
@@ -2952,8 +2949,9 @@ export default function MapView({ events, headerCollapsed = false, interactive =
 
   // Parse a Uint8Array of FGB data into a FeatureCollection.
   // Yields to the event loop every CHUNK features to prevent main-thread freeze.
-  const FGB_YIELD_CHUNK = 10000; // yield every 10K — reduces frame budget pressure vs 5K, still non-blocking
-  const FGB_ESTIMATED_TOTAL = 381000;
+  const FGB_YIELD_CHUNK = 10000;
+  // Approximate total building count across all 5 borough FGBs (used for progress estimation only).
+  const FGB_ESTIMATED_TOTAL = 500000;
 
   async function parseFGBBuffer(buf, onProgress) {
     const features = [];
@@ -3012,7 +3010,6 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       if (mapCacheStore.precomputedTiers && !precomputedTiersRef.current)
         precomputedTiersRef.current = mapCacheStore.precomputedTiers;
       setFgbCacheStatus('done'); setFgbCacheProgress(100);
-      // Safety net: if Real3D was activated before this ran (race), push data now
       const map = mapRef.current;
       if (map && real3DRef.current && map.getSource('fgb-buildings') && map.getStyle()) {
         map.getSource('fgb-buildings').setData(buildingFGBRef.current);
@@ -3025,99 +3022,69 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     setFgbCacheStatus('building');
     setFgbCacheProgress(0);
 
-    // Progress: parse = 0-60%, PiP = 60-95%, finalize = 95-100%
-    const reportParseProgress = (count) => {
-      const pct = Math.min(60, Math.round((count / FGB_ESTIMATED_TOTAL) * 60));
-      setFgbCacheProgress(pct);
-    };
-    const reportPipProgress = (count) => {
-      const pct = 60 + Math.min(35, Math.round((count / FGB_ESTIMATED_TOTAL) * 35));
-      setFgbCacheProgress(pct);
-    };
-
     try {
-      // ── Check for cached ZCTA index (skip PiP on warm loads) ──
-      let cachedZctaIndex = null;
-      if ('caches' in window) {
-        try {
-          const cache = await caches.open(FGB_CACHE_NAME);
-          const idxResp = await cache.match('building_zcta_index.bin');
-          if (idxResp) {
-            cachedZctaIndex = new Int16Array(await idxResp.arrayBuffer());
-            console.log('ZCTA index loaded from cache — PiP will be skipped');
-          }
-        } catch (e) { /* ignore */ }
-      }
-
-      // ── Get FGB bytes (cache or network) ──
-      let buf = null;
-      if ('caches' in window) {
-        try {
-          const cache = await caches.open(FGB_CACHE_NAME);
-          const cached = await cache.match(FGB_CACHE_KEY);
-          if (cached) {
-            buf = new Uint8Array(await cached.arrayBuffer());
-            console.log('FGB bytes loaded from cache');
-          }
-        } catch (e) { /* ignore */ }
-      }
-
-      if (!buf) {
-        const resp = await fetch(BUILDING_FGB_URL);
-        if (!resp.ok) throw new Error(`FGB fetch failed: ${resp.status}`);
-        const arrayBuf = await resp.arrayBuffer();
-        buf = new Uint8Array(arrayBuf);
-
-        // Store raw bytes in Cache API for next session
+      // Step 1: Fetch all 5 borough FGBs in parallel (Cache API or network)
+      setFgbCacheProgress(2);
+      const rawBufs = await Promise.all(BOROUGH_FGBS.map(async (borough) => {
         if ('caches' in window) {
           try {
-            const cache = await caches.open(FGB_CACHE_NAME);
-            await cache.put(FGB_CACHE_KEY, new Response(arrayBuf.slice(0), {
-              headers: { 'Content-Type': 'application/octet-stream' },
-            }));
-            console.log('FGB bytes stored in cache');
-          } catch (e) { console.warn('Cache API write failed:', e); }
+            const cache = await caches.open(PIPELINE_FGB_CACHE_NAME);
+            const cached = await cache.match(borough.cacheKey);
+            if (cached) return new Uint8Array(await cached.arrayBuffer());
+          } catch (e) { /* ignore */ }
         }
-      }
+        const resp = await fetch(borough.url);
+        if (!resp.ok) throw new Error(`FGB fetch failed for ${borough.name}: ${resp.status}`);
+        const ab = await resp.arrayBuffer();
+        if ('caches' in window) {
+          try {
+            const cache = await caches.open(PIPELINE_FGB_CACHE_NAME);
+            await cache.put(borough.cacheKey, new Response(ab.slice(0), { headers: { 'Content-Type': 'application/octet-stream' } }));
+          } catch (e) { /* ignore */ }
+        }
+        return new Uint8Array(ab);
+      }));
+      setFgbCacheProgress(20);
 
-      // Mobile: raw bytes are now cached — that's all mobile needs.
-      // Mobile uses viewport R-Tree range queries (fetchViewportBuildings) as sole data path.
-      // Parsing 381K features into JS heap would cause ~300MB memory spike → WebKit OOM crash.
+      // Mobile: raw bytes now cached; mobile uses URL-based viewport Range queries — done.
       if (window.innerWidth < 768) {
         setFgbCacheProgress(100);
         setFgbCacheStatus('done');
-        console.log('FGB raw bytes cached (mobile — skipping full parse)');
         return;
       }
 
-      // ── Parse FGB binary → GeoJSON (yielding, non-blocking) ──
-      const geojson = await parseFGBBuffer(buf, reportParseProgress);
-      buildingFGBRef.current = geojson;
-
-      // ── ZCTA index: use cached or build with yielding ──
-      let idxMap = cachedZctaIndex;
-      if (idxMap && idxMap.length === geojson.features.length) {
-        buildingZctaMapRef.current = idxMap;
-        setFgbCacheProgress(95);
-        console.log(`FGB warm load: ${geojson.features.length} buildings, ZCTA index from cache`);
-      } else {
-        // Cold PiP — yields every 5K features
-        idxMap = await buildZctaIndexMap(geojson.features, reportPipProgress);
-        if (idxMap) {
-          buildingZctaMapRef.current = idxMap;
-          // Store ZCTA index for future warm loads (~762KB — instant cache write)
-          if ('caches' in window) {
-            try {
-              const cache = await caches.open(FGB_CACHE_NAME);
-              await cache.put('building_zcta_index.bin', new Response(idxMap.buffer.slice(0), {
-                headers: { 'Content-Type': 'application/octet-stream' },
-              }));
-              console.log('ZCTA index stored in cache');
-            } catch (e) { /* ignore */ }
-          }
-        }
-        console.log(`FGB cold load: ${geojson.features.length} buildings, ZCTA index built`);
+      // Step 2: Parse boroughs sequentially → merge. Release each buffer after parse.
+      const allFeatures = [];
+      for (let bi = 0; bi < rawBufs.length; bi++) {
+        const sub = await parseFGBBuffer(rawBufs[bi], count => {
+          const pct = 20 + Math.round(((bi * 100000 + count) / (BOROUGH_FGBS.length * 100000)) * 40);
+          setFgbCacheProgress(Math.min(pct, 59));
+        });
+        allFeatures.push(...sub.features);
+        rawBufs[bi] = null; // release buffer
       }
+      const geojson = { type: 'FeatureCollection', features: allFeatures };
+      buildingFGBRef.current = geojson;
+      setFgbCacheProgress(60);
+
+      // Step 3: Build ZCTA index from baked MODZCTA — O(n), no PiP needed
+      const zctaFeatures = geoDataRef.current?.features || [];
+      if (!zipToZctaIdxMapRef.current) {
+        const lookup = {};
+        for (let i = 0; i < zctaFeatures.length; i++) {
+          const z = zctaFeatures[i].properties?.MODZCTA;
+          if (z) lookup[String(z)] = i;
+        }
+        zipToZctaIdxMapRef.current = lookup;
+      }
+      const lookup = zipToZctaIdxMapRef.current;
+      const idxMap = new Int16Array(allFeatures.length);
+      for (let i = 0; i < allFeatures.length; i++) {
+        const z = allFeatures[i].properties?.MODZCTA;
+        idxMap[i] = z ? (lookup[String(z)] ?? -1) : -1;
+      }
+      buildingZctaMapRef.current = idxMap;
+      setFgbCacheProgress(65);
 
       setFgbCacheProgress(100);
       setFgbCacheStatus('done');
@@ -3125,12 +3092,11 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       // Push to map if Real3D active + bake all timespan tiers if pre-computed
       const map = mapRef.current;
       if (map && map.getSource('fgb-buildings') && map.getStyle()) {
-        const isMob = window.innerWidth < 768;
         if (precomputedTiersRef.current) {
-          if (isMob) {
-            await bakeAllTiersIntoBuildings(true); // async with yielding on mobile
+          if (window.innerWidth < 768) {
+            await bakeAllTiersIntoBuildings(true);
           } else {
-            const baked = bakeAllTiersIntoBuildings(); // sync on desktop
+            const baked = bakeAllTiersIntoBuildings();
             if (!baked) map.getSource('fgb-buildings').setData(geojson);
           }
         } else {
@@ -3178,60 +3144,50 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       maxY: bounds.getNorth() + latSpan * pad,
     };
 
-    const zctaFeatures = geoDataRef.current?.features;
-    const zctaBboxes   = zctaBboxesRef.current; // pre-computed bboxes for O(1) early-exit before PiP
-    const tiers = tiersRef.current;
-
     try {
       let features = [];
       let count = 0;
-      for await (const feature of fgbDeserialize(BUILDING_FGB_URL, rect)) {
-        if (!feature?.geometry?.coordinates) continue;
 
-        // Compute stable spatial hash from geometry anchor — ensures deterministic _s5/_s7 shade clusters
-        // regardless of feature load order. Prevents color flicker when panning (mobile viewport-only path).
-        const anchor = feature.geometry.coordinates?.[0]?.[0] ?? [0, 0];
-        const spatialSeed = Math.abs(Math.round(anchor[0] * 1e5) ^ Math.round(anchor[1] * 1e5));
-        const props = normalizeFGBProps(feature.properties, spatialSeed);
-
-        // Inline PiP — bake all 5 tier columns using precomputed tiers (no full ZCTA index needed).
-        const precomputed = precomputedTiersRef.current;
-        if (zctaFeatures?.length && (tiers?.length || precomputed)) {
-          const centroid = getGeomCentroid(feature.geometry);
-          const cx = centroid[0], cy = centroid[1];
-          let foundZctaIdx = -1;
-          for (let j = 0; j < zctaFeatures.length; j++) {
-            if (zctaFeatures[j].properties?._special) continue;
-            // BBox shortcut: skip full PiP if centroid is outside ZCTA bounding box
-            if (zctaBboxes?.[j]) {
-              const bb = zctaBboxes[j];
-              if (cx < bb.minX || cx > bb.maxX || cy < bb.minY || cy > bb.maxY) continue;
-            }
-            const geom = zctaFeatures[j].geometry;
-            const polys = geom.type === 'MultiPolygon' ? geom.coordinates : [geom.coordinates];
-            for (const poly of polys) {
-              if (pointInRing(cx, cy, poly[0])) { foundZctaIdx = j; break; }
-            }
-            if (foundZctaIdx >= 0) break;
-          }
-          if (foundZctaIdx >= 0) {
-            for (let t = 0; t < TIMESPAN_STEPS.length; t++) {
-              const trs = precomputed?.[t]?.tiers;
-              const tierVal = (trs && trs.length > foundZctaIdx) ? (trs[foundZctaIdx] ?? 0)
-                : (t === (timespanIdxRef.current ?? 2) ? (tiers?.[foundZctaIdx] ?? 0) : 0);
-              props[`_tier_${t}`] = Math.max(0, tierVal);
-            }
-            props._tier = props[`_tier_${timespanIdxRef.current ?? 2}`];
-          }
+      // Build MODZCTA → ZCTA feature index once and cache in ref
+      if (!zipToZctaIdxMapRef.current) {
+        const zf = geoDataRef.current?.features || [];
+        const lookup = {};
+        for (let i = 0; i < zf.length; i++) {
+          const z = zf[i].properties?.MODZCTA;
+          if (z) lookup[String(z)] = i;
         }
+        zipToZctaIdxMapRef.current = lookup;
+      }
+      const zipLookup = zipToZctaIdxMapRef.current;
+      const precomputed = precomputedTiersRef.current;
 
-        feature.properties = props;
-        features.push(feature);
-        count++;
+      for (const borough of BOROUGH_FGBS) {
+        for await (const feature of fgbDeserialize(borough.url, rect)) {
+          if (!feature?.geometry?.coordinates) continue;
 
-        // Yield every 2000 features — lets browser breathe and prevents iOS/Android Watchdog kill.
-        // Critical for mobile: without this, processing 10K-40K buildings blocks the main thread.
-        if (count % 2000 === 0) await new Promise(r => setTimeout(r, 0));
+          const anchor = feature.geometry.coordinates?.[0]?.[0] ?? [0, 0];
+          const spatialSeed = Math.abs(Math.round(anchor[0] * 1e5) ^ Math.round(anchor[1] * 1e5));
+          const props = normalizeFGBProps(feature.properties, spatialSeed);
+
+          // Fast path: use baked MODZCTA instead of PiP
+          const modzcta = feature.properties?.MODZCTA;
+          if (modzcta && precomputed) {
+            const zctaIdx = zipLookup[String(modzcta)] ?? -1;
+            if (zctaIdx >= 0) {
+              for (let t = 0; t < TIMESPAN_STEPS.length; t++) {
+                const trs = precomputed[t]?.tiers;
+                props[`_tier_${t}`] = (trs && trs.length > zctaIdx) ? (trs[zctaIdx] ?? 0) : 0;
+              }
+              props._tier = props[`_tier_${timespanIdxRef.current ?? 2}`];
+            }
+          }
+
+          feature.properties = props;
+          features.push(feature);
+          count++;
+
+          if (count % 2000 === 0) await new Promise(r => setTimeout(r, 0));
+        }
       }
 
       // Desktop: skip if full cache arrived while we were fetching

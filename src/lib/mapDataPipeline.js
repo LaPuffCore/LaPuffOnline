@@ -9,29 +9,24 @@ import mapCacheStore from './mapCacheStore';
 // ── Constants ────────────────────────────────────────────────────────────────
 export const GEOJSON_URL        = './data/MODZCTA_2010_WGS1984.geo.json';
 export const BOROUGH_GEOJSON_URL = './data/borough.geo.json';
-export const BUILDING_FGB_URL   = './data/final_building.fgb';
 export const ROAD_FGB_URL       = './data/roads_buffered.fgb';
-export const FGB_CACHE_NAME     = 'lapuff-fgb-v4';
-export const FGB_CACHE_KEY      = 'final_building.fgb';
+// Borough-split building FGBs — each has HEIGHT_ROOF + MODZCTA baked in per feature.
+export const BOROUGH_FGBS = [
+  { name: 'BronxAndSafezones', url: './data/BronxAndSafezones.fgb', cacheKey: 'BronxAndSafezones.fgb' },
+  { name: 'Brooklyn',          url: './data/Brooklyn.fgb',          cacheKey: 'Brooklyn.fgb' },
+  { name: 'Manhattan',         url: './data/Manhattan.fgb',         cacheKey: 'Manhattan.fgb' },
+  { name: 'Queens',            url: './data/Queens.fgb',            cacheKey: 'Queens.fgb' },
+  { name: 'Staten Island',     url: './data/Staten Island.fgb',     cacheKey: 'Staten Island.fgb' },
+];
+export const FGB_CACHE_NAME     = 'lapuff-fgb-v5';     // v5: borough-split FGBs with baked MODZCTA
 export const ROADS_FGB_CACHE_NAME = 'lapuff-roads-v10';
 export const ROADS_FGB_CACHE_KEY  = 'roads_buffered.fgb';
 export const MAP_CACHE_DONE_KEY     = 'lapuff_map_cache_v1';
 export const MAP_CACHE_BUILDING_KEY = 'lapuff_map_cache_building';
 
-// PMTiles URLs — must mirror MapView.jsx constants (same bucket).
-// When USE_PMTILES_REAL3D is true in MapView, Phase 2A pre-warms these headers
-// so the first Real3D activation finds them already in the HTTP cache.
-export const PMTILES_URL       = 'https://objectstorage.us-ashburn-1.oraclecloud.com/p/yGTOMC4N2uc1uIGkliFRgP51VbnPm96W8vebh_sOqeoGil3PErp8dvWmy74pEH70/n/idfnjqqb9g0p/b/nyc-map-data/o/nyc_final.pmtiles';
 export const ROADS_PMTILES_URL = 'https://objectstorage.us-ashburn-1.oraclecloud.com/p/yGTOMC4N2uc1uIGkliFRgP51VbnPm96W8vebh_sOqeoGil3PErp8dvWmy74pEH70/n/idfnjqqb9g0p/b/nyc-map-data/o/realfinaldeciroads.pmtiles';
-// Mirror flag — keep in sync with MapView.jsx USE_PMTILES_REAL3D.
-// When true, Phase 2A skips FGB pipeline (saves ~12s on cold load) and pre-warms PMTiles instead.
-export const USE_PMTILES_REAL3D = true;
-// Mirror flag — keep in sync with MapView.jsx USE_FGB_BUILDINGS.
-// When true, FGB building pipeline runs even in PMTiles mode (roads PMTiles, buildings FGB).
-export const USE_FGB_BUILDINGS = true;
 
-// In-memory ref: populated during Phase 2A so Real3D activation uses it directly
-// instead of re-running the expensive FGB deserialize loop (D optimization).
+// In-memory ref: populated during Phase 2A so Real3D road activation uses it directly.
 export const roadFGBFeaturesRef = { current: null };
 
 export const TIMESPAN_STEPS = [
@@ -40,8 +35,6 @@ export const TIMESPAN_STEPS = [
 ];
 
 const FGB_YIELD_CHUNK = 10000;
-const PIP_YIELD_CHUNK  = 2000;  // smaller chunks for PiP so the main thread breathes more often
-const FGB_ESTIMATED_TOTAL = 381000;
 
 // ── Ring / winding helpers ────────────────────────────────────────────────────
 
@@ -524,75 +517,68 @@ async function cacheRoadFGB() {
 async function runFGBPipeline(zctaFeatures, precomputedTiers, P, onProgress) {
   const report = (pct, msg) => onProgress?.(pct, msg);
 
-  // Check for cached ZCTA index (skip expensive PiP on warm loads)
-  let cachedZctaIndex = null;
-  if ('caches' in window) {
-    try {
-      const cache = await caches.open(FGB_CACHE_NAME);
-      const idxResp = await cache.match('building_zcta_index.bin');
-      if (idxResp) cachedZctaIndex = new Int16Array(await idxResp.arrayBuffer());
-    } catch (e) { /* ignore */ }
+  // Build MODZCTA → ZCTA feature index lookup (O(1) per building — no PiP needed).
+  // New borough FGBs have MODZCTA baked in per building feature.
+  const zipToZctaIdx = {};
+  for (let i = 0; i < zctaFeatures.length; i++) {
+    const z = zctaFeatures[i].properties?.MODZCTA;
+    if (z) zipToZctaIdx[String(z)] = i;
   }
 
-  // Step 7: FGB raw bytes (cache or network)
+  // Step 7: Fetch all borough FGBs in parallel (Cache API or network per borough)
   report(P.fgbFetch[0], 'Loading building data...');
-  let buf = null;
-  if ('caches' in window) {
-    try {
-      const cache = await caches.open(FGB_CACHE_NAME);
-      const cached = await cache.match(FGB_CACHE_KEY);
-      if (cached) buf = new Uint8Array(await cached.arrayBuffer());
-    } catch (e) { /* ignore */ }
-  }
-  if (!buf) {
-    const resp = await fetch(BUILDING_FGB_URL);
-    if (!resp.ok) throw new Error(`FGB fetch failed: ${resp.status}`);
-    const arrayBuf = await resp.arrayBuffer();
-    buf = new Uint8Array(arrayBuf);
+  const rawBufs = await Promise.all(BOROUGH_FGBS.map(async (borough) => {
     if ('caches' in window) {
       try {
         const cache = await caches.open(FGB_CACHE_NAME);
-        await cache.put(FGB_CACHE_KEY, new Response(arrayBuf.slice(0), { headers: { 'Content-Type': 'application/octet-stream' } }));
+        const cached = await cache.match(borough.cacheKey);
+        if (cached) return new Uint8Array(await cached.arrayBuffer());
       } catch (e) { /* ignore */ }
     }
-  }
+    const resp = await fetch(borough.url);
+    if (!resp.ok) throw new Error(`FGB fetch failed for ${borough.name}: ${resp.status}`);
+    const ab = await resp.arrayBuffer();
+    if ('caches' in window) {
+      try {
+        const cache = await caches.open(FGB_CACHE_NAME);
+        await cache.put(borough.cacheKey, new Response(ab.slice(0), { headers: { 'Content-Type': 'application/octet-stream' } }));
+      } catch (e) { /* ignore */ }
+    }
+    return new Uint8Array(ab);
+  }));
   report(P.fgbFetch[1], 'Building data cached');
 
-  // Step 8: Parse FGB binary → GeoJSON
+  // Step 8: Parse all boroughs sequentially → merge into one FeatureCollection.
+  // Sequential (not parallel) to keep peak memory bounded.
   report(P.fgbParse[0], 'Parsing building geometry...');
-  const span8 = P.fgbParse[1] - P.fgbParse[0];
-  const geojson = await parseFGBBuffer(buf, count => {
-    report(Math.min(P.fgbParse[0] + Math.round((count / FGB_ESTIMATED_TOTAL) * span8), P.fgbParse[1]), 'Parsing building geometry...');
-  });
+  const allFeatures = [];
+  for (let bi = 0; bi < rawBufs.length; bi++) {
+    const sub = await parseFGBBuffer(rawBufs[bi], count => {
+      const approxPct = Math.round(((bi * 100000 + count) / (BOROUGH_FGBS.length * 100000)) * (P.fgbParse[1] - P.fgbParse[0]));
+      report(Math.min(P.fgbParse[0] + approxPct, P.fgbParse[1] - 1), 'Parsing building geometry...');
+    });
+    allFeatures.push(...sub.features);
+    rawBufs[bi] = null; // release buffer after parse
+  }
+  const geojson = { type: 'FeatureCollection', features: allFeatures };
   mapCacheStore.buildingFGB = geojson;
   report(P.fgbParse[1], 'Building geometry parsed');
 
-  // Step 9: ZCTA index PiP (or warm-load from cache)
+  // Step 9: Build ZCTA index from baked MODZCTA — O(n), near-instant.
   report(P.pip[0], 'Indexing buildings to zones...');
-  let idxMap = cachedZctaIndex;
-  if (idxMap && idxMap.length === geojson.features.length) {
-    mapCacheStore.buildingZctaIndex = idxMap;
-    report(P.pip[1], 'Zone index loaded from cache');
-  } else {
-    const span9 = P.pip[1] - P.pip[0];
-    idxMap = await buildZctaIndexMap(zctaFeatures, geojson.features, count => {
-      report(Math.min(P.pip[0] + Math.round((count / FGB_ESTIMATED_TOTAL) * span9), P.pip[1]), 'Indexing buildings...');
-    });
-    mapCacheStore.buildingZctaIndex = idxMap;
-    if (idxMap && 'caches' in window) {
-      try {
-        const cache = await caches.open(FGB_CACHE_NAME);
-        await cache.put('building_zcta_index.bin', new Response(idxMap.buffer.slice(0), { headers: { 'Content-Type': 'application/octet-stream' } }));
-      } catch (e) { /* ignore */ }
-    }
-    report(P.pip[1], 'Buildings indexed');
+  const idxMap = new Int16Array(allFeatures.length);
+  for (let i = 0; i < allFeatures.length; i++) {
+    const z = allFeatures[i].properties?.MODZCTA;
+    idxMap[i] = z ? (zipToZctaIdx[String(z)] ?? -1) : -1;
   }
+  mapCacheStore.buildingZctaIndex = idxMap;
+  report(P.pip[1], 'Buildings indexed');
 
   // Step 10: Bake all 5 tier columns into building properties
   report(P.bake[0], 'Baking tier data into buildings...');
   const span10 = P.bake[1] - P.bake[0];
   await bakeAllTiersIntoBuildingsData(geojson, idxMap, precomputedTiers, count => {
-    report(Math.min(P.bake[0] + Math.round((count / FGB_ESTIMATED_TOTAL) * span10), P.bake[1]), 'Baking tier data...');
+    report(Math.min(P.bake[0] + Math.round((count / allFeatures.length) * span10), P.bake[1]), 'Baking tier data...');
   });
   mapCacheStore.buildingTiersBaked = true;
   report(P.bake[1], 'Tier data baked');
@@ -726,37 +712,26 @@ export async function runPhase2A(events, isMobile, onProgress) {
   mapCacheStore.zipBoroughMap  = zipBoroughMap;
   mapCacheStore.precomputedTiers = precomputedTiers;
 
-  // ── Road geometry: PMTiles mode caches FULL roads file + warms building header ──
+  // ── Road geometry: cache PMTiles roads file for fast offline access ──────────
   report(P.roadCache[0], 'Caching road geometry...');
-  if (USE_PMTILES_REAL3D) {
-    // Roads PMTiles is only ~14MB — fully cache it for instant offline-quality access.
-    // Fire-and-forget so we don't block 2A on network.
-    (async () => {
-      try {
-        if (!('caches' in window)) return;
-        const cache = await caches.open('lapuff-pmtiles-v1');
-        const existing = await cache.match(ROADS_PMTILES_URL);
-        if (!existing) {
-          const resp = await fetch(ROADS_PMTILES_URL);
-          if (resp.ok) await cache.put(ROADS_PMTILES_URL, resp.clone());
-        }
-      } catch (_e) { /* ignore — browser HTTP cache is the fallback */ }
-    })();
-    // Buildings PMTiles is 120MB — only pre-warm the root directory header.
-    // MapLibre will Range-fetch tiles on demand from there.
-    fetch(PMTILES_URL, { headers: { Range: 'bytes=0-32767' } }).catch(() => {});
-  } else {
-    await cacheRoadFGB();
-  }
+  // Fire-and-forget — don't block Phase 2A on network
+  (async () => {
+    try {
+      if (!('caches' in window)) return;
+      const cache = await caches.open('lapuff-pmtiles-v1');
+      const existing = await cache.match(ROADS_PMTILES_URL);
+      if (!existing) {
+        const resp = await fetch(ROADS_PMTILES_URL);
+        if (resp.ok) await cache.put(ROADS_PMTILES_URL, resp.clone());
+      }
+    } catch (_e) { /* ignore — browser HTTP cache is the fallback */ }
+  })();
   report(P.roadCache[1], 'Road data cached');
 
-  // ── Steps 7-10: Desktop FGB pipeline ─────────────────────────────────────
-  // Skipped entirely in PMTiles mode — buildings stream from vector tiles.
-  if (!isMobile && !USE_PMTILES_REAL3D) {
+  // ── Steps 7-10: Desktop FGB building pipeline ─────────────────────────────
+  // Skipped on mobile — buildings loaded JIT via viewport Range queries.
+  if (!isMobile) {
     await runFGBPipeline(geoData.features, precomputedTiers, P, onProgress);
-  } else if (!isMobile && USE_PMTILES_REAL3D) {
-    // Desktop PMTiles mode: jump progress to 93% (skipping FGB fetch+parse+pip+bake range)
-    report(93, 'Map ready');
   }
 
   // Enforce minimum 1s display time on first load so user sees the loading screen
