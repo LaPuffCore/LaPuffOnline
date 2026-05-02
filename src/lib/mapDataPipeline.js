@@ -723,13 +723,25 @@ export async function runPhase2A(events, isMobile, onProgress) {
   mapCacheStore.zipBoroughMap  = zipBoroughMap;
   mapCacheStore.precomputedTiers = precomputedTiers;
 
-  // ── Road geometry: PMTiles mode pre-warms header; FGB mode caches full bytes ──
+  // ── Road geometry: PMTiles mode caches FULL roads file + warms building header ──
   report(P.roadCache[0], 'Caching road geometry...');
   if (USE_PMTILES_REAL3D) {
-    // Pre-warm both PMTiles headers (root directory in first 16KB).
-    // Fire-and-forget; do not block Phase 2A on network.
-    fetch(PMTILES_URL,       { headers: { Range: 'bytes=0-16383' } }).catch(() => {});
-    fetch(ROADS_PMTILES_URL, { headers: { Range: 'bytes=0-16383' } }).catch(() => {});
+    // Roads PMTiles is only ~14MB — fully cache it for instant offline-quality access.
+    // Fire-and-forget so we don't block 2A on network.
+    (async () => {
+      try {
+        if (!('caches' in window)) return;
+        const cache = await caches.open('lapuff-pmtiles-v1');
+        const existing = await cache.match(ROADS_PMTILES_URL);
+        if (!existing) {
+          const resp = await fetch(ROADS_PMTILES_URL);
+          if (resp.ok) await cache.put(ROADS_PMTILES_URL, resp.clone());
+        }
+      } catch (_e) { /* ignore — browser HTTP cache is the fallback */ }
+    })();
+    // Buildings PMTiles is 120MB — only pre-warm the root directory header.
+    // MapLibre will Range-fetch tiles on demand from there.
+    fetch(PMTILES_URL, { headers: { Range: 'bytes=0-32767' } }).catch(() => {});
   } else {
     await cacheRoadFGB();
   }

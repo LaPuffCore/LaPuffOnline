@@ -52,10 +52,13 @@ const USE_PMTILES_REAL3D = true;
 const REAL3D_OMT_LAYER_IDS = [
   'real3d-water', 'real3d-park',
   'real3d-landuse-baseplate',
-  // PMTiles roads (USE_PMTILES_REAL3D=true) — one layer per fclass for zoom gating
-  'real3d-pm-roads-motorway', 'real3d-pm-roads-trunk',
-  'real3d-pm-roads-primary',  'real3d-pm-roads-secondary',
-  'real3d-pm-roads-tertiary', 'real3d-pm-roads-residential',
+  // PMTiles roads (USE_PMTILES_REAL3D=true) — one fill (z9-12) + one extrusion (z12+) per fclass
+  'real3d-pm-roads-motorway-fill', 'real3d-pm-roads-motorway',
+  'real3d-pm-roads-trunk-fill',    'real3d-pm-roads-trunk',
+  'real3d-pm-roads-primary-fill',  'real3d-pm-roads-primary',
+  'real3d-pm-roads-secondary-fill','real3d-pm-roads-secondary',
+  'real3d-pm-roads-tertiary-fill', 'real3d-pm-roads-tertiary',
+  'real3d-pm-roads-residential-fill','real3d-pm-roads-residential',
   // PMTiles buildings (USE_PMTILES_REAL3D=true)
   'real3d-pm-buildings', 'real3d-pm-buildings-baseplate',
 ];
@@ -992,9 +995,12 @@ const REAL3D_ALL_LAYER_IDS = [
   'real3d-landuse-baseplate',
   'real3d-buildings', 'real3d-buildings-outline', 'real3d-buildings-baseplate',
   // PMTiles mode
-  'real3d-pm-roads-motorway', 'real3d-pm-roads-trunk',
-  'real3d-pm-roads-primary',  'real3d-pm-roads-secondary',
-  'real3d-pm-roads-tertiary', 'real3d-pm-roads-residential',
+  'real3d-pm-roads-motorway-fill', 'real3d-pm-roads-motorway',
+  'real3d-pm-roads-trunk-fill',    'real3d-pm-roads-trunk',
+  'real3d-pm-roads-primary-fill',  'real3d-pm-roads-primary',
+  'real3d-pm-roads-secondary-fill','real3d-pm-roads-secondary',
+  'real3d-pm-roads-tertiary-fill', 'real3d-pm-roads-tertiary',
+  'real3d-pm-roads-residential-fill','real3d-pm-roads-residential',
   'real3d-pm-buildings', 'real3d-pm-buildings-baseplate',
 ];
 
@@ -3557,11 +3563,12 @@ export default function MapView({ events, headerCollapsed = false, interactive =
           map.addSource('roads-pm', { type: 'vector', url: `pmtiles://${ROADS_PMTILES_URL}` });
         }
 
-        // Roads: one fill-extrusion layer per fclass with proper zoom gating.
-        // _z baked into PMTiles features (motorway 0.6 → residential 0.1).
-        // Use it directly as the extrusion height — buildings depth-occlude.
+        // Roads: dual-layer per fclass to fix far-zoom pixelation.
+        // - z9-12 (FAR): flat `fill` layer — full polygon area visible, no thin sliver from extrusion perspective.
+        //   Buildings only appear at z14+, so no occlusion concern at this range.
+        // - z12+ (NEAR): `fill-extrusion` so buildings depth-occlude correctly.
+        // _z baked into PMTiles: motorway 0.6 → residential 0.1.
         // Heatmap ON: black @ 0.4 opacity; OFF: dark red.
-        // motorway/trunk minz=9, primary/secondary minz=11, tertiary/residential minz=12.
         const HEIGHT_EXPR = ['max', ['coalesce', ['get', '_z'], 0.1], 0.1];
         const ROAD_FCLASSES = [
           { fclass: 'motorway',    minz: 9,  colorOff: '#850000', opacityOff: 0.95 },
@@ -3573,12 +3580,26 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         ];
         const HM_OPACITY = 0.4;
         for (const r of ROAD_FCLASSES) {
-          const id = `real3d-pm-roads-${r.fclass}`;
-          if (!map.getLayer(id)) {
+          const fillId = `real3d-pm-roads-${r.fclass}-fill`;
+          const extId  = `real3d-pm-roads-${r.fclass}`;
+          if (!map.getLayer(fillId)) {
             map.addLayer({
-              id, type: 'fill-extrusion',
+              id: fillId, type: 'fill',
               source: 'roads-pm', 'source-layer': ROADS_PMTILES_LAYER,
-              minzoom: r.minz,
+              minzoom: r.minz, maxzoom: 12,
+              filter: ['==', ['get', 'fclass'], r.fclass],
+              paint: {
+                'fill-color':   isHeatmap ? '#000000' : r.colorOff,
+                'fill-opacity': isHeatmap ? HM_OPACITY : r.opacityOff,
+                'fill-antialias': true,
+              },
+            });
+          }
+          if (!map.getLayer(extId)) {
+            map.addLayer({
+              id: extId, type: 'fill-extrusion',
+              source: 'roads-pm', 'source-layer': ROADS_PMTILES_LAYER,
+              minzoom: 12,
               filter: ['==', ['get', 'fclass'], r.fclass],
               paint: {
                 'fill-extrusion-color':   isHeatmap ? '#000000' : r.colorOff,
@@ -3592,11 +3613,12 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         }
 
         // Buildings: standard OMT 'building' source-layer.
-        // ALL buildings flush to ground (base 0) growing by render_height. No min-height clamp,
-        // no min_height offset — matches user spec for clean ground-anchored extrusions.
-        // Baseplate: single solid color, height 1m, z13-14 (visual proxy at far zoom).
-        // Full buildings: clustered shades via id%7, z14+.
-        // NYC restriction: ['within', NYC_BBOX_GEOM] filter — same approach used for park/landuse.
+        // Flush to ground (base 0) growing by render_height.
+        // NO ['within'] filter — that's failure #8 in the post-mortem (fill-extrusion on
+        // vector tile sources gets dropped entirely). PMTiles dataset bbox is mostly NYC
+        // anyway; some Jersey/Westchester buildings will appear at the edges.
+        // Per-zip strict NYC masking is a future improvement (would need server-side clip
+        // or a custom shader).
         const BLDG_HEIGHT = ['coalesce', ['get', 'render_height'], 8];
         const BLDG_SHADE7 = ['%', ['coalesce', ['id'], 0], 7];
         const BLDG_COLOR_OFF = ['case',
@@ -3608,18 +3630,15 @@ export default function MapView({ events, headerCollapsed = false, interactive =
           ['==', BLDG_SHADE7, 5], '#1f0404',
           '#7a1818',
         ];
-        // Single solid colors for baseplate — middle red shade off, dark red on.
-        const BASEPLATE_OFF = '#260606';   // middle of cluster range
-        const BASEPLATE_ON  = '#220505';   // dark red for heatmap mode
-        const BLDG_COLOR_ON = '#220505';   // heatmap mode: uniform dark (per-zip tinting deferred)
-        const NYC_FILTER = ['within', NYC_BBOX_GEOM];
+        const BASEPLATE_OFF = '#260606';
+        const BASEPLATE_ON  = '#220505';
+        const BLDG_COLOR_ON = '#220505';
 
         if (!map.getLayer('real3d-pm-buildings-baseplate')) {
           map.addLayer({
             id: 'real3d-pm-buildings-baseplate', type: 'fill-extrusion',
             source: 'openmaptiles', 'source-layer': 'building',
             minzoom: 13, maxzoom: 14,
-            filter: NYC_FILTER,
             paint: {
               'fill-extrusion-color': isHeatmap ? BASEPLATE_ON : BASEPLATE_OFF,
               'fill-extrusion-height': 1,
@@ -3634,7 +3653,6 @@ export default function MapView({ events, headerCollapsed = false, interactive =
             id: 'real3d-pm-buildings', type: 'fill-extrusion',
             source: 'openmaptiles', 'source-layer': 'building',
             minzoom: 14,
-            filter: NYC_FILTER,
             paint: {
               'fill-extrusion-color': isHeatmap ? BLDG_COLOR_ON : BLDG_COLOR_OFF,
               'fill-extrusion-height': BLDG_HEIGHT,
@@ -3827,10 +3845,15 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       ];
       const HM_OPACITY = 0.4;
       ROAD_FCLASS_PAINT.forEach(({ fclass, colorOff, opacityOff }) => {
-        const id = `real3d-pm-roads-${fclass}`;
-        if (map.getLayer(id)) {
-          map.setPaintProperty(id, 'fill-extrusion-color',   heatmap ? '#000000' : colorOff);
-          map.setPaintProperty(id, 'fill-extrusion-opacity', heatmap ? HM_OPACITY : opacityOff);
+        const fillId = `real3d-pm-roads-${fclass}-fill`;
+        const extId  = `real3d-pm-roads-${fclass}`;
+        if (map.getLayer(fillId)) {
+          map.setPaintProperty(fillId, 'fill-color',   heatmap ? '#000000' : colorOff);
+          map.setPaintProperty(fillId, 'fill-opacity', heatmap ? HM_OPACITY : opacityOff);
+        }
+        if (map.getLayer(extId)) {
+          map.setPaintProperty(extId, 'fill-extrusion-color',   heatmap ? '#000000' : colorOff);
+          map.setPaintProperty(extId, 'fill-extrusion-opacity', heatmap ? HM_OPACITY : opacityOff);
         }
       });
       // Full-height buildings: heatmap=uniform dark, off=shade-clustered red palette.
