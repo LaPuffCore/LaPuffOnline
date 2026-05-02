@@ -3653,10 +3653,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
               'fill-extrusion-color': isHeatmap ? BASEPLATE_ON : BASEPLATE_OFF,
               'fill-extrusion-height': 1,
               'fill-extrusion-base': 0,
-              // Fade OUT fully by z14 so there is zero baseplate when full buildings appear.
-              'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'],
-                13, 0, 13.5, 0.85, 13.95, 0.85, 14, 0,
-              ],
+              // Hard 0.8 opacity — no fade transition. maxzoom:14 gives the hard cutoff.
+              'fill-extrusion-opacity': 0.8,
               'fill-extrusion-vertical-gradient': false,
             },
           });
@@ -3670,10 +3668,13 @@ export default function MapView({ events, headerCollapsed = false, interactive =
               'fill-extrusion-color': isHeatmap ? BLDG_COLOR_ON : BLDG_COLOR_OFF,
               'fill-extrusion-height': BLDG_HEIGHT,
               'fill-extrusion-base': 0,
-              // Opacity 1.0: full depth-buffer occlusion of road slabs underneath.
-              // The AA glitch between adjacent buildings is caused by the baseplate layer
-              // overlapping at the z14 boundary — the baseplate fade-out above (→ 0 at z14)
-              // eliminates it. vertical-gradient: false prevents inter-face blending artifacts.
+              // Hard 1.0 opacity — full depth-buffer occlusion of road slabs. No transition.
+              // minzoom:14 gives the hard appearance. Baseplate is gone by maxzoom:14 above
+              // so no two layers ever overlap.
+              // NOTE: remaining tile-edge AA (thin seams at tile boundaries) is inherent to
+              // PMTiles vector tiles splitting building polygons at tile edges. This was absent
+              // with FGB (single complete GeoJSON polygons, no tile seams). Will be resolved
+              // when custom NYC-clipped PMTiles is generated.
               'fill-extrusion-opacity': 1.0,
               'fill-extrusion-vertical-gradient': false,
             },
