@@ -3558,10 +3558,11 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         }
 
         // Roads: one fill-extrusion layer per fclass with proper zoom gating.
-        // _z baked: 0 or 0.6 (binary extrude flag). Use coalesce + max for visible min height.
+        // _z baked into PMTiles features (motorway 0.6 → residential 0.1).
+        // Use it directly as the extrusion height — buildings depth-occlude.
         // Heatmap ON: black @ 0.4 opacity; OFF: dark red.
         // motorway/trunk minz=9, primary/secondary minz=11, tertiary/residential minz=12.
-        const HEIGHT_EXPR = ['max', ['coalesce', ['get', '_z'], 0.2], 0.2];
+        const HEIGHT_EXPR = ['max', ['coalesce', ['get', '_z'], 0.1], 0.1];
         const ROAD_FCLASSES = [
           { fclass: 'motorway',    minz: 9,  colorOff: '#850000', opacityOff: 0.95 },
           { fclass: 'trunk',       minz: 9,  colorOff: '#850000', opacityOff: 0.95 },
@@ -3591,13 +3592,12 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         }
 
         // Buildings: standard OMT 'building' source-layer.
-        // render_height in meters (often 2-5m for low-rise, 50-300m for towers).
-        // Apply min height of 4m so all buildings are visible.
-        // Shade clustering via id%7 for visual variety. Heatmap mode: uniform dark
-        // (per-zip building tinting deferred — PMTiles features can't be baked per-feature
-        //  without setFeatureState, which causes tile-seam artifacts).
-        const BLDG_HEIGHT = ['max', ['coalesce', ['get', 'render_height'], 5], 4];
-        const BLDG_BASE   = ['coalesce', ['get', 'render_min_height'], 0];
+        // ALL buildings flush to ground (base 0) growing by render_height. No min-height clamp,
+        // no min_height offset — matches user spec for clean ground-anchored extrusions.
+        // Baseplate: single solid color, height 1m, z13-14 (visual proxy at far zoom).
+        // Full buildings: clustered shades via id%7, z14+.
+        // NYC restriction: ['within', NYC_BBOX_GEOM] filter — same approach used for park/landuse.
+        const BLDG_HEIGHT = ['coalesce', ['get', 'render_height'], 8];
         const BLDG_SHADE7 = ['%', ['coalesce', ['id'], 0], 7];
         const BLDG_COLOR_OFF = ['case',
           ['==', BLDG_SHADE7, 0], '#0d0101',
@@ -3608,16 +3608,21 @@ export default function MapView({ events, headerCollapsed = false, interactive =
           ['==', BLDG_SHADE7, 5], '#1f0404',
           '#7a1818',
         ];
-        const BLDG_COLOR_ON = '#220505'; // heatmap mode: uniform dark
+        // Single solid colors for baseplate — middle red shade off, dark red on.
+        const BASEPLATE_OFF = '#260606';   // middle of cluster range
+        const BASEPLATE_ON  = '#220505';   // dark red for heatmap mode
+        const BLDG_COLOR_ON = '#220505';   // heatmap mode: uniform dark (per-zip tinting deferred)
+        const NYC_FILTER = ['within', NYC_BBOX_GEOM];
 
         if (!map.getLayer('real3d-pm-buildings-baseplate')) {
           map.addLayer({
             id: 'real3d-pm-buildings-baseplate', type: 'fill-extrusion',
             source: 'openmaptiles', 'source-layer': 'building',
             minzoom: 13, maxzoom: 14,
+            filter: NYC_FILTER,
             paint: {
-              'fill-extrusion-color': isHeatmap ? BLDG_COLOR_ON : BLDG_COLOR_OFF,
-              'fill-extrusion-height': 7,
+              'fill-extrusion-color': isHeatmap ? BASEPLATE_ON : BASEPLATE_OFF,
+              'fill-extrusion-height': 1,
               'fill-extrusion-base': 0,
               'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'], 13, 0, 13.5, 0.9],
               'fill-extrusion-vertical-gradient': false,
@@ -3629,10 +3634,11 @@ export default function MapView({ events, headerCollapsed = false, interactive =
             id: 'real3d-pm-buildings', type: 'fill-extrusion',
             source: 'openmaptiles', 'source-layer': 'building',
             minzoom: 14,
+            filter: NYC_FILTER,
             paint: {
               'fill-extrusion-color': isHeatmap ? BLDG_COLOR_ON : BLDG_COLOR_OFF,
               'fill-extrusion-height': BLDG_HEIGHT,
-              'fill-extrusion-base': BLDG_BASE,
+              'fill-extrusion-base': 0,
               'fill-extrusion-opacity': 1.0,
               'fill-extrusion-vertical-gradient': false,
             },
@@ -3827,7 +3833,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
           map.setPaintProperty(id, 'fill-extrusion-opacity', heatmap ? HM_OPACITY : opacityOff);
         }
       });
-      // Buildings: heatmap=uniform dark, off=shade-clustered red palette.
+      // Full-height buildings: heatmap=uniform dark, off=shade-clustered red palette.
       const BLDG_SHADE7 = ['%', ['coalesce', ['id'], 0], 7];
       const BLDG_COLOR_OFF = ['case',
         ['==', BLDG_SHADE7, 0], '#0d0101',
@@ -3839,11 +3845,15 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         '#7a1818',
       ];
       const BLDG_COLOR_ON = '#220505';
-      ['real3d-pm-buildings', 'real3d-pm-buildings-baseplate'].forEach(id => {
-        if (map.getLayer(id)) {
-          map.setPaintProperty(id, 'fill-extrusion-color', heatmap ? BLDG_COLOR_ON : BLDG_COLOR_OFF);
-        }
-      });
+      if (map.getLayer('real3d-pm-buildings')) {
+        map.setPaintProperty('real3d-pm-buildings', 'fill-extrusion-color',
+          heatmap ? BLDG_COLOR_ON : BLDG_COLOR_OFF);
+      }
+      // Baseplate: single solid color (NOT clustered) — middle red off, dark red on.
+      if (map.getLayer('real3d-pm-buildings-baseplate')) {
+        map.setPaintProperty('real3d-pm-buildings-baseplate', 'fill-extrusion-color',
+          heatmap ? '#220505' : '#260606');
+      }
       // Landuse baseplate: shared with FGB path, still uses tier expression.
       if (map.getLayer('real3d-landuse-baseplate')) {
         map.setPaintProperty('real3d-landuse-baseplate', 'fill-color', baseplateColorExpr(heatmap, timespanIdxRef.current ?? 2));
