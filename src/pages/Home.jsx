@@ -77,14 +77,14 @@ export default function Home({ events = [], eventsLoading = false }) {
   const [currentMode,   setCurrentMode]   = useState(null); 
   const [currentTrack,  setCurrentTrack]  = useState(null); 
   const [showMusicMenu, setShowMusicMenu] = useState(false);
-  const [musicVolume,   setMusicVolume]   = useState(80);
+  const [musicVolume,   setMusicVolume]   = useState(50);
   
   // DUAL-IFRAME ARCHITECTURE — no w.load() ever called, both stations pre-loaded on mount
   const scWidgetCloutRef   = useRef(null);
   const scWidgetDimesRef   = useRef(null);
   
   const loadedPlaylistRef  = useRef(null); // active station: 'clout' | 'dimes' | null
-  const musicVolumeRef     = useRef(80);
+  const musicVolumeRef     = useRef(50);
   const musicDesktopRef    = useRef(null);
   const musicMobileRef     = useRef(null);
   
