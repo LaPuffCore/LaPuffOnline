@@ -18,6 +18,15 @@ export const ROADS_FGB_CACHE_KEY  = 'roads_buffered.fgb';
 export const MAP_CACHE_DONE_KEY     = 'lapuff_map_cache_v1';
 export const MAP_CACHE_BUILDING_KEY = 'lapuff_map_cache_building';
 
+// PMTiles URLs — must mirror MapView.jsx constants (same bucket).
+// When USE_PMTILES_REAL3D is true in MapView, Phase 2A pre-warms these headers
+// so the first Real3D activation finds them already in the HTTP cache.
+export const PMTILES_URL       = 'https://objectstorage.us-ashburn-1.oraclecloud.com/p/yGTOMC4N2uc1uIGkliFRgP51VbnPm96W8vebh_sOqeoGil3PErp8dvWmy74pEH70/n/idfnjqqb9g0p/b/nyc-map-data/o/nyc_final.pmtiles';
+export const ROADS_PMTILES_URL = 'https://objectstorage.us-ashburn-1.oraclecloud.com/p/yGTOMC4N2uc1uIGkliFRgP51VbnPm96W8vebh_sOqeoGil3PErp8dvWmy74pEH70/n/idfnjqqb9g0p/b/nyc-map-data/o/realfinaldeciroads.pmtiles';
+// Mirror flag — keep in sync with MapView.jsx USE_PMTILES_REAL3D.
+// When true, Phase 2A skips FGB pipeline (saves ~12s on cold load) and pre-warms PMTiles instead.
+export const USE_PMTILES_REAL3D = true;
+
 // In-memory ref: populated during Phase 2A so Real3D activation uses it directly
 // instead of re-running the expensive FGB deserialize loop (D optimization).
 export const roadFGBFeaturesRef = { current: null };
@@ -714,16 +723,25 @@ export async function runPhase2A(events, isMobile, onProgress) {
   mapCacheStore.zipBoroughMap  = zipBoroughMap;
   mapCacheStore.precomputedTiers = precomputedTiers;
 
-  // ── Road FGB bytes → Cache API (both mobile + desktop) ───────────────────
-  // Phase 2A caches the raw bytes so MapView can skip the network fetch at
-  // Real3D activation time. Parsing happens later on-demand.
+  // ── Road geometry: PMTiles mode pre-warms header; FGB mode caches full bytes ──
   report(P.roadCache[0], 'Caching road geometry...');
-  await cacheRoadFGB();
+  if (USE_PMTILES_REAL3D) {
+    // Pre-warm both PMTiles headers (root directory in first 16KB).
+    // Fire-and-forget; do not block Phase 2A on network.
+    fetch(PMTILES_URL,       { headers: { Range: 'bytes=0-16383' } }).catch(() => {});
+    fetch(ROADS_PMTILES_URL, { headers: { Range: 'bytes=0-16383' } }).catch(() => {});
+  } else {
+    await cacheRoadFGB();
+  }
   report(P.roadCache[1], 'Road data cached');
 
   // ── Steps 7-10: Desktop FGB pipeline ─────────────────────────────────────
-  if (!isMobile) {
+  // Skipped entirely in PMTiles mode — buildings stream from vector tiles.
+  if (!isMobile && !USE_PMTILES_REAL3D) {
     await runFGBPipeline(geoData.features, precomputedTiers, P, onProgress);
+  } else if (!isMobile && USE_PMTILES_REAL3D) {
+    // Desktop PMTiles mode: jump progress to 93% (skipping FGB fetch+parse+pip+bake range)
+    report(93, 'Map ready');
   }
 
   // Enforce minimum 1s display time on first load so user sees the loading screen
