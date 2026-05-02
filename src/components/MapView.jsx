@@ -3653,9 +3653,9 @@ export default function MapView({ events, headerCollapsed = false, interactive =
               'fill-extrusion-color': isHeatmap ? BASEPLATE_ON : BASEPLATE_OFF,
               'fill-extrusion-height': 1,
               'fill-extrusion-base': 0,
-              // Fade IN z13→z13.5, hold, fade OUT z13.9→z14 (clean handoff to full buildings)
+              // Fade OUT fully by z14 so there is zero baseplate when full buildings appear.
               'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'],
-                13, 0, 13.5, 0.9, 13.9, 0.9, 14, 0,
+                13, 0, 13.5, 0.85, 13.95, 0.85, 14, 0,
               ],
               'fill-extrusion-vertical-gradient': false,
             },
@@ -3670,9 +3670,11 @@ export default function MapView({ events, headerCollapsed = false, interactive =
               'fill-extrusion-color': isHeatmap ? BLDG_COLOR_ON : BLDG_COLOR_OFF,
               'fill-extrusion-height': BLDG_HEIGHT,
               'fill-extrusion-base': 0,
-              // 0.9 (not 1.0): forces framebuffer compositing → eliminates tile-seam Z-fighting.
-              // Fades in z14→z14.5 for smooth baseplate handoff.
-              'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'], 14, 0, 14.5, 0.9],
+              // Opacity 1.0: full depth-buffer occlusion of road slabs underneath.
+              // The AA glitch between adjacent buildings is caused by the baseplate layer
+              // overlapping at the z14 boundary — the baseplate fade-out above (→ 0 at z14)
+              // eliminates it. vertical-gradient: false prevents inter-face blending artifacts.
+              'fill-extrusion-opacity': 1.0,
               'fill-extrusion-vertical-gradient': false,
             },
           });
