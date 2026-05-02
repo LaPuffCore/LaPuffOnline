@@ -3563,12 +3563,12 @@ export default function MapView({ events, headerCollapsed = false, interactive =
           map.addSource('roads-pm', { type: 'vector', url: `pmtiles://${ROADS_PMTILES_URL}` });
         }
 
-        // Roads: dual-layer per fclass to fix far-zoom pixelation.
-        // - z9-12 (FAR): flat `fill` layer — full polygon area visible, no thin sliver from extrusion perspective.
-        //   Buildings only appear at z14+, so no occlusion concern at this range.
-        // - z12+ (NEAR): `fill-extrusion` so buildings depth-occlude correctly.
+        // Roads: dual-layer per fclass.
+        // INSIGHT: Roads only need depth-occlusion by buildings at z14+ (that's when buildings
+        // appear). So use flat `fill` (2D, no 3D compute) for z9→z14, and `fill-extrusion`
+        // only at z14+ for proper GPU depth occlusion. This eliminates ALL far-zoom pixelation
+        // (no thin perspective sliver) and saves significant 3D geometry compute at z9-13.
         // _z baked into PMTiles: motorway 0.6 → residential 0.1.
-        // Heatmap ON: black @ 0.4 opacity; OFF: dark red.
         const HEIGHT_EXPR = ['max', ['coalesce', ['get', '_z'], 0.1], 0.1];
         const ROAD_FCLASSES = [
           { fclass: 'motorway',    minz: 9,  colorOff: '#850000', opacityOff: 0.95 },
@@ -3582,24 +3582,27 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         for (const r of ROAD_FCLASSES) {
           const fillId = `real3d-pm-roads-${r.fclass}-fill`;
           const extId  = `real3d-pm-roads-${r.fclass}`;
+          // 2D fill: covers full zoom range before buildings (z9/11/12 → z14).
+          // Full polygon footprint, antialiased, zero 3D overhead.
           if (!map.getLayer(fillId)) {
             map.addLayer({
               id: fillId, type: 'fill',
               source: 'roads-pm', 'source-layer': ROADS_PMTILES_LAYER,
-              minzoom: r.minz, maxzoom: 12,
+              minzoom: r.minz, maxzoom: 14,
               filter: ['==', ['get', 'fclass'], r.fclass],
               paint: {
-                'fill-color':   isHeatmap ? '#000000' : r.colorOff,
-                'fill-opacity': isHeatmap ? HM_OPACITY : r.opacityOff,
-                'fill-antialias': true,
+                'fill-color':      isHeatmap ? '#000000' : r.colorOff,
+                'fill-opacity':    isHeatmap ? HM_OPACITY : r.opacityOff,
+                'fill-antialias':  true,
               },
             });
           }
+          // 3D extrusion: only at z14+ so buildings can properly occlude road slabs.
           if (!map.getLayer(extId)) {
             map.addLayer({
               id: extId, type: 'fill-extrusion',
               source: 'roads-pm', 'source-layer': ROADS_PMTILES_LAYER,
-              minzoom: 12,
+              minzoom: 14,
               filter: ['==', ['get', 'fclass'], r.fclass],
               paint: {
                 'fill-extrusion-color':   isHeatmap ? '#000000' : r.colorOff,
@@ -3612,13 +3615,20 @@ export default function MapView({ events, headerCollapsed = false, interactive =
           }
         }
 
-        // Buildings: standard OMT 'building' source-layer.
-        // Flush to ground (base 0) growing by render_height.
-        // NO ['within'] filter — that's failure #8 in the post-mortem (fill-extrusion on
-        // vector tile sources gets dropped entirely). PMTiles dataset bbox is mostly NYC
-        // anyway; some Jersey/Westchester buildings will appear at the edges.
-        // Per-zip strict NYC masking is a future improvement (would need server-side clip
-        // or a custom shader).
+        // Buildings: standard OMT 'building' source-layer from nyc_final.pmtiles.
+        // Flush to ground (base 0), grows by render_height.
+        // NO ['within'] filter — failure #8: fill-extrusion on vector tile source = all features disappear.
+        // Some NJ/Westchester edge buildings appear; custom NYC-clipped PMTiles will fix this.
+        //
+        // Antialiasing / Z-fighting fix: opacity 0.9 (not 1.0) forces MapLibre framebuffer
+        // compositing pass which eliminates tile-seam Z-fighting artifacts between adjacent buildings.
+        // This is the correct fix (same principle as fill-extrusion-opacity < 1.0 trick in the
+        // general MapView notes — framebuffer compositing hides GPU tile seams).
+        //
+        // Baseplate fade strategy:
+        //   Baseplate fades IN (z13→z13.5) then OUT (z13.9→z14) so there's never overlap
+        //   with full-height buildings at exactly z14. Buildings fade IN (z14→z14.5) for a
+        //   smooth handoff. This eliminates the hard-cut flicker at the z14 boundary.
         const BLDG_HEIGHT = ['coalesce', ['get', 'render_height'], 8];
         const BLDG_SHADE7 = ['%', ['coalesce', ['id'], 0], 7];
         const BLDG_COLOR_OFF = ['case',
@@ -3643,7 +3653,10 @@ export default function MapView({ events, headerCollapsed = false, interactive =
               'fill-extrusion-color': isHeatmap ? BASEPLATE_ON : BASEPLATE_OFF,
               'fill-extrusion-height': 1,
               'fill-extrusion-base': 0,
-              'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'], 13, 0, 13.5, 0.9],
+              // Fade IN z13→z13.5, hold, fade OUT z13.9→z14 (clean handoff to full buildings)
+              'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'],
+                13, 0, 13.5, 0.9, 13.9, 0.9, 14, 0,
+              ],
               'fill-extrusion-vertical-gradient': false,
             },
           });
@@ -3657,7 +3670,9 @@ export default function MapView({ events, headerCollapsed = false, interactive =
               'fill-extrusion-color': isHeatmap ? BLDG_COLOR_ON : BLDG_COLOR_OFF,
               'fill-extrusion-height': BLDG_HEIGHT,
               'fill-extrusion-base': 0,
-              'fill-extrusion-opacity': 1.0,
+              // 0.9 (not 1.0): forces framebuffer compositing → eliminates tile-seam Z-fighting.
+              // Fades in z14→z14.5 for smooth baseplate handoff.
+              'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'], 14, 0, 14.5, 0.9],
               'fill-extrusion-vertical-gradient': false,
             },
           });
