@@ -1798,6 +1798,12 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       maxBounds: [[-75.5, 40.0], [-72.5, 41.5]],
       attributionControl: false,
       antialias: true,
+      // Session tile cache: keeps infrastructure tiles (roads, water, outlines) warm
+      // across pan/zoom so zooming out never shows black squares. Mobile gets a smaller
+      // cache to stay under iOS Safari's ~4GB RAM ceiling.
+      maxTileCacheSize: window.innerWidth < 768 ? 60 : 200,
+      // Fade duration 0 = paint changes apply instantly, no cross-fade flash on outlines.
+      fadeDuration: 0,
     });
     // Place navigation controls in the bottom-right and give extra padding + slight scale for accessibility
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
@@ -2253,6 +2259,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         url: `pmtiles://${BUILDINGS_PMTILES_URL}`,
         minzoom: 13,
         maxzoom: 16,
+        promoteId: 'b',
       });
     }
     if (real3dLayersCreatedRef.current) return;
@@ -3066,6 +3073,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         url: `pmtiles://${BUILDINGS_PMTILES_URL}`,
         minzoom: 13,
         maxzoom: 16,
+        promoteId: 'b',
       });
     }
 
