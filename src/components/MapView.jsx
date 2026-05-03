@@ -1977,12 +1977,20 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     map.addLayer({
       id: 'zcta-line-glow', type: 'line', source: 'zcta',
       filter: ['!=', ['get', '_special'], true],
-      paint: { 'line-color': OUTLINE_COLOR, 'line-width': zctaLineWidthExpr(1.25), 'line-opacity': is3D ? 0 : (sat ? 0.55 : 0.75), 'line-blur': 3 },
+      paint: {
+        'line-color': OUTLINE_COLOR, 'line-width': zctaLineWidthExpr(1.25),
+        'line-opacity': is3D ? 0 : (sat ? 0.55 : 0.75), 'line-blur': 3,
+        'line-opacity-transition': { duration: 0 }, 'line-width-transition': { duration: 0 },
+      },
     });
     map.addLayer({
       id: 'zcta-line', type: 'line', source: 'zcta',
       filter: ['!=', ['get', '_special'], true],
-      paint: { 'line-color': OUTLINE_COLOR, 'line-width': zctaLineWidthExpr(1), 'line-opacity': is3D ? 0 : 1 },
+      paint: {
+        'line-color': OUTLINE_COLOR, 'line-width': zctaLineWidthExpr(1),
+        'line-opacity': is3D ? 0 : 1,
+        'line-opacity-transition': { duration: 0 }, 'line-width-transition': { duration: 0 },
+      },
     });
 
     // Upper 3D border — annular ring using createZctaOutlineGeoJSON.
@@ -2013,6 +2021,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
           'fill-extrusion-base': 0,
           'fill-extrusion-opacity': 0,
           'fill-extrusion-vertical-gradient': false,
+          'fill-extrusion-opacity-transition': { duration: 0 },
+          'fill-extrusion-color-transition': { duration: 0 },
         },
       });
     }
@@ -2196,21 +2206,27 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     addLayers(map, geoData, satellite);
     // Signal MapLoadingScreen Phase 2B that layers are ready → overlay will reveal the map
     mapCacheStore.layersReady = true;
-    // GPU warm-up: jog through zooms 8→17 quickly to compile shaders + warm tile cache.
-    // Runs on next frame so layers are committed first. Restores original camera at end.
-    // Skip on mobile to save battery + avoid jank.
+    // GPU warm-up: thoroughly pan across all 5 boroughs at every zoom level so the
+    // session tile cache contains every roads/water/zip-outline tile NYC will ever need.
+    // After this completes, every pan and zoom in the user's session is instant —
+    // no fetch, no parse, no flicker. Skip on mobile to save battery + bandwidth.
     if (window.innerWidth >= 768) {
       requestAnimationFrame(() => {
         try {
           const origCenter = map.getCenter();
           const origZoom = map.getZoom();
-          // Phase 2B warmup: cycle zooms to compile shaders + warm tile caches.
-          // z8: tessellates water GeoJSON at low zoom (avoids square-tile re-render on zoom-out)
-          // z10-z12: PMTiles road fill tiles + ZCTA fills
-          // z14-z16: Real3D fill-extrusion shader compilation + building geometry upload
-          // Restore to default 2D (pitch=0) at end.
-          const zooms = [8, 10, 12, 14, 16];
-          let i = 0;
+          // 5 borough centers + Manhattan extras — covers the entire NYC tile grid
+          const samples = [
+            [-73.97, 40.78],   // Manhattan north
+            [-73.99, 40.73],   // Manhattan mid
+            [-74.01, 40.70],   // Manhattan south
+            [-73.95, 40.68],   // Brooklyn
+            [-73.79, 40.72],   // Queens
+            [-73.87, 40.84],   // Bronx
+            [-74.15, 40.58],   // Staten Island
+          ];
+          // Walk through key zooms — z9-12 for outline/road wide views, z13-16 for close detail
+          const zooms = [9, 10, 11, 12, 13, 14, 15, 16];
           const realLayers = REAL3D_ALL_LAYER_IDS;
           const setRealVis = (vis) => {
             for (const id of realLayers) {
@@ -2219,18 +2235,25 @@ export default function MapView({ events, headerCollapsed = false, interactive =
               }
             }
           };
+          // Build full sweep: for each zoom, jump to each sample point
+          const sweep = [];
+          for (const z of zooms) {
+            for (const c of samples) sweep.push({ center: c, zoom: z });
+          }
+          let i = 0;
           const step = () => {
-            if (i >= zooms.length) {
+            if (i >= sweep.length) {
               // Restore: default 2D state — original camera, no pitch/bearing, all Real3D layers hidden.
               setRealVis('none');
               map.jumpTo({ center: origCenter, zoom: origZoom, pitch: 0, bearing: 0 });
               mapCacheStore.warmupComplete = true;
               return;
             }
-            const z = zooms[i++];
-            // At z=14+ briefly show Real3D layers to compile fill-extrusion shaders.
-            setRealVis(z >= 14 ? 'visible' : 'none');
-            map.jumpTo({ center: origCenter, zoom: z, pitch: 0, bearing: 0 });
+            const { center, zoom } = sweep[i++];
+            // At z=14+ briefly show Real3D layers to compile fill-extrusion shaders
+            // and warm a sampling of building tiles into the cache.
+            setRealVis(zoom >= 14 ? 'visible' : 'none');
+            map.jumpTo({ center, zoom, pitch: 0, bearing: 0 });
             requestAnimationFrame(step);
           };
           // Defer one frame so layer pre-creation effect runs first.
@@ -2859,34 +2882,58 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     };
   }, [mapReady]);
 
-  // SATELLITE: Single raster layer on main map — same approach for ALL modes (2D, 3D, Real3D).
-  // Inserted at bottom of layer stack so it renders behind all other layers. No stencil blocks it.
-  // No separate canvas, no camera sync. Moves naturally with main map.
+  // SATELLITE: Hybrid raster — ArcGIS World Imagery for z<13 (sharp at low zoom),
+  // Clarity for z≥13 (uniform NYC mosaic at high zoom). Both rasters always present
+  // when satellite is ON; MapLibre auto-handles the handoff at the source maxzoom edge.
+  // Inserted at bottom of layer stack so they render behind all other layers.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
 
     if (satellite) {
+      // Low-zoom layer: ArcGIS World Imagery (z0-13) — much sharper than Clarity at z<13
+      if (!map.getSource('sat-source-arcgis')) {
+        map.addSource('sat-source-arcgis', {
+          type: 'raster',
+          tiles: ['https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+          tileSize: 256,
+          minzoom: 0,
+          maxzoom: 13,
+        });
+      }
+      // High-zoom layer: Clarity (z13+) — uniform NYC mosaic
       if (!map.getSource('sat-source')) {
         map.addSource('sat-source', {
           type: 'raster',
-          // Clarity server: older but visually uniform mosaic — no patchwork from mixed vendor sources
           tiles: ['https://clarity.maptiles.arcgis.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
           tileSize: 256,
+          minzoom: 13,
           maxzoom: 19,
         });
       }
+      const layers = map.getStyle().layers;
+      const firstLayerId = layers.length > 0 ? layers[0].id : undefined;
+      // ArcGIS first (bottom) — visible at z<13
+      if (!map.getLayer('sat-layer-arcgis')) {
+        map.addLayer({
+          id: 'sat-layer-arcgis', type: 'raster', source: 'sat-source-arcgis',
+          maxzoom: 13,
+          paint: { 'raster-opacity': 1, 'raster-fade-duration': 0 },
+        }, firstLayerId);
+      }
+      // Clarity on top of ArcGIS — visible at z≥13
       if (!map.getLayer('sat-layer')) {
-        const layers = map.getStyle().layers;
-        const firstLayerId = layers.length > 0 ? layers[0].id : undefined;
         map.addLayer({
           id: 'sat-layer', type: 'raster', source: 'sat-source',
-          paint: { 'raster-opacity': 1 },
+          minzoom: 13,
+          paint: { 'raster-opacity': 1, 'raster-fade-duration': 0 },
         }, firstLayerId);
       }
     } else {
       if (map.getLayer('sat-layer')) map.removeLayer('sat-layer');
+      if (map.getLayer('sat-layer-arcgis')) map.removeLayer('sat-layer-arcgis');
       if (map.getSource('sat-source')) map.removeSource('sat-source');
+      if (map.getSource('sat-source-arcgis')) map.removeSource('sat-source-arcgis');
     }
 
     // Water opacity: 0.5 when satellite on (so imagery shows through), 0.6 otherwise
@@ -3082,13 +3129,17 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         id: 'real3d-buildings-baseplate', type: 'fill-extrusion',
         source: 'nyc-buildings',
         'source-layer': BUILDINGS_PMTILES_LAYER,
+        // Baseplate visible ONLY at z13 → z14 (hard cutoff at 14, no overlap with full buildings)
         minzoom: 13, maxzoom: 14,
         paint: {
           'fill-extrusion-color': baseplateColorExpr(isHeatmap, tsIdx),
           'fill-extrusion-height': 7,
           'fill-extrusion-base': 0,
-          'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'], 13, 0, 13.5, 0.9],
+          // Hard-swap: full opacity from frame 1, no fade ramp
+          'fill-extrusion-opacity': 0.95,
           'fill-extrusion-vertical-gradient': false,
+          'fill-extrusion-opacity-transition': { duration: 0 },
+          'fill-extrusion-color-transition': { duration: 0 },
         },
       });
     }
@@ -3098,6 +3149,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         id: 'real3d-buildings', type: 'fill-extrusion',
         source: 'nyc-buildings',
         'source-layer': BUILDINGS_PMTILES_LAYER,
+        // Full-height buildings ONLY at z14+ (where baseplate stops)
         minzoom: 14,
         paint: {
           'fill-extrusion-color': buildingColorExprByState(isHeatmap, tsIdx),
@@ -3105,6 +3157,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
           'fill-extrusion-base': ['coalesce', ['get', 'm'], 0],
           'fill-extrusion-opacity': 1.0,
           'fill-extrusion-vertical-gradient': false,
+          'fill-extrusion-opacity-transition': { duration: 0 },
+          'fill-extrusion-color-transition': { duration: 0 },
         },
       });
     }
