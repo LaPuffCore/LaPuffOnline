@@ -2817,12 +2817,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
           type: 'raster',
           tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
           tileSize: 256,
-          // Cap source maxzoom at 11 — Esri's mosaic is uniform at z≤11 (single
-          // pre-blended worldwide layer). Above z11 it composites different vendor
-          // imagery (Maxar/Vivid/etc.) with mismatched colors causing the chunky
-          // discontinuous look. MapLibre auto-upscales z11 tiles past z11 from a
-          // single uniform set → soft but visually continuous at every zoom.
-          maxzoom: 11,
+          maxzoom: 19,
         });
       }
       if (!map.getLayer('sat-layer')) {
