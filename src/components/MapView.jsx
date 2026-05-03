@@ -979,6 +979,9 @@ const REAL3D_ALL_LAYER_IDS = [
   'real3d-pm-roads-residential-fill','real3d-pm-roads-residential',
 ];
 
+// Building layers deferred on show so roads/water/outlines render visibly first.
+const BUILDING_DEFERRED_IDS = ['real3d-buildings-baseplate', 'real3d-buildings'];
+
 // Douglas-Peucker line simplification — reduces coordinate count while preserving shape.
 // tolerance in degrees (0.002 ≈ 200m, enough to cut ZCTA point count by ~70%).
 function dpSimplify(points, tolerance) {
@@ -1534,6 +1537,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   const buildingTiersBakedRef = useRef(false);
   // Tracks borough outline 3D mode — defers opacity on FIRST entry to avoid spike artifact
   const boroughWas3DRef = useRef(false);
+  // Cache key for borough outline geometry — skip expensive safezone PiP when only Real3D/opacity changes
+  const boroughGeoKeyRef = useRef(null);
   // Interaction control — disabled during Phase 2B loading, enabled on reveal
   const interactiveRef = useRef(interactive);
 
@@ -1641,6 +1646,19 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     if (!mapReady) return;
     fetch(ROADS_PMTILES_URL, { headers: { Range: 'bytes=0-16383' } }).catch(() => {});
   }, [mapReady]);
+
+  // Build zip→ZCTA index map as soon as geoData is available (no `interactive` gate).
+  // This ensures buildTierByZipExpr can produce correct paint expressions even if
+  // buildFGBCache runs before interactive is set.
+  useEffect(() => {
+    if (!geoData?.features || zipToZctaIdxMapRef.current) return;
+    const lookup = {};
+    geoData.features.forEach((f, i) => {
+      const z = f.properties?.MODZCTA;
+      if (z) lookup[String(z)] = i;
+    });
+    zipToZctaIdxMapRef.current = lookup;
+  }, [geoData]);
 
   useEffect(() => {
     const onOnline = () => {
@@ -2220,11 +2238,23 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   }, [mapReady, geoData]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Pre-create Real3D layers at map init so first toggle is instant (just a visibility flip).
+  // Also pre-adds nyc-buildings PMTiles source (no layers) so the SW-cached PMTiles directory
+  // is fetched/parsed before Real3D is ever toggled — eliminates header-fetch hang on toggle.
   // On mobile: skip this — layers created on-demand when Real3D is activated to save GPU memory.
   useEffect(() => {
     if (window.innerWidth < 768) return; // mobile: defer to Real3D toggle
     const map = mapRef.current;
     if (!map || !mapReady || !geoData) return;
+    // Pre-add PMTiles source even before initReal3DLayers so MapLibre parses the
+    // PMTiles directory immediately (16KB range fetch, served from SW in-memory = ~0ms warm).
+    if (!map.getSource('nyc-buildings')) {
+      map.addSource('nyc-buildings', {
+        type: 'vector',
+        url: `pmtiles://${BUILDINGS_PMTILES_URL}`,
+        minzoom: 13,
+        maxzoom: 16,
+      });
+    }
     if (real3dLayersCreatedRef.current) return;
     initReal3DLayers(map, heatmapRef.current, timespanIdxRef.current ?? 2);
     setReal3DLayersVisible(map, false);
@@ -2601,12 +2631,37 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         boroughAvgTiersRef.current = avgTiers;
         const coloredBorough = buildColoredBoroughFeatures(boroughGeoDataRef.current, avgTiers, heatmap);
         boroughWithColorRef.current = coloredBorough;
-        // Generate quads and remove quads overlapping safezone areas (interior edges preserved)
-        let boroughQuads = createOutlineGeoJSON(coloredBorough, getZoomAwareOutlineWidth(map, 18, threeD || real3D));
-        const safezoneFeatures = geoData?.features?.filter(f => f.properties?._special) || [];
-        const { filtered, removedIdxSet } = removeSafezoneOverlapQuads(boroughQuads, safezoneFeatures);
-        boroughQuadFilterRef.current = removedIdxSet;
-        map.getSource('borough-source').setData(filtered);
+
+        // Key = geometry-affecting parameters only (NOT real3D/threeD — those only change opacity+width)
+        const boroughGeoKey = `${heatmap ? 1 : 0}|${timespanIdx}|${events?.length ?? 0}`;
+        const widthMeters   = getZoomAwareOutlineWidth(map, 18, threeD || real3D);
+
+        // Use precomputed skeleton path (O(vertices) linear math, no polygon normalization).
+        // Fall back to createOutlineGeoJSON only on first render before skeleton is ready.
+        const overrides = coloredBorough.features.map(f => f.properties);
+        let boroughQuads;
+        if (boroughSkeletonRef.current) {
+          boroughQuads = generateBoroughQuadsFromSkeleton(boroughSkeletonRef.current, widthMeters, overrides);
+        } else {
+          boroughQuads = createOutlineGeoJSON(coloredBorough, widthMeters);
+        }
+
+        // Only redo the expensive safezone PiP filter when tier/heatmap data actually changed.
+        // On Real3D/3D toggle the geometry key doesn't change — reuse boroughQuadFilterRef.
+        if (boroughGeoKey !== boroughGeoKeyRef.current || !boroughQuadFilterRef.current) {
+          const safezoneFeatures = geoData?.features?.filter(f => f.properties?._special) || [];
+          const { filtered, removedIdxSet } = removeSafezoneOverlapQuads(boroughQuads, safezoneFeatures);
+          boroughQuadFilterRef.current = removedIdxSet;
+          boroughGeoKeyRef.current = boroughGeoKey;
+          map.getSource('borough-source').setData(filtered);
+        } else {
+          // Fast path: re-apply cached filter (O(n) index filter, no PiP)
+          const filterSet = boroughQuadFilterRef.current;
+          const filtered = filterSet.size > 0
+            ? { ...boroughQuads, features: boroughQuads.features.filter((_, i) => !filterSet.has(i)) }
+            : boroughQuads;
+          map.getSource('borough-source').setData(filtered);
+        }
         // Borough color: read baked _color from features — mid-brightness for visibility
         map.setPaintProperty('borough-outline', 'fill-extrusion-color', ['coalesce', ['get', '_color'], OUTLINE_COLOR]);
         // Base 0 → full extrusion blocks from ground to max height.
@@ -3159,14 +3214,39 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     buildingAssignCleanupRef.current = () => {};
     // DO NOT moveLayer('borough-outline') to top — it must stay below roads + buildings.
     real3dLayersCreatedRef.current = true;
+    // Apply correct paint expressions immediately so layers have proper colors from frame 1.
+    // Must run after real3dLayersCreatedRef=true so refreshBuildingColors can find the layers.
+    refreshBuildingColors();
   }
 
   // Show/hide all Real3D layers. No source or layer destruction.
   function setReal3DLayersVisible(map, visible) {
     const vis = visible ? 'visible' : 'none';
+    if (!visible) {
+      // Hide everything immediately when turning off
+      REAL3D_ALL_LAYER_IDS.forEach(id => {
+        if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', 'none');
+      });
+      return;
+    }
+    // Show non-building layers immediately so roads/water/outlines snap in first.
+    // Defer building baseplates + buildings until the map has rendered a frame —
+    // this ensures roads are visually present before buildings "load in" on top.
     REAL3D_ALL_LAYER_IDS.forEach(id => {
-      if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', vis);
+      if (BUILDING_DEFERRED_IDS.includes(id)) return; // handled below
+      if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', 'visible');
     });
+    // Deferred: show buildings after the next idle frame (or 600ms safety fallback)
+    let shown = false;
+    const showBuildings = () => {
+      if (shown) return;
+      shown = true;
+      BUILDING_DEFERRED_IDS.forEach(id => {
+        if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', 'visible');
+      });
+    };
+    map.once('idle', showBuildings);
+    setTimeout(showBuildings, 600);
   }
 
   // Real3D toggle effect — create once, then toggle visibility.
@@ -3193,8 +3273,9 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       if (!real3dLayersCreatedRef.current) {
         initReal3DLayers(map, isHm, timespanIdxRef.current ?? 2);
       } else {
-        setReal3DLayersVisible(map, true);
+        // Paint FIRST — buildings have correct colors from frame 1, no one-frame black flash
         refreshBuildingColors();
+        setReal3DLayersVisible(map, true);
       }
       map.setLight({ anchor: 'map' });
       map.easeTo({ pitch: 55, bearing: -17, duration: 700 });
@@ -3213,6 +3294,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       if (!real3dLayersCreatedRef.current) {
         initReal3DLayers(map, isHm, timespanIdxRef.current ?? 2);
       } else {
+        // Paint correct colors before showing layers
+        refreshBuildingColors();
         setReal3DLayersVisible(map, true);
       }
       if (cancelled) return;
@@ -3222,7 +3305,6 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       await new Promise(r => setTimeout(r, 100));
       if (cancelled) return;
 
-      refreshBuildingColors();
       setReal3dLoading(false);
       setReal3dLoadProgress('');
     })();
