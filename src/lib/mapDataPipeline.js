@@ -5,6 +5,7 @@
 
 import { deserialize as fgbDeserialize } from 'flatgeobuf/lib/mjs/geojson.js';
 import mapCacheStore from './mapCacheStore';
+import { loadBakedBuildings, saveBakedBuildings, rebakeTiersInPlace } from './mapIDBCache';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 export const GEOJSON_URL        = './data/MODZCTA_2010_WGS1984.geo.json';
@@ -17,7 +18,9 @@ export const BOROUGH_FGBS = [
   { name: 'Staten Island',     url: './data/Staten Island_r.fgb',     cacheKey: 'Staten Island_r.fgb' },
 ];
 export const FGB_CACHE_NAME     = 'lapuff-fgb-v8';     // v8: HEIGHT_ROOF feet→meters fix + stack-overflow fix
-export const MAP_CACHE_DONE_KEY     = 'lapuff_map_cache_v2';
+// v3: IDB persistence + worker-only parse path (removed main-thread fallback hang)
+export const MAP_CACHE_DONE_KEY     = 'lapuff_map_cache_v3';
+export const MAP_IDB_VERSION        = 'lapuff_idb_v3_' + FGB_CACHE_NAME;
 export const MAP_CACHE_BUILDING_KEY = 'lapuff_map_cache_building';
 
 export const ROADS_PMTILES_URL = 'https://objectstorage.us-ashburn-1.oraclecloud.com/p/yGTOMC4N2uc1uIGkliFRgP51VbnPm96W8vebh_sOqeoGil3PErp8dvWmy74pEH70/n/idfnjqqb9g0p/b/nyc-map-data/o/realfinaldeciroads.pmtiles';
@@ -936,24 +939,36 @@ export async function runPhase2A(events, isMobile, onProgress) {
     }
   }).catch(() => {});
 
-  // ── Steps 7-10: Desktop FGB building pipeline (borough-split spatial FGBs) ─
-  // Skipped on mobile — buildings loaded JIT via spatial Range queries in 3rd Gear.
-  // Skipped on 2nd+ load — building data is already in Cache API; MapView's
-  // buildFGBCache effect loads it in background after the map is visible (saves ~3-4s).
-  if (!isMobile && !isDoneFlag) {
-    // NOTE (regression debug): worker path temporarily disabled while we trace why
-    // building setData was not reaching the Real3D layers. Main-thread pipeline is
-    // the proven baseline. To re-enable worker, set USE_FGB_WORKER=true.
-    const USE_FGB_WORKER = true;
-    if (USE_FGB_WORKER) {
-      try {
-        await runFGBPipelineWithWorker(geoData.features, precomputedTiers, P, onProgress);
-      } catch (workerErr) {
-        console.warn('[Pipeline] Worker FGB path failed, falling back to main thread:', workerErr?.message || workerErr);
-        await runFGBPipeline(geoData.features, precomputedTiers, P, onProgress);
-      }
+  // ── Steps 7-10: Desktop FGB building pipeline ──────────────────────────────
+  // Mobile uses runtime R-tree viewport queries — skipped here.
+  // Desktop ALWAYS runs (no 2nd-load skip — that previously caused a hang because
+  // mapCacheStore is in-memory only and didn't survive page reload). On 2nd+ load
+  // we hydrate the baked FeatureCollection from IndexedDB instead of re-parsing
+  // the ~196MB of FGB data. IDB rehydrate is ~800ms vs 6-10s for FGB parse.
+  if (!isMobile) {
+    const idbHit = await loadBakedBuildings(MAP_IDB_VERSION).catch(() => null);
+    if (idbHit) {
+      report(P.fgbFetch[0], 'Restoring building cache...');
+      // Rebake tiers in-place against current event-derived tier data.
+      // Cheap (~50ms) and ensures heatmap colors reflect *this* session's events.
+      rebakeTiersInPlace(idbHit.fc, idbHit.zctaIndex, precomputedTiers, TIMESPAN_STEPS.length);
+      mapCacheStore.buildingFGB        = idbHit.fc;
+      mapCacheStore.buildingZctaIndex  = idbHit.zctaIndex;
+      mapCacheStore.buildingTiersBaked = true;
+      report(P.bake[1], 'Building cache restored');
     } else {
-      await runFGBPipeline(geoData.features, precomputedTiers, P, onProgress);
+      // Cold path: worker parses + bakes, then we persist for next load.
+      // No main-thread fallback — if worker fails the loading screen surfaces the
+      // error rather than silently freezing the UI for 6-10s on the main thread.
+      await runFGBPipelineWithWorker(geoData.features, precomputedTiers, P, onProgress);
+      try {
+        await saveBakedBuildings({
+          fc: mapCacheStore.buildingFGB,
+          zctaIndex: mapCacheStore.buildingZctaIndex,
+          version: MAP_IDB_VERSION,
+          eventFingerprint,
+        });
+      } catch (e) { /* IDB write failed — non-fatal, just slower next load */ }
     }
   }
 

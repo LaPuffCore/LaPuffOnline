@@ -23,7 +23,7 @@ const FGB_YIELD_CHUNK = 10000;
 function normalizeFGBProps(props, i) {
   const hr = parseFloat(props?.HEIGHT_ROOF ?? props?.height_roof);
   return {
-    height_roof: isNaN(hr) ? 8 : hr,
+    height_roof: isNaN(hr) ? 8 : hr / 3.28084,  // convert feet → meters
     MODZCTA: props?.MODZCTA ?? null,
     _s5: i % 5,
     _s7: i % 7,

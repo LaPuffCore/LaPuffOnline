@@ -15,6 +15,7 @@ import { getSampleUsersForZip } from '../lib/sampleUsers';
 import { deserialize as fgbDeserialize } from 'flatgeobuf/lib/mjs/geojson.js';
 import { fetchGeoPostFeed, fetchReactionsForPosts } from '../lib/supabase';
 import { BOROUGH_FGBS, FGB_CACHE_NAME as PIPELINE_FGB_CACHE_NAME } from '../lib/mapDataPipeline';
+import { rebakeTiersInPlace } from '../lib/mapIDBCache';
 
 const GEOJSON_URL = './data/MODZCTA_2010_WGS1984.geo.json';
 const BOROUGH_GEOJSON_URL = './data/borough.geo.json';
@@ -2257,11 +2258,12 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   // Hydrate from mapCacheStore if Phase 2A already computed them; else compute fresh.
   useEffect(() => {
     if (!geoData || !adjacency || !events?.length) return;
-    // Hydrate from Phase 2A store if available (warm load — still recompute for fresh events)
+    // Hydrate from Phase 2A store if available. Worker baked all 5 tier columns
+    // into building properties already — runtime only needs paint refresh.
     if (mapCacheStore.precomputedTiers) {
       precomputedTiersRef.current = mapCacheStore.precomputedTiers;
       if (buildingFGBRef.current && buildingZctaMapRef.current) {
-        bakeAllTiersIntoBuildings();
+        refreshBuildingColors();
       }
     }
     let cancelled = false;
@@ -2276,9 +2278,18 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       }
       if (!cancelled) {
         precomputedTiersRef.current = result;
-        // Bake tiers into buildings if FGB data + ZCTA index are ready
+        // Tiers were baked in Phase 2A (worker). Live recompute is a safety net for
+        // edge cases (e.g. event list changes mid-session). If FGB data is loaded,
+        // re-bake the freshly-computed tiers in-place against the cached FC + index.
         if (buildingFGBRef.current && buildingZctaMapRef.current) {
-          bakeAllTiersIntoBuildings();
+          rebakeTiersInPlace(buildingFGBRef.current, buildingZctaMapRef.current, result);
+          buildingTiersBakedRef.current = true;
+          memoizedExprs.current = {};
+          const map = mapRef.current;
+          if (map?.getSource('fgb-buildings') && map.getStyle()) {
+            map.getSource('fgb-buildings').setData(buildingFGBRef.current);
+            refreshBuildingColors();
+          }
         }
       }
     })();
@@ -3064,133 +3075,39 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     return idxMap;
   }
 
-  // Background cache builder — non-blocking with yielding every 5K features.
-  // Warm path: FGB bytes from Cache API + ZCTA index from Cache API → parse (skip PiP).
-  // Cold path: fetch FGB from network → parse → PiP → cache bytes + index.
-  // Never caches parsed GeoJSON (too large, causes freeze on stringify/parse).
-  async function buildFGBCache() {
+  // Hydrate buildingFGBRef from mapCacheStore. Phase 2A guarantees this is populated
+  // (worker parse on cold load, IDB rehydrate on warm load). No main-thread parse
+  // fallback — if mapCacheStore is empty something is genuinely broken upstream and
+  // we surface that rather than silently freezing the UI for 6-10s.
+  function buildFGBCache() {
     if (buildingFGBRef.current) { setFgbCacheStatus('done'); setFgbCacheProgress(100); return; }
-
-    // ── Multi-borough spatial FGBs ─────────────────────────────────────────────
-    // Desktop: Phase 2A pre-loaded everything into mapCacheStore — just hydrate refs.
-    // If Phase 2A already built the FGB cache, hydrate refs and skip full reparse.
-    if (mapCacheStore.buildingFGB) {
-      buildingFGBRef.current = mapCacheStore.buildingFGB;
-      if (mapCacheStore.buildingZctaIndex) buildingZctaMapRef.current = mapCacheStore.buildingZctaIndex;
-      if (mapCacheStore.buildingTiersBaked) buildingTiersBakedRef.current = true;
-      if (mapCacheStore.precomputedTiers && !precomputedTiersRef.current)
-        precomputedTiersRef.current = mapCacheStore.precomputedTiers;
-      setFgbCacheStatus('done'); setFgbCacheProgress(100);
-      const map = mapRef.current;
-      if (map && map.getSource('fgb-buildings') && map.getStyle()) {
-        try {
-          map.getSource('fgb-buildings').setData(buildingFGBRef.current);
-          refreshBuildingColors();
-          // One-shot safety net: re-apply colors once GPU triangulation completes.
-          const onSourceLoaded = (e) => {
-            if (e.sourceId === 'fgb-buildings' && e.isSourceLoaded) {
-              map.off('sourcedata', onSourceLoaded);
-              if (real3DRef.current) refreshBuildingColors();
-            }
-          };
-          map.on('sourcedata', onSourceLoaded);
-        } catch (_e) { /* ignore — race during style swap */ }
+    if (!mapCacheStore.buildingFGB) {
+      // Mobile path: never populates mapCacheStore.buildingFGB — viewport R-tree handles it.
+      // Desktop: Phase 2A should have populated this. Log and return.
+      if (window.innerWidth >= 768) {
+        console.error('[MapView] mapCacheStore.buildingFGB empty after Phase 2A — Real3D buildings will be missing.');
       }
       return;
     }
-    if (fgbLoadingRef.current) return;
-    fgbLoadingRef.current = true;
-    setFgbCacheStatus('building');
-    setFgbCacheProgress(0);
-
-    try {
-      // Step 1: Fetch all 5 borough FGBs in parallel (Cache API or network)
-      setFgbCacheProgress(2);
-      const rawBufs = await Promise.all(BOROUGH_FGBS.map(async (borough) => {
-        if ('caches' in window) {
-          try {
-            const cache = await caches.open(PIPELINE_FGB_CACHE_NAME);
-            const cached = await cache.match(borough.cacheKey);
-            if (cached) return new Uint8Array(await cached.arrayBuffer());
-          } catch (e) { /* ignore */ }
-        }
-        const resp = await fetch(borough.url);
-        if (!resp.ok) throw new Error(`FGB fetch failed for ${borough.name}: ${resp.status}`);
-        const ab = await resp.arrayBuffer();
-        if ('caches' in window) {
-          try {
-            const cache = await caches.open(PIPELINE_FGB_CACHE_NAME);
-            await cache.put(borough.cacheKey, new Response(ab.slice(0), { headers: { 'Content-Type': 'application/octet-stream' } }));
-          } catch (e) { /* ignore */ }
-        }
-        return new Uint8Array(ab);
-      }));
-      setFgbCacheProgress(20);
-
-      // Mobile: raw bytes now cached; mobile uses URL-based viewport Range queries — done.
-      if (window.innerWidth < 768) {
-        setFgbCacheProgress(100);
-        setFgbCacheStatus('done');
-        return;
-      }
-
-      // Step 2: Parse boroughs sequentially → merge. Release each buffer after parse.
-      const allFeatures = [];
-      for (let bi = 0; bi < rawBufs.length; bi++) {
-        const sub = await parseFGBBuffer(rawBufs[bi], count => {
-          const pct = 20 + Math.round(((bi * 100000 + count) / (BOROUGH_FGBS.length * 100000)) * 40);
-          setFgbCacheProgress(Math.min(pct, 59));
-        });
-        // Safe large-array merge — spread push causes stack overflow on 200K+ arrays
-        for (let _fi = 0; _fi < sub.features.length; _fi++) allFeatures.push(sub.features[_fi]);
-        rawBufs[bi] = null; // release buffer
-      }
-      const geojson = { type: 'FeatureCollection', features: allFeatures };
-      buildingFGBRef.current = geojson;
-      setFgbCacheProgress(60);
-
-      // Step 3: Build ZCTA index from baked MODZCTA — O(n), no PiP needed
-      const zctaFeatures = geoDataRef.current?.features || [];
-      if (!zipToZctaIdxMapRef.current) {
-        const lookup = {};
-        for (let i = 0; i < zctaFeatures.length; i++) {
-          const z = zctaFeatures[i].properties?.MODZCTA;
-          if (z) lookup[String(z)] = i;
-        }
-        zipToZctaIdxMapRef.current = lookup;
-      }
-      const lookup = zipToZctaIdxMapRef.current;
-      const idxMap = new Int16Array(allFeatures.length);
-      for (let i = 0; i < allFeatures.length; i++) {
-        const z = allFeatures[i].properties?.MODZCTA;
-        idxMap[i] = z ? (lookup[String(z)] ?? -1) : -1;
-      }
-      buildingZctaMapRef.current = idxMap;
-      setFgbCacheProgress(65);
-
-      setFgbCacheProgress(100);
-      setFgbCacheStatus('done');
-
-      // Push to map if Real3D active + bake all timespan tiers if pre-computed
-      const map = mapRef.current;
-      if (map && map.getSource('fgb-buildings') && map.getStyle()) {
-        if (precomputedTiersRef.current) {
-          if (window.innerWidth < 768) {
-            await bakeAllTiersIntoBuildings(true);
-          } else {
-            const baked = bakeAllTiersIntoBuildings();
-            if (!baked) map.getSource('fgb-buildings').setData(geojson);
+    buildingFGBRef.current = mapCacheStore.buildingFGB;
+    if (mapCacheStore.buildingZctaIndex) buildingZctaMapRef.current = mapCacheStore.buildingZctaIndex;
+    if (mapCacheStore.buildingTiersBaked) buildingTiersBakedRef.current = true;
+    if (mapCacheStore.precomputedTiers && !precomputedTiersRef.current)
+      precomputedTiersRef.current = mapCacheStore.precomputedTiers;
+    setFgbCacheStatus('done'); setFgbCacheProgress(100);
+    const map = mapRef.current;
+    if (map && map.getSource('fgb-buildings') && map.getStyle()) {
+      try {
+        map.getSource('fgb-buildings').setData(buildingFGBRef.current);
+        refreshBuildingColors();
+        const onSourceLoaded = (e) => {
+          if (e.sourceId === 'fgb-buildings' && e.isSourceLoaded) {
+            map.off('sourcedata', onSourceLoaded);
+            if (real3DRef.current) refreshBuildingColors();
           }
-        } else {
-          map.getSource('fgb-buildings').setData(geojson);
-        }
-      }
-    } catch (err) {
-      console.error('FGB cache build failed:', err);
-      setFgbCacheStatus('idle');
-      setFgbCacheProgress(0);
-    } finally {
-      fgbLoadingRef.current = false;
+        };
+        map.on('sourcedata', onSourceLoaded);
+      } catch (_e) { /* ignore — race during style swap */ }
     }
   }
 
@@ -3326,56 +3243,27 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   }
 
   // Bake all 5 timespan tiers into building properties (_tier_0.._tier_4).
-  // After this, GPU reads ['get', '_tier_X'] directly — no feature-state or setData needed on timespan change.
-  // Only called when BOTH pre-computed tiers AND building ZCTA index are ready.
-  // Mutates features in place, then one final setData pushes the baked GeoJSON.
-  // On mobile: yields every 10K features to avoid main thread freeze.
-  function bakeAllTiersIntoBuildings(asyncMode = false) {
+  // POST-OVERHAUL: Phase 2A worker bakes tiers once on cold load, mapIDBCache
+  // rebakes on warm load. This function is now a thin synchronous wrapper around
+  // rebakeTiersInPlace — kept for the rare safety-net call sites that still invoke
+  // it. asyncMode arg ignored (no main-thread chunking needed; the operation is
+  // ~50ms on desktop and the worker handles cold-path bake off-thread).
+  function bakeAllTiersIntoBuildings(_asyncMode = false) {
     const geojson = buildingFGBRef.current;
     const idxMap = buildingZctaMapRef.current;
     const precomputed = precomputedTiersRef.current;
-    if (!geojson?.features?.length || !idxMap || !precomputed) return asyncMode ? Promise.resolve(false) : false;
-
-    const features = geojson.features;
-    const BAKE_CHUNK = 10000;
-
-    function bakeRange(start, end) {
-      for (let i = start; i < end; i++) {
-        const zIdx = idxMap[i];
-        const props = features[i].properties;
-        for (let t = 0; t < TIMESPAN_STEPS.length; t++) {
-          const tiers = precomputed[t]?.tiers;
-          props[`_tier_${t}`] = (zIdx >= 0 && tiers && tiers.length > zIdx) ? (tiers[zIdx] ?? 0) : 0;
-        }
-      }
+    if (!geojson?.features?.length || !idxMap || !precomputed) {
+      return _asyncMode ? Promise.resolve(false) : false;
     }
-
-    function finalize() {
-      buildingTiersBakedRef.current = true;
-      memoizedExprs.current = {};
-      const map = mapRef.current;
-      if (map?.getSource('fgb-buildings') && map.getStyle()) {
-        map.getSource('fgb-buildings').setData(geojson);
-        refreshBuildingColors();
-      }
+    rebakeTiersInPlace(geojson, idxMap, precomputed, TIMESPAN_STEPS.length);
+    buildingTiersBakedRef.current = true;
+    memoizedExprs.current = {};
+    const map = mapRef.current;
+    if (map?.getSource('fgb-buildings') && map.getStyle()) {
+      map.getSource('fgb-buildings').setData(geojson);
+      refreshBuildingColors();
     }
-
-    if (!asyncMode) {
-      // Desktop: synchronous (fast on desktop, ~50-100ms)
-      bakeRange(0, features.length);
-      finalize();
-      return true;
-    }
-
-    // Mobile: async with yielding every BAKE_CHUNK features
-    return (async () => {
-      for (let start = 0; start < features.length; start += BAKE_CHUNK) {
-        bakeRange(start, Math.min(start + BAKE_CHUNK, features.length));
-        await new Promise(r => setTimeout(r, 0));
-      }
-      finalize();
-      return true;
-    })();
+    return _asyncMode ? Promise.resolve(true) : true;
   }
 
   // Create fgb-buildings source + building layers. Source starts empty.

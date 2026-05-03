@@ -104,8 +104,12 @@ def mvt_to_geojson_geoms(tile_data, tile_x, tile_y, tile_z, layer_name='water'):
     def mvt_to_wgs(pt):
         lx, ly = pt
         lon = west + (lx / EXTENT) * lon_span
-        # Correct: interpolate in Mercator Y space, then convert to WGS84 lat
-        my  = merc_n - (ly / EXTENT) * merc_span
+        # mapbox_vector_tile.decode() with default y_coord_down=False flips Y so
+        # ly=0 is at the BOTTOM (south) of the tile, ly=EXTENT at the TOP (north).
+        # Interpolate in Mercator Y space (south + northward as ly grows), then
+        # convert to WGS84 lat. Previous code (merc_n - ly/EXTENT * span) assumed
+        # top-left origin and produced vertically-mirrored geometry per tile.
+        my  = merc_s + (ly / EXTENT) * merc_span
         lat = merc_y_to_lat(my)
         return (lon, lat)
 
