@@ -83,30 +83,20 @@ function lngLatToTile(lng, lat, zoom) {
 }
 function precacheSatelliteTiles() {
   if (typeof window === 'undefined') return;
-  // Wider envelope: matches MapLibre maxBounds padded — covers full visible area
-  // even when user zooms way out. Lng [-75.5, -72.5], Lat [40.0, 41.5].
+  // Lock satellite to z10 ONLY. MapLibre overzooms z10 tiles for closer zooms.
+  // Eliminates fragmentation/seams + reduces tile fetches ~10x.
+  // Coverage envelope matches MapLibre maxBounds: Lng [-75.5, -72.5], Lat [40.0, 41.5].
   const lng1 = -75.50, lat1 = 40.00, lng2 = -72.50, lat2 = 41.50;
   const urls = [];
-  // z10-12 = full coverage instant. z13 = street-block detail near NYC core.
-  // Cumulative ~500 tiles ~20MB. Browser HTTP cache handles persistence.
-  for (const z of [10, 11, 12, 13]) {
-    const a = lngLatToTile(lng1, lat2, z); // top-left
-    const b = lngLatToTile(lng2, lat1, z); // bottom-right
-    // For z13, restrict tighter to NYC core (lng [-74.30, -73.65], lat [40.45, 40.95])
-    // so we don't pull 1500+ tiles covering NJ/CT countryside at street level.
-    let xStart = a.x, xEnd = b.x, yStart = a.y, yEnd = b.y;
-    if (z === 13) {
-      const ca = lngLatToTile(-74.30, 40.95, z);
-      const cb = lngLatToTile(-73.65, 40.45, z);
-      xStart = ca.x; xEnd = cb.x; yStart = ca.y; yEnd = cb.y;
-    }
-    for (let x = xStart; x <= xEnd; x++) {
-      for (let y = yStart; y <= yEnd; y++) {
-        urls.push(`https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`);
-      }
+  const z = 10;
+  const a = lngLatToTile(lng1, lat2, z);
+  const b = lngLatToTile(lng2, lat1, z);
+  for (let x = a.x; x <= b.x; x++) {
+    for (let y = a.y; y <= b.y; y++) {
+      urls.push(`https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`);
     }
   }
-  // Throttled to 4 concurrent — Esri rate limits ~10/sec from one IP.
+  // ~50 tiles, ~2MB. Throttled at 4 concurrent.
   let active = 0, idx = 0;
   const MAX = 4;
   function next() {
@@ -537,7 +527,7 @@ async function buildZctaIndexMap(zctaFeatures, buildingFeatures, onProgress) {
       }
       if (idxMap[i] >= 0) break;
     }
-    if (i % PIP_YIELD_CHUNK === 0 && i > 0) {
+    if (i % FGB_YIELD_CHUNK === 0 && i > 0) {
       if (onProgress) onProgress(i);
       await new Promise(r => setTimeout(r, 0));
     }
@@ -978,7 +968,7 @@ export async function runPhase2A(events, isMobile, onProgress) {
     // NOTE (regression debug): worker path temporarily disabled while we trace why
     // building setData was not reaching the Real3D layers. Main-thread pipeline is
     // the proven baseline. To re-enable worker, set USE_FGB_WORKER=true.
-    const USE_FGB_WORKER = false;
+    const USE_FGB_WORKER = true;
     if (USE_FGB_WORKER) {
       try {
         await runFGBPipelineWithWorker(geoData.features, precomputedTiers, P, onProgress);

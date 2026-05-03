@@ -34,3 +34,11 @@ build_output.txt
 
 # Large source MBTiles (do not commit; used only for local PMTiles extraction)
 *.mbtiles
+*.mbtiles-journal
+
+# Legacy / dormant map data (replaced by per-borough FGBs + PMTiles)
+public/data/final_building.fgb
+public/data/external_waters4.json
+public/data/roads_buffered.fgb
+public/data/internalwater.json
+public/data/Supabase Snippet*.csv

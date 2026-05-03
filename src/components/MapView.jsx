@@ -2227,19 +2227,35 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         try {
           const origCenter = map.getCenter();
           const origZoom = map.getZoom();
-          const origPitch = map.getPitch();
-          const origBearing = map.getBearing();
-          const zooms = [8, 10, 12, 14, 16, 17];
+          // Force-warm Real3D shaders: pre-created layers exist (next effect) but are
+          // hidden. Briefly flip visibility ON at z14 so MapLibre compiles fill-extrusion
+          // shaders and uploads building geometry to GPU. Then OFF — kept warm in cache.
+          // Cycle zooms to pre-load tile pyramid (PMTiles roads + ZCTA fills).
+          const zooms = [10, 12, 14, 16];
           let i = 0;
+          const realLayers = ['real3d-buildings', 'real3d-buildings-baseplate', 'real3d-roads-primary', 'real3d-roads-tertiary', 'real3d-roads-motorway', 'real3d-water'];
+          const setRealVis = (vis) => {
+            for (const id of realLayers) {
+              if (map.getLayer(id)) {
+                try { map.setLayoutProperty(id, 'visibility', vis); } catch (_e) { /* */ }
+              }
+            }
+          };
           const step = () => {
             if (i >= zooms.length) {
-              map.jumpTo({ center: origCenter, zoom: origZoom, pitch: origPitch, bearing: origBearing });
+              // Restore: default 2D state — original camera, no pitch/bearing, all 3D/Real3D layers hidden.
+              setRealVis('none');
+              map.jumpTo({ center: origCenter, zoom: origZoom, pitch: 0, bearing: 0 });
               return;
             }
-            map.jumpTo({ center: origCenter, zoom: zooms[i++], pitch: 0, bearing: 0 });
+            const z = zooms[i++];
+            // At z=14+ briefly show Real3D to compile shaders; otherwise keep hidden.
+            setRealVis(z >= 14 ? 'visible' : 'none');
+            map.jumpTo({ center: origCenter, zoom: z, pitch: 0, bearing: 0 });
             requestAnimationFrame(step);
           };
-          step();
+          // Defer one frame so layer pre-creation effect runs first.
+          requestAnimationFrame(step);
         } catch (_e) { /* ignore — warmup is best-effort */ }
       });
     }
@@ -2834,7 +2850,9 @@ export default function MapView({ events, headerCollapsed = false, interactive =
           type: 'raster',
           tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
           tileSize: 256,
-          maxzoom: 19,
+          // Lock satellite imagery to z10 — MapLibre overzooms the z10 tiles for closer
+          // zooms. Eliminates fragmentation/seams seen at z11+ and reduces tile fetches by ~10x.
+          maxzoom: 10,
         });
       }
       if (!map.getLayer('sat-layer')) {
@@ -2907,10 +2925,6 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     if (!map || !map.getStyle()) return;
     const isHm = heatmapRef.current;
     const tsIdx = timespanIdxRef.current ?? 2;
-    console.log('[Real3D] refreshBuildingColors: isHm=', isHm, 'tsIdx=', tsIdx,
-      'hasBuildings=', !!map.getLayer('real3d-buildings'),
-      'hasBaseplates=', !!map.getLayer('real3d-buildings-baseplate'),
-      'srcLoaded=', map.getSource('fgb-buildings') ? map.isSourceLoaded('fgb-buildings') : 'no-src');
     memoizedExprs.current = {};
     if (map.getLayer('real3d-buildings')) {
       map.setPaintProperty('real3d-buildings', 'fill-extrusion-color', buildingColorExprByState(isHm, tsIdx));
@@ -3085,7 +3099,6 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     // Desktop: Phase 2A pre-loaded everything into mapCacheStore — just hydrate refs.
     // If Phase 2A already built the FGB cache, hydrate refs and skip full reparse.
     if (mapCacheStore.buildingFGB) {
-      console.log('[FGB] fast path: mapCacheStore has', mapCacheStore.buildingFGB?.features?.length, 'features');
       buildingFGBRef.current = mapCacheStore.buildingFGB;
       if (mapCacheStore.buildingZctaIndex) buildingZctaMapRef.current = mapCacheStore.buildingZctaIndex;
       if (mapCacheStore.buildingTiersBaked) buildingTiersBakedRef.current = true;
@@ -3093,14 +3106,11 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         precomputedTiersRef.current = mapCacheStore.precomputedTiers;
       setFgbCacheStatus('done'); setFgbCacheProgress(100);
       const map = mapRef.current;
-      // Push data whenever the FGB source exists — independent of real3D toggle state.
-      // Pre-populating the source means the first Real3D toggle is a pure visibility flip.
       if (map && map.getSource('fgb-buildings') && map.getStyle()) {
         try {
-          console.log('[FGB] fast-path setData', buildingFGBRef.current?.features?.length, 'features');
           map.getSource('fgb-buildings').setData(buildingFGBRef.current);
           refreshBuildingColors();
-          // Safety net: re-apply colors once MapLibre finishes GPU triangulation of the source data.
+          // One-shot safety net: re-apply colors once GPU triangulation completes.
           const onSourceLoaded = (e) => {
             if (e.sourceId === 'fgb-buildings' && e.isSourceLoaded) {
               map.off('sourcedata', onSourceLoaded);
@@ -3256,33 +3266,18 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     try {
       const features = [];
       let count = 0;
-      let globalFeatureIdx = 0; // tracks position into centroid binary across boroughs
 
-      for (const borough of BOROUGH_FGBS) {
+      // Parallel borough fetches/parses for instant viewport assembly.
+      // FGBs are already borough-bounded; no centroid/bbox guards needed —
+      // R-tree spatial Range query already returns only viewport-overlapping features.
+      const boroughResults = await Promise.all(BOROUGH_FGBS.map(async (borough) => {
+        const localFeatures = [];
         if (isMob) {
-          // Mobile: R-tree spatial Range query — fetches only viewport bytes via SW Range cache.
-          // R-tree returns all features whose bbox overlaps the query rect (may include
-          // features whose centroid is just outside). Use centroid binary as a secondary
-          // guard if available, falling back to first-ring anchor.
-          const boroughMeta = mapCacheStore.buildingCentroidsMeta?.byBorough?.find(b => b.name === borough.name);
-          const boroughCentroidOffset = boroughMeta?.offset ?? -1;
-          let boroughLocalIdx = 0;
+          // Mobile: R-tree spatial Range query. Trust the index — no guards.
           for await (const feature of fgbDeserialize(borough.url, rect)) {
             if (!feature?.geometry?.coordinates) continue;
-            // Centroid bbox guard (tighter than R-tree bbox)
-            let clng, clat;
-            if (centroidsBin && boroughCentroidOffset >= 0) {
-              const gi = boroughCentroidOffset + boroughLocalIdx;
-              clng = centroidsBin[gi * 2];
-              clat = centroidsBin[gi * 2 + 1];
-            } else {
-              const anchor = feature.geometry.coordinates?.[0]?.[0] ?? [0, 0];
-              clng = anchor[0]; clat = anchor[1];
-            }
-            boroughLocalIdx++;
-            // Skip features whose centroid is clearly outside the padded viewport
-            if (clng < minX || clng > maxX || clat < minY || clat > maxY) continue;
-            const spatialSeed = Math.abs(Math.round(clng * 1e5) ^ Math.round(clat * 1e5));
+            const anchor = feature.geometry.coordinates?.[0]?.[0] ?? [0, 0];
+            const spatialSeed = Math.abs(Math.round(anchor[0] * 1e5) ^ Math.round(anchor[1] * 1e5));
             const props = normalizeFGBProps(feature.properties, spatialSeed);
             const modzcta = props.MODZCTA;
             if (modzcta && precomputed) {
@@ -3295,14 +3290,10 @@ export default function MapView({ events, headerCollapsed = false, interactive =
               }
             }
             feature.properties = props;
-            features.push(feature);
-            if (++count % 1000 === 0) await new Promise(r => setTimeout(r, 0));
+            localFeatures.push(feature);
           }
-          // Advance globalFeatureIdx by borough count (for next borough's centroid offset)
-          if (boroughMeta) globalFeatureIdx += boroughMeta.count;
         } else {
           // Desktop fallback (no Phase 2A cache yet): full buffer parse + JS bbox filter.
-          // Use centroid binary for bbox check if available — more accurate than first-ring anchor.
           let buf = null;
           if ('caches' in window) {
             try {
@@ -3313,23 +3304,13 @@ export default function MapView({ events, headerCollapsed = false, interactive =
           }
           if (!buf) {
             const resp = await fetch(borough.url);
-            if (!resp.ok) { globalFeatureIdx += (mapCacheStore.buildingCentroidsMeta?.byBorough?.find(b => b.name === borough.name)?.count ?? 0); continue; }
+            if (!resp.ok) return localFeatures;
             buf = new Uint8Array(await resp.arrayBuffer());
           }
-          const boroughMetaDsk = mapCacheStore.buildingCentroidsMeta?.byBorough?.find(b => b.name === borough.name);
-          const boroughCentroidOffsetDsk = boroughMetaDsk?.offset ?? -1;
-          let dskLocalIdx = 0;
           for await (const feature of fgbDeserialize(buf)) {
-            if (!feature?.geometry?.coordinates) { dskLocalIdx++; continue; }
-            let lng, lat;
-            if (centroidsBin && boroughCentroidOffsetDsk >= 0) {
-              const gi = boroughCentroidOffsetDsk + dskLocalIdx;
-              lng = centroidsBin[gi * 2]; lat = centroidsBin[gi * 2 + 1];
-            } else {
-              const anchor = feature.geometry.coordinates?.[0]?.[0] ?? [0, 0];
-              lng = anchor[0]; lat = anchor[1];
-            }
-            dskLocalIdx++;
+            if (!feature?.geometry?.coordinates) continue;
+            const anchor = feature.geometry.coordinates?.[0]?.[0] ?? [0, 0];
+            const lng = anchor[0], lat = anchor[1];
             if (lng < minX || lng > maxX || lat < minY || lat > maxY) continue;
             const spatialSeed = Math.abs(Math.round(lng * 1e5) ^ Math.round(lat * 1e5));
             const props = normalizeFGBProps(feature.properties, spatialSeed);
@@ -3344,13 +3325,16 @@ export default function MapView({ events, headerCollapsed = false, interactive =
               }
             }
             feature.properties = props;
-            features.push(feature);
-            if (++count % 2000 === 0) await new Promise(r => setTimeout(r, 0));
+            localFeatures.push(feature);
           }
-          if (boroughMetaDsk) globalFeatureIdx += boroughMetaDsk.count;
-          buf = null;
         }
+        return localFeatures;
+      }));
+
+      for (const arr of boroughResults) {
+        for (let i = 0; i < arr.length; i++) features.push(arr[i]);
       }
+      count = features.length;
 
       // Desktop: skip if full cache arrived while we were parsing
       if (!isMob && buildingFGBRef.current) return;
@@ -3359,6 +3343,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         map.getSource('fgb-buildings').setData({ type: 'FeatureCollection', features });
         if (real3DRef.current) refreshBuildingColors();
       }
+      void count; // silence unused
     } catch (err) {
       if (err.name !== 'AbortError') console.error('FGB viewport fetch failed:', err);
     }
@@ -3741,7 +3726,6 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   // Initialize Real3D layers ONCE. After first call, all subsequent activations
   // just toggle visibility — no WebGL context rebuild, no source re-creation.
   function initReal3DLayers(map, isHeatmap, tsIdx = 0) {
-    console.log('[Real3D] initReal3DLayers: isHeatmap=', isHeatmap, 'tsIdx=', tsIdx);
     map.setLight({ anchor: 'map' });
     addOpenmaptilesSourceAndLayers(map, isHeatmap, tsIdx);
 
@@ -3822,9 +3806,6 @@ export default function MapView({ events, headerCollapsed = false, interactive =
 
     // Desktop: immediate (sync) path — unchanged
     if (!isMob) {
-      console.log('[Real3D] desktop toggle ON: layersCreated=', real3dLayersCreatedRef.current,
-        'buildingFGB=', !!buildingFGBRef.current, 'tiersBaked=', buildingTiersBakedRef.current,
-        'zoom=', map.getZoom());
       if (!real3dLayersCreatedRef.current) {
         initReal3DLayers(map, isHm, timespanIdxRef.current ?? 2);
       } else {
@@ -3838,9 +3819,9 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         }
       }
       map.setLight({ anchor: 'map' });
-      // Auto-zoom to 14 if below building visible range — ensures buildings (minzoom 14) are visible.
-      const curZoom = map.getZoom();
-      map.easeTo({ pitch: 55, bearing: -17, duration: 700, ...(curZoom < 14 ? { zoom: 14 } : {}) });
+      // No auto-zoom — preserve user's current zoom. Buildings appear naturally when user
+      // zooms to 14+. Phase 2B warmup pre-compiled all shaders so toggle is instant.
+      map.easeTo({ pitch: 55, bearing: -17, duration: 700 });
       return;
     }
 

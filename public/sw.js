@@ -1,5 +1,5 @@
 // LaPuff Service Worker — caches FGB files + PMTiles (full-file pre-warm + Range slicing).
-const SW_VERSION = 'lapuff-sw-v4';
+const SW_VERSION = 'lapuff-sw-v5';
 
 // Cache names (must match mapDataPipeline.js)
 const FGB_CACHE         = 'lapuff-fgb-v8';            // v8: HEIGHT_ROOF feet→meters fix + stack-overflow fix
