@@ -1,10 +1,10 @@
 // LaPuff Service Worker — PMTiles full-file pre-warm + Range slicing.
-const SW_VERSION = 'lapuff-sw-v9';
+const SW_VERSION = 'lapuff-sw-v10';
 
 // Cache names (must match mapDataPipeline.js)
 const FGB_CACHE         = 'lapuff-fgb-v9';            // v9: bumped on PMTiles buildings migration
 const PMTILES_CACHE     = 'lapuff-pmtiles-sw-v3';     // v3: per-Range responses (fallback)
-const PMTILES_FULL_CACHE = 'lapuff-pmtiles-full-v4';  // v4: dedup buildings (--buffer=0)
+const PMTILES_FULL_CACHE = 'lapuff-pmtiles-full-v5';  // v5: borough-FGB rebuild, no-clipping, z13-16
 
 const MANAGED_CACHES = [FGB_CACHE, PMTILES_CACHE, PMTILES_FULL_CACHE];
 

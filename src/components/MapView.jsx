@@ -2240,11 +2240,21 @@ export default function MapView({ events, headerCollapsed = false, interactive =
           for (const z of zooms) {
             for (const c of samples) sweep.push({ center: c, zoom: z });
           }
+          // 3D-mode warm: at high zooms briefly enable extruded ZCTA/upper-border opacity
+          // so MapLibre compiles their fill-extrusion paint shaders (otherwise first 3D
+          // toggle in-session triggers a compile hang).
+          const setExtruded3D = (on) => {
+            try {
+              if (map.getLayer('zcta-extrude')) map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', on ? 0.9 : 0);
+              if (map.getLayer('zcta-outline')) map.setPaintProperty('zcta-outline', 'fill-extrusion-opacity', on ? 0.95 : 0);
+            } catch (_e) { /* */ }
+          };
           let i = 0;
           const step = () => {
             if (i >= sweep.length) {
               // Restore: default 2D state — original camera, no pitch/bearing, all Real3D layers hidden.
               setRealVis('none');
+              setExtruded3D(false);
               map.jumpTo({ center: origCenter, zoom: origZoom, pitch: 0, bearing: 0 });
               mapCacheStore.warmupComplete = true;
               return;
@@ -2253,7 +2263,9 @@ export default function MapView({ events, headerCollapsed = false, interactive =
             // At z=14+ briefly show Real3D layers to compile fill-extrusion shaders
             // and warm a sampling of building tiles into the cache.
             setRealVis(zoom >= 14 ? 'visible' : 'none');
-            map.jumpTo({ center, zoom, pitch: 0, bearing: 0 });
+            // At z>=11 briefly enable 3D extrusions so their paint expressions compile.
+            setExtruded3D(zoom >= 11);
+            map.jumpTo({ center, zoom, pitch: zoom >= 11 ? 48 : 0, bearing: zoom >= 11 ? -17 : 0 });
             requestAnimationFrame(step);
           };
           // Defer one frame so layer pre-creation effect runs first.
@@ -2891,41 +2903,42 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     if (!map || !mapReady) return;
 
     if (satellite) {
-      // Low-zoom layer: ArcGIS World Imagery (z0-13) — much sharper than Clarity at z<13
+      // Low-zoom layer: ArcGIS World Imagery — used z0-14 so the entire
+      // sub-z14 range is uniformly sourced (no provider mismatch at z11-z13).
       if (!map.getSource('sat-source-arcgis')) {
         map.addSource('sat-source-arcgis', {
           type: 'raster',
           tiles: ['https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
           tileSize: 256,
           minzoom: 0,
-          maxzoom: 13,
+          maxzoom: 14,
         });
       }
-      // High-zoom layer: Clarity (z13+) — uniform NYC mosaic
+      // High-zoom layer: Clarity (z14+) — uniform NYC mosaic at high zoom only.
       if (!map.getSource('sat-source')) {
         map.addSource('sat-source', {
           type: 'raster',
           tiles: ['https://clarity.maptiles.arcgis.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
           tileSize: 256,
-          minzoom: 13,
+          minzoom: 14,
           maxzoom: 19,
         });
       }
       const layers = map.getStyle().layers;
       const firstLayerId = layers.length > 0 ? layers[0].id : undefined;
-      // ArcGIS first (bottom) — visible at z<13
+      // ArcGIS first (bottom) — visible at z<14 (uniform ArcGIS through z11-z13)
       if (!map.getLayer('sat-layer-arcgis')) {
         map.addLayer({
           id: 'sat-layer-arcgis', type: 'raster', source: 'sat-source-arcgis',
-          maxzoom: 13,
+          maxzoom: 14,
           paint: { 'raster-opacity': 1, 'raster-fade-duration': 0 },
         }, firstLayerId);
       }
-      // Clarity on top of ArcGIS — visible at z≥13
+      // Clarity on top of ArcGIS — visible at z≥14
       if (!map.getLayer('sat-layer')) {
         map.addLayer({
           id: 'sat-layer', type: 'raster', source: 'sat-source',
-          minzoom: 13,
+          minzoom: 14,
           paint: { 'raster-opacity': 1, 'raster-fade-duration': 0 },
         }, firstLayerId);
       }
