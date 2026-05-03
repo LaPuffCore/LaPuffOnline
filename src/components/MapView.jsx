@@ -2819,7 +2819,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       if (!map.getSource('sat-source')) {
         map.addSource('sat-source', {
           type: 'raster',
-          tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+          // Clarity server: older but visually uniform mosaic — no patchwork from mixed vendor sources
+          tiles: ['https://clarity.maptiles.arcgis.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
           tileSize: 256,
           maxzoom: 19,
         });
