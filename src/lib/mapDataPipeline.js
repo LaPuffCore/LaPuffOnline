@@ -66,20 +66,41 @@ function lngLatToTile(lng, lat, zoom) {
 }
 function precacheSatelliteTiles() {
   if (typeof window === 'undefined') return;
-  // Lock satellite to z10 ONLY. MapLibre overzooms z10 tiles for closer zooms.
-  // Eliminates fragmentation/seams + reduces tile fetches ~10x.
-  // Coverage envelope matches MapLibre maxBounds: Lng [-75.5, -72.5], Lat [40.0, 41.5].
-  const lng1 = -75.50, lat1 = 40.00, lng2 = -72.50, lat2 = 41.50;
+  // Satellite tile strategy (3 zoom levels):
+  //   z10: full viewport bbox — ocean baseplate, ~50 tiles
+  //   z11: NYC bounds — borough-level detail, ~30 tiles
+  //   z12: inner NYC — block-level detail for typical map zoom, ~50 tiles
+  // maxzoom in MapView sat source is now 12; MapLibre requests z10/11/12 depending
+  // on viewport zoom. Pre-caching all three prevents first-toggle stutter.
+  const ARCGIS_TILE = (z, y, x) =>
+    `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`;
   const urls = [];
-  const z = 10;
-  const a = lngLatToTile(lng1, lat2, z);
-  const b = lngLatToTile(lng2, lat1, z);
-  for (let x = a.x; x <= b.x; x++) {
-    for (let y = a.y; y <= b.y; y++) {
-      urls.push(`https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`);
-    }
+
+  // z10: full MapLibre maxBounds
+  {
+    const z = 10, lng1 = -75.50, lat1 = 40.00, lng2 = -72.50, lat2 = 41.50;
+    const a = lngLatToTile(lng1, lat2, z), b = lngLatToTile(lng2, lat1, z);
+    for (let x = a.x; x <= b.x; x++)
+      for (let y = a.y; y <= b.y; y++)
+        urls.push(ARCGIS_TILE(z, y, x));
   }
-  // ~50 tiles, ~2MB. Throttled at 4 concurrent.
+  // z11: NYC tight bbox
+  {
+    const z = 11, lng1 = -74.27, lat1 = 40.47, lng2 = -73.68, lat2 = 40.93;
+    const a = lngLatToTile(lng1, lat2, z), b = lngLatToTile(lng2, lat1, z);
+    for (let x = a.x; x <= b.x; x++)
+      for (let y = a.y; y <= b.y; y++)
+        urls.push(ARCGIS_TILE(z, y, x));
+  }
+  // z12: NYC tight bbox (~4× tile count vs z11, ~50 tiles)
+  {
+    const z = 12, lng1 = -74.27, lat1 = 40.47, lng2 = -73.68, lat2 = 40.93;
+    const a = lngLatToTile(lng1, lat2, z), b = lngLatToTile(lng2, lat1, z);
+    for (let x = a.x; x <= b.x; x++)
+      for (let y = a.y; y <= b.y; y++)
+        urls.push(ARCGIS_TILE(z, y, x));
+  }
+  // ~130 tiles total, ~5MB. Throttled at 4 concurrent (polite, no rate-limit risk).
   let active = 0, idx = 0;
   const MAX = 4;
   function next() {
@@ -917,7 +938,9 @@ export async function runPhase2A(events, isMobile, onProgress) {
 
   // ── Steps 7-10: Desktop FGB building pipeline (borough-split spatial FGBs) ─
   // Skipped on mobile — buildings loaded JIT via spatial Range queries in 3rd Gear.
-  if (!isMobile) {
+  // Skipped on 2nd+ load — building data is already in Cache API; MapView's
+  // buildFGBCache effect loads it in background after the map is visible (saves ~3-4s).
+  if (!isMobile && !isDoneFlag) {
     // NOTE (regression debug): worker path temporarily disabled while we trace why
     // building setData was not reaching the Real3D layers. Main-thread pipeline is
     // the proven baseline. To re-enable worker, set USE_FGB_WORKER=true.

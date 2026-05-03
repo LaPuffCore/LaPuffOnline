@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
 """
 extract_water_z10.py
-Extracts all z=10 water polygons from water.pmtiles, dissolves overlapping/touching
-polygons (tile-grid seams) into unified shapes, and writes water_static.geojson.
+Extracts water polygons from water.pmtiles at z=10 (ocean baseplate) and z=11
+(NYC-area detail: rivers, channels, bays). Dissolves tile-seam overlaps into
+unified shapes and writes water_static.geojson.
 
 Output: public/data/water_static.geojson
-  - Single GeoJSON FeatureCollection
-  - All polygons reflect the z=10 simplification level (ocean stays as one polygon)
-  - Overlapping/adjacent tile-seam quads are merged into one polygon (no double-fill)
-  - Usable at ALL zoom levels with no further recalculation
+  - All polygons from z10 (viewport-wide baseplate) + z11 (NYC detail)
+  - Tile-seam duplicates dissolved via unary_union
+  - Correct Mercator Y → WGS84 latitude projection (not linear approximation)
+  - NO area filtering — every feature preserved
+  - NO simplification — exact geometry from source tiles
+  - Polygon winding corrected via shapely orient()
 """
-import sys, json, os
+import sys, json, math
 from pathlib import Path
 
 # ── deps ───────────────────────────────────────────────────────────────────────
@@ -32,6 +35,7 @@ except ImportError:
 try:
     from shapely.geometry import shape, mapping
     from shapely.ops import unary_union
+    from shapely.geometry.polygon import orient
     import shapely
 except ImportError:
     print("Installing shapely...")
@@ -39,6 +43,7 @@ except ImportError:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "shapely", "-q"])
     from shapely.geometry import shape, mapping
     from shapely.ops import unary_union
+    from shapely.geometry.polygon import orient
     import shapely
 
 # ── helpers ────────────────────────────────────────────────────────────────────
@@ -47,17 +52,33 @@ def tile_to_wgs84_bounds(x, y, z):
     n = 2 ** z
     west  =  x / n * 360.0 - 180.0
     east  = (x + 1) / n * 360.0 - 180.0
-    import math
     def merc_to_lat(ty):
         return math.degrees(math.atan(math.sinh(math.pi * (1 - 2 * ty / n))))
     north = merc_to_lat(y)
     south = merc_to_lat(y + 1)
     return west, south, east, north
 
+def lng_to_tile_x(lng, z):
+    return int((lng + 180.0) / 360.0 * 2**z)
+
+def lat_to_tile_y(lat, z):
+    lr = math.radians(lat)
+    return int((1.0 - math.log(math.tan(lr) + 1.0/math.cos(lr)) / math.pi) / 2.0 * 2**z)
+
+# Correct Mercator Y helpers for accurate WGS84 projection within a tile.
+# Linear lat interpolation introduces ~100-200m errors at z10; this is exact.
+def lat_to_merc_y(lat_deg):
+    r = math.radians(lat_deg)
+    return math.log(math.tan(math.pi / 4 + r / 2))
+
+def merc_y_to_lat(my):
+    return math.degrees(2 * math.atan(math.exp(my)) - math.pi / 2)
+
 def mvt_to_geojson_geoms(tile_data, tile_x, tile_y, tile_z, layer_name='water'):
     """
-    Decode MVT tile bytes and return list of shapely geometries projected to WGS84.
-    MVT coordinates are in tile-local units [0..4096]. We map them to WGS84 here.
+    Decode MVT tile bytes → list of shapely geometries projected to WGS84.
+    MVT coords are tile-local integers [0..extent]. We project to WGS84 here
+    using correct inverse-Mercator for latitude (not linear approximation).
     """
     if not tile_data:
         return []
@@ -74,40 +95,67 @@ def mvt_to_geojson_geoms(tile_data, tile_x, tile_y, tile_z, layer_name='water'):
         return []
 
     west, south, east, north = tile_to_wgs84_bounds(tile_x, tile_y, tile_z)
-    lon_span = east - west
-    lat_span = north - south
-    EXTENT = 4096.0
+    lon_span  = east - west
+    merc_n    = lat_to_merc_y(north)
+    merc_s    = lat_to_merc_y(south)
+    merc_span = merc_n - merc_s
+    EXTENT    = 4096.0
+
+    def mvt_to_wgs(pt):
+        lx, ly = pt
+        lon = west + (lx / EXTENT) * lon_span
+        # Correct: interpolate in Mercator Y space, then convert to WGS84 lat
+        my  = merc_n - (ly / EXTENT) * merc_span
+        lat = merc_y_to_lat(my)
+        return (lon, lat)
 
     geoms = []
     for feature in decoded[layer_name].get('features', []):
-        geom = feature.get('geometry')
+        geom   = feature.get('geometry')
         if not geom:
             continue
-        gtype = geom.get('type')
+        gtype  = geom.get('type')
         coords = geom.get('coordinates')
         if gtype not in ('Polygon', 'MultiPolygon') or not coords:
             continue
-
-        def mvt_to_wgs(pt):
-            lx, ly = pt
-            lon = west + (lx / EXTENT) * lon_span
-            lat = north - (ly / EXTENT) * lat_span
-            return (lon, lat)
-
         try:
             if gtype == 'Polygon':
                 wgs_coords = [[mvt_to_wgs(p) for p in ring] for ring in coords]
-                geoms.append(shape({'type': 'Polygon', 'coordinates': wgs_coords}))
-            else:  # MultiPolygon
-                wgs_polys = [[[mvt_to_wgs(p) for p in ring] for ring in poly] for poly in coords]
-                geoms.append(shape({'type': 'MultiPolygon', 'coordinates': wgs_polys}))
+                g = shape({'type': 'Polygon', 'coordinates': wgs_coords})
+            else:
+                wgs_polys  = [[[mvt_to_wgs(p) for p in ring] for ring in poly] for poly in coords]
+                g = shape({'type': 'MultiPolygon', 'coordinates': wgs_polys})
+            geoms.append(g)
         except Exception as e:
-            print(f"  WARN: geom conversion failed: {e}", file=sys.stderr)
+            print(f"  WARN: geom conversion failed at {tile_z}/{tile_x}/{tile_y}: {e}", file=sys.stderr)
+    return geoms
+
+def extract_tiles(reader, z, bounds, label):
+    """Extract all non-empty water polygons from tiles at zoom z within bounds."""
+    west, south, east, north = bounds
+    x_min = lng_to_tile_x(west, z)
+    x_max = lng_to_tile_x(east, z)
+    y_min = lat_to_tile_y(north, z)   # y increases southward
+    y_max = lat_to_tile_y(south, z)
+    print(f"  {label}: z={z} tiles x={x_min}..{x_max}, y={y_min}..{y_max} "
+          f"({(x_max-x_min+1)*(y_max-y_min+1)} cells)")
+    geoms      = []
+    tile_count = 0
+    for tx in range(x_min, x_max + 1):
+        for ty in range(y_min, y_max + 1):
+            tile_data = reader.get(z, tx, ty)
+            if tile_data is None:
+                continue
+            gs = mvt_to_geojson_geoms(tile_data, tx, ty, z)
+            if gs:
+                geoms.extend(gs)
+                tile_count += 1
+    print(f"    → {tile_count} non-empty tiles, {len(geoms)} raw polygons")
     return geoms
 
 # ── main ───────────────────────────────────────────────────────────────────────
 def main():
-    repo_root = Path(__file__).parent.parent
+    repo_root    = Path(__file__).parent.parent
     pmtiles_path = repo_root / 'public' / 'data' / 'water.pmtiles'
     out_path     = repo_root / 'public' / 'data' / 'water_static.geojson'
 
@@ -115,127 +163,102 @@ def main():
         print(f"ERROR: {pmtiles_path} not found", file=sys.stderr)
         sys.exit(1)
 
-    print(f"Reading {pmtiles_path} ...")
+    print(f"Reading {pmtiles_path} ({pmtiles_path.stat().st_size/1024/1024:.1f} MB) ...")
     with open(pmtiles_path, 'rb') as f:
         source = MemorySource(f.read())
 
     reader = Reader(source)
     header = reader.header()
-    print(f"  min_zoom={header['min_zoom']} max_zoom={header['max_zoom']}")
-    print(f"  bounds: {header.get('bounds', 'n/a')}")
+    print(f"  header: min_zoom={header['min_zoom']}  max_zoom={header['max_zoom']}")
 
-    # Enumerate z=10 tiles
-    TARGET_Z = 10
-    print(f"\nCollecting z={TARGET_Z} tiles ...")
+    # ── Two-zoom strategy ────────────────────────────────────────────────────
+    # z10: Full MapLibre viewport envelope — ocean baseplate, NY Bight, Atlantic.
+    # z11: NYC detail area — rivers, channels, East River, Hudson, Harlem River, bays.
+    # Using z11 detail for NYC area prevents the area-filter issue that previously
+    # removed small-but-critical water bodies (channels around Manhattan).
+    FULL_BBOX = (-75.5, 40.0, -72.5, 41.5)   # matches MapLibre maxBounds
+    NYC_BBOX  = (-74.5, 40.3, -73.5, 41.1)   # NYC detail area for z11
+
+    print("\nExtracting tiles ...")
     all_geoms = []
-    tile_count = 0
-
-    # We need to iterate tile IDs at z=10. Use the directory.
-    # pmtiles Python SDK: reader.get(tile_id) where tile_id is Hilbert ID
-    # Iterate by converting z/x/y to tile_id
-    from pmtiles.tile import zxy_to_tileid, tileid_to_zxy
-
-    # Determine z10 tile range from header bounds
-    # Default: full NYC envelope
-    BOUNDS = (-75.5, 40.0, -72.5, 41.5)
-
-    import math
-    def lng_to_tile_x(lng, z):
-        return int((lng + 180.0) / 360.0 * 2**z)
-    def lat_to_tile_y(lat, z):
-        lr = math.radians(lat)
-        return int((1.0 - math.log(math.tan(lr) + 1.0/math.cos(lr)) / math.pi) / 2.0 * 2**z)
-
-    z = TARGET_Z
-    x_min = lng_to_tile_x(BOUNDS[0], z)
-    x_max = lng_to_tile_x(BOUNDS[2], z)
-    y_min = lat_to_tile_y(BOUNDS[3], z)  # Note: y increases southward
-    y_max = lat_to_tile_y(BOUNDS[1], z)
-
-    print(f"  z={z} tile range: x={x_min}-{x_max}, y={y_min}-{y_max}")
-
-    for tx in range(x_min, x_max + 1):
-        for ty in range(y_min, y_max + 1):
-            tile_data = reader.get(z, tx, ty)
-            if tile_data is None:
-                continue
-            geoms = mvt_to_geojson_geoms(tile_data, tx, ty, z)
-            if geoms:
-                all_geoms.extend(geoms)
-                tile_count += 1
-
-    print(f"  Decoded {tile_count} non-empty tiles, {len(all_geoms)} raw polygons")
+    all_geoms += extract_tiles(reader, 10, FULL_BBOX, 'z10 full viewport')
+    all_geoms += extract_tiles(reader, 11, NYC_BBOX,  'z11 NYC detail')
 
     if not all_geoms:
-        print("ERROR: no geometries extracted — check source-layer name", file=sys.stderr)
+        print("ERROR: no geometries extracted — check source-layer name 'water'", file=sys.stderr)
         sys.exit(1)
 
-    # ── Dissolve overlapping/adjacent polygons ─────────────────────────────────
-    print("\nDissolving overlapping geometries ...")
-    # Fix any invalid geometries first
+    # ── Fix invalid geometries before dissolve ───────────────────────────────
+    print(f"\nFixing invalid geometries ({len(all_geoms)} raw) ...")
     fixed = []
-    for i, g in enumerate(all_geoms):
+    for g in all_geoms:
         if not g.is_valid:
             g = g.buffer(0)
         if g.is_valid and not g.is_empty:
             fixed.append(g)
     print(f"  {len(fixed)} valid geometries after fix")
 
+    # ── Dissolve tile-seam overlaps ──────────────────────────────────────────
+    # unary_union merges polygons that touch/overlap — removes tile-grid duplicate edges.
+    # This correctly fuses any Manhattan-channel polygon into the main ocean body.
+    print("\nDissolving tile-seam overlaps (unary_union) ...")
     dissolved = unary_union(fixed)
     print(f"  Dissolved → type={dissolved.geom_type}")
 
-    # ── Simplify coordinates (0.001° ≈ 80m at z10 — below perception threshold for a stencil)
-    print("\nSimplifying geometry (tolerance=0.001°) ...")
-    dissolved = dissolved.simplify(0.001, preserve_topology=True)
-    print(f"  After simplify → type={dissolved.geom_type}")
+    # ── Extract polygon parts and fix winding order ──────────────────────────
+    print("\nExtracting final polygons and fixing winding order ...")
+    raw_polys = []
+    if dissolved.geom_type == 'Polygon':
+        raw_polys = [dissolved]
+    elif dissolved.geom_type == 'MultiPolygon':
+        raw_polys = list(dissolved.geoms)
+    elif dissolved.geom_type == 'GeometryCollection':
+        raw_polys = [g for g in dissolved.geoms if g.geom_type in ('Polygon', 'MultiPolygon')]
 
-    # ── Write GeoJSON ──────────────────────────────────────────────────────────
-    if dissolved.geom_type == 'GeometryCollection':
-        # Extract only polygonal parts
-        polys = [g for g in dissolved.geoms if g.geom_type in ('Polygon', 'MultiPolygon')]
-        from shapely.ops import unary_union as uu
-        dissolved = uu(polys) if polys else dissolved
+    # shapely orient(): sign=1.0 → outer ring CCW (GeoJSON standard), holes CW.
+    # Prevents rendering artifacts from incorrect winding order.
+    oriented = []
+    for g in raw_polys:
+        if g.geom_type == 'MultiPolygon':
+            for part in g.geoms:
+                o = orient(part, sign=1.0)
+                if not o.is_empty:
+                    oriented.append(o)
+        else:
+            o = orient(g, sign=1.0)
+            if not o.is_empty:
+                oriented.append(o)
 
-    features = []
-    MIN_AREA_DEG2 = 1e-4  # ~1km² equivalent — keeps ocean, rivers, bays; drops tiny docks/ponds invisible at z10
+    print(f"  {len(oriented)} final polygons")
 
+    # ── Write GeoJSON ─────────────────────────────────────────────────────────
+    # NO area filtering — every feature preserved as requested.
+    # NO simplification — exact geometry from source tiles.
+    # Coordinates rounded to 6 decimal places (~0.1m precision, tiny file overhead vs 5dp).
     def round_coords(geom_map):
-        """Round all coordinates to 5 decimal places (~1m precision) to shrink file size."""
-        import copy
-        def rnd(pt): return [round(pt[0], 5), round(pt[1], 5)]
+        def rnd(pt):  return [round(pt[0], 6), round(pt[1], 6)]
         def rnd_ring(ring): return [rnd(p) for p in ring]
-        gm = copy.deepcopy(geom_map)
-        t = gm['type']
+        gm = dict(geom_map)
+        t  = gm['type']
         if t == 'Polygon':
             gm['coordinates'] = [rnd_ring(r) for r in gm['coordinates']]
         elif t == 'MultiPolygon':
             gm['coordinates'] = [[rnd_ring(r) for r in poly] for poly in gm['coordinates']]
         return gm
 
-    if dissolved.geom_type == 'Polygon':
-        if dissolved.area >= MIN_AREA_DEG2:
-            features.append({'type': 'Feature', 'properties': {'water': 'ocean'}, 'geometry': round_coords(mapping(dissolved))})
-    elif dissolved.geom_type == 'MultiPolygon':
-        for poly in dissolved.geoms:
-            if poly.area >= MIN_AREA_DEG2:
-                features.append({'type': 'Feature', 'properties': {'water': 'ocean'}, 'geometry': round_coords(mapping(poly))})
-    else:
-        # fallback: dump everything
-        for g in (dissolved.geoms if hasattr(dissolved, 'geoms') else [dissolved]):
-            if g.geom_type in ('Polygon', 'MultiPolygon') and g.area >= MIN_AREA_DEG2:
-                features.append({'type': 'Feature', 'properties': {}, 'geometry': round_coords(mapping(g))})
+    features = [
+        {'type': 'Feature', 'properties': {'water': 'ocean'}, 'geometry': round_coords(mapping(g))}
+        for g in oriented
+    ]
 
     fc = {'type': 'FeatureCollection', 'features': features}
-
     with open(out_path, 'w') as f:
-        json.dump(fc, f, separators=(',', ':'))  # compact output
+        json.dump(fc, f, separators=(',', ':'))
 
     size_kb = out_path.stat().st_size / 1024
-    print(f"\nWrote {out_path}")
-    print(f"  Features: {len(features)}")
-    print(f"  File size: {size_kb:.1f} KB")
-    print("\nDone! Replace water.pmtiles source in MapView with:")
-    print("  source: 'water-static', type: 'geojson', data: './data/water_static.geojson'")
+    print(f"\n✓ Wrote {out_path}")
+    print(f"  Features : {len(features)}")
+    print(f"  File size: {size_kb:.0f} KB")
 
 if __name__ == '__main__':
     main()

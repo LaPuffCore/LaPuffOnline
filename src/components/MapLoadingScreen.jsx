@@ -96,7 +96,7 @@ function shuffle(arr) {
 //   onComplete    — callback: Home sets mapCacheReady=true → overlay disappears
 export default function MapLoadingScreen({ events, onPhase2ADone, onComplete }) {
   const isMobile = window.innerWidth < 768;
-  const isFirstLoad = !localStorage.getItem('lapuff_map_cache_v1');
+  const isFirstLoad = !localStorage.getItem('lapuff_map_cache_v2');
 
   const [progress, setProgress] = useState(0);
   const [isDone, setIsDone] = useState(false);

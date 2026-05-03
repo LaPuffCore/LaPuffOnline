@@ -20,7 +20,7 @@ const GEOJSON_URL = './data/MODZCTA_2010_WGS1984.geo.json';
 const BOROUGH_GEOJSON_URL = './data/borough.geo.json';
 
 // MapLoadingScreen gate keys
-const MAP_CACHE_DONE_KEY     = 'lapuff_map_cache_v1';
+const MAP_CACHE_DONE_KEY     = 'lapuff_map_cache_v2';
 const MAP_CACHE_BUILDING_KEY = 'lapuff_map_cache_building';
 
 // Roads PMTiles: hierarchical-dissolve road polygons (~8.5K features, 14MB) on OCI PAR.
@@ -32,17 +32,6 @@ const ROADS_PMTILES_LAYER = 'final6deciroads';
 const _pmtilesProtocol = new PMTilesProtocol();
 maplibregl.addProtocol('pmtiles', _pmtilesProtocol.tile.bind(_pmtilesProtocol));
 
-// The water+roads layers used in Real3D mode.
-const REAL3D_OMT_LAYER_IDS = [
-  'real3d-water',
-  // PMTiles roads — one fill (z9→z14, 2D) + one extrusion (z13+, 3D) per fclass
-  'real3d-pm-roads-motorway-fill', 'real3d-pm-roads-motorway',
-  'real3d-pm-roads-trunk-fill',    'real3d-pm-roads-trunk',
-  'real3d-pm-roads-primary-fill',  'real3d-pm-roads-primary',
-  'real3d-pm-roads-secondary-fill','real3d-pm-roads-secondary',
-  'real3d-pm-roads-tertiary-fill', 'real3d-pm-roads-tertiary',
-  'real3d-pm-roads-residential-fill','real3d-pm-roads-residential',
-];
 
 const TIMESPAN_STEPS = [
   { label: '1d', days: 1 }, { label: '7d', days: 7 }, { label: '30d', days: 30 },
@@ -966,14 +955,12 @@ const NYC_BBOX_GEOM = {
   ]],
 };
 
-// All Real3D layer IDs — used for cleanup.
+// All Real3D layer IDs — used for visibility toggling in setReal3DLayersVisible.
+// Keep in sync with layers created by initReal3DLayers + addOpenmaptilesSourceAndLayers.
 const REAL3D_ALL_LAYER_IDS = [
   'real3d-water',
-  'real3d-roads-motorway-far-slab',   'real3d-roads-motorway-slab',
-  'real3d-roads-primary-far-slab',    'real3d-roads-primary-slab',
-  'real3d-roads-tertiary-far-slab',   'real3d-roads-tertiary-slab',
-  'real3d-buildings', 'real3d-buildings-outline', 'real3d-buildings-baseplate',
-  // PMTiles roads
+  'real3d-buildings', 'real3d-buildings-baseplate',
+  // PMTiles roads — one fill (2D) + one extrusion (3D) per fclass
   'real3d-pm-roads-motorway-fill', 'real3d-pm-roads-motorway',
   'real3d-pm-roads-trunk-fill',    'real3d-pm-roads-trunk',
   'real3d-pm-roads-primary-fill',  'real3d-pm-roads-primary',
@@ -1563,6 +1550,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   const real3dLayersCreatedRef = useRef(false); // true after first initReal3DLayers
   // Tracks whether _tier_0.._tier_4 have been baked into building properties
   const buildingTiersBakedRef = useRef(false);
+  // Tracks borough outline 3D mode — defers opacity on FIRST entry to avoid spike artifact
+  const boroughWas3DRef = useRef(false);
   // Interaction control — disabled during Phase 2B loading, enabled on reveal
   const interactiveRef = useRef(interactive);
 
@@ -2209,13 +2198,14 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         try {
           const origCenter = map.getCenter();
           const origZoom = map.getZoom();
-          // Force-warm Real3D shaders: pre-created layers exist (next effect) but are
-          // hidden. Briefly flip visibility ON at z14 so MapLibre compiles fill-extrusion
-          // shaders and uploads building geometry to GPU. Then OFF — kept warm in cache.
-          // Cycle zooms to pre-load tile pyramid (PMTiles roads + ZCTA fills).
-          const zooms = [10, 12, 14, 16];
+          // Phase 2B warmup: cycle zooms to compile shaders + warm tile caches.
+          // z8: tessellates water GeoJSON at low zoom (avoids square-tile re-render on zoom-out)
+          // z10-z12: PMTiles road fill tiles + ZCTA fills
+          // z14-z16: Real3D fill-extrusion shader compilation + building geometry upload
+          // Restore to default 2D (pitch=0) at end.
+          const zooms = [8, 10, 12, 14, 16];
           let i = 0;
-          const realLayers = ['real3d-buildings', 'real3d-buildings-baseplate', 'real3d-roads-primary', 'real3d-roads-tertiary', 'real3d-roads-motorway', 'real3d-water'];
+          const realLayers = REAL3D_ALL_LAYER_IDS;
           const setRealVis = (vis) => {
             for (const id of realLayers) {
               if (map.getLayer(id)) {
@@ -2225,13 +2215,13 @@ export default function MapView({ events, headerCollapsed = false, interactive =
           };
           const step = () => {
             if (i >= zooms.length) {
-              // Restore: default 2D state — original camera, no pitch/bearing, all 3D/Real3D layers hidden.
+              // Restore: default 2D state — original camera, no pitch/bearing, all Real3D layers hidden.
               setRealVis('none');
               map.jumpTo({ center: origCenter, zoom: origZoom, pitch: 0, bearing: 0 });
               return;
             }
             const z = zooms[i++];
-            // At z=14+ briefly show Real3D to compile shaders; otherwise keep hidden.
+            // At z=14+ briefly show Real3D layers to compile fill-extrusion shaders.
             setRealVis(z >= 14 ? 'visible' : 'none');
             map.jumpTo({ center: origCenter, zoom: z, pitch: 0, bearing: 0 });
             requestAnimationFrame(step);
@@ -2241,7 +2231,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         } catch (_e) { /* ignore — warmup is best-effort */ }
       });
     }
-  }, [mapReady, geoData]);
+  }, [mapReady, geoData]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Pre-create Real3D layers at map init so first toggle is instant (just a visibility flip).
   // On mobile: skip this — layers created on-demand when Real3D is activated to save GPU memory.
@@ -2635,10 +2625,29 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         // Height stagger by _boroughIdx * 0.1m prevents Z-fighting at shared top edges.
         map.setPaintProperty('borough-outline', 'fill-extrusion-base',   0);
         map.setPaintProperty('borough-outline', 'fill-extrusion-height', ['+', 32, ['*', 0.1, ['coalesce', ['get', '_boroughIdx'], 0]]]);
-        // Borough outlines only visible in 3D and Real3D modes (fill-extrusion blocks
-        // appear as floating squares in 2D / pitch=0 mode, which looks wrong).
-        map.setPaintProperty('borough-outline', 'fill-extrusion-opacity',
-          (threeD || real3D) ? ['interpolate', ['linear'], ['zoom'], 9, 0.4, 11, 1.0] : 0);
+        // Borough outlines only visible in 3D and Real3D modes.
+        // On FIRST entry into 3D/Real3D: defer opacity until easeTo camera animation finishes
+        // (700ms). Without the delay, the tall extrusions snap in at pitch=0 on the first
+        // rendered frame and appear as giant spikes before the pitch animation completes.
+        const is3D = threeD || real3D;
+        const entering3D = is3D && !boroughWas3DRef.current;
+        boroughWas3DRef.current = is3D;
+        if (!is3D) {
+          map.setPaintProperty('borough-outline', 'fill-extrusion-opacity', 0);
+        } else if (entering3D) {
+          // Hide immediately; reveal after camera reaches target pitch.
+          map.setPaintProperty('borough-outline', 'fill-extrusion-opacity', 0);
+          const mapSnap = map;
+          setTimeout(() => {
+            if (mapSnap.getLayer('borough-outline')) {
+              mapSnap.setPaintProperty('borough-outline', 'fill-extrusion-opacity',
+                ['interpolate', ['linear'], ['zoom'], 9, 0.4, 11, 1.0]);
+            }
+          }, 850); // 700ms easeTo + 150ms buffer
+        } else {
+          map.setPaintProperty('borough-outline', 'fill-extrusion-opacity',
+            ['interpolate', ['linear'], ['zoom'], 9, 0.4, 11, 1.0]);
+        }
       } else {
         map.setPaintProperty('borough-outline', 'fill-extrusion-opacity', 0);
         boroughWithColorRef.current = null;
@@ -2834,7 +2843,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
           tileSize: 256,
           // Lock satellite imagery to z10 — MapLibre overzooms the z10 tiles for closer
           // zooms. Eliminates fragmentation/seams seen at z11+ and reduces tile fetches by ~10x.
-          maxzoom: 10,
+          maxzoom: 12,
         });
       }
       if (!map.getLayer('sat-layer')) {
@@ -3499,7 +3508,9 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         const fillId = `real3d-pm-roads-${r.fclass}-fill`;
         const extId  = `real3d-pm-roads-${r.fclass}`;
         // 2D fill: full polygon footprint, antialiased, zero 3D overhead.
-        // Opacity crossfade: full at r.minz→z13, fades to 0 at z14 (seamless handoff to extrusion).
+        // Opacity crossfade: full at r.minz→z13.5, fades to 0 at z14.5.
+        // Extended crossfade (was z14) gives PMTiles extrusion tiles more time to load
+        // before the fill disappears — prevents the "road gap" on fast zoom-in.
         if (!map.getLayer(fillId)) {
           map.addLayer({
             id: fillId, type: 'fill',
@@ -3508,18 +3519,19 @@ export default function MapView({ events, headerCollapsed = false, interactive =
             filter: ['==', ['get', 'fclass'], r.fclass],
             paint: {
               'fill-color':     isHeatmap ? '#000000' : r.colorOff,
-              'fill-opacity':   ['interpolate', ['linear'], ['zoom'], 13, isHeatmap ? HM_OPACITY : r.opacityOff, 14, 0],
+              'fill-opacity':   ['interpolate', ['linear'], ['zoom'], 13.5, isHeatmap ? HM_OPACITY : r.opacityOff, 14.5, 0],
               'fill-antialias': true,
             },
           });
         }
-        // 3D extrusion: fades IN from z13→z14, then full opacity for building occlusion at z14+.
-        // Crossfade with fill layer in z13-z14 zone — no Z-fight (separate GPU passes).
+        // 3D extrusion: starts loading at z12 (earlier tile request), fades IN z13→z14.
+        // Starting at z12 gives the PMTiles server one extra zoom level to stream tiles
+        // before they're needed — prevents the road-disappear gap on fast zoom-in.
         if (!map.getLayer(extId)) {
           map.addLayer({
             id: extId, type: 'fill-extrusion',
             source: 'roads-pm', 'source-layer': ROADS_PMTILES_LAYER,
-            minzoom: 13,
+            minzoom: 12,
             filter: ['==', ['get', 'fclass'], r.fclass],
             paint: {
               'fill-extrusion-color':   isHeatmap ? '#000000' : r.colorOff,
