@@ -2221,14 +2221,18 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     setReal3DLayersVisible(map, false);
   }, [mapReady, geoData]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Gear 2 — MapView Active: start desktop FGB cache as soon as map is ready.
-  // Phase 2A already parsed the FGB during MapLoadingScreen — this is a synchronous ref hydration (near-instant).
+  // Gear 2 — MapView Active: start desktop FGB cache as soon as Phase 2A is done.
+  // MapView mounts simultaneously with MapLoadingScreen (before Phase 2A completes), so
+  // we MUST gate on `interactive` (which becomes true only after Phase 2A + warmup finish)
+  // to ensure mapCacheStore.buildingFGB is populated before we try to hydrate it.
+  // Without this gate the effect fires while Phase 2A is still running → buildingFGB null.
   // Mobile: defer entirely to Real3D toggle (Gear 3) — raw bytes already staged by Gear 1.
   useEffect(() => {
     if (!mapReady || !geoData) return;
     if (window.innerWidth < 768) return; // mobile: Gear 3 handles cache on Real3D activation
+    if (!interactive) return; // wait for Phase 2A to complete (mapCacheStore.buildingFGB not yet set)
     buildFGBCache();
-  }, [mapReady, geoData]);
+  }, [mapReady, geoData, interactive]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Pre-compute tiers for all 5 timespans in background.
   // Hydrate from mapCacheStore if Phase 2A already computed them; else compute fresh.
