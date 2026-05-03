@@ -9,10 +9,6 @@ import mapCacheStore from './mapCacheStore';
 // ── Constants ────────────────────────────────────────────────────────────────
 export const GEOJSON_URL        = './data/MODZCTA_2010_WGS1984.geo.json';
 export const BOROUGH_GEOJSON_URL = './data/borough.geo.json';
-export const ROAD_FGB_URL       = './data/roads_buffered.fgb';
-// Borough-split building FGBs — each has HEIGHT_ROOF + MODZCTA baked in per feature.
-// Borough-split building FGBs with R-tree spatial index, baked MODZCTA, HEIGHT_ROOF, fclass, index.
-// BronxAndSafezones includes the Bronx + safezone zip 99999.
 export const BOROUGH_FGBS = [
   { name: 'BronxAndSafezones', url: './data/BronxAndSafezones_r.fgb', cacheKey: 'BronxAndSafezones_r.fgb' },
   { name: 'Brooklyn',          url: './data/Brooklyn_r.fgb',          cacheKey: 'Brooklyn_r.fgb' },
@@ -21,23 +17,10 @@ export const BOROUGH_FGBS = [
   { name: 'Staten Island',     url: './data/Staten Island_r.fgb',     cacheKey: 'Staten Island_r.fgb' },
 ];
 export const FGB_CACHE_NAME     = 'lapuff-fgb-v8';     // v8: HEIGHT_ROOF feet→meters fix + stack-overflow fix
-export const ROADS_FGB_CACHE_NAME = 'lapuff-roads-v10';
-export const ROADS_FGB_CACHE_KEY  = 'roads_buffered.fgb';
 export const MAP_CACHE_DONE_KEY     = 'lapuff_map_cache_v2';
 export const MAP_CACHE_BUILDING_KEY = 'lapuff_map_cache_building';
 
 export const ROADS_PMTILES_URL = 'https://objectstorage.us-ashburn-1.oraclecloud.com/p/yGTOMC4N2uc1uIGkliFRgP51VbnPm96W8vebh_sOqeoGil3PErp8dvWmy74pEH70/n/idfnjqqb9g0p/b/nyc-map-data/o/realfinaldeciroads.pmtiles';
-
-// Local self-hosted water PMTiles (~14MB). Extracted from OpenMapTiles northeast
-// region, clipped to our bbox [-76.5,39.0,-71.5,42.5], zooms 0-14, water layer only.
-// Layer 'water' contains all polygons (ocean, river, lake, dock + intermittent).
-// BASE_URL injected so subfolder deploys (/LaPuffOnline/) resolve correctly.
-export const WATER_PMTILES_URL = (typeof window !== 'undefined')
-  ? `${window.location.origin}${import.meta.env.BASE_URL}data/water.pmtiles`
-  : '/data/water.pmtiles';
-
-// In-memory ref: populated during Phase 2A so Real3D road activation uses it directly.
-export const roadFGBFeaturesRef = { current: null };
 
 // Precomputed building centroid binary (Float32Array of [lng,lat] pairs).
 // Generated at build time by scripts/build_centroids.mjs. Order matches BOROUGH_FGBS
@@ -556,36 +539,6 @@ async function bakeAllTiersIntoBuildingsData(buildingFGB, zctaIndexMap, precompu
   return buildingFGB;
 }
 
-// ── Road FGB cache (Phase 2A: cache raw bytes + pre-deserialize into memory) ─
-async function cacheRoadFGB() {
-  if (!('caches' in window)) return;
-  try {
-    const cache = await caches.open(ROADS_FGB_CACHE_NAME);
-    let buf = null;
-    const cached = await cache.match(ROADS_FGB_CACHE_KEY);
-    if (cached) {
-      // Already cached — grab bytes for in-memory deserialization
-      buf = new Uint8Array(await cached.arrayBuffer());
-    } else {
-      const resp = await fetch(ROAD_FGB_URL);
-      if (!resp.ok) return;
-      const ab = await resp.arrayBuffer();
-      buf = new Uint8Array(ab);
-      await cache.put(ROADS_FGB_CACHE_KEY, new Response(ab.slice(0), {
-        headers: { 'Content-Type': 'application/octet-stream' },
-      }));
-    }
-    // Pre-deserialize into memory on desktop only — Real3D reads this ref directly (instant setData).
-    // Mobile skips deserialization: uses viewport-only FGB range queries to avoid OOM.
-    const isMob = typeof window !== 'undefined' && window.innerWidth < 768;
-    if (!isMob && !roadFGBFeaturesRef.current) {
-      const features = [];
-      for await (const feature of fgbDeserialize(buf)) features.push(feature);
-      roadFGBFeaturesRef.current = features;
-    }
-  } catch (e) { /* silent — MapView will fall back to direct fetch */ }
-}
-
 // ── FGB sub-pipeline (desktop, worker-based) ─────────────────────────────────
 // Parses + bakes all 5 borough FGBs in a Web Worker. Main thread stays free
 // during the ~2-4 second FGB parse, only paying the structured-clone cost
@@ -939,13 +892,13 @@ export async function runPhase2A(events, isMobile, onProgress) {
   }
   report(P.roadCache[1], 'Road tiles ready');
 
-  // ── Water header pre-warm + full-file SW pre-cache ──────────────────────
-  report(P.waterCache[0], 'Pre-warming water tiles...');
-  fetch(WATER_PMTILES_URL, { headers: { Range: 'bytes=0-16383' } }).catch(() => {});
-  if (navigator.serviceWorker?.controller) {
-    navigator.serviceWorker.controller.postMessage({ type: 'PRECACHE_PMTILES', url: WATER_PMTILES_URL });
-  }
-  report(P.waterCache[1], 'Water tiles ready');
+  // ── Water static GeoJSON pre-cache ──────────────────────────────────────
+  report(P.waterCache[0], 'Pre-warming water layer...');
+  const WATER_STATIC_URL = (typeof window !== 'undefined')
+    ? `${window.location.origin}${import.meta.env.BASE_URL}data/water_static.geojson`
+    : '/data/water_static.geojson';
+  fetch(WATER_STATIC_URL, { cache: 'force-cache' }).catch(() => {});
+  report(P.waterCache[1], 'Water layer ready');
 
   // ── Satellite tile pre-cache (background, non-blocking) ──────────────────
   // Esri ArcGIS World Imagery tiles for NYC z10-13 (~500 tiles, ~20MB).

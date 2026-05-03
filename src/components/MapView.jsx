@@ -14,24 +14,15 @@ import { SAMPLE_MODE } from '../lib/sampleConfig';
 import { getSampleUsersForZip } from '../lib/sampleUsers';
 import { deserialize as fgbDeserialize } from 'flatgeobuf/lib/mjs/geojson.js';
 import { fetchGeoPostFeed, fetchReactionsForPosts } from '../lib/supabase';
-import { roadFGBFeaturesRef, BOROUGH_FGBS, FGB_CACHE_NAME as PIPELINE_FGB_CACHE_NAME } from '../lib/mapDataPipeline';
+import { BOROUGH_FGBS, FGB_CACHE_NAME as PIPELINE_FGB_CACHE_NAME } from '../lib/mapDataPipeline';
 
 const GEOJSON_URL = './data/MODZCTA_2010_WGS1984.geo.json';
 const BOROUGH_GEOJSON_URL = './data/borough.geo.json';
-const ROAD_FGB_URL     = './data/roads_buffered.fgb';
-// Building FGBs are imported from mapDataPipeline (BOROUGH_FGBS array).
-// FGB_CACHE_NAME imported as PIPELINE_FGB_CACHE_NAME.
-const ROADS_FGB_CACHE_NAME = 'lapuff-roads-v10';
-const ROADS_FGB_CACHE_KEY  = 'roads_buffered.fgb';
 
 // MapLoadingScreen gate keys
-const MAP_CACHE_DONE_KEY     = 'lapuff_map_cache_v1';  // set once first full cache completes
-const MAP_CACHE_BUILDING_KEY = 'lapuff_map_cache_building'; // cleared on completion; if set on next load = corruption
-// Water PMTiles — local self-hosted OSM waterway extract (water polygons + waterway lines).
-// Generated via Geofabrik NY OSM → osmium filter → tippecanoe → pmtiles convert.
-// Layers: 'water' (polygons: lakes, bays, wetlands) + 'waterway' (lines: rivers, streams).
-// bbox: -76.5/39.0 to -71.5/42.5 — 1° pad beyond NYC maxBounds on every side.
-const WATER_PMTILES_URL = `${window.location.origin}${import.meta.env.BASE_URL}data/water.pmtiles`;
+const MAP_CACHE_DONE_KEY     = 'lapuff_map_cache_v1';
+const MAP_CACHE_BUILDING_KEY = 'lapuff_map_cache_building';
+
 // Roads PMTiles: hierarchical-dissolve road polygons (~8.5K features, 14MB) on OCI PAR.
 // Schema: layer 'final6deciroads', props { id, fclass, _z }.
 // fclass values: motorway, trunk, primary, secondary, tertiary, residential.
@@ -40,15 +31,6 @@ const ROADS_PMTILES_LAYER = 'final6deciroads';
 // Register the pmtiles:// protocol with MapLibre once at module load.
 const _pmtilesProtocol = new PMTilesProtocol();
 maplibregl.addProtocol('pmtiles', _pmtilesProtocol.tile.bind(_pmtilesProtocol));
-
-// FEATURE FLAG: when true, Real3D buildings + roads come from PMTiles (vector tiles)
-// instead of FGB (full-dataset GeoJSON). PMTiles streams only visible tiles → much
-// lower mobile memory + instant activation. Buildings render with proper depth-tested
-// occlusion of road slabs because both share the fill-extrusion GPU pass.
-// Set to false to roll back to FGB pipeline (FGB code remains intact, just dormant).
-const USE_PMTILES_REAL3D = true;
-// When true, buildings use FGB (381K polygons, no tile-seam AA) even while roads use PMTiles.
-const USE_FGB_BUILDINGS = true;
 
 // The water+roads layers used in Real3D mode.
 const REAL3D_OMT_LAYER_IDS = [
@@ -3349,45 +3331,6 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     }
   }
 
-  // Viewport-only road fetch for mobile — mirrors fetchViewportBuildings but simpler.
-  // Roads already have _tier and _z baked at FGB generation time — no ZCTA PiP needed.
-  // Desktop skips this (roadFGBFeaturesRef.current is populated and used directly).
-  async function fetchViewportRoads(map) {
-    if (!map || !map.getStyle() || !map.getSource('fgb-roads')) return;
-    const isMob = window.innerWidth < 768;
-    if (!isMob && roadFGBFeaturesRef.current) return; // desktop: full cache ready
-
-    const zoom = map.getZoom();
-    if (zoom < 9) {
-      if (isMob) map.getSource('fgb-roads').setData({ type: 'FeatureCollection', features: [] });
-      return;
-    }
-
-    const bounds = map.getBounds();
-    const lngSpan = bounds.getEast() - bounds.getWest();
-    const latSpan = bounds.getNorth() - bounds.getSouth();
-    const pad = 0.3;
-    const rect = {
-      minX: bounds.getWest()  - lngSpan * pad,
-      minY: bounds.getSouth() - latSpan * pad,
-      maxX: bounds.getEast()  + lngSpan * pad,
-      maxY: bounds.getNorth() + latSpan * pad,
-    };
-    try {
-      const features = [];
-      let count = 0;
-      for await (const f of fgbDeserialize(ROAD_FGB_URL, rect)) {
-        if (f?.geometry) features.push(f);
-        if (++count % 500 === 0) await new Promise(r => setTimeout(r, 0)); // yield to avoid main-thread freeze
-      }
-      if (map.getSource('fgb-roads') && map.getStyle()) {
-        map.getSource('fgb-roads').setData({ type: 'FeatureCollection', features });
-      }
-    } catch (e) {
-      if (e.name !== 'AbortError') console.warn('Road viewport fetch failed:', e);
-    }
-  }
-
   // Bake all 5 timespan tiers into building properties (_tier_0.._tier_4).
   // After this, GPU reads ['get', '_tier_X'] directly — no feature-state or setData needed on timespan change.
   // Only called when BOTH pre-computed tiers AND building ZCTA index are ready.
@@ -3444,122 +3387,6 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   // Create fgb-buildings source + building layers. Source starts empty.
   // Data loaded separately via deferred loading (instant toggle).
   function addBuildingLayers(map, isHeatmap, tsIdx = 0) {
-    // PMTILES MODE: roads + buildings come from PMTiles sources added in
-    // addOpenmaptilesSourceAndLayers. FGB pipeline is dormant — bail early.
-    if (USE_PMTILES_REAL3D && !USE_FGB_BUILDINGS) return;
-
-    // ── Road slabs (fill-extrusion ribbons) ────────────────────────────────
-    // PMTiles roads replace FGB road slabs — skip this section when PMTiles roads are active.
-    if (!USE_PMTILES_REAL3D) {
-    // Buffered polygon ribbons. fill-extrusions share the same GPU depth pass
-    // as buildings — walls correctly occlude roads at pitched angles.
-    // 3 tiers × 2 zoom variants = 6 layers total.
-    // Far (_z='f'): wider slabs, minz→z12 (hard cutoff)
-    // Near (_z='n'): calibrated slabs, z12+
-    // Heatmap ON: all roads #000000 @ 0.4 opacity → naturally dark over zone color.
-    // Colors: motorway/primary=#850000 (dark red), tertiary=#cc1100 (mid red).
-    if (!map.getSource('fgb-roads')) {
-      map.addSource('fgb-roads', {
-        type: 'geojson',
-        data: { type: 'FeatureCollection', features: [] },
-      });
-
-      // Deferred road data load — staggered 100ms after building load (which fires at 0ms)
-      // to prevent road deserialization from blocking building setData on desktop.
-      // Pipeline pre-deserializes during loading screen, so this is usually a zero-work instant assignment.
-      // Mobile uses viewport-only range queries via fetchViewportRoads.
-      setTimeout(async () => {
-        if (!map.getSource('fgb-roads')) return;
-        try {
-          const isMob = window.innerWidth < 768;
-          let features = roadFGBFeaturesRef.current;
-          if (!features) {
-            if (isMob) {
-              // Mobile: viewport-only fetch — never loads full dataset to avoid OOM
-              fetchViewportRoads(map);
-              return;
-            }
-            // Desktop fallback: deserialize from cache or network
-            let buf = null;
-            if ('caches' in window) {
-              try {
-                const cache = await caches.open(ROADS_FGB_CACHE_NAME);
-                const cached = await cache.match(ROADS_FGB_CACHE_KEY);
-                if (cached) buf = new Uint8Array(await cached.arrayBuffer());
-              } catch (_e) { /* ignore — fall through to network */ }
-            }
-            if (!buf) {
-              const resp = await fetch(ROAD_FGB_URL);
-              if (!resp.ok) return;
-              const ab = await resp.arrayBuffer();
-              buf = new Uint8Array(ab);
-              if ('caches' in window) {
-                try {
-                  const cache = await caches.open(ROADS_FGB_CACHE_NAME);
-                  await cache.put(ROADS_FGB_CACHE_KEY, new Response(ab.slice(0), {
-                    headers: { 'Content-Type': 'application/octet-stream' },
-                  }));
-                } catch (_e) { /* ignore */ }
-              }
-            }
-            features = [];
-            for await (const feature of fgbDeserialize(buf)) features.push(feature);
-            roadFGBFeaturesRef.current = features;
-          }
-          if (map.getSource('fgb-roads')) {
-            map.getSource('fgb-roads').setData({ type: 'FeatureCollection', features });
-          }
-        } catch (e) { console.warn('Road slab load failed:', e.message); }
-      }, 100); // 100ms after building load (0ms) to prevent blocking building setData
-    }
-
-    // 3 merged road tiers × 2 zoom variants (far + near) = 6 layers.
-    // Hard z12 cutoff — no crossfade to avoid anti-aliasing artifacts.
-    // Far (_z='f'): wider slabs, minz→z12.
-    // Near (_z='n'): tighter slabs, z12+.
-    // Filter uses baked _tier integer property (faster GPU evaluation than match).
-    // Colors: motorway/primary=#850000, tertiary=#cc1100.
-    const ROAD_TIERS = [
-      { id: 'motorway', tierNum: 0, minz: 9,  colorOff: '#850000', opacityOff: 0.95, height: 0.6 },
-      { id: 'primary',  tierNum: 1, minz: 11, colorOff: '#850000', opacityOff: 0.92, height: 0.4 },
-      { id: 'tertiary', tierNum: 2, minz: 12, colorOff: '#cc1100', opacityOff: 0.88, height: 0.2 },
-    ];
-    const HM_OPACITY = 0.4;
-    for (const tier of ROAD_TIERS) {
-      const tierFilter = ['==', ['get', '_tier'], tier.tierNum];
-      // Far version: wider slabs, hard maxzoom 12
-      const farId = `real3d-roads-${tier.id}-far-slab`;
-      if (!map.getLayer(farId)) {
-        map.addLayer({
-          id: farId, type: 'fill-extrusion', source: 'fgb-roads',
-          minzoom: tier.minz, maxzoom: 12,
-          filter: ['all', tierFilter, ['==', ['get', '_z'], 'f']],
-          paint: {
-            'fill-extrusion-color':   isHeatmap ? '#000000' : tier.colorOff,
-            'fill-extrusion-height':  tier.height, 'fill-extrusion-base': 0,
-            'fill-extrusion-opacity': isHeatmap ? HM_OPACITY : tier.opacityOff,
-            'fill-extrusion-vertical-gradient': false,
-          },
-        });
-      }
-      // Near version: tighter slabs, hard minzoom 12
-      const nearId = `real3d-roads-${tier.id}-slab`;
-      if (!map.getLayer(nearId)) {
-        map.addLayer({
-          id: nearId, type: 'fill-extrusion', source: 'fgb-roads',
-          minzoom: 12,
-          filter: ['all', tierFilter, ['==', ['get', '_z'], 'n']],
-          paint: {
-            'fill-extrusion-color':   isHeatmap ? '#000000' : tier.colorOff,
-            'fill-extrusion-height':  tier.height, 'fill-extrusion-base': 0,
-            'fill-extrusion-opacity': isHeatmap ? HM_OPACITY : tier.opacityOff,
-            'fill-extrusion-vertical-gradient': false,
-          },
-        });
-      }
-    }
-    } // end if (!USE_PMTILES_REAL3D) — FGB road slabs
-
     // ── Building layers ─────────────────────────────────────────────────────
     if (!map.getSource('fgb-buildings')) {
       map.addSource('fgb-buildings', {
@@ -3620,30 +3447,27 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     }, 0);
   }
 
-  // ─── Water PMTiles source + Real3D water layer ──────────────────────────────
-  // Single self-hosted water.pmtiles (~14MB). Extracted from OpenMapTiles
-  // northeast region, clipped to bbox [-76.5,39.0,-71.5,42.5], zooms 0-14.
-  // Source-layer 'water' contains all water polygons (ocean, river, lake, dock,
-  // including intermittent via the `intermittent` property). OMT pre-bakes
-  // zoom-based simplification — same look as the old Oracle PMTiles.
+  // ─── Static water GeoJSON + Real3D water layer ─────────────────────────────
+  // water_static.geojson: 128 features, 326KB, z=10 simplification level, seams dissolved.
+  // Static = same geometry at all zoom levels → warms ONCE in SW cache, never re-renders.
   function addOpenmaptilesSourceAndLayers(map, isHeatmap, tsIdx = 0) {
-    if (map.getSource('water-pm') && map.getSource('roads-pm')) return; // already exists
+    if (map.getSource('water-static') && map.getSource('roads-pm')) return; // already exists
     try {
-      if (!map.getSource('water-pm')) {
-        map.addSource('water-pm', { type: 'vector', url: `pmtiles://${WATER_PMTILES_URL}` });
+      if (!map.getSource('water-static')) {
+        map.addSource('water-static', {
+          type: 'geojson',
+          data: `${import.meta.env.BASE_URL}data/water_static.geojson`,
+        });
       }
 
       const waterBeforeId = map.getLayer('heat-underlay') ? 'heat-underlay' : undefined;
       if (!map.getLayer('real3d-water')) {
         map.addLayer({
           id: 'real3d-water', type: 'fill',
-          source: 'water-pm', 'source-layer': 'water',
+          source: 'water-static',
           paint: { 'fill-color': '#0e1f35', 'fill-opacity': 0.85 },
         }, waterBeforeId);
       }
-      // NOTE: 'waterway' line layer intentionally NOT rendered — those are
-      // small streams/rivers as polylines that visually clash with the polygon
-      // water. Polygons in the 'water' source-layer cover all real water bodies.
 
       // ── PMTILES ROADS (Real3D mode) ──────────────────────────────────────────
       // Dual-layer per fclass: 2D fill (z9→z14) + 3D extrusion (z13→z14+).
@@ -3652,123 +3476,100 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       // Extrusion fades IN (0→opacityFull) from z13 to z14.
       // 2D fill and fill-extrusion are separate GPU passes — zero Z-fighting in the overlap zone.
       // At z14+ buildings occlude 3D road slabs via shared depth buffer.
-      if (USE_PMTILES_REAL3D) {
-        if (!map.getSource('roads-pm')) {
-          map.addSource('roads-pm', { type: 'vector', url: `pmtiles://${ROADS_PMTILES_URL}` });
-        }
-
-        // Roads: dual-layer per fclass.
-        // INSIGHT: Roads only need depth-occlusion by buildings at z14+ (that's when buildings
-        // appear). So use flat `fill` (2D, no 3D compute) for z9→z14, and `fill-extrusion`
-        // only at z14+ for proper GPU depth occlusion. This eliminates ALL far-zoom pixelation
-        // (no thin perspective sliver) and saves significant 3D geometry compute at z9-13.
-        // _z baked into PMTiles: motorway 0.6 → residential 0.1.
-        const HEIGHT_EXPR = ['max', ['coalesce', ['get', '_z'], 0.1], 0.1];
-        const ROAD_FCLASSES = [
-          { fclass: 'motorway',    minz: 9,  colorOff: '#850000', opacityOff: 0.95 },
-          { fclass: 'trunk',       minz: 9,  colorOff: '#850000', opacityOff: 0.95 },
-          { fclass: 'primary',     minz: 11, colorOff: '#850000', opacityOff: 0.92 },
-          { fclass: 'secondary',   minz: 11, colorOff: '#850000', opacityOff: 0.92 },
-          { fclass: 'tertiary',    minz: 12, colorOff: '#cc1100', opacityOff: 0.88 },
-          { fclass: 'residential', minz: 12, colorOff: '#cc1100', opacityOff: 0.88 },
-        ];
-        const HM_OPACITY = 0.4;
-        for (const r of ROAD_FCLASSES) {
-          const fillId = `real3d-pm-roads-${r.fclass}-fill`;
-          const extId  = `real3d-pm-roads-${r.fclass}`;
-          // 2D fill: full polygon footprint, antialiased, zero 3D overhead.
-          // Opacity crossfade: full at r.minz→z13, fades to 0 at z14 (seamless handoff to extrusion).
-          if (!map.getLayer(fillId)) {
-            map.addLayer({
-              id: fillId, type: 'fill',
-              source: 'roads-pm', 'source-layer': ROADS_PMTILES_LAYER,
-              minzoom: r.minz,
-              filter: ['==', ['get', 'fclass'], r.fclass],
-              paint: {
-                'fill-color':     isHeatmap ? '#000000' : r.colorOff,
-                'fill-opacity':   ['interpolate', ['linear'], ['zoom'], 13, isHeatmap ? HM_OPACITY : r.opacityOff, 14, 0],
-                'fill-antialias': true,
-              },
-            });
-          }
-          // 3D extrusion: fades IN from z13→z14, then full opacity for building occlusion at z14+.
-          // Crossfade with fill layer in z13-z14 zone — no Z-fight (separate GPU passes).
-          if (!map.getLayer(extId)) {
-            map.addLayer({
-              id: extId, type: 'fill-extrusion',
-              source: 'roads-pm', 'source-layer': ROADS_PMTILES_LAYER,
-              minzoom: 13,
-              filter: ['==', ['get', 'fclass'], r.fclass],
-              paint: {
-                'fill-extrusion-color':   isHeatmap ? '#000000' : r.colorOff,
-                'fill-extrusion-height':  HEIGHT_EXPR,
-                'fill-extrusion-base':    0,
-                'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'], 13, 0, 14, isHeatmap ? HM_OPACITY : r.opacityOff],
-                'fill-extrusion-vertical-gradient': false,
-              },
-            });
-          }
-        }
-        // Buildings: FGB path (USE_FGB_BUILDINGS=true) — no PMTiles buildings added here.
+      // Roads: dual-layer per fclass.
+      // INSIGHT: Roads only need depth-occlusion by buildings at z14+ (that's when buildings
+      // appear). So use flat `fill` (2D, no 3D compute) for z9→z14, and `fill-extrusion`
+      // only at z14+ for proper GPU depth occlusion. This eliminates ALL far-zoom pixelation
+      // (no thin perspective sliver) and saves significant 3D geometry compute at z9-13.
+      // _z baked into PMTiles: motorway 0.6 → residential 0.1.
+      const HEIGHT_EXPR = ['max', ['coalesce', ['get', '_z'], 0.1], 0.1];
+      const ROAD_FCLASSES = [
+        { fclass: 'motorway',    minz: 9,  colorOff: '#850000', opacityOff: 0.95 },
+        { fclass: 'trunk',       minz: 9,  colorOff: '#850000', opacityOff: 0.95 },
+        { fclass: 'primary',     minz: 11, colorOff: '#850000', opacityOff: 0.92 },
+        { fclass: 'secondary',   minz: 11, colorOff: '#850000', opacityOff: 0.92 },
+        { fclass: 'tertiary',    minz: 12, colorOff: '#cc1100', opacityOff: 0.88 },
+        { fclass: 'residential', minz: 12, colorOff: '#cc1100', opacityOff: 0.88 },
+      ];
+      const HM_OPACITY = 0.4;
+      if (!map.getSource('roads-pm')) {
+        map.addSource('roads-pm', { type: 'vector', url: `pmtiles://${ROADS_PMTILES_URL}` });
       }
+      for (const r of ROAD_FCLASSES) {
+        const fillId = `real3d-pm-roads-${r.fclass}-fill`;
+        const extId  = `real3d-pm-roads-${r.fclass}`;
+        // 2D fill: full polygon footprint, antialiased, zero 3D overhead.
+        // Opacity crossfade: full at r.minz→z13, fades to 0 at z14 (seamless handoff to extrusion).
+        if (!map.getLayer(fillId)) {
+          map.addLayer({
+            id: fillId, type: 'fill',
+            source: 'roads-pm', 'source-layer': ROADS_PMTILES_LAYER,
+            minzoom: r.minz,
+            filter: ['==', ['get', 'fclass'], r.fclass],
+            paint: {
+              'fill-color':     isHeatmap ? '#000000' : r.colorOff,
+              'fill-opacity':   ['interpolate', ['linear'], ['zoom'], 13, isHeatmap ? HM_OPACITY : r.opacityOff, 14, 0],
+              'fill-antialias': true,
+            },
+          });
+        }
+        // 3D extrusion: fades IN from z13→z14, then full opacity for building occlusion at z14+.
+        // Crossfade with fill layer in z13-z14 zone — no Z-fight (separate GPU passes).
+        if (!map.getLayer(extId)) {
+          map.addLayer({
+            id: extId, type: 'fill-extrusion',
+            source: 'roads-pm', 'source-layer': ROADS_PMTILES_LAYER,
+            minzoom: 13,
+            filter: ['==', ['get', 'fclass'], r.fclass],
+            paint: {
+              'fill-extrusion-color':   isHeatmap ? '#000000' : r.colorOff,
+              'fill-extrusion-height':  HEIGHT_EXPR,
+              'fill-extrusion-base':    0,
+              'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'], 13, 0, 14, isHeatmap ? HM_OPACITY : r.opacityOff],
+              'fill-extrusion-vertical-gradient': false,
+            },
+          });
+        }
+      }
+      // Buildings: FGB pipeline (addBuildingLayers called separately in initReal3DLayers).
     } catch (err) { console.warn('addOpenmaptilesSourceAndLayers failed:', err); }
   }
 
-  // Tear down water + roads sources and their dependent layers (used when Real3D is torn down).
-  function removeOpenmaptilesSourceAndLayers(map) {
-    REAL3D_OMT_LAYER_IDS.forEach(id => {
-      if (map.getLayer(id)) map.removeLayer(id);
-    });
-    if (map.getSource('water-pm')) map.removeSource('water-pm');
-    if (map.getSource('roads-pm')) map.removeSource('roads-pm');
-  }
-
-  // Initialize Real3D layers ONCE. After first call, all subsequent activations
-  // just toggle visibility — no WebGL context rebuild, no source re-creation.
+  // Initialize Real3D layers ONCE.
   function initReal3DLayers(map, isHeatmap, tsIdx = 0) {
     map.setLight({ anchor: 'map' });
     addOpenmaptilesSourceAndLayers(map, isHeatmap, tsIdx);
 
     addBuildingLayers(map, isHeatmap, tsIdx);
 
-    // Viewport listener for instant render when cache isn't ready.
-    // Skip fetch when Real3D layers are hidden — no visible output to fill.
-    // Skip entirely in PMTiles mode — vector tiles handle viewport natively.
+    // Viewport listener for building viewport fetches (mobile: FGB R-tree range queries).
+    // Roads use PMTiles which handles viewport natively — no listener needed for roads.
     let vpTimer = null;
-    let vpRoadTimer = null;
     let zoomSettleTimer = null;
     const isMob = window.innerWidth < 768;
     const VP_DEBOUNCE = isMob ? 350 : 200;
     const onViewportChange = () => {
-      if (USE_PMTILES_REAL3D) return; // PMTiles handles viewport via tile streaming
       if (!real3DRef.current) return;
       if (vpTimer) clearTimeout(vpTimer);
-      if (vpRoadTimer) clearTimeout(vpRoadTimer);
       if (zoomSettleTimer) clearTimeout(zoomSettleTimer);
-      // Cancel in-flight fetches during rapid zoom changes
       zoomSettleTimer = setTimeout(() => {
         vpTimer = setTimeout(() => {
           fetchViewportBuildings(mapRef.current);
         }, VP_DEBOUNCE);
-        if (isMob) {
-          // Road fetch staggered 200ms after buildings to avoid competing GPU setData calls
-          vpRoadTimer = setTimeout(() => {
-            fetchViewportRoads(mapRef.current);
-          }, VP_DEBOUNCE + 200);
-        }
       }, isMob ? 100 : 0);
     };
-    if (!USE_PMTILES_REAL3D) {
+    // Mobile: listen for viewport changes to refetch visible buildings.
+    // Desktop: full FGB cache populates source directly; no listener needed.
+    if (isMob) {
       map.on('moveend', onViewportChange);
       map.on('zoomend', onViewportChange);
     }
     buildingAssignCleanupRef.current = () => {
-      if (!USE_PMTILES_REAL3D) {
+      if (isMob) {
         map.off('moveend', onViewportChange);
         map.off('zoomend', onViewportChange);
       }
       if (vpTimer) clearTimeout(vpTimer);
-      if (vpRoadTimer) clearTimeout(vpRoadTimer);
       if (zoomSettleTimer) clearTimeout(zoomSettleTimer);
     };
 
@@ -3810,8 +3611,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         initReal3DLayers(map, isHm, timespanIdxRef.current ?? 2);
       } else {
         setReal3DLayersVisible(map, true);
-        // Always refresh colors after making layers visible — the USE_PMTILES_REAL3D
-        // guard here was incorrectly skipping this call when USE_PMTILES_REAL3D=true.
+        // Always refresh building colors after making layers visible.
         if (!buildingTiersBakedRef.current && buildingFGBRef.current && buildingZctaMapRef.current && precomputedTiersRef.current) {
           bakeAllTiersIntoBuildings();
         } else {
@@ -3826,26 +3626,23 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     }
 
     // Mobile: gated async path — show loading popup, then do viewport-only JIT fetch.
-    // PMTILES MODE: streaming via vector tiles → no FGB cache, no JIT viewport fetch.
     let cancelled = false;
     (async () => {
       setReal3dLoading(true);
       setReal3dLoadProgress('Preparing Real3D layers…');
       await new Promise(r => setTimeout(r, 50));
 
-      if (USE_FGB_BUILDINGS) {
-        // Step 1 (FGB buildings): Ensure raw FGB bytes are cached (Gear 3 handshake).
-        if (fgbCacheStatus !== 'done') {
-          setReal3dLoadProgress('Caching map data…');
-          await buildFGBCache();
-          let polls = 0;
-          while (fgbCacheStatusRef.current !== 'done' && polls < 60) {
-            await new Promise(r => setTimeout(r, 200));
-            polls++;
-          }
+      // Step 1: Ensure raw FGB bytes are cached (Gear 3 handshake).
+      if (fgbCacheStatus !== 'done') {
+        setReal3dLoadProgress('Caching map data…');
+        await buildFGBCache();
+        let polls = 0;
+        while (fgbCacheStatusRef.current !== 'done' && polls < 60) {
+          await new Promise(r => setTimeout(r, 200));
+          polls++;
         }
-        if (cancelled) return;
       }
+      if (cancelled) return;
 
       // Step 2: Create layers if needed (lightweight — just WebGL setup, no data)
       setReal3dLoadProgress('Preparing Real3D layers…');
@@ -3862,8 +3659,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       await new Promise(r => setTimeout(r, 100));
       if (cancelled) return;
 
-      // Step 5 (FGB buildings only): JIT viewport fetch — skip in non-FGB mode.
-      if (USE_FGB_BUILDINGS && map.getZoom() >= 13) {
+      // Step 4: JIT viewport fetch — loads visible buildings for current viewport.
+      if (map.getZoom() >= 13) {
         setReal3dLoadProgress('Loading buildings…');
         await fetchViewportBuildings(map);
       }
@@ -3882,76 +3679,45 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     if (!map || !mapReady || !real3D) return;
     if (!real3dLayersCreatedRef.current) return; // layers not yet initialized — skip
 
-    if (USE_PMTILES_REAL3D) {
-      // PMTiles roads: update color + zoom-interpolated opacity expressions.
-      const ROAD_FCLASS_PAINT = [
-        { fclass: 'motorway',    colorOff: '#850000', opacityOff: 0.95 },
-        { fclass: 'trunk',       colorOff: '#850000', opacityOff: 0.95 },
-        { fclass: 'primary',     colorOff: '#850000', opacityOff: 0.92 },
-        { fclass: 'secondary',   colorOff: '#850000', opacityOff: 0.92 },
-        { fclass: 'tertiary',    colorOff: '#cc1100', opacityOff: 0.88 },
-        { fclass: 'residential', colorOff: '#cc1100', opacityOff: 0.88 },
-      ];
-      const HM_OPACITY = 0.4;
-      ROAD_FCLASS_PAINT.forEach(({ fclass, colorOff, opacityOff }) => {
-        const fillId = `real3d-pm-roads-${fclass}-fill`;
-        const extId  = `real3d-pm-roads-${fclass}`;
-        if (map.getLayer(fillId)) {
-          map.setPaintProperty(fillId, 'fill-color',   heatmap ? '#000000' : colorOff);
-          map.setPaintProperty(fillId, 'fill-opacity',
-            ['interpolate', ['linear'], ['zoom'], 13, heatmap ? HM_OPACITY : opacityOff, 14, 0]);
-        }
-        if (map.getLayer(extId)) {
-          map.setPaintProperty(extId, 'fill-extrusion-color',   heatmap ? '#000000' : colorOff);
-          map.setPaintProperty(extId, 'fill-extrusion-opacity',
-            ['interpolate', ['linear'], ['zoom'], 13, 0, 14, heatmap ? HM_OPACITY : opacityOff]);
-        }
-      });
-      // Safezone opacity (shared between PMTiles + FGB paths)
-      const isSat = satelliteRef?.current ?? satellite;
-      if (map.getLayer('zcta-safezone-extrusion')) {
-        map.setPaintProperty('zcta-safezone-extrusion', 'fill-extrusion-opacity', isSat ? 0.22 : 1.0);
+    // PMTiles roads: update color + zoom-interpolated opacity expressions.
+    const ROAD_FCLASS_PAINT = [
+      { fclass: 'motorway',    colorOff: '#850000', opacityOff: 0.95 },
+      { fclass: 'trunk',       colorOff: '#850000', opacityOff: 0.95 },
+      { fclass: 'primary',     colorOff: '#850000', opacityOff: 0.92 },
+      { fclass: 'secondary',   colorOff: '#850000', opacityOff: 0.92 },
+      { fclass: 'tertiary',    colorOff: '#cc1100', opacityOff: 0.88 },
+      { fclass: 'residential', colorOff: '#cc1100', opacityOff: 0.88 },
+    ];
+    const HM_OPACITY = 0.4;
+    ROAD_FCLASS_PAINT.forEach(({ fclass, colorOff, opacityOff }) => {
+      const fillId = `real3d-pm-roads-${fclass}-fill`;
+      const extId  = `real3d-pm-roads-${fclass}`;
+      if (map.getLayer(fillId)) {
+        map.setPaintProperty(fillId, 'fill-color',   heatmap ? '#000000' : colorOff);
+        map.setPaintProperty(fillId, 'fill-opacity',
+          ['interpolate', ['linear'], ['zoom'], 13, heatmap ? HM_OPACITY : opacityOff, 14, 0]);
       }
+      if (map.getLayer(extId)) {
+        map.setPaintProperty(extId, 'fill-extrusion-color',   heatmap ? '#000000' : colorOff);
+        map.setPaintProperty(extId, 'fill-extrusion-opacity',
+          ['interpolate', ['linear'], ['zoom'], 13, 0, 14, heatmap ? HM_OPACITY : opacityOff]);
+      }
+    });
+    // Safezone opacity
+    const isSat = satelliteRef?.current ?? satellite;
+    if (map.getLayer('zcta-safezone-extrusion')) {
+      map.setPaintProperty('zcta-safezone-extrusion', 'fill-extrusion-opacity', isSat ? 0.22 : 1.0);
     }
 
-    // FGB buildings paint — runs when buildings use FGB (USE_FGB_BUILDINGS=true)
-    if (!USE_PMTILES_REAL3D || USE_FGB_BUILDINGS) {
-      const isMob = window.innerWidth < 768;
-      if (isMob) {
-        if (map.getZoom() >= 13) fetchViewportBuildings(map);
+    // FGB buildings paint
+    const isMob = window.innerWidth < 768;
+    if (isMob) {
+      if (map.getZoom() >= 13) fetchViewportBuildings(map);
+    } else {
+      if (!buildingTiersBakedRef.current && buildingFGBRef.current && buildingZctaMapRef.current && precomputedTiersRef.current) {
+        bakeAllTiersIntoBuildings();
       } else {
-        if (!buildingTiersBakedRef.current && buildingFGBRef.current && buildingZctaMapRef.current && precomputedTiersRef.current) {
-          bakeAllTiersIntoBuildings();
-        } else {
-          refreshBuildingColors();
-        }
-      }
-    }
-
-    // FGB road slab paint — only when FGB roads are active
-    if (!USE_PMTILES_REAL3D) {
-      const HM_OPACITY = 0.4;
-      const ROAD_TIER_COLORS = [
-        { base: 'motorway', colorOff: '#850000', opacityOff: 0.95 },
-        { base: 'primary',  colorOff: '#850000', opacityOff: 0.92 },
-        { base: 'tertiary', colorOff: '#cc1100', opacityOff: 0.88 },
-      ];
-      ROAD_TIER_COLORS.forEach(({ base, colorOff, opacityOff }) => {
-        const farId  = `real3d-roads-${base}-far-slab`;
-        const nearId = `real3d-roads-${base}-slab`;
-        if (map.getLayer(farId)) {
-          map.setPaintProperty(farId, 'fill-extrusion-color',   heatmap ? '#000000' : colorOff);
-          map.setPaintProperty(farId, 'fill-extrusion-opacity', heatmap ? HM_OPACITY : opacityOff);
-        }
-        if (map.getLayer(nearId)) {
-          map.setPaintProperty(nearId, 'fill-extrusion-color',   heatmap ? '#000000' : colorOff);
-          map.setPaintProperty(nearId, 'fill-extrusion-opacity', heatmap ? HM_OPACITY : opacityOff);
-        }
-      });
-      // Safezone (only in pure FGB path — PMTiles path handles it above)
-      const isSat = satelliteRef?.current ?? satellite;
-      if (map.getLayer('zcta-safezone-extrusion')) {
-        map.setPaintProperty('zcta-safezone-extrusion', 'fill-extrusion-opacity', isSat ? 0.22 : 1.0);
+        refreshBuildingColors();
       }
     }
   }, [heatmap, real3D, mapReady]);

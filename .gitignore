@@ -41,4 +41,5 @@ public/data/final_building.fgb
 public/data/external_waters4.json
 public/data/roads_buffered.fgb
 public/data/internalwater.json
+public/data/water.pmtiles
 public/data/Supabase Snippet*.csv
