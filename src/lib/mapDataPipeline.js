@@ -20,19 +20,24 @@ export const BOROUGH_FGBS = [
   { name: 'Queens',            url: './data/Queens_r.fgb',            cacheKey: 'Queens_r.fgb' },
   { name: 'Staten Island',     url: './data/Staten Island_r.fgb',     cacheKey: 'Staten Island_r.fgb' },
 ];
-export const FGB_CACHE_NAME     = 'lapuff-fgb-v7';     // v7: real R-tree spatial-indexed borough FGBs
+export const FGB_CACHE_NAME     = 'lapuff-fgb-v8';     // v8: HEIGHT_ROOF feet→meters fix + stack-overflow fix
 export const ROADS_FGB_CACHE_NAME = 'lapuff-roads-v10';
 export const ROADS_FGB_CACHE_KEY  = 'roads_buffered.fgb';
-export const MAP_CACHE_DONE_KEY     = 'lapuff_map_cache_v1';
+export const MAP_CACHE_DONE_KEY     = 'lapuff_map_cache_v2';
 export const MAP_CACHE_BUILDING_KEY = 'lapuff_map_cache_building';
 
 export const ROADS_PMTILES_URL = 'https://objectstorage.us-ashburn-1.oraclecloud.com/p/yGTOMC4N2uc1uIGkliFRgP51VbnPm96W8vebh_sOqeoGil3PErp8dvWmy74pEH70/n/idfnjqqb9g0p/b/nyc-map-data/o/realfinaldeciroads.pmtiles';
 
-// Local self-hosted water PMTiles (~17MB). Layers: 'water' (polygons), 'waterway' (lines).
+// Local self-hosted water PMTiles (split into two files):
+// - internalwater.pmtiles (~70KB): NYC waterways inside borough boundaries
+// - externalwater.pmtiles (~5MB): negative-stencil water everywhere outside boroughs
 // BASE_URL injected so subfolder deploys (/LaPuffOnline/) resolve correctly.
-export const WATER_PMTILES_URL = (typeof window !== 'undefined')
-  ? `${window.location.origin}${import.meta.env.BASE_URL}data/water_nyc.pmtiles`
-  : '/data/water_nyc.pmtiles';
+export const WATER_INTERNAL_PMTILES_URL = (typeof window !== 'undefined')
+  ? `${window.location.origin}${import.meta.env.BASE_URL}data/internalwater.pmtiles`
+  : '/data/internalwater.pmtiles';
+export const WATER_EXTERNAL_PMTILES_URL = (typeof window !== 'undefined')
+  ? `${window.location.origin}${import.meta.env.BASE_URL}data/externalwater.pmtiles`
+  : '/data/externalwater.pmtiles';
 
 // In-memory ref: populated during Phase 2A so Real3D road activation uses it directly.
 export const roadFGBFeaturesRef = { current: null };
@@ -495,7 +500,7 @@ function computeZctaBboxes(geoData) {
 function normalizeFGBProps(props, i) {
   const hr = parseFloat(props?.HEIGHT_ROOF ?? props?.height_roof);
   return {
-    height_roof: isNaN(hr) ? 8 : hr,
+    height_roof: isNaN(hr) ? 8 : hr / 3.28084,  // convert feet → meters
     MODZCTA: props?.MODZCTA ?? null,  // preserve for tier baking
     _s5: i % 5,
     _s7: i % 7,
@@ -646,7 +651,8 @@ async function runFGBPipelineWithWorker(zctaFeatures, precomputedTiers, P, onPro
         const pct = Math.min(P.fgbParse[0] + Math.round((m.pct / 100) * reportSpan), P.bake[1] - 1);
         report(pct, m.msg);
       } else if (m.type === 'BOROUGH_DONE') {
-        allFeatures.push(...m.features);
+        // Safe large-array merge — spread push causes stack overflow on 200K+ arrays
+        for (let _fi = 0; _fi < m.features.length; _fi++) allFeatures.push(m.features[_fi]);
         idxMaps.push(m.idxMap);
         mapCacheStore.buildingFGBStream.push({ borough: m.borough, features: m.features });
         if (typeof window !== 'undefined') {
@@ -739,7 +745,8 @@ async function runFGBPipeline(zctaFeatures, precomputedTiers, P, onProgress) {
       const approxPct = Math.round(((bi * 100000 + count) / (BOROUGH_FGBS.length * 100000)) * (P.fgbParse[1] - P.fgbParse[0]));
       report(Math.min(P.fgbParse[0] + approxPct, P.fgbParse[1] - 1), 'Parsing building geometry...');
     });
-    allFeatures.push(...sub.features);
+    // Safe large-array merge — spread push causes stack overflow on 200K+ arrays
+    for (let _fi = 0; _fi < sub.features.length; _fi++) allFeatures.push(sub.features[_fi]);
     mapCacheStore.buildingFGBStream.push({ borough: BOROUGH_FGBS[bi].name, features: sub.features });
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('lapuff:fgb-borough-ready', { detail: { borough: BOROUGH_FGBS[bi].name, index: bi } }));
@@ -947,9 +954,11 @@ export async function runPhase2A(events, isMobile, onProgress) {
 
   // ── Water header pre-warm + full-file SW pre-cache ──────────────────────
   report(P.waterCache[0], 'Pre-warming water tiles...');
-  fetch(WATER_PMTILES_URL, { headers: { Range: 'bytes=0-16383' } }).catch(() => {});
+  fetch(WATER_INTERNAL_PMTILES_URL, { headers: { Range: 'bytes=0-16383' } }).catch(() => {});
+  fetch(WATER_EXTERNAL_PMTILES_URL, { headers: { Range: 'bytes=0-16383' } }).catch(() => {});
   if (navigator.serviceWorker?.controller) {
-    navigator.serviceWorker.controller.postMessage({ type: 'PRECACHE_PMTILES', url: WATER_PMTILES_URL });
+    navigator.serviceWorker.controller.postMessage({ type: 'PRECACHE_PMTILES', url: WATER_INTERNAL_PMTILES_URL });
+    navigator.serviceWorker.controller.postMessage({ type: 'PRECACHE_PMTILES', url: WATER_EXTERNAL_PMTILES_URL });
   }
   report(P.waterCache[1], 'Water tiles ready');
 

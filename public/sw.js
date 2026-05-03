@@ -1,15 +1,15 @@
 // LaPuff Service Worker — caches FGB files + PMTiles (full-file pre-warm + Range slicing).
-const SW_VERSION = 'lapuff-sw-v3';
+const SW_VERSION = 'lapuff-sw-v4';
 
 // Cache names (must match mapDataPipeline.js)
-const FGB_CACHE         = 'lapuff-fgb-v7';            // borough-split spatial FGBs (real R-tree)
+const FGB_CACHE         = 'lapuff-fgb-v8';            // v8: HEIGHT_ROOF feet→meters fix + stack-overflow fix
 const PMTILES_CACHE     = 'lapuff-pmtiles-sw-v1';     // legacy: per-Range responses (still used as fallback)
 const PMTILES_FULL_CACHE = 'lapuff-pmtiles-full-v1';  // full PMTiles file pre-warmed at MapLoadingScreen
 
 const MANAGED_CACHES = [FGB_CACHE, PMTILES_CACHE, PMTILES_FULL_CACHE];
 
 // URLs that we know are small + should be cached as full files (when SW receives PRECACHE message)
-const FULL_PMTILES_URL_PATTERNS = ['water_nyc.pmtiles', 'realfinaldeciroads.pmtiles'];
+const FULL_PMTILES_URL_PATTERNS = ['internalwater.pmtiles', 'externalwater.pmtiles', 'realfinaldeciroads.pmtiles'];
 
 // ── Install: skip waiting so new SW activates immediately ────────────────────
 self.addEventListener('install', event => {
