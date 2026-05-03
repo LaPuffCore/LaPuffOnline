@@ -1,15 +1,16 @@
 // LaPuff Service Worker — caches FGB files + PMTiles (full-file pre-warm + Range slicing).
-const SW_VERSION = 'lapuff-sw-v6';
+const SW_VERSION = 'lapuff-sw-v7';
 
 // Cache names (must match mapDataPipeline.js)
 const FGB_CACHE         = 'lapuff-fgb-v8';            // v8: HEIGHT_ROOF feet→meters fix + stack-overflow fix
-const PMTILES_CACHE     = 'lapuff-pmtiles-sw-v1';     // legacy: per-Range responses (still used as fallback)
-const PMTILES_FULL_CACHE = 'lapuff-pmtiles-full-v1';  // full PMTiles file pre-warmed at MapLoadingScreen
+const PMTILES_CACHE     = 'lapuff-pmtiles-sw-v2';     // v2: per-Range responses (still used as fallback)
+const PMTILES_FULL_CACHE = 'lapuff-pmtiles-full-v2';  // v2: full PMTiles file pre-warmed at MapLoadingScreen (now incl. nyc_buildings)
 
 const MANAGED_CACHES = [FGB_CACHE, PMTILES_CACHE, PMTILES_FULL_CACHE];
 
 // URLs that we know are small + should be cached as full files (when SW receives PRECACHE message)
-const FULL_PMTILES_URL_PATTERNS = ['realfinaldeciroads.pmtiles'];
+// nyc_buildings.pmtiles (~71MB) is fully precached → in-memory range slicing = 0ms warm tile fetches
+const FULL_PMTILES_URL_PATTERNS = ['realfinaldeciroads.pmtiles', 'nyc_buildings.pmtiles'];
 
 // ── Install: skip waiting so new SW activates immediately ────────────────────
 self.addEventListener('install', event => {

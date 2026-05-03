@@ -797,48 +797,18 @@ export async function runPhase2A(events, isMobile, onProgress) {
     }
   }).catch(() => {});
 
-  // ── Steps 7-10: Desktop FGB building pipeline ──────────────────────────────
-  // Mobile uses runtime R-tree viewport queries — skipped here.
-  // Desktop ALWAYS runs (no 2nd-load skip — that previously caused a hang because
-  // mapCacheStore is in-memory only and didn't survive page reload). On 2nd+ load
-  // we hydrate the baked FeatureCollection from IndexedDB instead of re-parsing
-  // the ~196MB of FGB data. IDB rehydrate is ~800ms vs 6-10s for FGB parse.
-  if (!isMobile) {
-    const idbHit = await loadBakedBuildings(MAP_IDB_VERSION).catch(() => null);
-    if (idbHit) {
-      report(P.fgbFetch[0], 'Restoring building cache...');
-      // Rebake tiers in-place against current event-derived tier data.
-      // Cheap (~50ms) and ensures heatmap colors reflect *this* session's events.
-      rebakeTiersInPlace(idbHit.fc, idbHit.zctaIndex, precomputedTiers, TIMESPAN_STEPS.length);
-      mapCacheStore.buildingFGB        = idbHit.fc;
-      mapCacheStore.buildingZctaIndex  = idbHit.zctaIndex;
-      mapCacheStore.buildingTiersBaked = true;
-      // Build a 5-chunk stream from the cached FC so MapView's chunked setData
-      // path also works on warm load (otherwise 2nd-load tries to push all 196MB
-      // in one setData and the main thread hangs ~600ms).
-      const feats = idbHit.fc.features;
-      const chunkSize = Math.ceil(feats.length / 5);
-      const stream = [];
-      for (let s = 0; s < feats.length; s += chunkSize) {
-        stream.push({ borough: `chunk_${stream.length}`, features: feats.slice(s, s + chunkSize) });
-      }
-      mapCacheStore.buildingFGBStream = stream;
-      report(P.bake[1], 'Building cache restored');
-    } else {
-      // Cold path: worker parses + bakes, then we persist for next load.
-      // No main-thread fallback — if worker fails the loading screen surfaces the
-      // error rather than silently freezing the UI for 6-10s on the main thread.
-      await runFGBPipelineWithWorker(geoData.features, precomputedTiers, P, onProgress);
-      try {
-        await saveBakedBuildings({
-          fc: mapCacheStore.buildingFGB,
-          zctaIndex: mapCacheStore.buildingZctaIndex,
-          version: MAP_IDB_VERSION,
-          eventFingerprint,
-        });
-      } catch (e) { /* IDB write failed — non-fatal, just slower next load */ }
-    }
+  // ── Buildings PMTiles pre-warm + full-file SW pre-cache ────────────────────
+  // Same pattern as roads. ~71MB; SW caches it once and serves Range slices in-memory.
+  // Layer 'building'. Per-feature props: { z=zip, b=bid, h=height, m=min_height, c=colour }.
+  report(P.fgbFetch[0], 'Pre-warming building tiles...');
+  const BUILDINGS_PMTILES_URL = (typeof window !== 'undefined')
+    ? `${window.location.origin}${import.meta.env.BASE_URL}data/nyc_buildings.pmtiles`
+    : '/data/nyc_buildings.pmtiles';
+  fetch(BUILDINGS_PMTILES_URL, { headers: { Range: 'bytes=0-16383' } }).catch(() => {});
+  if (navigator.serviceWorker?.controller) {
+    navigator.serviceWorker.controller.postMessage({ type: 'PRECACHE_PMTILES', url: BUILDINGS_PMTILES_URL });
   }
+  report(P.bake[1], 'Building tiles ready');
 
   // Enforce minimum 1s display time on first load so user sees the loading screen
   const elapsed = Date.now() - startTime;

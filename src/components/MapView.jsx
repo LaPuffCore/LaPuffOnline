@@ -21,8 +21,17 @@ const GEOJSON_URL = './data/MODZCTA_2010_WGS1984.geo.json';
 const BOROUGH_GEOJSON_URL = './data/borough.geo.json';
 
 // MapLoadingScreen gate keys
-const MAP_CACHE_DONE_KEY     = 'lapuff_map_cache_v2';
+const MAP_CACHE_DONE_KEY     = 'lapuff_map_cache_v3';
 const MAP_CACHE_BUILDING_KEY = 'lapuff_map_cache_building';
+
+// Buildings PMTiles — same-origin GitHub Pages, SW range-cached. ~71MB, never fully loaded
+// at runtime; MapLibre fetches only viewport tiles via HTTP Range. SW pre-warms full file
+// in MapLoadingScreen Phase 2A so warm tiles serve from in-memory slicing (~0ms).
+// Layer: 'building'. Per-feature props: { z=zip(string), b=bid(int), h=height_m, m=min_h, c=colour }
+const BUILDINGS_PMTILES_URL = (typeof window !== 'undefined')
+  ? `${window.location.origin}${import.meta.env.BASE_URL}data/nyc_buildings.pmtiles`
+  : '/data/nyc_buildings.pmtiles';
+const BUILDINGS_PMTILES_LAYER = 'building';
 
 // Roads PMTiles: hierarchical-dissolve road polygons (~8.5K features, 14MB) on OCI PAR.
 // Schema: layer 'final6deciroads', props { id, fclass, _z }.
@@ -2238,13 +2247,10 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   // Hydrate from mapCacheStore if Phase 2A already computed them; else compute fresh.
   useEffect(() => {
     if (!geoData || !adjacency || !events?.length) return;
-    // Hydrate from Phase 2A store if available. Worker baked all 5 tier columns
-    // into building properties already — runtime only needs paint refresh.
     if (mapCacheStore.precomputedTiers) {
       precomputedTiersRef.current = mapCacheStore.precomputedTiers;
-      if (buildingFGBRef.current && buildingZctaMapRef.current) {
-        refreshBuildingColors();
-      }
+      memoizedExprs.current = {};
+      refreshBuildingColors();
     }
     let cancelled = false;
     (async () => {
@@ -2258,19 +2264,10 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       }
       if (!cancelled) {
         precomputedTiersRef.current = result;
-        // Tiers were baked in Phase 2A (worker). Live recompute is a safety net for
-        // edge cases (e.g. event list changes mid-session). If FGB data is loaded,
-        // re-bake the freshly-computed tiers in-place against the cached FC + index.
-        if (buildingFGBRef.current && buildingZctaMapRef.current) {
-          rebakeTiersInPlace(buildingFGBRef.current, buildingZctaMapRef.current, result);
-          buildingTiersBakedRef.current = true;
-          memoizedExprs.current = {};
-          const map = mapRef.current;
-          if (map?.getSource('fgb-buildings') && map.getStyle()) {
-            map.getSource('fgb-buildings').setData(buildingFGBRef.current);
-            refreshBuildingColors();
-          }
-        }
+        // PMTiles tier coloring is via [match, ['get','z'], ...] expression — just
+        // refresh the paint expression to pick up new tier values.
+        memoizedExprs.current = {};
+        refreshBuildingColors();
       }
     })();
     return () => { cancelled = true; };
@@ -2778,18 +2775,10 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       }
 
       // Mobile Real3D: trigger viewport fetch when crossing z13/z14 thresholds.
-      // 100ms debounce — matches the outline cadence above so both fire together.
-      if (isMob && isR3D) {
-        const crossedBaseplates = (prevZoom < 13 && zoom >= 13);
-        const crossedBuildings  = (prevZoom < 14 && zoom >= 14);
-        if (crossedBaseplates || crossedBuildings) {
-          if (mobileVpTimer) clearTimeout(mobileVpTimer);
-          mobileVpTimer = setTimeout(() => fetchViewportBuildings(mapRef.current), 100);
-        }
-      }
+      // PMTiles handles building viewport tiles natively — no manual fetch on threshold crossings.
 
-      // Desktop Real3D: refresh paint expressions on zoom threshold crossing (cheap, sync).
-      if (!isMob && isR3D && heatmapRef.current) {
+      // Real3D paint expression refresh on zoom threshold crossing (cheap, sync).
+      if (isR3D && heatmapRef.current) {
         const crossedBaseplates = (prevZoom < 13 && zoom >= 13) || (prevZoom >= 13 && zoom < 13);
         const crossedBuildings  = (prevZoom < 14 && zoom >= 14) || (prevZoom >= 14 && zoom < 14);
         if (crossedBaseplates || crossedBuildings) refreshBuildingColors();
@@ -2845,10 +2834,28 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   }, [satellite, real3D, mapReady]);
 
 
-  // Building color expression — uses pre-computed _s7 (shade index mod 7).
-  // For heatmap mode, tier comes from baked _tier_X property (X = timespanIdx).
+  // Building color expression — uses bid % 7 (standard) / bid % 5 (heatmap shade clusters).
+  // For heatmap mode, tier comes from per-zip lookup via match expression on `z` property.
   // GPU reads property directly — no feature-state needed, no CPU loop.
   const memoizedExprs = useRef({});
+
+  // Build a [match, ['get','z'], '10001', tier, '10002', tier, ..., 0] expression
+  // that maps each ZIP to its tier (0–4) for the given timespan index.
+  function buildTierByZipExpr(tsIdx) {
+    const precomputed = precomputedTiersRef.current;
+    const zipToZcta = zipToZctaIdxMapRef.current;
+    if (!precomputed || !zipToZcta) return 0;
+    const tiers = precomputed[tsIdx]?.tiers;
+    if (!tiers) return 0;
+    const expr = ['match', ['get', 'z']];
+    for (const zip in zipToZcta) {
+      const idx = zipToZcta[zip];
+      const tier = tiers[idx] ?? 0;
+      expr.push(zip, tier);
+    }
+    expr.push(0); // default
+    return expr;
+  }
 
   function buildingColorExprByState(isHeatmap, tsIdx = 0) {
     const key = `bldg_${isHeatmap}_${tsIdx}`;
@@ -2856,23 +2863,24 @@ export default function MapView({ events, headerCollapsed = false, interactive =
 
     let expr;
     if (!isHeatmap) {
+      const shadeIdx = ['%', ['coalesce', ['get', 'b'], 0], 7];
       expr = ['case',
-        ['==', ['get', '_s7'], 0], '#0d0101',
-        ['==', ['get', '_s7'], 1], '#1a0303',
-        ['==', ['get', '_s7'], 2], '#260606',
-        ['==', ['get', '_s7'], 3], '#330909',
-        ['==', ['get', '_s7'], 4], '#400c0c',
-        ['==', ['get', '_s7'], 5], '#1f0404',
+        ['==', shadeIdx, 0], '#0d0101',
+        ['==', shadeIdx, 1], '#1a0303',
+        ['==', shadeIdx, 2], '#260606',
+        ['==', shadeIdx, 3], '#330909',
+        ['==', shadeIdx, 4], '#400c0c',
+        ['==', shadeIdx, 5], '#1f0404',
         '#7a1818',
       ];
     } else {
-      // Tier from baked property — switches column on timespan change (GPU-only)
-      const tierExpr = ['coalesce', ['get', `_tier_${tsIdx}`], 0];
+      const tierExpr = buildTierByZipExpr(tsIdx);
+      const shadeIdx = ['%', ['coalesce', ['get', 'b'], 0], 5];
       const shades = (tones) => ['case',
-        ['==', ['get', '_s5'], 0], tones[0],
-        ['==', ['get', '_s5'], 1], tones[1],
-        ['==', ['get', '_s5'], 2], tones[2],
-        ['==', ['get', '_s5'], 3], tones[3],
+        ['==', shadeIdx, 0], tones[0],
+        ['==', shadeIdx, 1], tones[1],
+        ['==', shadeIdx, 2], tones[2],
+        ['==', shadeIdx, 3], tones[3],
         tones[4],
       ];
       expr = ['case',
@@ -2897,10 +2905,10 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     const tsIdx = timespanIdxRef.current ?? 2;
     memoizedExprs.current = {};
     if (map.getLayer('real3d-buildings')) {
-      map.setPaintProperty('real3d-buildings', 'fill-extrusion-color', buildingColorExprByState(isHm, tsIdx));
+      map.setPaintProperty('real3d-buildings', 'fill-extrusion-color', withSeamDedup(buildingColorExprByState(isHm, tsIdx)));
     }
     if (map.getLayer('real3d-buildings-baseplate')) {
-      map.setPaintProperty('real3d-buildings-baseplate', 'fill-extrusion-color', baseplateColorExpr(isHm, tsIdx));
+      map.setPaintProperty('real3d-buildings-baseplate', 'fill-extrusion-color', withSeamDedup(baseplateColorExpr(isHm, tsIdx)));
     }
   }
 
@@ -2921,8 +2929,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       // Standard: single flat dark red for all baseplates
       expr = '#220505';
     } else {
-      // Heatmap: one dark contrast color per tier, matching the heat zone color family
-      const tierExpr = ['coalesce', ['get', `_tier_${tsIdx}`], 0];
+      // Heatmap: one dark contrast color per tier, looked up by zip via match expression
+      const tierExpr = buildTierByZipExpr(tsIdx);
       expr = ['case',
         ['==', tierExpr, 4], '#440400',   // hot → dark red
         ['==', tierExpr, 3], '#3d1500',   // orange → dark orange-brown
@@ -2957,203 +2965,96 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   // Phase E: parseFGBBuffer + buildZctaIndexMap removed — Phase 2A worker (fgbWorker.js)
   // owns FGB parsing and ZCTA index construction off the main thread.
 
-  // Hydrate buildingFGBRef from mapCacheStore. Phase 2A guarantees this is populated
-  // (worker parse on cold load, IDB rehydrate on warm load). No main-thread parse
-  // fallback — if mapCacheStore is empty something is genuinely broken upstream and
-  // we surface that rather than silently freezing the UI for 6-10s.
+  // Hydrate buildingFGBRef from mapCacheStore (legacy compat). PMTiles migration:
+  // building data now lives in nyc_buildings.pmtiles, fetched via Range requests by MapLibre.
+  // This function is kept as a no-op shim so existing call sites don't crash; the actual
+  // source/layer creation happens in addBuildingLayers below.
   function buildFGBCache() {
-    if (buildingFGBRef.current) { setFgbCacheStatus('done'); setFgbCacheProgress(100); return; }
-    if (!mapCacheStore.buildingFGB) {
-      // Mobile path: never populates mapCacheStore.buildingFGB — viewport R-tree handles it.
-      // Desktop: Phase 2A should have populated this. Log and return.
-      if (window.innerWidth >= 768) {
-        console.error('[MapView] mapCacheStore.buildingFGB empty after Phase 2A — Real3D buildings will be missing.');
-      }
-      return;
-    }
-    buildingFGBRef.current = mapCacheStore.buildingFGB;
-    if (mapCacheStore.buildingZctaIndex) buildingZctaMapRef.current = mapCacheStore.buildingZctaIndex;
-    if (mapCacheStore.buildingTiersBaked) buildingTiersBakedRef.current = true;
-    if (mapCacheStore.precomputedTiers && !precomputedTiersRef.current)
-      precomputedTiersRef.current = mapCacheStore.precomputedTiers;
-    setFgbCacheStatus('done'); setFgbCacheProgress(100);
-    const map = mapRef.current;
-    if (map && map.getSource('fgb-buildings') && map.getStyle()) {
-      try {
-        // Single source of truth for desktop building data upload.
-        // Use chunked rAF push when borough stream is available (cold load) — keeps
-        // main thread responsive between chunks. On 2nd load (IDB hit) stream is
-        // empty → fall back to single setData of the full FC.
-        const stream = mapCacheStore.buildingFGBStream;
-        const src = map.getSource('fgb-buildings');
-        if (stream && stream.length > 1) {
-          const accum = [];
-          let i = 0;
-          const pushChunk = () => {
-            const s = mapRef.current?.getSource('fgb-buildings');
-            if (!s) return;
-            if (i >= stream.length) {
-              refreshBuildingColors();
-              return;
-            }
-            const chunk = stream[i++];
-            for (const f of chunk.features) accum.push(f);
-            try { s.setData({ type: 'FeatureCollection', features: accum }); } catch (_e) { /* */ }
-            requestAnimationFrame(pushChunk);
-          };
-          requestAnimationFrame(pushChunk);
-        } else {
-          src.setData(buildingFGBRef.current);
-          refreshBuildingColors();
-        }
-        const onSourceLoaded = (e) => {
-          if (e.sourceId === 'fgb-buildings' && e.isSourceLoaded) {
-            map.off('sourcedata', onSourceLoaded);
-            if (real3DRef.current) refreshBuildingColors();
-          }
-        };
-        map.on('sourcedata', onSourceLoaded);
-      } catch (_e) { /* ignore — race during style swap */ }
-    }
-  }
-
-  // Viewport building render — reads from full cache (desktop) or parses full borough buffers
-  // with JS-side bbox filter (mobile, no spatial index required).
-  // When borough FGBs have R-tree spatial index: mobile uses spatial Range fgbDeserialize(url, rect)
-  // — ~10× less network than full buffer parse. Desktop pre-loads full cache via Phase 2A.
-  async function fetchViewportBuildings(map) {
-    if (!map || !map.getStyle() || !map.getSource('fgb-buildings')) return;
-
-    const isMob = window.innerWidth < 768;
-
-    // Zoom guard: nothing to render below z13 (baseplates start z13, buildings z14).
-    if (map.getZoom() < 13) {
-      if (isMob) map.getSource('fgb-buildings').setData({ type: 'FeatureCollection', features: [] });
-      return;
-    }
-
-    if (!isMob && buildingFGBRef.current) return; // desktop: full cache ready, skip viewport fetch
-
-    const bounds = map.getBounds();
-    const lngSpan = bounds.getEast() - bounds.getWest();
-    const latSpan = bounds.getNorth() - bounds.getSouth();
-    const pad = isMob ? 0.25 : 0.5;
-    const minX = bounds.getWest()  - lngSpan * pad;
-    const minY = bounds.getSouth() - latSpan * pad;
-    const maxX = bounds.getEast()  + lngSpan * pad;
-    const maxY = bounds.getNorth() + latSpan * pad;
-    const rect = { minX, minY, maxX, maxY };
-
-    // Build MODZCTA → ZCTA feature index once and cache in ref
-    if (!zipToZctaIdxMapRef.current) {
-      const zf = geoDataRef.current?.features || [];
+    setFgbCacheStatus('done');
+    setFgbCacheProgress(100);
+    // Populate zipToZctaIdxMapRef from mapCacheStore so tier-by-zip match expressions work
+    if (!zipToZctaIdxMapRef.current && geoDataRef.current?.features) {
       const lookup = {};
+      const zf = geoDataRef.current.features;
       for (let i = 0; i < zf.length; i++) {
         const z = zf[i].properties?.MODZCTA;
         if (z) lookup[String(z)] = i;
       }
       zipToZctaIdxMapRef.current = lookup;
     }
-    const zipLookup = zipToZctaIdxMapRef.current;
-    const precomputed = precomputedTiersRef.current;
-
-    // Precomputed centroid binary — avoids getGeomCentroid() calls and tightens bbox filter.
-    // centroids[featureGlobalIdx*2], centroids[featureGlobalIdx*2+1] = [lng, lat]
-    // Global index tracks position across all boroughs, matching build_centroids.mjs order.
-    const centroidsBin = mapCacheStore.buildingCentroids;
-
-    try {
-      const features = [];
-      let count = 0;
-
-      // Mobile-only: R-tree spatial Range query per borough. Trust the index — no guards.
-      // Phase E removed the desktop fallback (full buffer parse + JS bbox filter); desktop
-      // ALWAYS uses mapCacheStore.buildingFGB populated by Phase 2A worker.
-      if (!isMob) return; // safety: function should never be called on desktop after Phase E
-      const boroughResults = await Promise.all(BOROUGH_FGBS.map(async (borough) => {
-        const localFeatures = [];
-        for await (const feature of fgbDeserialize(borough.url, rect)) {
-          if (!feature?.geometry?.coordinates) continue;
-          const anchor = feature.geometry.coordinates?.[0]?.[0] ?? [0, 0];
-          const spatialSeed = Math.abs(Math.round(anchor[0] * 1e5) ^ Math.round(anchor[1] * 1e5));
-          const props = normalizeFGBProps(feature.properties, spatialSeed);
-          const modzcta = props.MODZCTA;
-          if (modzcta && precomputed) {
-            const zctaIdx = zipLookup[String(modzcta)] ?? -1;
-            if (zctaIdx >= 0) {
-              for (let t = 0; t < TIMESPAN_STEPS.length; t++) {
-                const trs = precomputed[t]?.tiers;
-                props[`_tier_${t}`] = (trs && trs.length > zctaIdx) ? (trs[zctaIdx] ?? 0) : 0;
-              }
-            }
-          }
-          feature.properties = props;
-          localFeatures.push(feature);
-        }
-        return localFeatures;
-      }));
-
-      for (const arr of boroughResults) {
-        for (let i = 0; i < arr.length; i++) features.push(arr[i]);
-      }
-      count = features.length;
-
-      // Desktop: skip if full cache arrived while we were parsing
-      if (!isMob && buildingFGBRef.current) return;
-
-      if (map.getSource('fgb-buildings') && map.getStyle()) {
-        map.getSource('fgb-buildings').setData({ type: 'FeatureCollection', features });
-        if (real3DRef.current) refreshBuildingColors();
-      }
-      void count; // silence unused
-    } catch (err) {
-      if (err.name !== 'AbortError') console.error('FGB viewport fetch failed:', err);
+    if (mapCacheStore.precomputedTiers && !precomputedTiersRef.current) {
+      precomputedTiersRef.current = mapCacheStore.precomputedTiers;
     }
+    refreshBuildingColors();
   }
 
-  // Bake all 5 timespan tiers into building properties (_tier_0.._tier_4).
-  // POST-OVERHAUL: Phase 2A worker bakes tiers once on cold load, mapIDBCache
-  // rebakes on warm load. This function is now a thin synchronous wrapper around
-  // rebakeTiersInPlace — kept for the rare safety-net call sites that still invoke
-  // it. asyncMode arg ignored (no main-thread chunking needed; the operation is
-  // ~50ms on desktop and the worker handles cold-path bake off-thread).
+  // Viewport building fetch — no-op under PMTiles. MapLibre fetches viewport tiles
+  // automatically via the pmtiles:// protocol; nothing for us to do per-pan/zoom.
+  async function fetchViewportBuildings(_map) { /* no-op (PMTiles handles viewport) */ }
+
+  // Tier baking — no-op. Tier color is now resolved via [match, ['get','z'], ...] expression
+  // built from precomputedTiersRef on demand. setPaintProperty swap handles timespan changes.
   function bakeAllTiersIntoBuildings(_asyncMode = false) {
-    const geojson = buildingFGBRef.current;
-    const idxMap = buildingZctaMapRef.current;
-    const precomputed = precomputedTiersRef.current;
-    if (!geojson?.features?.length || !idxMap || !precomputed) {
-      return _asyncMode ? Promise.resolve(false) : false;
-    }
-    rebakeTiersInPlace(geojson, idxMap, precomputed, TIMESPAN_STEPS.length);
-    buildingTiersBakedRef.current = true;
-    memoizedExprs.current = {};
-    const map = mapRef.current;
-    if (map?.getSource('fgb-buildings') && map.getStyle()) {
-      map.getSource('fgb-buildings').setData(geojson);
-      refreshBuildingColors();
-    }
     return _asyncMode ? Promise.resolve(true) : true;
   }
 
-  // Create fgb-buildings source + building layers. Source starts empty.
-  // Data loaded separately via deferred loading (instant toggle).
+  // Track first-seen bids; mark subsequent sightings (seam duplicates) so paint hides them.
+  const seenBidsRef = useRef(new Set());
+  function withSeamDedup(colorExpr) {
+    return ['case',
+      ['boolean', ['feature-state', 'dup'], false],
+      'rgba(0,0,0,0)',
+      colorExpr,
+    ];
+  }
+  function installSeamDedup(map) {
+    if (map._lpSeamDedupInstalled) return;
+    map._lpSeamDedupInstalled = true;
+    const handler = (e) => {
+      if (e.sourceId !== 'nyc-buildings' || !e.isSourceLoaded) return;
+      try {
+        const feats = map.querySourceFeatures('nyc-buildings', { sourceLayer: BUILDINGS_PMTILES_LAYER });
+        const seen = seenBidsRef.current;
+        for (let i = 0; i < feats.length; i++) {
+          const f = feats[i];
+          const bid = f.id ?? f.properties?.b;
+          if (bid == null) continue;
+          if (seen.has(bid)) {
+            map.setFeatureState(
+              { source: 'nyc-buildings', sourceLayer: BUILDINGS_PMTILES_LAYER, id: bid },
+              { dup: true }
+            );
+          } else {
+            seen.add(bid);
+          }
+        }
+      } catch (_e) { /* tile evicted */ }
+    };
+    map.on('sourcedata', handler);
+  }
+
+  // Create nyc-buildings PMTiles vector source + building layers.
+  // Source-layer 'building'. Per-feature props: { z=zip, b=bid, h=height_m, m=min_height, c=colour }.
+  // promoteId: 'b' enables setFeatureState({id:bid}, {duplicate:true}) for seam dedup.
   function addBuildingLayers(map, isHeatmap, tsIdx = 0) {
-    // ── Building layers ─────────────────────────────────────────────────────
-    if (!map.getSource('fgb-buildings')) {
-      map.addSource('fgb-buildings', {
-        type: 'geojson',
-        data: { type: 'FeatureCollection', features: [] },
-        generateId: true,
+    if (!map.getSource('nyc-buildings')) {
+      map.addSource('nyc-buildings', {
+        type: 'vector',
+        url: `pmtiles://${BUILDINGS_PMTILES_URL}`,
+        promoteId: 'b',
+        minzoom: 13,
+        maxzoom: 16,
       });
     }
 
     if (!map.getLayer('real3d-buildings-baseplate')) {
       map.addLayer({
         id: 'real3d-buildings-baseplate', type: 'fill-extrusion',
-        source: 'fgb-buildings',
+        source: 'nyc-buildings',
+        'source-layer': BUILDINGS_PMTILES_LAYER,
         minzoom: 13, maxzoom: 14,
         paint: {
-          'fill-extrusion-color': baseplateColorExpr(isHeatmap, tsIdx),
+          'fill-extrusion-color': withSeamDedup(baseplateColorExpr(isHeatmap, tsIdx)),
           'fill-extrusion-height': 7,
           'fill-extrusion-base': 0,
           'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'], 13, 0, 13.5, 0.9],
@@ -3165,12 +3066,13 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     if (!map.getLayer('real3d-buildings')) {
       map.addLayer({
         id: 'real3d-buildings', type: 'fill-extrusion',
-        source: 'fgb-buildings',
+        source: 'nyc-buildings',
+        'source-layer': BUILDINGS_PMTILES_LAYER,
         minzoom: 14,
         paint: {
-          'fill-extrusion-color': buildingColorExprByState(isHeatmap, tsIdx),
-          'fill-extrusion-height': ['coalesce', ['get', 'height_roof'], 8],
-          'fill-extrusion-base': 0,
+          'fill-extrusion-color': withSeamDedup(buildingColorExprByState(isHeatmap, tsIdx)),
+          'fill-extrusion-height': ['coalesce', ['get', 'h'], 8],
+          'fill-extrusion-base': ['coalesce', ['get', 'm'], 0],
           'fill-extrusion-opacity': 1.0,
           'fill-extrusion-vertical-gradient': false,
         },
@@ -3178,18 +3080,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     }
 
     if (map.getLayer('borough-outline')) map.moveLayer('borough-outline');
-
-    // Data upload is owned elsewhere:
-    //   • Desktop: buildFGBCache() pushes mapCacheStore.buildingFGB (chunked when stream
-    //     available, single setData on IDB-hit warm load). Runs on mapReady, before user
-    //     can possibly toggle Real3D, so source already has data when layers go visible.
-    //   • Mobile: viewport listener in initReal3DLayers calls fetchViewportBuildings on
-    //     moveend/zoomend after Real3D is toggled.
-    // No setTimeout setData here — it previously raced with buildFGBCache and caused
-    // buildings to flicker / not appear on desktop.
+    installSeamDedup(map);
   }
-
-  // ─── Static water GeoJSON + Real3D water layer ─────────────────────────────
   // water_static.geojson: 2304 features, z=10+z11 composite, dissolved tile-seams.
   // Static = same geometry at all zoom levels → warms ONCE in SW cache, never re-renders.
   // Cache-bust query (?v=6) forces re-fetch when SW version bumps so old misaligned
@@ -3286,42 +3178,10 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   function initReal3DLayers(map, isHeatmap, tsIdx = 0) {
     map.setLight({ anchor: 'map' });
     addOpenmaptilesSourceAndLayers(map, isHeatmap, tsIdx);
-
     addBuildingLayers(map, isHeatmap, tsIdx);
-
-    // Viewport listener for building viewport fetches (mobile: FGB R-tree range queries).
-    // Roads use PMTiles which handles viewport natively — no listener needed for roads.
-    let vpTimer = null;
-    let zoomSettleTimer = null;
-    const isMob = window.innerWidth < 768;
-    const VP_DEBOUNCE = isMob ? 350 : 200;
-    const onViewportChange = () => {
-      if (!real3DRef.current) return;
-      if (vpTimer) clearTimeout(vpTimer);
-      if (zoomSettleTimer) clearTimeout(zoomSettleTimer);
-      zoomSettleTimer = setTimeout(() => {
-        vpTimer = setTimeout(() => {
-          fetchViewportBuildings(mapRef.current);
-        }, VP_DEBOUNCE);
-      }, isMob ? 100 : 0);
-    };
-    // Mobile: listen for viewport changes to refetch visible buildings.
-    // Desktop: full FGB cache populates source directly; no listener needed.
-    if (isMob) {
-      map.on('moveend', onViewportChange);
-      map.on('zoomend', onViewportChange);
-    }
-    buildingAssignCleanupRef.current = () => {
-      if (isMob) {
-        map.off('moveend', onViewportChange);
-        map.off('zoomend', onViewportChange);
-      }
-      if (vpTimer) clearTimeout(vpTimer);
-      if (zoomSettleTimer) clearTimeout(zoomSettleTimer);
-    };
-
+    // PMTiles handles viewport tile fetching natively — no manual listeners needed.
+    buildingAssignCleanupRef.current = () => {};
     if (map.getLayer('borough-outline')) map.moveLayer('borough-outline');
-
     real3dLayersCreatedRef.current = true;
   }
 
@@ -3352,47 +3212,28 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     const isHm = heatmapRef.current;
     const isMob = window.innerWidth < 768;
 
-    // Desktop: immediate (sync) path — unchanged
+    // Desktop: immediate (sync) path
     if (!isMob) {
       if (!real3dLayersCreatedRef.current) {
         initReal3DLayers(map, isHm, timespanIdxRef.current ?? 2);
       } else {
         setReal3DLayersVisible(map, true);
-        // Always refresh building colors after making layers visible.
-        if (!buildingTiersBakedRef.current && buildingFGBRef.current && buildingZctaMapRef.current && precomputedTiersRef.current) {
-          bakeAllTiersIntoBuildings();
-        } else {
-          refreshBuildingColors();
-        }
+        refreshBuildingColors();
       }
       map.setLight({ anchor: 'map' });
-      // No auto-zoom — preserve user's current zoom. Buildings appear naturally when user
-      // zooms to 14+. Phase 2B warmup pre-compiled all shaders so toggle is instant.
       map.easeTo({ pitch: 55, bearing: -17, duration: 700 });
       return;
     }
 
-    // Mobile: gated async path — show loading popup, then do viewport-only JIT fetch.
+    // Mobile: gated path with loading popup. PMTiles handles tile fetching natively
+    // — no FGB cache step or viewport JIT fetch needed.
     let cancelled = false;
     (async () => {
       setReal3dLoading(true);
       setReal3dLoadProgress('Preparing Real3D layers…');
       await new Promise(r => setTimeout(r, 50));
-
-      // Step 1: Ensure raw FGB bytes are cached (Gear 3 handshake).
-      if (fgbCacheStatus !== 'done') {
-        setReal3dLoadProgress('Caching map data…');
-        await buildFGBCache();
-        let polls = 0;
-        while (fgbCacheStatusRef.current !== 'done' && polls < 60) {
-          await new Promise(r => setTimeout(r, 200));
-          polls++;
-        }
-      }
       if (cancelled) return;
 
-      // Step 2: Create layers if needed (lightweight — just WebGL setup, no data)
-      setReal3dLoadProgress('Preparing Real3D layers…');
       if (!real3dLayersCreatedRef.current) {
         initReal3DLayers(map, isHm, timespanIdxRef.current ?? 2);
       } else {
@@ -3400,19 +3241,12 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       }
       if (cancelled) return;
 
-      // Step 3: Camera transition — user sees the 3D view immediately
       map.setLight({ anchor: 'map' });
       map.easeTo({ pitch: 55, bearing: -17, duration: 700 });
       await new Promise(r => setTimeout(r, 100));
       if (cancelled) return;
 
-      // Step 4: JIT viewport fetch — loads visible buildings for current viewport.
-      if (map.getZoom() >= 13) {
-        setReal3dLoadProgress('Loading buildings…');
-        await fetchViewportBuildings(map);
-      }
-      if (cancelled) return;
-
+      refreshBuildingColors();
       setReal3dLoading(false);
       setReal3dLoadProgress('');
     })();
@@ -3456,36 +3290,16 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       map.setPaintProperty('zcta-safezone-extrusion', 'fill-extrusion-opacity', isSat ? 0.22 : 1.0);
     }
 
-    // FGB buildings paint
-    const isMob = window.innerWidth < 768;
-    if (isMob) {
-      if (map.getZoom() >= 13) fetchViewportBuildings(map);
-    } else {
-      if (!buildingTiersBakedRef.current && buildingFGBRef.current && buildingZctaMapRef.current && precomputedTiersRef.current) {
-        bakeAllTiersIntoBuildings();
-      } else {
-        refreshBuildingColors();
-      }
-    }
+    // PMTiles buildings paint refresh — identical desktop/mobile, no fetch needed.
+    refreshBuildingColors();
   }, [heatmap, real3D, mapReady]);
 
-  // Timespan change in Real3D — GPU column swap on desktop, viewport re-fetch on mobile
+  // Timespan change in Real3D — paint expression refresh (zip→tier match expression rebuild)
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady || !real3D) return;
     if (!heatmapRef.current) return;
-    const isMob = window.innerWidth < 768;
-    if (isMob) {
-      // Mobile: re-fetch viewport to rebake with updated timespanIdx
-      if (map.getZoom() >= 13) fetchViewportBuildings(map);
-    } else {
-      // Desktop: safety bake if needed, else GPU-only column swap
-      if (!buildingTiersBakedRef.current && buildingFGBRef.current && buildingZctaMapRef.current && precomputedTiersRef.current) {
-        bakeAllTiersIntoBuildings();
-      } else {
-        refreshBuildingColors();
-      }
-    }
+    refreshBuildingColors();
   }, [timespanIdx, real3D, mapReady]);
 
   const handleThreeDToggle = () => {
