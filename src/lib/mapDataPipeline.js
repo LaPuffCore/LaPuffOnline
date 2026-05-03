@@ -890,12 +890,38 @@ export async function runPhase2A(events, isMobile, onProgress) {
 
   // ── Step 6: Pre-compute all 5 timespan tiers ─────────────────────────────
   report(P.tiers[0], 'Computing event heat data...');
-  const precomputedTiers = {};
-  for (let idx = 0; idx < TIMESPAN_STEPS.length; idx++) {
-    const { zipMap, maxCount } = buildZipEventMap(events || [], TIMESPAN_STEPS[idx].days);
-    const tiers = computeTiers(geoData.features, zipMap, maxCount, adjacency);
-    precomputedTiers[idx] = { tiers, zipMap, maxCount };
-    await new Promise(r => setTimeout(r, 0));
+  // Fingerprint based on event count + most-recent event ID so a site reload with
+  // new/changed events always forces a full recompute. Same tab session = fast restore.
+  const eventFingerprint = `${(events || []).length}:${events?.[0]?.id ?? ''}:${events?.[events?.length - 1]?.id ?? ''}`;
+  const TIERS_SS_KEY = 'lapuff_precomputed_tiers';
+  const TIERS_FINGER_KEY = 'lapuff_precomputed_tiers_fp';
+  let precomputedTiers = null;
+  try {
+    const storedFP = sessionStorage.getItem(TIERS_FINGER_KEY);
+    if (storedFP === eventFingerprint) {
+      const raw = sessionStorage.getItem(TIERS_SS_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && Object.keys(parsed).length === TIMESPAN_STEPS.length) {
+          precomputedTiers = parsed;
+        }
+      }
+    }
+  } catch (_e) { /* sessionStorage unavailable — compute fresh */ }
+
+  if (!precomputedTiers) {
+    precomputedTiers = {};
+    for (let idx = 0; idx < TIMESPAN_STEPS.length; idx++) {
+      const { zipMap, maxCount } = buildZipEventMap(events || [], TIMESPAN_STEPS[idx].days);
+      const tiers = computeTiers(geoData.features, zipMap, maxCount, adjacency);
+      precomputedTiers[idx] = { tiers, zipMap, maxCount };
+      await new Promise(r => setTimeout(r, 0));
+    }
+    // Persist for remainder of this tab session (cleared on tab close / hard reload).
+    try {
+      sessionStorage.setItem(TIERS_SS_KEY, JSON.stringify(precomputedTiers));
+      sessionStorage.setItem(TIERS_FINGER_KEY, eventFingerprint);
+    } catch (_e) { /* quota exceeded or unavailable — skip */ }
   }
   report(P.tiers[1], 'Heat data ready');
 

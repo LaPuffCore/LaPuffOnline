@@ -2995,16 +2995,71 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     const zctaFeatures = geoDataRef.current?.features;
     if (!zctaFeatures?.length) return null;
     const idxMap = new Int16Array(features.length).fill(-1);
-    for (let i = 0; i < features.length; i++) {
-      const centroid = getGeomCentroid(features[i].geometry);
+
+    // Fast path: use precomputed centroid binary if available.
+    // centroids Float32Array is laid out as [lng0,lat0, lng1,lat1, ...] in BOROUGH_FGBS order.
+    // features here are the full merged array from buildFGBCache (same order), so index i
+    // directly maps to centroids[i*2], centroids[i*2+1].
+    const centroids = mapCacheStore.buildingCentroids;
+    if (centroids && centroids.length >= features.length * 2) {
+      // Build zip→idx lookup
+      const zipLookup = {};
       for (let j = 0; j < zctaFeatures.length; j++) {
-        if (zctaFeatures[j].properties?._special) continue;
-        const geom = zctaFeatures[j].geometry;
-        const polys = geom.type === 'MultiPolygon' ? geom.coordinates : [geom.coordinates];
-        for (const poly of polys) {
-          if (pointInRing(centroid[0], centroid[1], poly[0])) { idxMap[i] = j; break; }
+        const z = zctaFeatures[j].properties?.MODZCTA;
+        if (z) zipLookup[String(z)] = j;
+      }
+      for (let i = 0; i < features.length; i++) {
+        // If MODZCTA is baked into the feature (new _r.fgb format) — O(1) lookup, skip centroid.
+        const modzcta = features[i].properties?.MODZCTA;
+        if (modzcta) {
+          idxMap[i] = zipLookup[String(modzcta)] ?? -1;
+          continue;
         }
-        if (idxMap[i] >= 0) break;
+        // Fallback: use precomputed centroid for PiP
+        const lng = centroids[i * 2], lat = centroids[i * 2 + 1];
+        for (let j = 0; j < zctaFeatures.length; j++) {
+          if (zctaFeatures[j].properties?._special) continue;
+          const geom = zctaFeatures[j].geometry;
+          const polys = geom.type === 'MultiPolygon' ? geom.coordinates : [geom.coordinates];
+          for (const poly of polys) {
+            if (pointInRing(lng, lat, poly[0])) { idxMap[i] = j; break; }
+          }
+          if (idxMap[i] >= 0) break;
+        }
+        if (i % FGB_YIELD_CHUNK === 0 && i > 0) {
+          if (onProgress) onProgress(i);
+          await new Promise(r => setTimeout(r, 0));
+        }
+      }
+      if (onProgress) onProgress(features.length);
+      return idxMap;
+    }
+
+    // Slow path: runtime geometry centroid + full PiP (original logic, no binary available)
+    for (let i = 0; i < features.length; i++) {
+      const modzcta = features[i].properties?.MODZCTA;
+      if (modzcta && !zipToZctaIdxMapRef.current) {
+        // Build lookup lazily — MODZCTA baked; just scan once
+        const lookup = {};
+        for (let j = 0; j < zctaFeatures.length; j++) {
+          const z = zctaFeatures[j].properties?.MODZCTA;
+          if (z) lookup[String(z)] = j;
+        }
+        zipToZctaIdxMapRef.current = lookup;
+      }
+      if (modzcta && zipToZctaIdxMapRef.current) {
+        idxMap[i] = zipToZctaIdxMapRef.current[String(modzcta)] ?? -1;
+      } else {
+        const centroid = getGeomCentroid(features[i].geometry);
+        for (let j = 0; j < zctaFeatures.length; j++) {
+          if (zctaFeatures[j].properties?._special) continue;
+          const geom = zctaFeatures[j].geometry;
+          const polys = geom.type === 'MultiPolygon' ? geom.coordinates : [geom.coordinates];
+          for (const poly of polys) {
+            if (pointInRing(centroid[0], centroid[1], poly[0])) { idxMap[i] = j; break; }
+          }
+          if (idxMap[i] >= 0) break;
+        }
       }
       if (i % FGB_YIELD_CHUNK === 0 && i > 0) {
         if (onProgress) onProgress(i);
@@ -3174,17 +3229,41 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     const zipLookup = zipToZctaIdxMapRef.current;
     const precomputed = precomputedTiersRef.current;
 
+    // Precomputed centroid binary — avoids getGeomCentroid() calls and tightens bbox filter.
+    // centroids[featureGlobalIdx*2], centroids[featureGlobalIdx*2+1] = [lng, lat]
+    // Global index tracks position across all boroughs, matching build_centroids.mjs order.
+    const centroidsBin = mapCacheStore.buildingCentroids;
+
     try {
       const features = [];
       let count = 0;
+      let globalFeatureIdx = 0; // tracks position into centroid binary across boroughs
 
       for (const borough of BOROUGH_FGBS) {
         if (isMob) {
           // Mobile: R-tree spatial Range query — fetches only viewport bytes via SW Range cache.
+          // R-tree returns all features whose bbox overlaps the query rect (may include
+          // features whose centroid is just outside). Use centroid binary as a secondary
+          // guard if available, falling back to first-ring anchor.
+          const boroughMeta = mapCacheStore.buildingCentroidsMeta?.byBorough?.find(b => b.name === borough.name);
+          const boroughCentroidOffset = boroughMeta?.offset ?? -1;
+          let boroughLocalIdx = 0;
           for await (const feature of fgbDeserialize(borough.url, rect)) {
             if (!feature?.geometry?.coordinates) continue;
-            const anchor = feature.geometry.coordinates?.[0]?.[0] ?? [0, 0];
-            const spatialSeed = Math.abs(Math.round(anchor[0] * 1e5) ^ Math.round(anchor[1] * 1e5));
+            // Centroid bbox guard (tighter than R-tree bbox)
+            let clng, clat;
+            if (centroidsBin && boroughCentroidOffset >= 0) {
+              const gi = boroughCentroidOffset + boroughLocalIdx;
+              clng = centroidsBin[gi * 2];
+              clat = centroidsBin[gi * 2 + 1];
+            } else {
+              const anchor = feature.geometry.coordinates?.[0]?.[0] ?? [0, 0];
+              clng = anchor[0]; clat = anchor[1];
+            }
+            boroughLocalIdx++;
+            // Skip features whose centroid is clearly outside the padded viewport
+            if (clng < minX || clng > maxX || clat < minY || clat > maxY) continue;
+            const spatialSeed = Math.abs(Math.round(clng * 1e5) ^ Math.round(clat * 1e5));
             const props = normalizeFGBProps(feature.properties, spatialSeed);
             const modzcta = props.MODZCTA;
             if (modzcta && precomputed) {
@@ -3200,8 +3279,11 @@ export default function MapView({ events, headerCollapsed = false, interactive =
             features.push(feature);
             if (++count % 1000 === 0) await new Promise(r => setTimeout(r, 0));
           }
+          // Advance globalFeatureIdx by borough count (for next borough's centroid offset)
+          if (boroughMeta) globalFeatureIdx += boroughMeta.count;
         } else {
-          // Desktop fallback (no Phase 2A cache yet): full buffer parse + JS bbox filter
+          // Desktop fallback (no Phase 2A cache yet): full buffer parse + JS bbox filter.
+          // Use centroid binary for bbox check if available — more accurate than first-ring anchor.
           let buf = null;
           if ('caches' in window) {
             try {
@@ -3212,13 +3294,23 @@ export default function MapView({ events, headerCollapsed = false, interactive =
           }
           if (!buf) {
             const resp = await fetch(borough.url);
-            if (!resp.ok) continue;
+            if (!resp.ok) { globalFeatureIdx += (mapCacheStore.buildingCentroidsMeta?.byBorough?.find(b => b.name === borough.name)?.count ?? 0); continue; }
             buf = new Uint8Array(await resp.arrayBuffer());
           }
+          const boroughMetaDsk = mapCacheStore.buildingCentroidsMeta?.byBorough?.find(b => b.name === borough.name);
+          const boroughCentroidOffsetDsk = boroughMetaDsk?.offset ?? -1;
+          let dskLocalIdx = 0;
           for await (const feature of fgbDeserialize(buf)) {
-            if (!feature?.geometry?.coordinates) continue;
-            const anchor = feature.geometry.coordinates?.[0]?.[0] ?? [0, 0];
-            const lng = anchor[0], lat = anchor[1];
+            if (!feature?.geometry?.coordinates) { dskLocalIdx++; continue; }
+            let lng, lat;
+            if (centroidsBin && boroughCentroidOffsetDsk >= 0) {
+              const gi = boroughCentroidOffsetDsk + dskLocalIdx;
+              lng = centroidsBin[gi * 2]; lat = centroidsBin[gi * 2 + 1];
+            } else {
+              const anchor = feature.geometry.coordinates?.[0]?.[0] ?? [0, 0];
+              lng = anchor[0]; lat = anchor[1];
+            }
+            dskLocalIdx++;
             if (lng < minX || lng > maxX || lat < minY || lat > maxY) continue;
             const spatialSeed = Math.abs(Math.round(lng * 1e5) ^ Math.round(lat * 1e5));
             const props = normalizeFGBProps(feature.properties, spatialSeed);
@@ -3236,6 +3328,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
             features.push(feature);
             if (++count % 2000 === 0) await new Promise(r => setTimeout(r, 0));
           }
+          if (boroughMetaDsk) globalFeatureIdx += boroughMetaDsk.count;
           buf = null;
         }
       }
