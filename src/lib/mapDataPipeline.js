@@ -14,13 +14,13 @@ export const ROAD_FGB_URL       = './data/roads_buffered.fgb';
 // Borough-split building FGBs with R-tree spatial index, baked MODZCTA, HEIGHT_ROOF, fclass, index.
 // BronxAndSafezones includes the Bronx + safezone zip 99999.
 export const BOROUGH_FGBS = [
-  { name: 'BronxAndSafezones', url: './data/BronxAndSafezones_spatial.fgb', cacheKey: 'BronxAndSafezones_spatial.fgb' },
-  { name: 'Brooklyn',          url: './data/Brooklyn_spatial.fgb',          cacheKey: 'Brooklyn_spatial.fgb' },
-  { name: 'Manhattan',         url: './data/Manhattan_spatial.fgb',         cacheKey: 'Manhattan_spatial.fgb' },
-  { name: 'Queens',            url: './data/Queens_spatial.fgb',            cacheKey: 'Queens_spatial.fgb' },
-  { name: 'Staten Island',     url: './data/Staten Island_spatial.fgb',     cacheKey: 'Staten Island_spatial.fgb' },
+  { name: 'BronxAndSafezones', url: './data/BronxAndSafezones_r.fgb', cacheKey: 'BronxAndSafezones_r.fgb' },
+  { name: 'Brooklyn',          url: './data/Brooklyn_r.fgb',          cacheKey: 'Brooklyn_r.fgb' },
+  { name: 'Manhattan',         url: './data/Manhattan_r.fgb',         cacheKey: 'Manhattan_r.fgb' },
+  { name: 'Queens',            url: './data/Queens_r.fgb',            cacheKey: 'Queens_r.fgb' },
+  { name: 'Staten Island',     url: './data/Staten Island_r.fgb',     cacheKey: 'Staten Island_r.fgb' },
 ];
-export const FGB_CACHE_NAME     = 'lapuff-fgb-v6';     // v6: spatial-indexed borough FGBs
+export const FGB_CACHE_NAME     = 'lapuff-fgb-v7';     // v7: real R-tree spatial-indexed borough FGBs
 export const ROADS_FGB_CACHE_NAME = 'lapuff-roads-v10';
 export const ROADS_FGB_CACHE_KEY  = 'roads_buffered.fgb';
 export const MAP_CACHE_DONE_KEY     = 'lapuff_map_cache_v1';
@@ -37,12 +37,85 @@ export const WATER_PMTILES_URL = (typeof window !== 'undefined')
 // In-memory ref: populated during Phase 2A so Real3D road activation uses it directly.
 export const roadFGBFeaturesRef = { current: null };
 
+// Precomputed building centroid binary (Float32Array of [lng,lat] pairs).
+// Generated at build time by scripts/build_centroids.mjs. Order matches BOROUGH_FGBS
+// + per-borough FGB iteration order (deterministic). Used to skip ~80ms of PiP work
+// on desktop and to give mobile viewport queries a fast spatial pre-filter.
+export const CENTROIDS_BIN_URL = (typeof window !== 'undefined')
+  ? `${window.location.origin}${import.meta.env.BASE_URL}data/building_centroids.bin`
+  : '/data/building_centroids.bin';
+export const CENTROIDS_META_URL = (typeof window !== 'undefined')
+  ? `${window.location.origin}${import.meta.env.BASE_URL}data/building_centroids.meta.json`
+  : '/data/building_centroids.meta.json';
+
+async function loadCentroidsBin() {
+  try {
+    const [binResp, metaResp] = await Promise.all([
+      fetch(CENTROIDS_BIN_URL, { cache: 'force-cache' }),
+      fetch(CENTROIDS_META_URL, { cache: 'force-cache' }),
+    ]);
+    if (!binResp.ok || !metaResp.ok) return null;
+    const ab = await binResp.arrayBuffer();
+    const meta = await metaResp.json();
+    return { centroids: new Float32Array(ab), meta };
+  } catch (e) { return null; }
+}
+
 export const TIMESPAN_STEPS = [
   { label: '1d', days: 1 }, { label: '7d', days: 7 }, { label: '30d', days: 30 },
   { label: '3mo', days: 90 }, { label: '6mo', days: 180 },
 ];
 
 const FGB_YIELD_CHUNK = 10000;
+
+// ── Satellite tile precache ─────────────────────────────────────────────────
+// Esri World Imagery tiles for NYC bounds at z10-12.
+// Fire-and-forget: warms browser HTTP cache so first satellite toggle is instant.
+// NYC bbox: lng [-74.27, -73.68], lat [40.47, 40.93]
+function lngLatToTile(lng, lat, zoom) {
+  const n = Math.pow(2, zoom);
+  const x = Math.floor((lng + 180) / 360 * n);
+  const latRad = lat * Math.PI / 180;
+  const y = Math.floor((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2 * n);
+  return { x, y };
+}
+function precacheSatelliteTiles() {
+  if (typeof window === 'undefined') return;
+  // Wider envelope: matches MapLibre maxBounds padded — covers full visible area
+  // even when user zooms way out. Lng [-75.5, -72.5], Lat [40.0, 41.5].
+  const lng1 = -75.50, lat1 = 40.00, lng2 = -72.50, lat2 = 41.50;
+  const urls = [];
+  // z10-12 = full coverage instant. z13 = street-block detail near NYC core.
+  // Cumulative ~500 tiles ~20MB. Browser HTTP cache handles persistence.
+  for (const z of [10, 11, 12, 13]) {
+    const a = lngLatToTile(lng1, lat2, z); // top-left
+    const b = lngLatToTile(lng2, lat1, z); // bottom-right
+    // For z13, restrict tighter to NYC core (lng [-74.30, -73.65], lat [40.45, 40.95])
+    // so we don't pull 1500+ tiles covering NJ/CT countryside at street level.
+    let xStart = a.x, xEnd = b.x, yStart = a.y, yEnd = b.y;
+    if (z === 13) {
+      const ca = lngLatToTile(-74.30, 40.95, z);
+      const cb = lngLatToTile(-73.65, 40.45, z);
+      xStart = ca.x; xEnd = cb.x; yStart = ca.y; yEnd = cb.y;
+    }
+    for (let x = xStart; x <= xEnd; x++) {
+      for (let y = yStart; y <= yEnd; y++) {
+        urls.push(`https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`);
+      }
+    }
+  }
+  // Throttled to 4 concurrent — Esri rate limits ~10/sec from one IP.
+  let active = 0, idx = 0;
+  const MAX = 4;
+  function next() {
+    while (active < MAX && idx < urls.length) {
+      active++;
+      const u = urls[idx++];
+      fetch(u, { mode: 'no-cors', cache: 'force-cache' }).catch(() => {}).finally(() => { active--; next(); });
+    }
+  }
+  next();
+}
 
 // ── Ring / winding helpers ────────────────────────────────────────────────────
 
@@ -521,7 +594,105 @@ async function cacheRoadFGB() {
   } catch (e) { /* silent — MapView will fall back to direct fetch */ }
 }
 
-// ── FGB sub-pipeline (desktop only) ──────────────────────────────────────────
+// ── FGB sub-pipeline (desktop, worker-based) ─────────────────────────────────
+// Parses + bakes all 5 borough FGBs in a Web Worker. Main thread stays free
+// during the ~2-4 second FGB parse, only paying the structured-clone cost
+// when each borough completes (~50-300ms per borough, sequential).
+async function runFGBPipelineWithWorker(zctaFeatures, precomputedTiers, P, onProgress) {
+  const report = (pct, msg) => onProgress?.(pct, msg);
+
+  // Step 7: Fetch all borough buffers (Cache API or network) — done on main thread
+  // so we can transfer ArrayBuffers into the worker zero-copy.
+  report(P.fgbFetch[0], 'Loading building data...');
+  const rawBufs = await Promise.all(BOROUGH_FGBS.map(async (borough) => {
+    if ('caches' in window) {
+      try {
+        const cache = await caches.open(FGB_CACHE_NAME);
+        const cached = await cache.match(borough.cacheKey);
+        if (cached) return await cached.arrayBuffer();
+      } catch (e) { /* ignore */ }
+    }
+    const resp = await fetch(borough.url);
+    if (!resp.ok) throw new Error(`FGB fetch failed for ${borough.name}: ${resp.status}`);
+    const ab = await resp.arrayBuffer();
+    if ('caches' in window) {
+      try {
+        const cache = await caches.open(FGB_CACHE_NAME);
+        await cache.put(borough.cacheKey, new Response(ab.slice(0), { headers: { 'Content-Type': 'application/octet-stream' } }));
+      } catch (e) { /* ignore */ }
+    }
+    return ab;
+  }));
+  report(P.fgbFetch[1], 'Building data cached');
+
+  // Step 8-10: Worker handles parse + index + bake in one pass.
+  return await new Promise((resolve, reject) => {
+    let worker;
+    try {
+      worker = new Worker(new URL('./fgbWorker.js', import.meta.url), { type: 'module' });
+    } catch (err) {
+      reject(err);
+      return;
+    }
+
+    const allFeatures = [];
+    const idxMaps = [];
+    mapCacheStore.buildingFGBStream = [];
+    const reportSpan = P.bake[1] - P.fgbParse[0];
+
+    worker.onmessage = (e) => {
+      const m = e.data;
+      if (m.type === 'PROGRESS') {
+        const pct = Math.min(P.fgbParse[0] + Math.round((m.pct / 100) * reportSpan), P.bake[1] - 1);
+        report(pct, m.msg);
+      } else if (m.type === 'BOROUGH_DONE') {
+        allFeatures.push(...m.features);
+        idxMaps.push(m.idxMap);
+        mapCacheStore.buildingFGBStream.push({ borough: m.borough, features: m.features });
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('lapuff:fgb-borough-ready', { detail: { borough: m.borough } }));
+        }
+      } else if (m.type === 'ALL_DONE') {
+        // Merge per-borough idxMaps into one Int16Array
+        const totalLen = idxMaps.reduce((s, a) => s + a.length, 0);
+        const merged = new Int16Array(totalLen);
+        let off = 0;
+        for (const a of idxMaps) { merged.set(a, off); off += a.length; }
+
+        const geojson = { type: 'FeatureCollection', features: allFeatures };
+        mapCacheStore.buildingFGB = geojson;
+        mapCacheStore.buildingZctaIndex = merged;
+        mapCacheStore.buildingTiersBaked = true;
+        report(P.bake[1], 'Tier data baked');
+        worker.terminate();
+        resolve();
+      } else if (m.type === 'ERROR') {
+        worker.terminate();
+        reject(new Error(m.message));
+      }
+    };
+
+    worker.onerror = (err) => {
+      worker.terminate();
+      reject(err);
+    };
+
+    // Send buffers as transferable
+    const boroughs = BOROUGH_FGBS.map((b, i) => ({
+      name: b.name, url: b.url, cacheKey: b.cacheKey, buf: rawBufs[i],
+    }));
+    const transferList = rawBufs.filter(b => b);
+    const zctaFeaturesProps = zctaFeatures.map(f => ({
+      MODZCTA: f.properties?.MODZCTA, _special: f.properties?._special,
+    }));
+    worker.postMessage(
+      { type: 'PARSE_AND_BAKE', boroughs, precomputedTiers, zctaFeaturesProps },
+      transferList
+    );
+  });
+}
+
+// ── FGB sub-pipeline (desktop fallback if worker fails) ──────────────────────
 
 async function runFGBPipeline(zctaFeatures, precomputedTiers, P, onProgress) {
   const report = (pct, msg) => onProgress?.(pct, msg);
@@ -558,15 +729,21 @@ async function runFGBPipeline(zctaFeatures, precomputedTiers, P, onProgress) {
   report(P.fgbFetch[1], 'Building data cached');
 
   // Step 8: Parse all boroughs sequentially → merge into one FeatureCollection.
-  // Sequential (not parallel) to keep peak memory bounded.
+  // Stream each borough into mapCacheStore.buildingFGBStream as it's parsed so
+  // MapView can incrementally setData while the rest still parses (Q6).
   report(P.fgbParse[0], 'Parsing building geometry...');
   const allFeatures = [];
+  mapCacheStore.buildingFGBStream = []; // array of borough chunks; consumers append
   for (let bi = 0; bi < rawBufs.length; bi++) {
     const sub = await parseFGBBuffer(rawBufs[bi], count => {
       const approxPct = Math.round(((bi * 100000 + count) / (BOROUGH_FGBS.length * 100000)) * (P.fgbParse[1] - P.fgbParse[0]));
       report(Math.min(P.fgbParse[0] + approxPct, P.fgbParse[1] - 1), 'Parsing building geometry...');
     });
     allFeatures.push(...sub.features);
+    mapCacheStore.buildingFGBStream.push({ borough: BOROUGH_FGBS[bi].name, features: sub.features });
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('lapuff:fgb-borough-ready', { detail: { borough: BOROUGH_FGBS[bi].name, index: bi } }));
+    }
     rawBufs[bi] = null; // release buffer after parse
   }
   const geojson = { type: 'FeatureCollection', features: allFeatures };
@@ -677,10 +854,19 @@ export async function runPhase2A(events, isMobile, onProgress) {
   const geoData = { ...rawGeo, features };
   report(P.zcta[1], 'Zone boundaries loaded');
 
-  // ── Step 2: Adjacency ────────────────────────────────────────────────────
+  // ── Step 2: Adjacency (use precomputed static JSON if present, else compute) ─
   report(P.adj[0], 'Computing adjacency graph...');
   await new Promise(r => setTimeout(r, 0));
-  const adjacency = buildAdjacency(features);
+  let adjacency = null;
+  try {
+    const r = await fetch('./data/zcta_adjacency.json', { cache: 'force-cache' });
+    if (r.ok) {
+      const json = await r.json();
+      // Sanity check: must match feature count
+      if (Array.isArray(json) && json.length === features.length) adjacency = json;
+    }
+  } catch (_e) { /* fall through to runtime compute */ }
+  if (!adjacency) adjacency = buildAdjacency(features);
   report(P.adj[1], 'Adjacency complete');
 
   // ── Step 3: ZCTA skeleton + bboxes ──────────────────────────────────────
@@ -723,20 +909,50 @@ export async function runPhase2A(events, isMobile, onProgress) {
   mapCacheStore.zipBoroughMap  = zipBoroughMap;
   mapCacheStore.precomputedTiers = precomputedTiers;
 
-  // ── Road header pre-warm: SW caches Range responses on first hit ─────────
+// ── Road header pre-warm + full-file SW pre-cache ───────────────────────
+  // SW receives PRECACHE_PMTILES → fetches full file once → serves Range slices in-memory.
+  // Header pre-warm (Range bytes=0-16383) primes the PMTiles directory parser.
   report(P.roadCache[0], 'Pre-warming road tiles...');
   fetch(ROADS_PMTILES_URL, { headers: { Range: 'bytes=0-16383' } }).catch(() => {});
+  if (navigator.serviceWorker?.controller) {
+    navigator.serviceWorker.controller.postMessage({ type: 'PRECACHE_PMTILES', url: ROADS_PMTILES_URL });
+  }
   report(P.roadCache[1], 'Road tiles ready');
 
-  // ── Water header pre-warm: SW caches Range responses on first hit ────────
+  // ── Water header pre-warm + full-file SW pre-cache ──────────────────────
   report(P.waterCache[0], 'Pre-warming water tiles...');
   fetch(WATER_PMTILES_URL, { headers: { Range: 'bytes=0-16383' } }).catch(() => {});
+  if (navigator.serviceWorker?.controller) {
+    navigator.serviceWorker.controller.postMessage({ type: 'PRECACHE_PMTILES', url: WATER_PMTILES_URL });
+  }
   report(P.waterCache[1], 'Water tiles ready');
+
+  // ── Satellite tile pre-cache (background, non-blocking) ──────────────────
+  // Esri ArcGIS World Imagery tiles for NYC z10-13 (~500 tiles, ~20MB).
+  // Browser HTTP cache stores them. Fire-and-forget — first satellite toggle is instant.
+  precacheSatelliteTiles();
+
+  // Load precomputed centroid binary (background) — saves PiP work on desktop and
+  // makes mobile viewport bbox queries instant. Non-blocking; pipeline checks
+  // mapCacheStore.buildingCentroids before falling back to runtime PiP.
+  loadCentroidsBin().then(c => {
+    if (c) {
+      mapCacheStore.buildingCentroids = c.centroids;
+      mapCacheStore.buildingCentroidsMeta = c.meta;
+    }
+  }).catch(() => {});
 
   // ── Steps 7-10: Desktop FGB building pipeline (borough-split spatial FGBs) ─
   // Skipped on mobile — buildings loaded JIT via spatial Range queries in 3rd Gear.
   if (!isMobile) {
-    await runFGBPipeline(geoData.features, precomputedTiers, P, onProgress);
+    try {
+      await runFGBPipelineWithWorker(geoData.features, precomputedTiers, P, onProgress);
+    } catch (workerErr) {
+      // Worker failed (CSP, environment without Worker, parse error). Fall back to
+      // main-thread pipeline so the map still loads — just with brief jank.
+      console.warn('[Pipeline] Worker FGB path failed, falling back to main thread:', workerErr?.message || workerErr);
+      await runFGBPipeline(geoData.features, precomputedTiers, P, onProgress);
+    }
   }
 
   // Enforce minimum 1s display time on first load so user sees the loading screen

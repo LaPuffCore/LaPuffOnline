@@ -2219,6 +2219,30 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     addLayers(map, geoData, satellite);
     // Signal MapLoadingScreen Phase 2B that layers are ready → overlay will reveal the map
     mapCacheStore.layersReady = true;
+    // GPU warm-up: jog through zooms 8→17 quickly to compile shaders + warm tile cache.
+    // Runs on next frame so layers are committed first. Restores original camera at end.
+    // Skip on mobile to save battery + avoid jank.
+    if (window.innerWidth >= 768) {
+      requestAnimationFrame(() => {
+        try {
+          const origCenter = map.getCenter();
+          const origZoom = map.getZoom();
+          const origPitch = map.getPitch();
+          const origBearing = map.getBearing();
+          const zooms = [8, 10, 12, 14, 16, 17];
+          let i = 0;
+          const step = () => {
+            if (i >= zooms.length) {
+              map.jumpTo({ center: origCenter, zoom: origZoom, pitch: origPitch, bearing: origBearing });
+              return;
+            }
+            map.jumpTo({ center: origCenter, zoom: zooms[i++], pitch: 0, bearing: 0 });
+            requestAnimationFrame(step);
+          };
+          step();
+        } catch (_e) { /* ignore — warmup is best-effort */ }
+      });
+    }
   }, [mapReady, geoData]);
 
   // Pre-create Real3D layers at map init so first toggle is instant (just a visibility flip).

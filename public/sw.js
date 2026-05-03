@@ -1,13 +1,15 @@
-// LaPuff Service Worker — caches FGB files + PMTiles Range requests for offline/repeat visit speed.
-// Version bump this string to force SW update across all clients.
-const SW_VERSION = 'lapuff-sw-v2';
+// LaPuff Service Worker — caches FGB files + PMTiles (full-file pre-warm + Range slicing).
+const SW_VERSION = 'lapuff-sw-v3';
 
 // Cache names (must match mapDataPipeline.js)
-const FGB_CACHE      = 'lapuff-fgb-v6';            // borough-split spatial FGBs
-const PMTILES_CACHE  = 'lapuff-pmtiles-sw-v1';     // PMTiles Range responses
+const FGB_CACHE         = 'lapuff-fgb-v7';            // borough-split spatial FGBs (real R-tree)
+const PMTILES_CACHE     = 'lapuff-pmtiles-sw-v1';     // legacy: per-Range responses (still used as fallback)
+const PMTILES_FULL_CACHE = 'lapuff-pmtiles-full-v1';  // full PMTiles file pre-warmed at MapLoadingScreen
 
-// All cache names managed by this SW version
-const MANAGED_CACHES = [FGB_CACHE, PMTILES_CACHE];
+const MANAGED_CACHES = [FGB_CACHE, PMTILES_CACHE, PMTILES_FULL_CACHE];
+
+// URLs that we know are small + should be cached as full files (when SW receives PRECACHE message)
+const FULL_PMTILES_URL_PATTERNS = ['water_nyc.pmtiles', 'realfinaldeciroads.pmtiles'];
 
 // ── Install: skip waiting so new SW activates immediately ────────────────────
 self.addEventListener('install', event => {
@@ -80,18 +82,54 @@ async function handleFGB(request) {
 }
 
 async function handlePMTiles(request) {
-  const cache = await caches.open(PMTILES_CACHE);
+  // Strategy: check full-file cache first. If we have the entire .pmtiles cached,
+  // slice the requested byte range from it and return a synthesized 206 response.
+  // This is dramatically faster than per-Range network calls.
+  const url = new URL(request.url);
+  const isFullCandidate = FULL_PMTILES_URL_PATTERNS.some(p => url.href.includes(p));
 
-  // Match exact request — Range header is part of the key.
-  // This means the same Range byte-range for the same tile will hit cache on re-visit.
+  if (isFullCandidate) {
+    try {
+      const fullCache = await caches.open(PMTILES_FULL_CACHE);
+      const fullHit = await fullCache.match(url.origin + url.pathname);
+      if (fullHit) {
+        const range = request.headers.get('range');
+        if (!range) {
+          // No range header: return full file (e.g., a header-pre-warm fetch)
+          return fullHit.clone();
+        }
+        // Parse Range: bytes=START-END
+        const m = /bytes=(\d+)-(\d+)?/.exec(range);
+        if (m) {
+          const start = parseInt(m[1], 10);
+          const end = m[2] ? parseInt(m[2], 10) : -1;
+          const ab = await fullHit.arrayBuffer();
+          const total = ab.byteLength;
+          const realEnd = end >= 0 ? Math.min(end, total - 1) : total - 1;
+          const slice = ab.slice(start, realEnd + 1);
+          return new Response(slice, {
+            status: 206,
+            statusText: 'Partial Content',
+            headers: {
+              'Content-Type': 'application/octet-stream',
+              'Content-Range': `bytes ${start}-${realEnd}/${total}`,
+              'Content-Length': String(slice.byteLength),
+              'Accept-Ranges': 'bytes',
+            },
+          });
+        }
+      }
+    } catch (e) { /* fall through to per-range cache */ }
+  }
+
+  // Fallback: per-Range cache (works for any PMTiles, including partial pre-warm)
+  const cache = await caches.open(PMTILES_CACHE);
   const hit = await cache.match(request);
   if (hit) return hit;
 
   try {
     const resp = await fetch(request.clone());
-    // Cache both full (200) and partial (206) responses
     if (resp.ok || resp.status === 206) {
-      // Clone before consuming — put is fire-and-forget
       cache.put(request, resp.clone()).catch(() => {});
     }
     return resp;
@@ -100,3 +138,25 @@ async function handlePMTiles(request) {
     return new Response('PMTiles not available offline', { status: 503 });
   }
 }
+
+// ── Message handler: precache full PMTiles file ─────────────────────────────
+// Sent by MapLoadingScreen Phase 2A. SW fetches the full file once and caches
+// it under URL key. Subsequent Range requests are served by slicing in-memory.
+self.addEventListener('message', event => {
+  const msg = event.data;
+  if (!msg || msg.type !== 'PRECACHE_PMTILES' || !msg.url) return;
+  event.waitUntil((async () => {
+    try {
+      const cache = await caches.open(PMTILES_FULL_CACHE);
+      const url = new URL(msg.url);
+      const key = url.origin + url.pathname;
+      const existing = await cache.match(key);
+      if (existing) return; // already cached
+      const resp = await fetch(msg.url, { cache: 'reload' });
+      if (resp.ok && resp.status === 200) {
+        await cache.put(key, resp.clone());
+        console.log('[SW] Pre-cached full PMTiles:', key);
+      }
+    } catch (e) { console.warn('[SW] PRECACHE_PMTILES failed:', e); }
+  })());
+});
