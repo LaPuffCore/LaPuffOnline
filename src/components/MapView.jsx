@@ -2625,29 +2625,14 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         // Height stagger by _boroughIdx * 0.1m prevents Z-fighting at shared top edges.
         map.setPaintProperty('borough-outline', 'fill-extrusion-base',   0);
         map.setPaintProperty('borough-outline', 'fill-extrusion-height', ['+', 32, ['*', 0.1, ['coalesce', ['get', '_boroughIdx'], 0]]]);
-        // Borough outlines only visible in 3D and Real3D modes.
-        // On FIRST entry into 3D/Real3D: defer opacity until easeTo camera animation finishes
-        // (700ms). Without the delay, the tall extrusions snap in at pitch=0 on the first
-        // rendered frame and appear as giant spikes before the pitch animation completes.
+        // Borough outlines only visible in 3D and Real3D modes (fill-extrusions appear
+        // as flat rings at pitch=0 which looks wrong in 2D). Render immediately —
+        // the camera easeTo animation is just a visual transition and should not block
+        // geometry from appearing. MapLibre blends the geometry naturally as pitch changes.
         const is3D = threeD || real3D;
-        const entering3D = is3D && !boroughWas3DRef.current;
         boroughWas3DRef.current = is3D;
-        if (!is3D) {
-          map.setPaintProperty('borough-outline', 'fill-extrusion-opacity', 0);
-        } else if (entering3D) {
-          // Hide immediately; reveal after camera reaches target pitch.
-          map.setPaintProperty('borough-outline', 'fill-extrusion-opacity', 0);
-          const mapSnap = map;
-          setTimeout(() => {
-            if (mapSnap.getLayer('borough-outline')) {
-              mapSnap.setPaintProperty('borough-outline', 'fill-extrusion-opacity',
-                ['interpolate', ['linear'], ['zoom'], 9, 0.4, 11, 1.0]);
-            }
-          }, 850); // 700ms easeTo + 150ms buffer
-        } else {
-          map.setPaintProperty('borough-outline', 'fill-extrusion-opacity',
-            ['interpolate', ['linear'], ['zoom'], 9, 0.4, 11, 1.0]);
-        }
+        map.setPaintProperty('borough-outline', 'fill-extrusion-opacity',
+          is3D ? ['interpolate', ['linear'], ['zoom'], 9, 0.4, 11, 1.0] : 0);
       } else {
         map.setPaintProperty('borough-outline', 'fill-extrusion-opacity', 0);
         boroughWithColorRef.current = null;
@@ -3508,9 +3493,9 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         const fillId = `real3d-pm-roads-${r.fclass}-fill`;
         const extId  = `real3d-pm-roads-${r.fclass}`;
         // 2D fill: full polygon footprint, antialiased, zero 3D overhead.
-        // Opacity crossfade: full at r.minz→z13.5, fades to 0 at z14.5.
-        // Extended crossfade (was z14) gives PMTiles extrusion tiles more time to load
-        // before the fill disappears — prevents the "road gap" on fast zoom-in.
+        // Must be GONE by z14 — at z14+ only 3D extrusion roads are visible so
+        // buildings can properly occlude them via the GPU depth buffer.
+        // Crossfade window z12.5→z14: extrusion has time to load before fill disappears.
         if (!map.getLayer(fillId)) {
           map.addLayer({
             id: fillId, type: 'fill',
@@ -3519,14 +3504,14 @@ export default function MapView({ events, headerCollapsed = false, interactive =
             filter: ['==', ['get', 'fclass'], r.fclass],
             paint: {
               'fill-color':     isHeatmap ? '#000000' : r.colorOff,
-              'fill-opacity':   ['interpolate', ['linear'], ['zoom'], 13.5, isHeatmap ? HM_OPACITY : r.opacityOff, 14.5, 0],
+              'fill-opacity':   ['interpolate', ['linear'], ['zoom'], 12.5, isHeatmap ? HM_OPACITY : r.opacityOff, 14, 0],
               'fill-antialias': true,
             },
           });
         }
-        // 3D extrusion: starts loading at z12 (earlier tile request), fades IN z13→z14.
-        // Starting at z12 gives the PMTiles server one extra zoom level to stream tiles
-        // before they're needed — prevents the road-disappear gap on fast zoom-in.
+        // 3D extrusion: minzoom 12 so tiles start streaming early.
+        // Fade IN at z12→z13.5 so roads are fully visible before z14 (when buildings arrive).
+        // Full opacity at z13.5+ ensures roads never disappear before buildings take over.
         if (!map.getLayer(extId)) {
           map.addLayer({
             id: extId, type: 'fill-extrusion',
@@ -3537,7 +3522,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
               'fill-extrusion-color':   isHeatmap ? '#000000' : r.colorOff,
               'fill-extrusion-height':  HEIGHT_EXPR,
               'fill-extrusion-base':    0,
-              'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'], 13, 0, 14, isHeatmap ? HM_OPACITY : r.opacityOff],
+              'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0, 13.5, isHeatmap ? HM_OPACITY : r.opacityOff],
               'fill-extrusion-vertical-gradient': false,
             },
           });
