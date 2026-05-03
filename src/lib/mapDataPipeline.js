@@ -971,12 +971,18 @@ export async function runPhase2A(events, isMobile, onProgress) {
   // ── Steps 7-10: Desktop FGB building pipeline (borough-split spatial FGBs) ─
   // Skipped on mobile — buildings loaded JIT via spatial Range queries in 3rd Gear.
   if (!isMobile) {
-    try {
-      await runFGBPipelineWithWorker(geoData.features, precomputedTiers, P, onProgress);
-    } catch (workerErr) {
-      // Worker failed (CSP, environment without Worker, parse error). Fall back to
-      // main-thread pipeline so the map still loads — just with brief jank.
-      console.warn('[Pipeline] Worker FGB path failed, falling back to main thread:', workerErr?.message || workerErr);
+    // NOTE (regression debug): worker path temporarily disabled while we trace why
+    // building setData was not reaching the Real3D layers. Main-thread pipeline is
+    // the proven baseline. To re-enable worker, set USE_FGB_WORKER=true.
+    const USE_FGB_WORKER = false;
+    if (USE_FGB_WORKER) {
+      try {
+        await runFGBPipelineWithWorker(geoData.features, precomputedTiers, P, onProgress);
+      } catch (workerErr) {
+        console.warn('[Pipeline] Worker FGB path failed, falling back to main thread:', workerErr?.message || workerErr);
+        await runFGBPipeline(geoData.features, precomputedTiers, P, onProgress);
+      }
+    } else {
       await runFGBPipeline(geoData.features, precomputedTiers, P, onProgress);
     }
   }

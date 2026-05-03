@@ -52,7 +52,7 @@ const USE_FGB_BUILDINGS = true;
 
 // The water+roads layers used in Real3D mode.
 const REAL3D_OMT_LAYER_IDS = [
-  'real3d-water', 'real3d-waterway',
+  'real3d-water',
   // PMTiles roads — one fill (z9→z14, 2D) + one extrusion (z13+, 3D) per fclass
   'real3d-pm-roads-motorway-fill', 'real3d-pm-roads-motorway',
   'real3d-pm-roads-trunk-fill',    'real3d-pm-roads-trunk',
@@ -986,7 +986,7 @@ const NYC_BBOX_GEOM = {
 
 // All Real3D layer IDs — used for cleanup.
 const REAL3D_ALL_LAYER_IDS = [
-  'real3d-water', 'real3d-waterway',
+  'real3d-water',
   'real3d-roads-motorway-far-slab',   'real3d-roads-motorway-slab',
   'real3d-roads-primary-far-slab',    'real3d-roads-primary-slab',
   'real3d-roads-tertiary-far-slab',   'real3d-roads-tertiary-slab',
@@ -3088,9 +3088,13 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         precomputedTiersRef.current = mapCacheStore.precomputedTiers;
       setFgbCacheStatus('done'); setFgbCacheProgress(100);
       const map = mapRef.current;
-      if (map && real3DRef.current && map.getSource('fgb-buildings') && map.getStyle()) {
-        map.getSource('fgb-buildings').setData(buildingFGBRef.current);
-        refreshBuildingColors();
+      // Push data whenever the FGB source exists — independent of real3D toggle state.
+      // Pre-populating the source means the first Real3D toggle is a pure visibility flip.
+      if (map && map.getSource('fgb-buildings') && map.getStyle()) {
+        try {
+          map.getSource('fgb-buildings').setData(buildingFGBRef.current);
+          refreshBuildingColors();
+        } catch (_e) { /* ignore — race during style swap */ }
       }
       return;
     }
@@ -3631,17 +3635,12 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         map.addLayer({
           id: 'real3d-water', type: 'fill',
           source: 'water-pmtiles', 'source-layer': 'water',
-          paint: { 'fill-color': '#0e1f35', 'fill-opacity': 0.6 },
+          paint: { 'fill-color': '#0e1f35', 'fill-opacity': 0.85 },
         }, waterBeforeId);
       }
-      if (!map.getLayer('real3d-waterway')) {
-        map.addLayer({
-          id: 'real3d-waterway', type: 'line',
-          source: 'water-pmtiles', 'source-layer': 'waterway',
-          minzoom: 8,
-          paint: { 'line-color': '#0e1f35', 'line-width': 1.5, 'line-opacity': 0.7 },
-        }, waterBeforeId);
-      }
+      // NOTE: 'waterway' line layer intentionally NOT rendered — those are
+      // small streams/rivers as polylines that visually clash with the polygon
+      // water. Polygons in the 'water' source-layer cover all real water bodies.
 
       // ── PMTILES ROADS (Real3D mode) ──────────────────────────────────────────
       // Dual-layer per fclass: 2D fill (z9→z14) + 3D extrusion (z13→z14+).
