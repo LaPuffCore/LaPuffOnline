@@ -180,7 +180,7 @@ def main():
     # z11: NYC detail area — rivers, channels, East River, Hudson, Harlem River, bays.
     # Using z11 detail for NYC area prevents the area-filter issue that previously
     # removed small-but-critical water bodies (channels around Manhattan).
-    FULL_BBOX = (-75.5, 40.0, -72.5, 41.5)   # matches MapLibre maxBounds
+    FULL_BBOX = (-76.5, 39.0, -71.5, 42.5)   # wider than viewport so pan/zoom always covers
     NYC_BBOX  = (-74.5, 40.3, -73.5, 41.1)   # NYC detail area for z11
 
     print("\nExtracting tiles ...")

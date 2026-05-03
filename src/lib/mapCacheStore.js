@@ -21,6 +21,7 @@ const mapCacheStore = {
   // ── Phase 2B signals (set by MapView after GL init) ────────────────────
   mapLibreReady: false,     // true when MapLibre 'load' event fires
   layersReady: false,       // true when addLayers() completes (ZCTA + borough base layers added)
+  warmupComplete: false,    // true after Phase 2B warmup zoom cycle finishes (shaders compiled, tiles primed)
 };
 
 export default mapCacheStore;

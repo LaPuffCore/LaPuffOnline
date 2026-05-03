@@ -143,11 +143,17 @@ export default function MapLoadingScreen({ events, onPhase2ADone, onComplete }) 
     phase2BPollRef.current = setInterval(() => {
       const glReady = mapCacheStore.mapLibreReady;
       const lrReady = mapCacheStore.layersReady;
+      const wmReady = mapCacheStore.warmupComplete;
 
       if (glReady && !lrReady) {
-        setProgress(isMobile ? 92 : 96);
+        setProgress(isMobile ? 90 : 95);
       }
-      if (lrReady) {
+      if (lrReady && !wmReady) {
+        setProgress(isMobile ? 95 : 98);
+      }
+      // Phase D: wait for warmup zoom cycle to complete so all shaders are compiled
+      // and all building chunks have been pushed before revealing the map.
+      if (lrReady && wmReady) {
         clearInterval(phase2BPollRef.current);
         setProgress(100);
         // Enforce 2s minimum display time so loading screen never flickers out

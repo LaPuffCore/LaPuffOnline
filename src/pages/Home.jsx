@@ -122,6 +122,7 @@ export default function Home({ events = [], eventsLoading = false }) {
       // Reset GL-ready signals so Phase 2B polling starts fresh on re-entry
       mapCacheStore.mapLibreReady = false;
       mapCacheStore.layersReady = false;
+      mapCacheStore.warmupComplete = false;
     }
   }, [isMap]);
 

@@ -2191,6 +2191,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
               // Restore: default 2D state — original camera, no pitch/bearing, all Real3D layers hidden.
               setRealVis('none');
               map.jumpTo({ center: origCenter, zoom: origZoom, pitch: 0, bearing: 0 });
+              mapCacheStore.warmupComplete = true;
               return;
             }
             const z = zooms[i++];
@@ -2201,8 +2202,11 @@ export default function MapView({ events, headerCollapsed = false, interactive =
           };
           // Defer one frame so layer pre-creation effect runs first.
           requestAnimationFrame(step);
-        } catch (_e) { /* ignore — warmup is best-effort */ }
+        } catch (_e) { mapCacheStore.warmupComplete = true; /* warmup best-effort */ }
       });
+    } else {
+      // Mobile: skip warmup zoom cycle but still signal completion so loading screen advances.
+      mapCacheStore.warmupComplete = true;
     }
   }, [mapReady, geoData]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -2945,109 +2949,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     };
   }
 
-  // Parse a Uint8Array of FGB data into a FeatureCollection.
-  // Yields to the event loop every CHUNK features to prevent main-thread freeze.
-  const FGB_YIELD_CHUNK = 10000;
-  // Approximate total building count across all 5 borough FGBs (used for progress estimation only).
-  const FGB_ESTIMATED_TOTAL = 500000;
-
-  async function parseFGBBuffer(buf, onProgress) {
-    const features = [];
-    let count = 0;
-    for await (const feature of fgbDeserialize(buf)) {
-      if (!feature?.geometry?.coordinates) continue;
-      feature.properties = normalizeFGBProps(feature.properties, count);
-      features.push(feature);
-      count++;
-      if (count % FGB_YIELD_CHUNK === 0) {
-        if (onProgress) onProgress(count);
-        await new Promise(r => setTimeout(r, 0)); // yield to event loop
-      }
-    }
-    if (onProgress) onProgress(count);
-    return { type: 'FeatureCollection', features };
-  }
-
-  // Build ZCTA index map — one-time PiP for each building centroid → ZCTA index.
-  // Yields every CHUNK buildings to prevent main-thread freeze.
-  async function buildZctaIndexMap(features, onProgress) {
-    const zctaFeatures = geoDataRef.current?.features;
-    if (!zctaFeatures?.length) return null;
-    const idxMap = new Int16Array(features.length).fill(-1);
-
-    // Fast path: use precomputed centroid binary if available.
-    // centroids Float32Array is laid out as [lng0,lat0, lng1,lat1, ...] in BOROUGH_FGBS order.
-    // features here are the full merged array from buildFGBCache (same order), so index i
-    // directly maps to centroids[i*2], centroids[i*2+1].
-    const centroids = mapCacheStore.buildingCentroids;
-    if (centroids && centroids.length >= features.length * 2) {
-      // Build zip→idx lookup
-      const zipLookup = {};
-      for (let j = 0; j < zctaFeatures.length; j++) {
-        const z = zctaFeatures[j].properties?.MODZCTA;
-        if (z) zipLookup[String(z)] = j;
-      }
-      for (let i = 0; i < features.length; i++) {
-        // If MODZCTA is baked into the feature (new _r.fgb format) — O(1) lookup, skip centroid.
-        const modzcta = features[i].properties?.MODZCTA;
-        if (modzcta) {
-          idxMap[i] = zipLookup[String(modzcta)] ?? -1;
-          continue;
-        }
-        // Fallback: use precomputed centroid for PiP
-        const lng = centroids[i * 2], lat = centroids[i * 2 + 1];
-        for (let j = 0; j < zctaFeatures.length; j++) {
-          if (zctaFeatures[j].properties?._special) continue;
-          const geom = zctaFeatures[j].geometry;
-          const polys = geom.type === 'MultiPolygon' ? geom.coordinates : [geom.coordinates];
-          for (const poly of polys) {
-            if (pointInRing(lng, lat, poly[0])) { idxMap[i] = j; break; }
-          }
-          if (idxMap[i] >= 0) break;
-        }
-        if (i % FGB_YIELD_CHUNK === 0 && i > 0) {
-          if (onProgress) onProgress(i);
-          await new Promise(r => setTimeout(r, 0));
-        }
-      }
-      if (onProgress) onProgress(features.length);
-      return idxMap;
-    }
-
-    // Slow path: runtime geometry centroid + full PiP (original logic, no binary available)
-    for (let i = 0; i < features.length; i++) {
-      const modzcta = features[i].properties?.MODZCTA;
-      if (modzcta && !zipToZctaIdxMapRef.current) {
-        // Build lookup lazily — MODZCTA baked; just scan once
-        const lookup = {};
-        for (let j = 0; j < zctaFeatures.length; j++) {
-          const z = zctaFeatures[j].properties?.MODZCTA;
-          if (z) lookup[String(z)] = j;
-        }
-        zipToZctaIdxMapRef.current = lookup;
-      }
-      if (modzcta && zipToZctaIdxMapRef.current) {
-        idxMap[i] = zipToZctaIdxMapRef.current[String(modzcta)] ?? -1;
-      } else {
-        const centroid = getGeomCentroid(features[i].geometry);
-        for (let j = 0; j < zctaFeatures.length; j++) {
-          if (zctaFeatures[j].properties?._special) continue;
-          const geom = zctaFeatures[j].geometry;
-          const polys = geom.type === 'MultiPolygon' ? geom.coordinates : [geom.coordinates];
-          for (const poly of polys) {
-            if (pointInRing(centroid[0], centroid[1], poly[0])) { idxMap[i] = j; break; }
-          }
-          if (idxMap[i] >= 0) break;
-        }
-      }
-      if (i % FGB_YIELD_CHUNK === 0 && i > 0) {
-        if (onProgress) onProgress(i);
-        await new Promise(r => setTimeout(r, 0));
-      }
-    }
-    if (onProgress) onProgress(features.length);
-    return idxMap;
-  }
+  // Phase E: parseFGBBuffer + buildZctaIndexMap removed — Phase 2A worker (fgbWorker.js)
+  // owns FGB parsing and ZCTA index construction off the main thread.
 
   // Hydrate buildingFGBRef from mapCacheStore. Phase 2A guarantees this is populated
   // (worker parse on cold load, IDB rehydrate on warm load). No main-thread parse
@@ -3134,66 +3037,29 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       const features = [];
       let count = 0;
 
-      // Parallel borough fetches/parses for instant viewport assembly.
-      // FGBs are already borough-bounded; no centroid/bbox guards needed —
-      // R-tree spatial Range query already returns only viewport-overlapping features.
+      // Mobile-only: R-tree spatial Range query per borough. Trust the index — no guards.
+      // Phase E removed the desktop fallback (full buffer parse + JS bbox filter); desktop
+      // ALWAYS uses mapCacheStore.buildingFGB populated by Phase 2A worker.
+      if (!isMob) return; // safety: function should never be called on desktop after Phase E
       const boroughResults = await Promise.all(BOROUGH_FGBS.map(async (borough) => {
         const localFeatures = [];
-        if (isMob) {
-          // Mobile: R-tree spatial Range query. Trust the index — no guards.
-          for await (const feature of fgbDeserialize(borough.url, rect)) {
-            if (!feature?.geometry?.coordinates) continue;
-            const anchor = feature.geometry.coordinates?.[0]?.[0] ?? [0, 0];
-            const spatialSeed = Math.abs(Math.round(anchor[0] * 1e5) ^ Math.round(anchor[1] * 1e5));
-            const props = normalizeFGBProps(feature.properties, spatialSeed);
-            const modzcta = props.MODZCTA;
-            if (modzcta && precomputed) {
-              const zctaIdx = zipLookup[String(modzcta)] ?? -1;
-              if (zctaIdx >= 0) {
-                for (let t = 0; t < TIMESPAN_STEPS.length; t++) {
-                  const trs = precomputed[t]?.tiers;
-                  props[`_tier_${t}`] = (trs && trs.length > zctaIdx) ? (trs[zctaIdx] ?? 0) : 0;
-                }
+        for await (const feature of fgbDeserialize(borough.url, rect)) {
+          if (!feature?.geometry?.coordinates) continue;
+          const anchor = feature.geometry.coordinates?.[0]?.[0] ?? [0, 0];
+          const spatialSeed = Math.abs(Math.round(anchor[0] * 1e5) ^ Math.round(anchor[1] * 1e5));
+          const props = normalizeFGBProps(feature.properties, spatialSeed);
+          const modzcta = props.MODZCTA;
+          if (modzcta && precomputed) {
+            const zctaIdx = zipLookup[String(modzcta)] ?? -1;
+            if (zctaIdx >= 0) {
+              for (let t = 0; t < TIMESPAN_STEPS.length; t++) {
+                const trs = precomputed[t]?.tiers;
+                props[`_tier_${t}`] = (trs && trs.length > zctaIdx) ? (trs[zctaIdx] ?? 0) : 0;
               }
             }
-            feature.properties = props;
-            localFeatures.push(feature);
           }
-        } else {
-          // Desktop fallback (no Phase 2A cache yet): full buffer parse + JS bbox filter.
-          let buf = null;
-          if ('caches' in window) {
-            try {
-              const cache = await caches.open(PIPELINE_FGB_CACHE_NAME);
-              const cached = await cache.match(borough.cacheKey);
-              if (cached) buf = new Uint8Array(await cached.arrayBuffer());
-            } catch (_e) { /* ignore */ }
-          }
-          if (!buf) {
-            const resp = await fetch(borough.url);
-            if (!resp.ok) return localFeatures;
-            buf = new Uint8Array(await resp.arrayBuffer());
-          }
-          for await (const feature of fgbDeserialize(buf)) {
-            if (!feature?.geometry?.coordinates) continue;
-            const anchor = feature.geometry.coordinates?.[0]?.[0] ?? [0, 0];
-            const lng = anchor[0], lat = anchor[1];
-            if (lng < minX || lng > maxX || lat < minY || lat > maxY) continue;
-            const spatialSeed = Math.abs(Math.round(lng * 1e5) ^ Math.round(lat * 1e5));
-            const props = normalizeFGBProps(feature.properties, spatialSeed);
-            const modzcta = props.MODZCTA;
-            if (modzcta && precomputed) {
-              const zctaIdx = zipLookup[String(modzcta)] ?? -1;
-              if (zctaIdx >= 0) {
-                for (let t = 0; t < TIMESPAN_STEPS.length; t++) {
-                  const trs = precomputed[t]?.tiers;
-                  props[`_tier_${t}`] = (trs && trs.length > zctaIdx) ? (trs[zctaIdx] ?? 0) : 0;
-                }
-              }
-            }
-            feature.properties = props;
-            localFeatures.push(feature);
-          }
+          feature.properties = props;
+          localFeatures.push(feature);
         }
         return localFeatures;
       }));
@@ -3294,8 +3160,30 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         if (!buildingTiersBakedRef.current && buildingZctaMapRef.current && precomputedTiersRef.current) {
           bakeAllTiersIntoBuildings();
         } else {
-          map.getSource('fgb-buildings').setData(buildingFGBRef.current);
-          refreshBuildingColors();
+          // Phase D: chunked setData by borough — split a big setData (~196MB JSON)
+          // into 5 rAF-spaced pushes so the main thread can paint outlines/roads
+          // between chunks instead of blocking for ~600ms on a single setData call.
+          const stream = mapCacheStore.buildingFGBStream;
+          const src = map.getSource('fgb-buildings');
+          if (stream && stream.length > 1 && src) {
+            const accum = [];
+            let i = 0;
+            const pushChunk = () => {
+              if (!map.getSource('fgb-buildings')) return;
+              if (i >= stream.length) {
+                refreshBuildingColors();
+                return;
+              }
+              const chunk = stream[i++];
+              for (const f of chunk.features) accum.push(f);
+              try { src.setData({ type: 'FeatureCollection', features: accum }); } catch (_e) { /* */ }
+              requestAnimationFrame(pushChunk);
+            };
+            requestAnimationFrame(pushChunk);
+          } else {
+            map.getSource('fgb-buildings').setData(buildingFGBRef.current);
+            refreshBuildingColors();
+          }
         }
       } else {
         fetchViewportBuildings(map);
@@ -3314,7 +3202,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       if (!map.getSource('water-static')) {
         map.addSource('water-static', {
           type: 'geojson',
-          data: `${import.meta.env.BASE_URL}data/water_static.geojson?v=6`,
+          data: `${import.meta.env.BASE_URL}data/water_static.geojson?v=7`,
         });
       }
 
