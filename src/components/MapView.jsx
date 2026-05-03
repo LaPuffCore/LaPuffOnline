@@ -27,10 +27,12 @@ const ROADS_FGB_CACHE_KEY  = 'roads_buffered.fgb';
 // MapLoadingScreen gate keys
 const MAP_CACHE_DONE_KEY     = 'lapuff_map_cache_v1';  // set once first full cache completes
 const MAP_CACHE_BUILDING_KEY = 'lapuff_map_cache_building'; // cleared on completion; if set on next load = corruption
-// PMTiles — self-hosted OpenMapTiles vector tiles on OCI.
-// PAR URL (read-only) — safe to embed in client code; no broader OCI access granted.
-const PMTILES_URL = 'https://objectstorage.us-ashburn-1.oraclecloud.com/p/yGTOMC4N2uc1uIGkliFRgP51VbnPm96W8vebh_sOqeoGil3PErp8dvWmy74pEH70/n/idfnjqqb9g0p/b/nyc-map-data/o/nyc_final.pmtiles';
-// Roads PMTiles: hierarchical-dissolve road polygons (~8.5K features, 14MB).
+// Water PMTiles — local self-hosted OSM waterway extract (water polygons + waterway lines).
+// Generated via Geofabrik NY OSM → osmium filter → tippecanoe → pmtiles convert.
+// Layers: 'water' (polygons: lakes, bays, wetlands) + 'waterway' (lines: rivers, streams).
+// bbox: -76.5/39.0 to -71.5/42.5 — 1° pad beyond NYC maxBounds on every side.
+const WATER_PMTILES_URL = `${window.location.origin}${import.meta.env.BASE_URL}data/water_nyc.pmtiles`;
+// Roads PMTiles: hierarchical-dissolve road polygons (~8.5K features, 14MB) on OCI PAR.
 // Schema: layer 'final6deciroads', props { id, fclass, _z }.
 // fclass values: motorway, trunk, primary, secondary, tertiary, residential.
 const ROADS_PMTILES_URL = 'https://objectstorage.us-ashburn-1.oraclecloud.com/p/yGTOMC4N2uc1uIGkliFRgP51VbnPm96W8vebh_sOqeoGil3PErp8dvWmy74pEH70/n/idfnjqqb9g0p/b/nyc-map-data/o/realfinaldeciroads.pmtiles';
@@ -48,9 +50,9 @@ const USE_PMTILES_REAL3D = true;
 // When true, buildings use FGB (381K polygons, no tile-seam AA) even while roads use PMTiles.
 const USE_FGB_BUILDINGS = true;
 
-// The OpenMapTiles-sourced layers used in Real3D mode (water + PMTiles roads).
+// The water+roads layers used in Real3D mode.
 const REAL3D_OMT_LAYER_IDS = [
-  'real3d-water',
+  'real3d-water', 'real3d-waterway',
   // PMTiles roads — one fill (z9→z14, 2D) + one extrusion (z13+, 3D) per fclass
   'real3d-pm-roads-motorway-fill', 'real3d-pm-roads-motorway',
   'real3d-pm-roads-trunk-fill',    'real3d-pm-roads-trunk',
@@ -984,7 +986,7 @@ const NYC_BBOX_GEOM = {
 
 // All Real3D layer IDs — used for cleanup.
 const REAL3D_ALL_LAYER_IDS = [
-  'real3d-water',
+  'real3d-water', 'real3d-waterway',
   'real3d-roads-motorway-far-slab',   'real3d-roads-motorway-slab',
   'real3d-roads-primary-far-slab',    'real3d-roads-primary-slab',
   'real3d-roads-tertiary-far-slab',   'real3d-roads-tertiary-slab',
@@ -2623,12 +2625,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       }
     }
 
-    // Real3D: when heatmap/timespan changes, rebuild all Real3D layers with updated tiers/colors.
-    // applyReal3DLayers handles this via the dedicated Real3D useEffect below.
-    // Only update landuse proxy here (safe to set without full rebuild).
-    if (real3D && map.getLayer('real3d-landuse-baseplate')) {
-      map.setPaintProperty('real3d-landuse-baseplate', 'fill-color', baseplateColorExpr(heatmap, timespanIdx));
-    }
+    // Real3D: heatmap/timespan changes handled by the dedicated Real3D useEffect below.
   }, [heatmap, topoOn, threeD, real3D, timespanIdx, events, geoData, boroughGeoData, mapReady, satellite, adjacency, styleVersion]);
 
   // Manage heat-underlay radius so its real-world meter reach stays constant between zoom 9.5 and 14.
@@ -2893,9 +2890,6 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     if (map.getLayer('real3d-buildings-baseplate')) {
       map.setPaintProperty('real3d-buildings-baseplate', 'fill-extrusion-color', baseplateColorExpr(isHm, tsIdx));
     }
-    if (map.getLayer('real3d-landuse-baseplate')) {
-      map.setPaintProperty('real3d-landuse-baseplate', 'fill-color', baseplateColorExpr(isHm, tsIdx));
-    }
   }
 
 
@@ -2941,6 +2935,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     const hr = parseFloat(props?.HEIGHT_ROOF ?? props?.height_roof);
     return {
       height_roof: isNaN(hr) ? 8 : hr,
+      MODZCTA: props?.MODZCTA ?? null,  // preserve for tier baking
       _s5: i % 5,
       _s7: i % 7,
       _tier_0: 0, _tier_1: 0, _tier_2: 0, _tier_3: 0, _tier_4: 0,
@@ -3002,7 +2997,10 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   // Never caches parsed GeoJSON (too large, causes freeze on stringify/parse).
   async function buildFGBCache() {
     if (buildingFGBRef.current) { setFgbCacheStatus('done'); setFgbCacheProgress(100); return; }
-    // If Phase 2A already built the FGB cache, hydrate refs and skip full reparse
+
+    // ── Multi-borough spatial FGBs ─────────────────────────────────────────────
+    // Desktop: Phase 2A pre-loaded everything into mapCacheStore — just hydrate refs.
+    // If Phase 2A already built the FGB cache, hydrate refs and skip full reparse.
     if (mapCacheStore.buildingFGB) {
       buildingFGBRef.current = mapCacheStore.buildingFGB;
       if (mapCacheStore.buildingZctaIndex) buildingZctaMapRef.current = mapCacheStore.buildingZctaIndex;
@@ -3112,19 +3110,16 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     }
   }
 
-  // Instant viewport render — fetches buildings in visible bbox via FGB HTTP Range request.
-  // On DESKTOP: fallback only (used before full cache arrives). Skipped once buildingFGBRef is set.
-  // On MOBILE: permanent data path — never loads full dataset. Always fetches viewport-only.
-  //   Mobile never sets buildingFGBRef, so this guard is skipped on mobile by design.
-  // Only runs at zoom >= 13 (below that, no baseplates or buildings are rendered).
+  // Viewport building render — reads from full cache (desktop) or parses full borough buffers
+  // with JS-side bbox filter (mobile, no spatial index required).
+  // When borough FGBs have R-tree spatial index: mobile uses spatial Range fgbDeserialize(url, rect)
+  // — ~10× less network than full buffer parse. Desktop pre-loads full cache via Phase 2A.
   async function fetchViewportBuildings(map) {
     if (!map || !map.getStyle() || !map.getSource('fgb-buildings')) return;
 
     const isMob = window.innerWidth < 768;
 
     // Zoom guard: nothing to render below z13 (baseplates start z13, buildings z14).
-    // Mobile: clear source to free memory — viewport-only path, data is re-fetched on zoom-in.
-    // Desktop: just return — full cache stays in source; layer minzoom handles visual hiding.
     if (map.getZoom() < 13) {
       if (isMob) map.getSource('fgb-buildings').setData({ type: 'FeatureCollection', features: [] });
       return;
@@ -3133,73 +3128,101 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     if (!isMob && buildingFGBRef.current) return; // desktop: full cache ready, skip viewport fetch
 
     const bounds = map.getBounds();
-    // Pad the viewport bbox by 50% in each direction for pan coverage
     const lngSpan = bounds.getEast() - bounds.getWest();
     const latSpan = bounds.getNorth() - bounds.getSouth();
-    const pad = 0.5;
-    const rect = {
-      minX: bounds.getWest()  - lngSpan * pad,
-      minY: bounds.getSouth() - latSpan * pad,
-      maxX: bounds.getEast()  + lngSpan * pad,
-      maxY: bounds.getNorth() + latSpan * pad,
-    };
+    const pad = isMob ? 0.25 : 0.5;
+    const minX = bounds.getWest()  - lngSpan * pad;
+    const minY = bounds.getSouth() - latSpan * pad;
+    const maxX = bounds.getEast()  + lngSpan * pad;
+    const maxY = bounds.getNorth() + latSpan * pad;
+    const rect = { minX, minY, maxX, maxY };
+
+    // Build MODZCTA → ZCTA feature index once and cache in ref
+    if (!zipToZctaIdxMapRef.current) {
+      const zf = geoDataRef.current?.features || [];
+      const lookup = {};
+      for (let i = 0; i < zf.length; i++) {
+        const z = zf[i].properties?.MODZCTA;
+        if (z) lookup[String(z)] = i;
+      }
+      zipToZctaIdxMapRef.current = lookup;
+    }
+    const zipLookup = zipToZctaIdxMapRef.current;
+    const precomputed = precomputedTiersRef.current;
 
     try {
-      let features = [];
+      const features = [];
       let count = 0;
 
-      // Build MODZCTA → ZCTA feature index once and cache in ref
-      if (!zipToZctaIdxMapRef.current) {
-        const zf = geoDataRef.current?.features || [];
-        const lookup = {};
-        for (let i = 0; i < zf.length; i++) {
-          const z = zf[i].properties?.MODZCTA;
-          if (z) lookup[String(z)] = i;
-        }
-        zipToZctaIdxMapRef.current = lookup;
-      }
-      const zipLookup = zipToZctaIdxMapRef.current;
-      const precomputed = precomputedTiersRef.current;
-
       for (const borough of BOROUGH_FGBS) {
-        for await (const feature of fgbDeserialize(borough.url, rect)) {
-          if (!feature?.geometry?.coordinates) continue;
-
-          const anchor = feature.geometry.coordinates?.[0]?.[0] ?? [0, 0];
-          const spatialSeed = Math.abs(Math.round(anchor[0] * 1e5) ^ Math.round(anchor[1] * 1e5));
-          const props = normalizeFGBProps(feature.properties, spatialSeed);
-
-          // Fast path: use baked MODZCTA instead of PiP
-          const modzcta = feature.properties?.MODZCTA;
-          if (modzcta && precomputed) {
-            const zctaIdx = zipLookup[String(modzcta)] ?? -1;
-            if (zctaIdx >= 0) {
-              for (let t = 0; t < TIMESPAN_STEPS.length; t++) {
-                const trs = precomputed[t]?.tiers;
-                props[`_tier_${t}`] = (trs && trs.length > zctaIdx) ? (trs[zctaIdx] ?? 0) : 0;
+        if (isMob) {
+          // Mobile: R-tree spatial Range query — fetches only viewport bytes via SW Range cache.
+          for await (const feature of fgbDeserialize(borough.url, rect)) {
+            if (!feature?.geometry?.coordinates) continue;
+            const anchor = feature.geometry.coordinates?.[0]?.[0] ?? [0, 0];
+            const spatialSeed = Math.abs(Math.round(anchor[0] * 1e5) ^ Math.round(anchor[1] * 1e5));
+            const props = normalizeFGBProps(feature.properties, spatialSeed);
+            const modzcta = props.MODZCTA;
+            if (modzcta && precomputed) {
+              const zctaIdx = zipLookup[String(modzcta)] ?? -1;
+              if (zctaIdx >= 0) {
+                for (let t = 0; t < TIMESPAN_STEPS.length; t++) {
+                  const trs = precomputed[t]?.tiers;
+                  props[`_tier_${t}`] = (trs && trs.length > zctaIdx) ? (trs[zctaIdx] ?? 0) : 0;
+                }
               }
-              props._tier = props[`_tier_${timespanIdxRef.current ?? 2}`];
             }
+            feature.properties = props;
+            features.push(feature);
+            if (++count % 1000 === 0) await new Promise(r => setTimeout(r, 0));
           }
-
-          feature.properties = props;
-          features.push(feature);
-          count++;
-
-          if (count % 2000 === 0) await new Promise(r => setTimeout(r, 0));
+        } else {
+          // Desktop fallback (no Phase 2A cache yet): full buffer parse + JS bbox filter
+          let buf = null;
+          if ('caches' in window) {
+            try {
+              const cache = await caches.open(PIPELINE_FGB_CACHE_NAME);
+              const cached = await cache.match(borough.cacheKey);
+              if (cached) buf = new Uint8Array(await cached.arrayBuffer());
+            } catch (_e) { /* ignore */ }
+          }
+          if (!buf) {
+            const resp = await fetch(borough.url);
+            if (!resp.ok) continue;
+            buf = new Uint8Array(await resp.arrayBuffer());
+          }
+          for await (const feature of fgbDeserialize(buf)) {
+            if (!feature?.geometry?.coordinates) continue;
+            const anchor = feature.geometry.coordinates?.[0]?.[0] ?? [0, 0];
+            const lng = anchor[0], lat = anchor[1];
+            if (lng < minX || lng > maxX || lat < minY || lat > maxY) continue;
+            const spatialSeed = Math.abs(Math.round(lng * 1e5) ^ Math.round(lat * 1e5));
+            const props = normalizeFGBProps(feature.properties, spatialSeed);
+            const modzcta = props.MODZCTA;
+            if (modzcta && precomputed) {
+              const zctaIdx = zipLookup[String(modzcta)] ?? -1;
+              if (zctaIdx >= 0) {
+                for (let t = 0; t < TIMESPAN_STEPS.length; t++) {
+                  const trs = precomputed[t]?.tiers;
+                  props[`_tier_${t}`] = (trs && trs.length > zctaIdx) ? (trs[zctaIdx] ?? 0) : 0;
+                }
+              }
+            }
+            feature.properties = props;
+            features.push(feature);
+            if (++count % 2000 === 0) await new Promise(r => setTimeout(r, 0));
+          }
+          buf = null;
         }
       }
 
-      // Desktop: skip if full cache arrived while we were fetching
-      if (!isMob && buildingFGBRef.current) { features = null; return; }
+      // Desktop: skip if full cache arrived while we were parsing
+      if (!isMob && buildingFGBRef.current) return;
 
       if (map.getSource('fgb-buildings') && map.getStyle()) {
         map.getSource('fgb-buildings').setData({ type: 'FeatureCollection', features });
         if (real3DRef.current) refreshBuildingColors();
       }
-      // Memory handshake: null the local array immediately so GC can reclaim it after MapLibre's worker
-      // has serialized the data. Critical on mobile to keep heap below crash threshold.
-      features = null;
     } catch (err) {
       if (err.name !== 'AbortError') console.error('FGB viewport fetch failed:', err);
     }
@@ -3476,19 +3499,32 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     }, 0);
   }
 
-  // ─── OpenMapTiles source + 6 layers ────────────────────────────────────────
-  // Uses self-hosted PMTiles (OCI PAR) — no MapTiler API key needed.
+  // ─── Water PMTiles source + Real3D water layers ────────────────────────────
+  // Local water_nyc.pmtiles — two vector layers: 'water' (polygons) + 'waterway' (lines).
+  // Source id: 'water-pmtiles'. Roads still come from Oracle OCI PAR ('roads-pm').
   function addOpenmaptilesSourceAndLayers(map, isHeatmap, tsIdx = 0) {
-    if (map.getSource('openmaptiles')) return; // already exists
+    if (map.getSource('water-pmtiles') && map.getSource('roads-pm')) return; // already exists
     try {
-      map.addSource('openmaptiles', { type: 'vector', url: `pmtiles://${PMTILES_URL}` });
+      if (!map.getSource('water-pmtiles')) {
+        map.addSource('water-pmtiles', { type: 'vector', url: `pmtiles://${WATER_PMTILES_URL}` });
+      }
 
       const waterBeforeId = map.getLayer('heat-underlay') ? 'heat-underlay' : undefined;
-      map.addLayer({
-        id: 'real3d-water', type: 'fill',
-        source: 'openmaptiles', 'source-layer': 'water',
-        paint: { 'fill-color': '#0e1f35', 'fill-opacity': 0.6 },
-      }, waterBeforeId);
+      if (!map.getLayer('real3d-water')) {
+        map.addLayer({
+          id: 'real3d-water', type: 'fill',
+          source: 'water-pmtiles', 'source-layer': 'water',
+          paint: { 'fill-color': '#0e1f35', 'fill-opacity': 0.6 },
+        }, waterBeforeId);
+      }
+      if (!map.getLayer('real3d-waterway')) {
+        map.addLayer({
+          id: 'real3d-waterway', type: 'line',
+          source: 'water-pmtiles', 'source-layer': 'waterway',
+          minzoom: 8,
+          paint: { 'line-color': '#0e1f35', 'line-width': 1.5, 'line-opacity': 0.7 },
+        }, waterBeforeId);
+      }
 
       // ── PMTILES ROADS (Real3D mode) ──────────────────────────────────────────
       // Dual-layer per fclass: 2D fill (z9→z14) + 3D extrusion (z13→z14+).
@@ -3559,13 +3595,12 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     } catch (err) { console.warn('addOpenmaptilesSourceAndLayers failed:', err); }
   }
 
-  // Tear down the OpenMapTiles source + its 6 dependent layers so they can be
-  // re-created with a different source URL (MapTiler ↔ PMTiles hot-swap).
+  // Tear down water + roads sources and their dependent layers (used when Real3D is torn down).
   function removeOpenmaptilesSourceAndLayers(map) {
     REAL3D_OMT_LAYER_IDS.forEach(id => {
       if (map.getLayer(id)) map.removeLayer(id);
     });
-    if (map.getSource('openmaptiles')) map.removeSource('openmaptiles');
+    if (map.getSource('water-pmtiles')) map.removeSource('water-pmtiles');
     if (map.getSource('roads-pm')) map.removeSource('roads-pm');
   }
 
@@ -3677,8 +3712,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       setReal3dLoadProgress('Preparing Real3D layers…');
       await new Promise(r => setTimeout(r, 50));
 
-      if (!USE_PMTILES_REAL3D) {
-        // Step 1 (FGB only): Ensure raw FGB bytes are cached (Gear 3 handshake).
+      if (USE_FGB_BUILDINGS) {
+        // Step 1 (FGB buildings): Ensure raw FGB bytes are cached (Gear 3 handshake).
         if (fgbCacheStatus !== 'done') {
           setReal3dLoadProgress('Caching map data…');
           await buildFGBCache();
@@ -3706,8 +3741,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       await new Promise(r => setTimeout(r, 100));
       if (cancelled) return;
 
-      // Step 5 (FGB only): JIT viewport fetch — skip in PMTiles mode (tiles stream natively).
-      if (!USE_PMTILES_REAL3D && map.getZoom() >= 13) {
+      // Step 5 (FGB buildings only): JIT viewport fetch — skip in non-FGB mode.
+      if (USE_FGB_BUILDINGS && map.getZoom() >= 13) {
         setReal3dLoadProgress('Loading buildings…');
         await fetchViewportBuildings(map);
       }

@@ -11,20 +11,28 @@ export const GEOJSON_URL        = './data/MODZCTA_2010_WGS1984.geo.json';
 export const BOROUGH_GEOJSON_URL = './data/borough.geo.json';
 export const ROAD_FGB_URL       = './data/roads_buffered.fgb';
 // Borough-split building FGBs — each has HEIGHT_ROOF + MODZCTA baked in per feature.
+// Borough-split building FGBs with R-tree spatial index, baked MODZCTA, HEIGHT_ROOF, fclass, index.
+// BronxAndSafezones includes the Bronx + safezone zip 99999.
 export const BOROUGH_FGBS = [
-  { name: 'BronxAndSafezones', url: './data/BronxAndSafezones.fgb', cacheKey: 'BronxAndSafezones.fgb' },
-  { name: 'Brooklyn',          url: './data/Brooklyn.fgb',          cacheKey: 'Brooklyn.fgb' },
-  { name: 'Manhattan',         url: './data/Manhattan.fgb',         cacheKey: 'Manhattan.fgb' },
-  { name: 'Queens',            url: './data/Queens.fgb',            cacheKey: 'Queens.fgb' },
-  { name: 'Staten Island',     url: './data/Staten Island.fgb',     cacheKey: 'Staten Island.fgb' },
+  { name: 'BronxAndSafezones', url: './data/BronxAndSafezones_spatial.fgb', cacheKey: 'BronxAndSafezones_spatial.fgb' },
+  { name: 'Brooklyn',          url: './data/Brooklyn_spatial.fgb',          cacheKey: 'Brooklyn_spatial.fgb' },
+  { name: 'Manhattan',         url: './data/Manhattan_spatial.fgb',         cacheKey: 'Manhattan_spatial.fgb' },
+  { name: 'Queens',            url: './data/Queens_spatial.fgb',            cacheKey: 'Queens_spatial.fgb' },
+  { name: 'Staten Island',     url: './data/Staten Island_spatial.fgb',     cacheKey: 'Staten Island_spatial.fgb' },
 ];
-export const FGB_CACHE_NAME     = 'lapuff-fgb-v5';     // v5: borough-split FGBs with baked MODZCTA
+export const FGB_CACHE_NAME     = 'lapuff-fgb-v6';     // v6: spatial-indexed borough FGBs
 export const ROADS_FGB_CACHE_NAME = 'lapuff-roads-v10';
 export const ROADS_FGB_CACHE_KEY  = 'roads_buffered.fgb';
 export const MAP_CACHE_DONE_KEY     = 'lapuff_map_cache_v1';
 export const MAP_CACHE_BUILDING_KEY = 'lapuff_map_cache_building';
 
 export const ROADS_PMTILES_URL = 'https://objectstorage.us-ashburn-1.oraclecloud.com/p/yGTOMC4N2uc1uIGkliFRgP51VbnPm96W8vebh_sOqeoGil3PErp8dvWmy74pEH70/n/idfnjqqb9g0p/b/nyc-map-data/o/realfinaldeciroads.pmtiles';
+
+// Local self-hosted water PMTiles (~17MB). Layers: 'water' (polygons), 'waterway' (lines).
+// BASE_URL injected so subfolder deploys (/LaPuffOnline/) resolve correctly.
+export const WATER_PMTILES_URL = (typeof window !== 'undefined')
+  ? `${window.location.origin}${import.meta.env.BASE_URL}data/water_nyc.pmtiles`
+  : '/data/water_nyc.pmtiles';
 
 // In-memory ref: populated during Phase 2A so Real3D road activation uses it directly.
 export const roadFGBFeaturesRef = { current: null };
@@ -415,6 +423,7 @@ function normalizeFGBProps(props, i) {
   const hr = parseFloat(props?.HEIGHT_ROOF ?? props?.height_roof);
   return {
     height_roof: isNaN(hr) ? 8 : hr,
+    MODZCTA: props?.MODZCTA ?? null,  // preserve for tier baking
     _s5: i % 5,
     _s7: i % 7,
     _tier_0: 0, _tier_1: 0, _tier_2: 0, _tier_3: 0, _tier_4: 0,
@@ -614,20 +623,22 @@ export async function runPhase2A(events, isMobile, onProgress) {
     skel:      [35, 43],
     boro:      [43, 57],
     boroSkel:  [57, 67],
-    tiers:     [67, 83],
-    roadCache: [83, 85],
+    tiers:     [67, 81],
+    roadCache: [81, 83],
+    waterCache:[83, 85],
   } : {
-    zcta:      [0,  12],
-    adj:       [12, 20],
-    skel:      [20, 24],
-    boro:      [24, 30],
-    boroSkel:  [30, 34],
-    tiers:     [34, 42],
-    roadCache: [42, 44],
-    fgbFetch:  [44, 56],
+    zcta:      [0,  10],
+    adj:       [10, 16],
+    skel:      [16, 20],
+    boro:      [20, 26],
+    boroSkel:  [26, 30],
+    tiers:     [30, 38],
+    roadCache: [38, 40],
+    waterCache:[40, 42],
+    fgbFetch:  [42, 56],
     fgbParse:  [56, 72],
-    pip:       [72, 85],
-    bake:      [85, 93],
+    pip:       [72, 80],
+    bake:      [80, 93],
   };
 
   const report = (pct, msg) => onProgress?.(pct, msg);
@@ -712,24 +723,18 @@ export async function runPhase2A(events, isMobile, onProgress) {
   mapCacheStore.zipBoroughMap  = zipBoroughMap;
   mapCacheStore.precomputedTiers = precomputedTiers;
 
-  // ── Road geometry: cache PMTiles roads file for fast offline access ──────────
-  report(P.roadCache[0], 'Caching road geometry...');
-  // Fire-and-forget — don't block Phase 2A on network
-  (async () => {
-    try {
-      if (!('caches' in window)) return;
-      const cache = await caches.open('lapuff-pmtiles-v1');
-      const existing = await cache.match(ROADS_PMTILES_URL);
-      if (!existing) {
-        const resp = await fetch(ROADS_PMTILES_URL);
-        if (resp.ok) await cache.put(ROADS_PMTILES_URL, resp.clone());
-      }
-    } catch (_e) { /* ignore — browser HTTP cache is the fallback */ }
-  })();
-  report(P.roadCache[1], 'Road data cached');
+  // ── Road header pre-warm: SW caches Range responses on first hit ─────────
+  report(P.roadCache[0], 'Pre-warming road tiles...');
+  fetch(ROADS_PMTILES_URL, { headers: { Range: 'bytes=0-16383' } }).catch(() => {});
+  report(P.roadCache[1], 'Road tiles ready');
 
-  // ── Steps 7-10: Desktop FGB building pipeline ─────────────────────────────
-  // Skipped on mobile — buildings loaded JIT via viewport Range queries.
+  // ── Water header pre-warm: SW caches Range responses on first hit ────────
+  report(P.waterCache[0], 'Pre-warming water tiles...');
+  fetch(WATER_PMTILES_URL, { headers: { Range: 'bytes=0-16383' } }).catch(() => {});
+  report(P.waterCache[1], 'Water tiles ready');
+
+  // ── Steps 7-10: Desktop FGB building pipeline (borough-split spatial FGBs) ─
+  // Skipped on mobile — buildings loaded JIT via spatial Range queries in 3rd Gear.
   if (!isMobile) {
     await runFGBPipeline(geoData.features, precomputedTiers, P, onProgress);
   }
