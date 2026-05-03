@@ -813,6 +813,16 @@ export async function runPhase2A(events, isMobile, onProgress) {
       mapCacheStore.buildingFGB        = idbHit.fc;
       mapCacheStore.buildingZctaIndex  = idbHit.zctaIndex;
       mapCacheStore.buildingTiersBaked = true;
+      // Build a 5-chunk stream from the cached FC so MapView's chunked setData
+      // path also works on warm load (otherwise 2nd-load tries to push all 196MB
+      // in one setData and the main thread hangs ~600ms).
+      const feats = idbHit.fc.features;
+      const chunkSize = Math.ceil(feats.length / 5);
+      const stream = [];
+      for (let s = 0; s < feats.length; s += chunkSize) {
+        stream.push({ borough: `chunk_${stream.length}`, features: feats.slice(s, s + chunkSize) });
+      }
+      mapCacheStore.buildingFGBStream = stream;
       report(P.bake[1], 'Building cache restored');
     } else {
       // Cold path: worker parses + bakes, then we persist for next load.

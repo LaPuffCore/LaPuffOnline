@@ -2817,7 +2817,12 @@ export default function MapView({ events, headerCollapsed = false, interactive =
           type: 'raster',
           tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
           tileSize: 256,
-          // No maxzoom cap — Esri serves up to z19; full quality at every zoom level.
+          // Cap source maxzoom at 11 — Esri's mosaic is uniform at z≤11 (single
+          // pre-blended worldwide layer). Above z11 it composites different vendor
+          // imagery (Maxar/Vivid/etc.) with mismatched colors causing the chunky
+          // discontinuous look. MapLibre auto-upscales z11 tiles past z11 from a
+          // single uniform set → soft but visually continuous at every zoom.
+          maxzoom: 11,
         });
       }
       if (!map.getLayer('sat-layer')) {
@@ -2975,8 +2980,32 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     const map = mapRef.current;
     if (map && map.getSource('fgb-buildings') && map.getStyle()) {
       try {
-        map.getSource('fgb-buildings').setData(buildingFGBRef.current);
-        refreshBuildingColors();
+        // Single source of truth for desktop building data upload.
+        // Use chunked rAF push when borough stream is available (cold load) — keeps
+        // main thread responsive between chunks. On 2nd load (IDB hit) stream is
+        // empty → fall back to single setData of the full FC.
+        const stream = mapCacheStore.buildingFGBStream;
+        const src = map.getSource('fgb-buildings');
+        if (stream && stream.length > 1) {
+          const accum = [];
+          let i = 0;
+          const pushChunk = () => {
+            const s = mapRef.current?.getSource('fgb-buildings');
+            if (!s) return;
+            if (i >= stream.length) {
+              refreshBuildingColors();
+              return;
+            }
+            const chunk = stream[i++];
+            for (const f of chunk.features) accum.push(f);
+            try { s.setData({ type: 'FeatureCollection', features: accum }); } catch (_e) { /* */ }
+            requestAnimationFrame(pushChunk);
+          };
+          requestAnimationFrame(pushChunk);
+        } else {
+          src.setData(buildingFGBRef.current);
+          refreshBuildingColors();
+        }
         const onSourceLoaded = (e) => {
           if (e.sourceId === 'fgb-buildings' && e.isSourceLoaded) {
             map.off('sourcedata', onSourceLoaded);
@@ -3150,45 +3179,14 @@ export default function MapView({ events, headerCollapsed = false, interactive =
 
     if (map.getLayer('borough-outline')) map.moveLayer('borough-outline');
 
-    // Deferred data loading — does not block Real3D toggle.
-    // Desktop: use full cache if ready, else fall back to viewport fetch.
-    // Mobile: always go straight to viewport fetch (never loads full cache).
-    setTimeout(() => {
-      if (!map.getSource('fgb-buildings')) return;
-      const isMob = window.innerWidth < 768;
-      if (!isMob && buildingFGBRef.current) {
-        if (!buildingTiersBakedRef.current && buildingZctaMapRef.current && precomputedTiersRef.current) {
-          bakeAllTiersIntoBuildings();
-        } else {
-          // Phase D: chunked setData by borough — split a big setData (~196MB JSON)
-          // into 5 rAF-spaced pushes so the main thread can paint outlines/roads
-          // between chunks instead of blocking for ~600ms on a single setData call.
-          const stream = mapCacheStore.buildingFGBStream;
-          const src = map.getSource('fgb-buildings');
-          if (stream && stream.length > 1 && src) {
-            const accum = [];
-            let i = 0;
-            const pushChunk = () => {
-              if (!map.getSource('fgb-buildings')) return;
-              if (i >= stream.length) {
-                refreshBuildingColors();
-                return;
-              }
-              const chunk = stream[i++];
-              for (const f of chunk.features) accum.push(f);
-              try { src.setData({ type: 'FeatureCollection', features: accum }); } catch (_e) { /* */ }
-              requestAnimationFrame(pushChunk);
-            };
-            requestAnimationFrame(pushChunk);
-          } else {
-            map.getSource('fgb-buildings').setData(buildingFGBRef.current);
-            refreshBuildingColors();
-          }
-        }
-      } else {
-        fetchViewportBuildings(map);
-      }
-    }, 0);
+    // Data upload is owned elsewhere:
+    //   • Desktop: buildFGBCache() pushes mapCacheStore.buildingFGB (chunked when stream
+    //     available, single setData on IDB-hit warm load). Runs on mapReady, before user
+    //     can possibly toggle Real3D, so source already has data when layers go visible.
+    //   • Mobile: viewport listener in initReal3DLayers calls fetchViewportBuildings on
+    //     moveend/zoomend after Real3D is toggled.
+    // No setTimeout setData here — it previously raced with buildFGBCache and caused
+    // buildings to flicker / not appear on desktop.
   }
 
   // ─── Static water GeoJSON + Real3D water layer ─────────────────────────────
