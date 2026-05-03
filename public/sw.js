@@ -1,10 +1,10 @@
-// LaPuff Service Worker — caches FGB files + PMTiles (full-file pre-warm + Range slicing).
-const SW_VERSION = 'lapuff-sw-v7';
+// LaPuff Service Worker — PMTiles full-file pre-warm + Range slicing.
+const SW_VERSION = 'lapuff-sw-v8';
 
 // Cache names (must match mapDataPipeline.js)
-const FGB_CACHE         = 'lapuff-fgb-v8';            // v8: HEIGHT_ROOF feet→meters fix + stack-overflow fix
-const PMTILES_CACHE     = 'lapuff-pmtiles-sw-v2';     // v2: per-Range responses (still used as fallback)
-const PMTILES_FULL_CACHE = 'lapuff-pmtiles-full-v2';  // v2: full PMTiles file pre-warmed at MapLoadingScreen (now incl. nyc_buildings)
+const FGB_CACHE         = 'lapuff-fgb-v9';            // v9: bumped on PMTiles buildings migration
+const PMTILES_CACHE     = 'lapuff-pmtiles-sw-v3';     // v3: per-Range responses (fallback)
+const PMTILES_FULL_CACHE = 'lapuff-pmtiles-full-v3';  // v3: includes nyc_buildings.pmtiles
 
 const MANAGED_CACHES = [FGB_CACHE, PMTILES_CACHE, PMTILES_FULL_CACHE];
 

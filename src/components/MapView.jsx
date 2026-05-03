@@ -21,7 +21,7 @@ const GEOJSON_URL = './data/MODZCTA_2010_WGS1984.geo.json';
 const BOROUGH_GEOJSON_URL = './data/borough.geo.json';
 
 // MapLoadingScreen gate keys
-const MAP_CACHE_DONE_KEY     = 'lapuff_map_cache_v3';
+const MAP_CACHE_DONE_KEY     = 'lapuff_map_cache_v4';
 const MAP_CACHE_BUILDING_KEY = 'lapuff_map_cache_building';
 
 // Buildings PMTiles — same-origin GitHub Pages, SW range-cached. ~71MB, never fully loaded
@@ -2905,10 +2905,10 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     const tsIdx = timespanIdxRef.current ?? 2;
     memoizedExprs.current = {};
     if (map.getLayer('real3d-buildings')) {
-      map.setPaintProperty('real3d-buildings', 'fill-extrusion-color', withSeamDedup(buildingColorExprByState(isHm, tsIdx)));
+      map.setPaintProperty('real3d-buildings', 'fill-extrusion-color', buildingColorExprByState(isHm, tsIdx));
     }
     if (map.getLayer('real3d-buildings-baseplate')) {
-      map.setPaintProperty('real3d-buildings-baseplate', 'fill-extrusion-color', withSeamDedup(baseplateColorExpr(isHm, tsIdx)));
+      map.setPaintProperty('real3d-buildings-baseplate', 'fill-extrusion-color', baseplateColorExpr(isHm, tsIdx));
     }
   }
 
@@ -2998,50 +2998,17 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     return _asyncMode ? Promise.resolve(true) : true;
   }
 
-  // Track first-seen bids; mark subsequent sightings (seam duplicates) so paint hides them.
-  const seenBidsRef = useRef(new Set());
-  function withSeamDedup(colorExpr) {
-    return ['case',
-      ['boolean', ['feature-state', 'dup'], false],
-      'rgba(0,0,0,0)',
-      colorExpr,
-    ];
-  }
-  function installSeamDedup(map) {
-    if (map._lpSeamDedupInstalled) return;
-    map._lpSeamDedupInstalled = true;
-    const handler = (e) => {
-      if (e.sourceId !== 'nyc-buildings' || !e.isSourceLoaded) return;
-      try {
-        const feats = map.querySourceFeatures('nyc-buildings', { sourceLayer: BUILDINGS_PMTILES_LAYER });
-        const seen = seenBidsRef.current;
-        for (let i = 0; i < feats.length; i++) {
-          const f = feats[i];
-          const bid = f.id ?? f.properties?.b;
-          if (bid == null) continue;
-          if (seen.has(bid)) {
-            map.setFeatureState(
-              { source: 'nyc-buildings', sourceLayer: BUILDINGS_PMTILES_LAYER, id: bid },
-              { dup: true }
-            );
-          } else {
-            seen.add(bid);
-          }
-        }
-      } catch (_e) { /* tile evicted */ }
-    };
-    map.on('sourcedata', handler);
-  }
-
   // Create nyc-buildings PMTiles vector source + building layers.
   // Source-layer 'building'. Per-feature props: { z=zip, b=bid, h=height_m, m=min_height, c=colour }.
-  // promoteId: 'b' enables setFeatureState({id:bid}, {duplicate:true}) for seam dedup.
+  // Tippecanoe was built with --detect-shared-borders + --coalesce-densest-as-needed
+  // which handles seam dedup at build-time. NO client-side feature-state dedup —
+  // that approach paints features transparent globally (since IDs are global to the
+  // source-layer) AND OOMs from unbounded querySourceFeatures + Set growth.
   function addBuildingLayers(map, isHeatmap, tsIdx = 0) {
     if (!map.getSource('nyc-buildings')) {
       map.addSource('nyc-buildings', {
         type: 'vector',
         url: `pmtiles://${BUILDINGS_PMTILES_URL}`,
-        promoteId: 'b',
         minzoom: 13,
         maxzoom: 16,
       });
@@ -3054,7 +3021,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         'source-layer': BUILDINGS_PMTILES_LAYER,
         minzoom: 13, maxzoom: 14,
         paint: {
-          'fill-extrusion-color': withSeamDedup(baseplateColorExpr(isHeatmap, tsIdx)),
+          'fill-extrusion-color': baseplateColorExpr(isHeatmap, tsIdx),
           'fill-extrusion-height': 7,
           'fill-extrusion-base': 0,
           'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'], 13, 0, 13.5, 0.9],
@@ -3070,7 +3037,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         'source-layer': BUILDINGS_PMTILES_LAYER,
         minzoom: 14,
         paint: {
-          'fill-extrusion-color': withSeamDedup(buildingColorExprByState(isHeatmap, tsIdx)),
+          'fill-extrusion-color': buildingColorExprByState(isHeatmap, tsIdx),
           'fill-extrusion-height': ['coalesce', ['get', 'h'], 8],
           'fill-extrusion-base': ['coalesce', ['get', 'm'], 0],
           'fill-extrusion-opacity': 1.0,
@@ -3079,8 +3046,13 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       });
     }
 
-    if (map.getLayer('borough-outline')) map.moveLayer('borough-outline');
-    installSeamDedup(map);
+    // Layer order (bottom→top) per user spec:
+    //   sat → water → zip outlines → borough outline → roads → baseplate → buildings
+    // After addLayer the new layers go on top by default; explicitly re-anchor below
+    // anything that should sit above buildings (none in real3D), and ensure roads
+    // render BELOW baseplates by moving baseplates above the topmost road layer.
+    // Borough outline must NOT be moved on top — it stays where addBoroughOutlineLayers
+    // put it (below buildings).
   }
   // water_static.geojson: 2304 features, z=10+z11 composite, dissolved tile-seams.
   // Static = same geometry at all zoom levels → warms ONCE in SW cache, never re-renders.
@@ -3175,13 +3147,17 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   }
 
   // Initialize Real3D layers ONCE.
+  // Layer-add order matters (newer layers go on top by default):
+  //   1. addOpenmaptilesSourceAndLayers — roads (PMTiles)
+  //   2. addBuildingLayers — baseplate then buildings
+  // Net stack (bottom→top, with 2D layers from main style still below):
+  //   sat → water → zip outlines → borough outline → roads → baseplate → buildings
   function initReal3DLayers(map, isHeatmap, tsIdx = 0) {
     map.setLight({ anchor: 'map' });
     addOpenmaptilesSourceAndLayers(map, isHeatmap, tsIdx);
     addBuildingLayers(map, isHeatmap, tsIdx);
-    // PMTiles handles viewport tile fetching natively — no manual listeners needed.
     buildingAssignCleanupRef.current = () => {};
-    if (map.getLayer('borough-outline')) map.moveLayer('borough-outline');
+    // DO NOT moveLayer('borough-outline') to top — it must stay below roads + buildings.
     real3dLayersCreatedRef.current = true;
   }
 

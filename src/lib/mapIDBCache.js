@@ -23,7 +23,7 @@
 // fingerprint differs, we either (a) re-bake tiers in-place (cheap, ~50ms) or
 // (b) re-run the pipeline. Right now we choose (a) for any fingerprint mismatch.
 
-const DB_NAME    = 'lapuff_map_cache_v3';
+const DB_NAME    = 'lapuff_map_cache_v4';
 const DB_VERSION = 1;
 const STORE      = 'kv';
 

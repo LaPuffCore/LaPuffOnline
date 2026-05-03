@@ -16,10 +16,10 @@ export const BOROUGH_FGBS = [
   { name: 'Queens',            url: './data/Queens_r.fgb',            cacheKey: 'Queens_r.fgb' },
   { name: 'Staten Island',     url: './data/Staten Island_r.fgb',     cacheKey: 'Staten Island_r.fgb' },
 ];
-export const FGB_CACHE_NAME     = 'lapuff-fgb-v8';     // v8: HEIGHT_ROOF feet→meters fix + stack-overflow fix
-// v3: IDB persistence + worker-only parse path (removed main-thread fallback hang)
-export const MAP_CACHE_DONE_KEY     = 'lapuff_map_cache_v3';
-export const MAP_IDB_VERSION        = 'lapuff_idb_v3_' + FGB_CACHE_NAME;
+export const FGB_CACHE_NAME     = 'lapuff-fgb-v9';     // v9: PMTiles buildings migration
+// v4: PMTiles buildings (no more FGB) — bumped to invalidate stale FGB IDB on existing clients
+export const MAP_CACHE_DONE_KEY     = 'lapuff_map_cache_v4';
+export const MAP_IDB_VERSION        = 'lapuff_idb_v4_' + FGB_CACHE_NAME;
 export const MAP_CACHE_BUILDING_KEY = 'lapuff_map_cache_building';
 
 export const ROADS_PMTILES_URL = 'https://objectstorage.us-ashburn-1.oraclecloud.com/p/yGTOMC4N2uc1uIGkliFRgP51VbnPm96W8vebh_sOqeoGil3PErp8dvWmy74pEH70/n/idfnjqqb9g0p/b/nyc-map-data/o/realfinaldeciroads.pmtiles';
