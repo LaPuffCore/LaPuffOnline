@@ -9,7 +9,7 @@ const PMTILES_FULL_CACHE = 'lapuff-pmtiles-full-v1';  // full PMTiles file pre-w
 const MANAGED_CACHES = [FGB_CACHE, PMTILES_CACHE, PMTILES_FULL_CACHE];
 
 // URLs that we know are small + should be cached as full files (when SW receives PRECACHE message)
-const FULL_PMTILES_URL_PATTERNS = ['internalwater.pmtiles', 'externalwater.pmtiles', 'realfinaldeciroads.pmtiles'];
+const FULL_PMTILES_URL_PATTERNS = ['water.pmtiles', 'realfinaldeciroads.pmtiles'];
 
 // ── Install: skip waiting so new SW activates immediately ────────────────────
 self.addEventListener('install', event => {

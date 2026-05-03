@@ -31,3 +31,6 @@ dist-ssr
 .vite
 build_output.txt
 .github/chat.json
+
+# Large source MBTiles (do not commit; used only for local PMTiles extraction)
+*.mbtiles

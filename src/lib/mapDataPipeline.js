@@ -28,16 +28,13 @@ export const MAP_CACHE_BUILDING_KEY = 'lapuff_map_cache_building';
 
 export const ROADS_PMTILES_URL = 'https://objectstorage.us-ashburn-1.oraclecloud.com/p/yGTOMC4N2uc1uIGkliFRgP51VbnPm96W8vebh_sOqeoGil3PErp8dvWmy74pEH70/n/idfnjqqb9g0p/b/nyc-map-data/o/realfinaldeciroads.pmtiles';
 
-// Local self-hosted water PMTiles (split into two files):
-// - internalwater.pmtiles (~70KB): NYC waterways inside borough boundaries
-// - externalwater.pmtiles (~5MB): negative-stencil water everywhere outside boroughs
+// Local self-hosted water PMTiles (~14MB). Extracted from OpenMapTiles northeast
+// region, clipped to our bbox [-76.5,39.0,-71.5,42.5], zooms 0-14, water layer only.
+// Layer 'water' contains all polygons (ocean, river, lake, dock + intermittent).
 // BASE_URL injected so subfolder deploys (/LaPuffOnline/) resolve correctly.
-export const WATER_INTERNAL_PMTILES_URL = (typeof window !== 'undefined')
-  ? `${window.location.origin}${import.meta.env.BASE_URL}data/internalwater.pmtiles`
-  : '/data/internalwater.pmtiles';
-export const WATER_EXTERNAL_PMTILES_URL = (typeof window !== 'undefined')
-  ? `${window.location.origin}${import.meta.env.BASE_URL}data/externalwater.pmtiles`
-  : '/data/externalwater.pmtiles';
+export const WATER_PMTILES_URL = (typeof window !== 'undefined')
+  ? `${window.location.origin}${import.meta.env.BASE_URL}data/water.pmtiles`
+  : '/data/water.pmtiles';
 
 // In-memory ref: populated during Phase 2A so Real3D road activation uses it directly.
 export const roadFGBFeaturesRef = { current: null };
@@ -954,11 +951,9 @@ export async function runPhase2A(events, isMobile, onProgress) {
 
   // ── Water header pre-warm + full-file SW pre-cache ──────────────────────
   report(P.waterCache[0], 'Pre-warming water tiles...');
-  fetch(WATER_INTERNAL_PMTILES_URL, { headers: { Range: 'bytes=0-16383' } }).catch(() => {});
-  fetch(WATER_EXTERNAL_PMTILES_URL, { headers: { Range: 'bytes=0-16383' } }).catch(() => {});
+  fetch(WATER_PMTILES_URL, { headers: { Range: 'bytes=0-16383' } }).catch(() => {});
   if (navigator.serviceWorker?.controller) {
-    navigator.serviceWorker.controller.postMessage({ type: 'PRECACHE_PMTILES', url: WATER_INTERNAL_PMTILES_URL });
-    navigator.serviceWorker.controller.postMessage({ type: 'PRECACHE_PMTILES', url: WATER_EXTERNAL_PMTILES_URL });
+    navigator.serviceWorker.controller.postMessage({ type: 'PRECACHE_PMTILES', url: WATER_PMTILES_URL });
   }
   report(P.waterCache[1], 'Water tiles ready');
 

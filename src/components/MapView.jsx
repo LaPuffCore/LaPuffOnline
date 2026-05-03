@@ -31,8 +31,7 @@ const MAP_CACHE_BUILDING_KEY = 'lapuff_map_cache_building'; // cleared on comple
 // Generated via Geofabrik NY OSM → osmium filter → tippecanoe → pmtiles convert.
 // Layers: 'water' (polygons: lakes, bays, wetlands) + 'waterway' (lines: rivers, streams).
 // bbox: -76.5/39.0 to -71.5/42.5 — 1° pad beyond NYC maxBounds on every side.
-const WATER_INTERNAL_PMTILES_URL = `${window.location.origin}${import.meta.env.BASE_URL}data/internalwater.pmtiles`;
-const WATER_EXTERNAL_PMTILES_URL = `${window.location.origin}${import.meta.env.BASE_URL}data/externalwater.pmtiles`;
+const WATER_PMTILES_URL = `${window.location.origin}${import.meta.env.BASE_URL}data/water.pmtiles`;
 // Roads PMTiles: hierarchical-dissolve road polygons (~8.5K features, 14MB) on OCI PAR.
 // Schema: layer 'final6deciroads', props { id, fclass, _z }.
 // fclass values: motorway, trunk, primary, secondary, tertiary, residential.
@@ -53,7 +52,6 @@ const USE_FGB_BUILDINGS = true;
 
 // The water+roads layers used in Real3D mode.
 const REAL3D_OMT_LAYER_IDS = [
-  'real3d-water-external',
   'real3d-water',
   // PMTiles roads — one fill (z9→z14, 2D) + one extrusion (z13+, 3D) per fclass
   'real3d-pm-roads-motorway-fill', 'real3d-pm-roads-motorway',
@@ -988,7 +986,6 @@ const NYC_BBOX_GEOM = {
 
 // All Real3D layer IDs — used for cleanup.
 const REAL3D_ALL_LAYER_IDS = [
-  'real3d-water-external',
   'real3d-water',
   'real3d-roads-motorway-far-slab',   'real3d-roads-motorway-slab',
   'real3d-roads-primary-far-slab',    'real3d-roads-primary-slab',
@@ -2857,9 +2854,6 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     if (map.getLayer('real3d-water')) {
       map.setPaintProperty('real3d-water', 'fill-opacity', satellite ? 0.5 : 0.6);
     }
-    if (map.getLayer('real3d-water-external')) {
-      map.setPaintProperty('real3d-water-external', 'fill-opacity', satellite ? 0.5 : 0.6);
-    }
   }, [satellite, real3D, mapReady]);
 
 
@@ -3627,35 +3621,24 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     }, 0);
   }
 
-  // ─── Water PMTiles sources + Real3D water layers ────────────────────────────
-  // Two sources: internalwater.pmtiles (NYC waterways inside boroughs) +
-  // externalwater.pmtiles (negative stencil — everything outside boroughs is water).
-  // Both layers use 'water' source-layer name (set via tippecanoe --layer=water).
-  // Source ids: 'water-internal-pm' + 'water-external-pm'. Roads still come from Oracle ('roads-pm').
+  // ─── Water PMTiles source + Real3D water layer ──────────────────────────────
+  // Single self-hosted water.pmtiles (~14MB). Extracted from OpenMapTiles
+  // northeast region, clipped to bbox [-76.5,39.0,-71.5,42.5], zooms 0-14.
+  // Source-layer 'water' contains all water polygons (ocean, river, lake, dock,
+  // including intermittent via the `intermittent` property). OMT pre-bakes
+  // zoom-based simplification — same look as the old Oracle PMTiles.
   function addOpenmaptilesSourceAndLayers(map, isHeatmap, tsIdx = 0) {
-    if (map.getSource('water-internal-pm') && map.getSource('roads-pm')) return; // already exists
+    if (map.getSource('water-pm') && map.getSource('roads-pm')) return; // already exists
     try {
-      if (!map.getSource('water-external-pm')) {
-        map.addSource('water-external-pm', { type: 'vector', url: `pmtiles://${WATER_EXTERNAL_PMTILES_URL}` });
-      }
-      if (!map.getSource('water-internal-pm')) {
-        map.addSource('water-internal-pm', { type: 'vector', url: `pmtiles://${WATER_INTERNAL_PMTILES_URL}` });
+      if (!map.getSource('water-pm')) {
+        map.addSource('water-pm', { type: 'vector', url: `pmtiles://${WATER_PMTILES_URL}` });
       }
 
       const waterBeforeId = map.getLayer('heat-underlay') ? 'heat-underlay' : undefined;
-      // External water (negative stencil — covers everything outside NYC boroughs).
-      // Render BELOW internal water so internal polygons composite cleanly on top.
-      if (!map.getLayer('real3d-water-external')) {
-        map.addLayer({
-          id: 'real3d-water-external', type: 'fill',
-          source: 'water-external-pm', 'source-layer': 'water',
-          paint: { 'fill-color': '#0e1f35', 'fill-opacity': 0.85 },
-        }, waterBeforeId);
-      }
       if (!map.getLayer('real3d-water')) {
         map.addLayer({
           id: 'real3d-water', type: 'fill',
-          source: 'water-internal-pm', 'source-layer': 'water',
+          source: 'water-pm', 'source-layer': 'water',
           paint: { 'fill-color': '#0e1f35', 'fill-opacity': 0.85 },
         }, waterBeforeId);
       }
@@ -3737,8 +3720,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     REAL3D_OMT_LAYER_IDS.forEach(id => {
       if (map.getLayer(id)) map.removeLayer(id);
     });
-    if (map.getSource('water-internal-pm')) map.removeSource('water-internal-pm');
-    if (map.getSource('water-external-pm')) map.removeSource('water-external-pm');
+    if (map.getSource('water-pm')) map.removeSource('water-pm');
     if (map.getSource('roads-pm')) map.removeSource('roads-pm');
   }
 
