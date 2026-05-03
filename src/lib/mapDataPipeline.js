@@ -3,7 +3,6 @@
 // independently inside MapLoadingScreen without importing the component.
 // MapView.jsx retains its own copies so its render code is unchanged.
 
-import { deserialize as fgbDeserialize } from 'flatgeobuf/lib/mjs/geojson.js';
 import mapCacheStore from './mapCacheStore';
 import { loadBakedBuildings, saveBakedBuildings, rebakeTiersInPlace } from './mapIDBCache';
 
@@ -54,7 +53,6 @@ export const TIMESPAN_STEPS = [
   { label: '3mo', days: 90 }, { label: '6mo', days: 180 },
 ];
 
-const FGB_YIELD_CHUNK = 10000;
 
 // ── Satellite tile precache ─────────────────────────────────────────────────
 // Esri World Imagery tiles for NYC bounds at z10-12.
@@ -489,79 +487,15 @@ function computeZctaBboxes(geoData) {
   });
 }
 
-// ── FGB pipeline ─────────────────────────────────────────────────────────────
+// ── FGB pipeline (legacy main-thread fallback — DELETED) ────────────────────
+// All FGB parsing/baking now lives in src/lib/mapWorker.js (off main thread).
+// runFGBPipelineWithWorker is the only path. The previously-defined
+// normalizeFGBProps / parseFGBBuffer / buildZctaIndexMap /
+// bakeAllTiersIntoBuildingsData / runFGBPipeline functions were dead code
+// (no call sites) and would have re-frozen the UI for 6-10s on the main thread
+// if ever invoked. Removed entirely; worker errors now surface via loading
+// screen rather than silently falling through.
 
-function normalizeFGBProps(props, i) {
-  const hr = parseFloat(props?.HEIGHT_ROOF ?? props?.height_roof);
-  return {
-    height_roof: isNaN(hr) ? 8 : hr / 3.28084,  // convert feet → meters
-    MODZCTA: props?.MODZCTA ?? null,  // preserve for tier baking
-    _s5: i % 5,
-    _s7: i % 7,
-    _tier_0: 0, _tier_1: 0, _tier_2: 0, _tier_3: 0, _tier_4: 0,
-  };
-}
-
-async function parseFGBBuffer(buf, onProgress) {
-  const features = [];
-  let count = 0;
-  for await (const feature of fgbDeserialize(buf)) {
-    if (!feature?.geometry?.coordinates) continue;
-    feature.properties = normalizeFGBProps(feature.properties, count);
-    features.push(feature);
-    count++;
-    if (count % FGB_YIELD_CHUNK === 0) {
-      if (onProgress) onProgress(count);
-      await new Promise(r => setTimeout(r, 0));
-    }
-  }
-  if (onProgress) onProgress(count);
-  return { type: 'FeatureCollection', features };
-}
-
-// Modified: takes zctaFeatures as first param instead of reading from a ref.
-async function buildZctaIndexMap(zctaFeatures, buildingFeatures, onProgress) {
-  if (!zctaFeatures?.length) return null;
-  const idxMap = new Int16Array(buildingFeatures.length).fill(-1);
-  for (let i = 0; i < buildingFeatures.length; i++) {
-    const centroid = getGeomCentroid(buildingFeatures[i].geometry);
-    for (let j = 0; j < zctaFeatures.length; j++) {
-      if (zctaFeatures[j].properties?._special) continue;
-      const geom = zctaFeatures[j].geometry;
-      const polys = geom.type === 'MultiPolygon' ? geom.coordinates : [geom.coordinates];
-      for (const poly of polys) {
-        if (pointInRing(centroid[0], centroid[1], poly[0])) { idxMap[i] = j; break; }
-      }
-      if (idxMap[i] >= 0) break;
-    }
-    if (i % FGB_YIELD_CHUNK === 0 && i > 0) {
-      if (onProgress) onProgress(i);
-      await new Promise(r => setTimeout(r, 0));
-    }
-  }
-  if (onProgress) onProgress(buildingFeatures.length);
-  return idxMap;
-}
-
-// Standalone baking — writes _tier_0.._tier_4 into buildingFGB properties.
-// Async with yielding so the main thread doesn't freeze.
-async function bakeAllTiersIntoBuildingsData(buildingFGB, zctaIndexMap, precomputedTiers, onProgress) {
-  const features = buildingFGB.features;
-  for (let start = 0; start < features.length; start += FGB_YIELD_CHUNK) {
-    const end = Math.min(start + FGB_YIELD_CHUNK, features.length);
-    for (let i = start; i < end; i++) {
-      const zIdx = zctaIndexMap[i];
-      const props = features[i].properties;
-      for (let t = 0; t < TIMESPAN_STEPS.length; t++) {
-        const tiers = precomputedTiers[t]?.tiers;
-        props[`_tier_${t}`] = (zIdx >= 0 && tiers && tiers.length > zIdx) ? (tiers[zIdx] ?? 0) : 0;
-      }
-    }
-    if (onProgress) onProgress(start + FGB_YIELD_CHUNK);
-    await new Promise(r => setTimeout(r, 0));
-  }
-  return buildingFGB;
-}
 
 // ── FGB sub-pipeline (desktop, worker-based) ─────────────────────────────────
 // Parses + bakes all 5 borough FGBs in a Web Worker. Main thread stays free
@@ -664,82 +598,6 @@ async function runFGBPipelineWithWorker(zctaFeatures, precomputedTiers, P, onPro
 
 // ── FGB sub-pipeline (desktop fallback if worker fails) ──────────────────────
 
-async function runFGBPipeline(zctaFeatures, precomputedTiers, P, onProgress) {
-  const report = (pct, msg) => onProgress?.(pct, msg);
-
-  // Build MODZCTA → ZCTA feature index lookup (O(1) per building — no PiP needed).
-  // New borough FGBs have MODZCTA baked in per building feature.
-  const zipToZctaIdx = {};
-  for (let i = 0; i < zctaFeatures.length; i++) {
-    const z = zctaFeatures[i].properties?.MODZCTA;
-    if (z) zipToZctaIdx[String(z)] = i;
-  }
-
-  // Step 7: Fetch all borough FGBs in parallel (Cache API or network per borough)
-  report(P.fgbFetch[0], 'Loading building data...');
-  const rawBufs = await Promise.all(BOROUGH_FGBS.map(async (borough) => {
-    if ('caches' in window) {
-      try {
-        const cache = await caches.open(FGB_CACHE_NAME);
-        const cached = await cache.match(borough.cacheKey);
-        if (cached) return new Uint8Array(await cached.arrayBuffer());
-      } catch (e) { /* ignore */ }
-    }
-    const resp = await fetch(borough.url);
-    if (!resp.ok) throw new Error(`FGB fetch failed for ${borough.name}: ${resp.status}`);
-    const ab = await resp.arrayBuffer();
-    if ('caches' in window) {
-      try {
-        const cache = await caches.open(FGB_CACHE_NAME);
-        await cache.put(borough.cacheKey, new Response(ab.slice(0), { headers: { 'Content-Type': 'application/octet-stream' } }));
-      } catch (e) { /* ignore */ }
-    }
-    return new Uint8Array(ab);
-  }));
-  report(P.fgbFetch[1], 'Building data cached');
-
-  // Step 8: Parse all boroughs sequentially → merge into one FeatureCollection.
-  // Stream each borough into mapCacheStore.buildingFGBStream as it's parsed so
-  // MapView can incrementally setData while the rest still parses (Q6).
-  report(P.fgbParse[0], 'Parsing building geometry...');
-  const allFeatures = [];
-  mapCacheStore.buildingFGBStream = []; // array of borough chunks; consumers append
-  for (let bi = 0; bi < rawBufs.length; bi++) {
-    const sub = await parseFGBBuffer(rawBufs[bi], count => {
-      const approxPct = Math.round(((bi * 100000 + count) / (BOROUGH_FGBS.length * 100000)) * (P.fgbParse[1] - P.fgbParse[0]));
-      report(Math.min(P.fgbParse[0] + approxPct, P.fgbParse[1] - 1), 'Parsing building geometry...');
-    });
-    // Safe large-array merge — spread push causes stack overflow on 200K+ arrays
-    for (let _fi = 0; _fi < sub.features.length; _fi++) allFeatures.push(sub.features[_fi]);
-    mapCacheStore.buildingFGBStream.push({ borough: BOROUGH_FGBS[bi].name, features: sub.features });
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('lapuff:fgb-borough-ready', { detail: { borough: BOROUGH_FGBS[bi].name, index: bi } }));
-    }
-    rawBufs[bi] = null; // release buffer after parse
-  }
-  const geojson = { type: 'FeatureCollection', features: allFeatures };
-  mapCacheStore.buildingFGB = geojson;
-  report(P.fgbParse[1], 'Building geometry parsed');
-
-  // Step 9: Build ZCTA index from baked MODZCTA — O(n), near-instant.
-  report(P.pip[0], 'Indexing buildings to zones...');
-  const idxMap = new Int16Array(allFeatures.length);
-  for (let i = 0; i < allFeatures.length; i++) {
-    const z = allFeatures[i].properties?.MODZCTA;
-    idxMap[i] = z ? (zipToZctaIdx[String(z)] ?? -1) : -1;
-  }
-  mapCacheStore.buildingZctaIndex = idxMap;
-  report(P.pip[1], 'Buildings indexed');
-
-  // Step 10: Bake all 5 tier columns into building properties
-  report(P.bake[0], 'Baking tier data into buildings...');
-  const span10 = P.bake[1] - P.bake[0];
-  await bakeAllTiersIntoBuildingsData(geojson, idxMap, precomputedTiers, count => {
-    report(Math.min(P.bake[0] + Math.round((count / allFeatures.length) * span10), P.bake[1]), 'Baking tier data...');
-  });
-  mapCacheStore.buildingTiersBaked = true;
-  report(P.bake[1], 'Tier data baked');
-}
 
 // ── Phase 2A entry point ─────────────────────────────────────────────────────
 

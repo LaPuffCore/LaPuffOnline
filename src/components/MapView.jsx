@@ -1252,10 +1252,19 @@ function AftersCheckInModal({ event, onClose }) {
 }
 
 // ── ZipHologram desktop ───────────────────────────────────────────────────────
-function ZipHologram({ feature, color, onClose, leftOffset = 0 }) {
+// ── ZipHologram — unified desktop + mobile (mobile prop) ──────────────────
+// Consolidated from old ZipHologram + ZipHologramMobile (95% duplicated).
+// `mobile`   → smaller canvas, lower depth, no scanline overlay / CRT flash
+// `embedded` → mobile only: render inline (no fixed positioning, no header)
+function ZipHologram({ feature, color, onClose, leftOffset = 0, mobile = false, embedded = false }) {
   const canvasRef = useRef(null);
   const animRef   = useRef(null);
   const timeRef   = useRef(0);
+
+  const W_PX     = mobile ? 400 : 460;
+  const H_PX     = mobile ? (embedded ? 220 : 260) : 340;
+  const DEPTH    = mobile ? 14 : 18;
+  const GLITCH_N = mobile ? 3 : null; // null = randomized desktop count
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -1285,26 +1294,55 @@ function ZipHologram({ feature, color, onClose, leftOffset = 0 }) {
       timeRef.current += 0.018;
       const t = timeRef.current, rotY = Math.sin(t) * 0.35;
       ctx.clearRect(0, 0, W, H);
-      const depth = 18;
-      for (let d = depth; d >= 0; d--) drawShape(Math.sin(rotY) * d * 1.8, -d * 0.7, 0.08 + (1 - d / depth) * 0.18, d > 0);
-      const ts = Math.sin(rotY) * depth * 1.8;
-      ctx.globalAlpha = 1; drawShape(ts, -depth * 0.7, 0.55, false);
-      if (Math.random() < 0.04) { for (let g = 0; g < Math.floor(Math.random() * 5) + 2; g++) { ctx.save(); ctx.globalAlpha = 0.35; ctx.fillStyle = color; ctx.fillRect((Math.random() - 0.5) * 20, Math.random() * H, W, Math.random() * 6 + 2); ctx.restore(); } }
-      ctx.save(); ctx.globalAlpha = 0.7 + Math.sin(t * 3) * 0.2; ctx.shadowColor = color; ctx.shadowBlur = 20; drawShape(ts, -depth * 0.7, 0.9, true); ctx.restore();
-      if (Math.sin(t * 7) > 0.92) { ctx.fillStyle = color + '22'; ctx.fillRect(0, 0, W, H); }
+      for (let d = DEPTH; d >= 0; d--) drawShape(Math.sin(rotY) * d * 1.8, -d * 0.7, 0.08 + (1 - d / DEPTH) * 0.18, d > 0);
+      const ts = Math.sin(rotY) * DEPTH * 1.8;
+      ctx.globalAlpha = 1; drawShape(ts, -DEPTH * 0.7, 0.55, false);
+      if (Math.random() < 0.04) {
+        const gn = GLITCH_N ?? (Math.floor(Math.random() * 5) + 2);
+        for (let g = 0; g < gn; g++) {
+          ctx.save(); ctx.globalAlpha = 0.35; ctx.fillStyle = color;
+          ctx.fillRect((Math.random() - 0.5) * 20, Math.random() * H, W, Math.random() * 6 + 2);
+          ctx.restore();
+        }
+      }
+      ctx.save(); ctx.globalAlpha = 0.7 + Math.sin(t * 3) * 0.2; ctx.shadowColor = color; ctx.shadowBlur = 20;
+      drawShape(ts, -DEPTH * 0.7, 0.9, true); ctx.restore();
+      if (!mobile && Math.sin(t * 7) > 0.92) { ctx.fillStyle = color + '22'; ctx.fillRect(0, 0, W, H); }
       animRef.current = requestAnimationFrame(frame);
     }
     animRef.current = requestAnimationFrame(frame);
     return () => { if (animRef.current) cancelAnimationFrame(animRef.current); };
-  }, [feature, color]);
+  }, [feature, color, mobile, DEPTH, GLITCH_N]);
 
   useEffect(() => {
+    if (mobile) return; // mobile escape handled by parent UI
     const h = e => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
-  }, [onClose]);
+  }, [onClose, mobile]);
 
   const zipLabel = feature?.properties?.MODZCTA;
+
+  if (mobile && embedded) {
+    return (
+      <div className="flex flex-col w-full flex-1 min-h-0">
+        <canvas ref={canvasRef} width={W_PX} height={H_PX} style={{ width: '100%', flex: 1, minHeight: 0, borderTop: `1px solid ${color}44`, background: '#000000bb' }} />
+        <div className="text-center py-1 text-[10px] font-black tracking-widest opacity-40 uppercase flex-shrink-0" style={{ color }}>◈ Hologram ◈</div>
+      </div>
+    );
+  }
+  if (mobile) {
+    return (
+      <div className="absolute inset-x-0 top-0 z-40 flex flex-col" style={{ height: '50%', background: 'rgba(0,0,0,0.78)', backdropFilter: 'blur(4px)' }}>
+        <div className="flex items-center justify-between px-3 py-2 flex-shrink-0">
+          <div style={{ color, textShadow: `0 0 12px ${color}` }} className="font-black text-sm tracking-widest uppercase">ZIP {zipLabel} — ISOLATED</div>
+          <button onClick={onClose} className="w-8 h-8 rounded-full border font-black text-xs flex items-center justify-center hover:bg-white/20" style={{ borderColor: color, color }}>✕</button>
+        </div>
+        <canvas ref={canvasRef} width={W_PX} height={H_PX} style={{ width: '100%', flex: 1, minHeight: 0, borderTop: `1px solid ${color}44`, background: '#000000bb' }} />
+        <div className="text-center py-1 text-[10px] font-black tracking-widest opacity-40 uppercase flex-shrink-0" style={{ color }}>◈ Hologram ◈</div>
+      </div>
+    );
+  }
   return (
     <div className="absolute z-40 pointer-events-none" style={{ left: leftOffset, right: 400, top: 0, bottom: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <div className="absolute inset-0" style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)' }} />
@@ -1313,81 +1351,15 @@ function ZipHologram({ feature, color, onClose, leftOffset = 0 }) {
           <div style={{ color, textShadow: `0 0 12px ${color}` }} className="font-black text-lg tracking-widest uppercase">ZIP {zipLabel} — ISOLATED</div>
           <button onClick={onClose} className="w-9 h-9 rounded-full border-2 font-black text-sm flex items-center justify-center hover:bg-white/20" style={{ borderColor: color, color }}>✕</button>
         </div>
-        <canvas ref={canvasRef} width={460} height={340} style={{ width: '100%', height: 340, borderRadius: 18, border: `2px solid ${color}`, boxShadow: `0 0 40px ${color}66, 0 0 80px ${color}33`, background: '#000000cc' }} />
-        <div className="absolute pointer-events-none" style={{ top: 44, left: 0, right: 0, height: 340, background: 'repeating-linear-gradient(transparent, transparent 3px, rgba(0,0,0,0.25) 3px, rgba(0,0,0,0.25) 4px)', borderRadius: 18 }} />
+        <canvas ref={canvasRef} width={W_PX} height={H_PX} style={{ width: '100%', height: H_PX, borderRadius: 18, border: `2px solid ${color}`, boxShadow: `0 0 40px ${color}66, 0 0 80px ${color}33`, background: '#000000cc' }} />
+        <div className="absolute pointer-events-none" style={{ top: 44, left: 0, right: 0, height: H_PX, background: 'repeating-linear-gradient(transparent, transparent 3px, rgba(0,0,0,0.25) 3px, rgba(0,0,0,0.25) 4px)', borderRadius: 18 }} />
         <div className="mt-3 text-xs font-black tracking-widest opacity-50 uppercase" style={{ color }}>◈ Holographic Extrusion Mode ◈</div>
       </div>
     </div>
   );
 }
 
-// ── ZipHologramMobile — constrained to top 50% of MapView container ─────
-function ZipHologramMobile({ feature, color, onClose, embedded = false }) {
-  const canvasRef = useRef(null);
-  const animRef   = useRef(null);
-  const timeRef   = useRef(0);
 
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || !feature) return;
-    const ctx = canvas.getContext('2d');
-    const W = canvas.width, H = canvas.height;
-    const allRings = feature.geometry.type === 'MultiPolygon' ? feature.geometry.coordinates.flat(1) : feature.geometry.coordinates;
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    allRings.forEach(ring => ring.forEach(([x, y]) => { minX = Math.min(minX, x); minY = Math.min(minY, y); maxX = Math.max(maxX, x); maxY = Math.max(maxY, y); }));
-    const geoW = maxX - minX, geoH = maxY - minY, padding = 0.15;
-    const scale = Math.min(W * (1 - padding * 2) / geoW, H * (1 - padding * 2) / geoH);
-    const offX = W / 2 - (minX + geoW / 2) * scale;
-    const offY = H / 2 + (minY + geoH / 2) * scale;
-    function project(lng, lat) { return [lng * scale + offX, -lat * scale + offY]; }
-    function drawShape(dx, dy, alpha, strokeOnly) {
-      ctx.save(); ctx.translate(dx, dy);
-      allRings.forEach(ring => {
-        ctx.beginPath();
-        ring.forEach(([x, y], i) => { const [px, py] = project(x, y); if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py); });
-        ctx.closePath();
-        if (!strokeOnly) { ctx.fillStyle = color + Math.round(alpha * 255).toString(16).padStart(2, '0'); ctx.fill(); }
-        ctx.strokeStyle = color; ctx.lineWidth = strokeOnly ? 1.5 : 2; ctx.globalAlpha = alpha; ctx.stroke();
-      });
-      ctx.restore();
-    }
-    function frame() {
-      timeRef.current += 0.018;
-      const t = timeRef.current, rotY = Math.sin(t) * 0.35;
-      ctx.clearRect(0, 0, W, H);
-      const depth = 14;
-      for (let d = depth; d >= 0; d--) drawShape(Math.sin(rotY) * d * 1.8, -d * 0.7, 0.08 + (1 - d / depth) * 0.18, d > 0);
-      const ts = Math.sin(rotY) * depth * 1.8;
-      ctx.globalAlpha = 1; drawShape(ts, -depth * 0.7, 0.55, false);
-      if (Math.random() < 0.04) { for (let g = 0; g < 3; g++) { ctx.save(); ctx.globalAlpha = 0.35; ctx.fillStyle = color; ctx.fillRect((Math.random() - 0.5) * 20, Math.random() * H, W, Math.random() * 6 + 2); ctx.restore(); } }
-      ctx.save(); ctx.globalAlpha = 0.7 + Math.sin(t * 3) * 0.2; ctx.shadowColor = color; ctx.shadowBlur = 20; drawShape(ts, -depth * 0.7, 0.9, true); ctx.restore();
-      animRef.current = requestAnimationFrame(frame);
-    }
-    animRef.current = requestAnimationFrame(frame);
-    return () => { if (animRef.current) cancelAnimationFrame(animRef.current); };
-  }, [feature, color]);
-
-  const zipLabel = feature?.properties?.MODZCTA;
-  if (embedded) {
-    // Embedded inside the unified mobile panel — no absolute positioning, no header row (parent controls it).
-    return (
-      <div className="flex flex-col w-full flex-1 min-h-0">
-        <canvas ref={canvasRef} width={400} height={220} style={{ width: '100%', flex: 1, minHeight: 0, borderTop: `1px solid ${color}44`, background: '#000000bb' }} />
-        <div className="text-center py-1 text-[10px] font-black tracking-widest opacity-40 uppercase flex-shrink-0" style={{ color }}>◈ Hologram ◈</div>
-      </div>
-    );
-  }
-  return (
-    <div className="absolute inset-x-0 top-0 z-40 flex flex-col" style={{ height: '50%', background: 'rgba(0,0,0,0.78)', backdropFilter: 'blur(4px)' }}>
-      <div className="flex items-center justify-between px-3 py-2 flex-shrink-0">
-        <div style={{ color, textShadow: `0 0 12px ${color}` }} className="font-black text-sm tracking-widest uppercase">ZIP {zipLabel} — ISOLATED</div>
-        <button onClick={onClose} className="w-8 h-8 rounded-full border font-black text-xs flex items-center justify-center hover:bg-white/20" style={{ borderColor: color, color }}>✕</button>
-      </div>
-      <canvas ref={canvasRef} width={400} height={260} style={{ width: '100%', flex: 1, minHeight: 0, borderTop: `1px solid ${color}44`, background: '#000000bb' }} />
-      <div className="text-center py-1 text-[10px] font-black tracking-widest opacity-40 uppercase flex-shrink-0" style={{ color }}>◈ Hologram ◈</div>
-    </div>
-  );
-}
 
 // ── MapPostsPanelView ──────────────────────────────────────────────────────────
 const POSTS_PER_PAGE = 6;
@@ -2782,8 +2754,23 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       const isR3D = real3DRef.current;
       const zoom  = map.getZoom();
 
+      // Outlines FIRST — they're cheapest to redraw and visible first to the user.
+      // Schedule the outline rebuild before any viewport fetch / paint refresh below
+      // so the GPU is already drawing fresh outline geometry while the heavier work
+      // is debounced behind it.
+      if (is3D || isR3D) {
+        if (!isMob) {
+          if (rafId) cancelAnimationFrame(rafId);
+          rafId = requestAnimationFrame(doOutlineRebuild);
+        } else if (is3D) {
+          if (rafId) clearTimeout(rafId);
+          // 100ms debounce — matches the mobile viewport timer for predictable cadence.
+          rafId = setTimeout(doOutlineRebuild, 100);
+        }
+      }
+
       // Mobile Real3D: trigger viewport fetch when crossing z13/z14 thresholds.
-      // Debounced at 100ms — much faster than the zoomend+350ms path.
+      // 100ms debounce — matches the outline cadence above so both fire together.
       if (isMob && isR3D) {
         const crossedBaseplates = (prevZoom < 13 && zoom >= 13);
         const crossedBuildings  = (prevZoom < 14 && zoom >= 14);
@@ -2793,7 +2780,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         }
       }
 
-      // Desktop Real3D: refresh paint expressions on zoom threshold crossing.
+      // Desktop Real3D: refresh paint expressions on zoom threshold crossing (cheap, sync).
       if (!isMob && isR3D && heatmapRef.current) {
         const crossedBaseplates = (prevZoom < 13 && zoom >= 13) || (prevZoom >= 13 && zoom < 13);
         const crossedBuildings  = (prevZoom < 14 && zoom >= 14) || (prevZoom >= 14 && zoom < 14);
@@ -2801,17 +2788,6 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       }
 
       prevZoom = zoom;
-      if (!is3D && !isR3D) return;
-
-      // Desktop: RAF debounce so setData doesn't fire 60x/sec during smooth scroll zoom.
-      // Mobile 3D: small timeout debounce (80ms) so spike geometry updates on pinch-zoom without freezing.
-      if (!isMob) {
-        if (rafId) cancelAnimationFrame(rafId);
-        rafId = requestAnimationFrame(doOutlineRebuild);
-      } else if (is3D) {
-        if (rafId) clearTimeout(rafId);
-        rafId = setTimeout(doOutlineRebuild, 80);
-      }
     };
     map.on('zoom', onZoom);
     map.on('pitch', onZoom);
@@ -2837,9 +2813,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
           type: 'raster',
           tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
           tileSize: 256,
-          // Lock satellite imagery to z10 — MapLibre overzooms the z10 tiles for closer
-          // zooms. Eliminates fragmentation/seams seen at z11+ and reduces tile fetches by ~10x.
-          maxzoom: 12,
+          // No maxzoom cap — Esri serves up to z19; full quality at every zoom level.
         });
       }
       if (!map.getLayer('sat-layer')) {
@@ -3330,15 +3304,17 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   }
 
   // ─── Static water GeoJSON + Real3D water layer ─────────────────────────────
-  // water_static.geojson: 128 features, 326KB, z=10 simplification level, seams dissolved.
+  // water_static.geojson: 2304 features, z=10+z11 composite, dissolved tile-seams.
   // Static = same geometry at all zoom levels → warms ONCE in SW cache, never re-renders.
+  // Cache-bust query (?v=6) forces re-fetch when SW version bumps so old misaligned
+  // copies cached client-side cannot persist past a deploy.
   function addOpenmaptilesSourceAndLayers(map, isHeatmap, tsIdx = 0) {
     if (map.getSource('water-static') && map.getSource('roads-pm')) return; // already exists
     try {
       if (!map.getSource('water-static')) {
         map.addSource('water-static', {
           type: 'geojson',
-          data: `${import.meta.env.BASE_URL}data/water_static.geojson`,
+          data: `${import.meta.env.BASE_URL}data/water_static.geojson?v=6`,
         });
       }
 
@@ -4638,7 +4614,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
 
           {/* ── MOBILE: hologram top 50%, side panel bottom 50% ── */}
           {holoFeature && isMobile && !sideZip && (
-            <ZipHologramMobile feature={holoFeature} color={holoColor} onClose={() => setHoloFeature(null)} />
+            <ZipHologram mobile feature={holoFeature} color={holoColor} onClose={() => setHoloFeature(null)} />
           )}
 
           {(sideZip || holoFeature) && isMobile && (
@@ -4674,7 +4650,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
                   >✕</button>
                 </div>
                 {holoFeature && (
-                  <ZipHologramMobile feature={holoFeature} color={holoColor} embedded onClose={null} />
+                  <ZipHologram mobile feature={holoFeature} color={holoColor} embedded onClose={null} />
                 )}
               </div>
 
