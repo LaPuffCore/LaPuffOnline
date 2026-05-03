@@ -2907,6 +2907,10 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     if (!map || !map.getStyle()) return;
     const isHm = heatmapRef.current;
     const tsIdx = timespanIdxRef.current ?? 2;
+    console.log('[Real3D] refreshBuildingColors: isHm=', isHm, 'tsIdx=', tsIdx,
+      'hasBuildings=', !!map.getLayer('real3d-buildings'),
+      'hasBaseplates=', !!map.getLayer('real3d-buildings-baseplate'),
+      'srcLoaded=', map.getSource('fgb-buildings') ? map.isSourceLoaded('fgb-buildings') : 'no-src');
     memoizedExprs.current = {};
     if (map.getLayer('real3d-buildings')) {
       map.setPaintProperty('real3d-buildings', 'fill-extrusion-color', buildingColorExprByState(isHm, tsIdx));
@@ -3081,6 +3085,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     // Desktop: Phase 2A pre-loaded everything into mapCacheStore — just hydrate refs.
     // If Phase 2A already built the FGB cache, hydrate refs and skip full reparse.
     if (mapCacheStore.buildingFGB) {
+      console.log('[FGB] fast path: mapCacheStore has', mapCacheStore.buildingFGB?.features?.length, 'features');
       buildingFGBRef.current = mapCacheStore.buildingFGB;
       if (mapCacheStore.buildingZctaIndex) buildingZctaMapRef.current = mapCacheStore.buildingZctaIndex;
       if (mapCacheStore.buildingTiersBaked) buildingTiersBakedRef.current = true;
@@ -3092,8 +3097,17 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       // Pre-populating the source means the first Real3D toggle is a pure visibility flip.
       if (map && map.getSource('fgb-buildings') && map.getStyle()) {
         try {
+          console.log('[FGB] fast-path setData', buildingFGBRef.current?.features?.length, 'features');
           map.getSource('fgb-buildings').setData(buildingFGBRef.current);
           refreshBuildingColors();
+          // Safety net: re-apply colors once MapLibre finishes GPU triangulation of the source data.
+          const onSourceLoaded = (e) => {
+            if (e.sourceId === 'fgb-buildings' && e.isSourceLoaded) {
+              map.off('sourcedata', onSourceLoaded);
+              if (real3DRef.current) refreshBuildingColors();
+            }
+          };
+          map.on('sourcedata', onSourceLoaded);
         } catch (_e) { /* ignore — race during style swap */ }
       }
       return;
@@ -3727,6 +3741,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   // Initialize Real3D layers ONCE. After first call, all subsequent activations
   // just toggle visibility — no WebGL context rebuild, no source re-creation.
   function initReal3DLayers(map, isHeatmap, tsIdx = 0) {
+    console.log('[Real3D] initReal3DLayers: isHeatmap=', isHeatmap, 'tsIdx=', tsIdx);
     map.setLight({ anchor: 'map' });
     addOpenmaptilesSourceAndLayers(map, isHeatmap, tsIdx);
 
@@ -3807,6 +3822,9 @@ export default function MapView({ events, headerCollapsed = false, interactive =
 
     // Desktop: immediate (sync) path — unchanged
     if (!isMob) {
+      console.log('[Real3D] desktop toggle ON: layersCreated=', real3dLayersCreatedRef.current,
+        'buildingFGB=', !!buildingFGBRef.current, 'tiersBaked=', buildingTiersBakedRef.current,
+        'zoom=', map.getZoom());
       if (!real3dLayersCreatedRef.current) {
         initReal3DLayers(map, isHm, timespanIdxRef.current ?? 2);
       } else {
@@ -3820,9 +3838,9 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         }
       }
       map.setLight({ anchor: 'map' });
-      // Auto-zoom to 13.5 if below building visible range — user sees baseplates immediately.
+      // Auto-zoom to 14 if below building visible range — ensures buildings (minzoom 14) are visible.
       const curZoom = map.getZoom();
-      map.easeTo({ pitch: 55, bearing: -17, duration: 700, ...(curZoom < 13 ? { zoom: 13.5 } : {}) });
+      map.easeTo({ pitch: 55, bearing: -17, duration: 700, ...(curZoom < 14 ? { zoom: 14 } : {}) });
       return;
     }
 
