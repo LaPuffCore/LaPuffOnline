@@ -1,5 +1,5 @@
 // LaPuff Service Worker — PMTiles full-file pre-warm + Range slicing + static GeoJSON cache + satellite tile cache.
-const SW_VERSION = 'lapuff-sw-v12';
+const SW_VERSION = 'lapuff-sw-v13';
 
 // Cache names (must match mapDataPipeline.js)
 const PMTILES_CACHE     = 'lapuff-pmtiles-sw-v3';     // v3: per-Range responses (fallback)
@@ -80,15 +80,16 @@ self.addEventListener('fetch', event => {
   }
 });
 
-// Cache-first satellite tile handler. Stores opaque (no-cors) responses too —
-// MapLibre uses them via crossOrigin='anonymous' but cache.put accepts any response type.
+// Cache-first satellite tile handler.
+// Only caches and serves CORS responses (resp.ok === true).
+// Opaque (no-cors) responses cannot be used as WebGL raster tile textures.
 async function handleSatellite(request) {
   const cache = await caches.open(SATELLITE_CACHE);
   const hit = await cache.match(request.url);
-  if (hit) return hit;
+  if (hit && hit.ok) return hit;  // only serve real 200 responses from cache
   try {
     const resp = await fetch(request);
-    if (resp && (resp.ok || resp.type === 'opaque' || resp.status === 0)) {
+    if (resp && resp.ok) {
       cache.put(request.url, resp.clone()).catch(() => {});
     }
     return resp;
@@ -212,8 +213,11 @@ self.addEventListener('message', event => {
                 try {
                   const existing = await cache.match(u);
                   if (existing) return;
-                  const resp = await fetch(u, { mode: 'no-cors' });
-                  if (resp && (resp.ok || resp.type === 'opaque' || resp.status === 0)) {
+                  // Fetch with CORS (not no-cors) so we get real 200 responses.
+                  // Opaque responses (no-cors) are rejected by WebGL texture loader —
+                  // MapLibre can't use them as raster tile data.
+                  const resp = await fetch(u, { credentials: 'omit' });
+                  if (resp && resp.ok) {
                     await cache.put(u, resp.clone()).catch(() => {});
                   }
                 } catch (_e) { /* skip */ }
