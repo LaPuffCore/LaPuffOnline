@@ -3257,7 +3257,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         // Color logic: same buildingColorExprByState at all zooms (_s7 shade clustering
         // in standard mode, tier+_s5 shade clustering in heatmap mode). Heatmap toggle
         // swaps only the color targets via refreshBuildingColors — no layer recreation.
-        minzoom: 13,
+        minzoom: 12.5,
         paint: {
           'fill-extrusion-color': buildingColorExprByState(isHeatmap, tsIdx),
           'fill-extrusion-height': ['interpolate', ['linear'], ['zoom'],
@@ -3270,7 +3270,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
             13.5, 0,
             14,   ['coalesce', ['get', 'm'], 0],
           ],
-          'fill-extrusion-opacity': 0.95,
+          'fill-extrusion-opacity': 1.0,
           'fill-extrusion-vertical-gradient': false,
           'fill-extrusion-opacity-transition': { duration: 0 },
           'fill-extrusion-color-transition': { duration: 0 },
