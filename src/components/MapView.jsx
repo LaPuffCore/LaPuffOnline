@@ -978,9 +978,9 @@ const REAL3D_ALL_LAYER_IDS = [
   'real3d-pm-roads-tertiary-fill', 'real3d-pm-roads-tertiary',
   'real3d-pm-roads-residential-fill','real3d-pm-roads-residential',
   // Unified building layer last — drawn on top of roads (occluding them correctly).
-  // Single layer covers z13+ with height interpolation:
-  //   z13–z13.5: flat 7m (baseplate appearance)
-  //   z13.5–z14: smooth growth to actual building height
+  // Single layer covers z12.5+ with height interpolation:
+  //   z13–z13.9: flat 7m (baseplate appearance — locked constant)
+  //   z13.9–z14: smooth growth to actual building height
   //   z14+: full roof height
   'real3d-buildings',
 ];
@@ -2301,7 +2301,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
           for (const z of [9, 10]) for (const c of gridForZoom(z, 1)) sweep.push({ center: c, zoom: z });
           for (const c of gridForZoom(11, 2)) sweep.push({ center: c, zoom: 11 });
           for (const c of gridForZoom(12, 2)) sweep.push({ center: c, zoom: 12 });
-          for (const c of gridForZoom(13, 3)) sweep.push({ center: c, zoom: 13 });
+          for (const c of gridForZoom(13, 4)) sweep.push({ center: c, zoom: 13 });
           for (const z of [14, 15, 16]) for (const c of gridForZoom(z, 4)) sweep.push({ center: c, zoom: z });
 
           let i = 0;
@@ -2989,6 +2989,9 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     const onMoveEnd = () => {
       const isR3D = real3DRef.current;
       if (!isR3D) return;
+      // Only repaint buildings on pan when heatmap is on — in standard mode, building
+      // colors are _s7 shade (objectid % 7), never change on pan, no repaint needed.
+      if (!heatmapRef.current) return;
       const zoom = map.getZoom();
       // Refresh building colors after pan — keeps tier expression current at z13+.
       if (zoom >= 13 && map.getLayer('real3d-buildings')) {
@@ -3151,16 +3154,17 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     return expr;
   }
 
-  // Central helper — clears stale memoized exprs and re-applies building colors.
-  // Single layer covers baseplate (z13–13.5) and full-height (z14+) via interpolated height.
+  // Central helper — re-applies building colors using memoized expressions.
+  // Single layer covers baseplate (z13–13.9) and full-height (z14+) via interpolated height.
   // Heatmap toggle: rebuilds color expression to switch between standard red-cluster palette
   // and tier-based heat palette — same _s7/_s5 shade clustering applies at all zoom states.
+  // NOTE: memoizedExprs is NOT cleared here — expressions are keyed by (isHeatmap, tsIdx)
+  // so they auto-invalidate on key change. Only clear when tiers actually change (see tier effect).
   function refreshBuildingColors() {
     const map = mapRef.current;
     if (!map || !map.getStyle()) return;
     const isHm = heatmapRef.current;
     const tsIdx = timespanIdxRef.current ?? 2;
-    memoizedExprs.current = {};
     if (map.getLayer('real3d-buildings')) {
       map.setPaintProperty('real3d-buildings', 'fill-extrusion-color', buildingColorExprByState(isHm, tsIdx));
     }
@@ -3249,10 +3253,10 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         id: 'real3d-buildings', type: 'fill-extrusion',
         source: 'nyc-buildings',
         'source-layer': BUILDINGS_PMTILES_LAYER,
-        // Unified layer: starts at z13 (no separate baseplate layer needed).
+        // Unified building layer: starts at z12.5 (source tiles available at z13+).
         // Height interpolation:
-        //   z13–z13.5: constant 7m flat appearance (baseplate visual)
-        //   z13.5–z14: smooth growth from 7m to full roof height
+        //   z13–z13.9: constant 7m flat appearance (baseplate visual — locked flat)
+        //   z13.9–z14: smooth growth from 7m to full roof height
         //   z14+:      constant full roof height from data
         // Color logic: same buildingColorExprByState at all zooms (_s7 shade clustering
         // in standard mode, tier+_s5 shade clustering in heatmap mode). Heatmap toggle
@@ -3262,12 +3266,12 @@ export default function MapView({ events, headerCollapsed = false, interactive =
           'fill-extrusion-color': buildingColorExprByState(isHeatmap, tsIdx),
           'fill-extrusion-height': ['interpolate', ['linear'], ['zoom'],
             13,   7,
-            13.5, 7,
+            13.9, 7,
             14,   ['coalesce', ['get', 'h'], 8],
           ],
           'fill-extrusion-base': ['interpolate', ['linear'], ['zoom'],
             13,   0,
-            13.5, 0,
+            13.9, 0,
             14,   ['coalesce', ['get', 'm'], 0],
           ],
           'fill-extrusion-opacity': 1.0,
@@ -3425,8 +3429,6 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       if (real3dLayersCreatedRef.current) {
         setReal3DLayersVisible(map, false);
       }
-      if (map.getLayer('real3d-nyc-stencil')) map.removeLayer('real3d-nyc-stencil');
-      if (map.getSource('real3d-stencil-source')) map.removeSource('real3d-stencil-source');
       if (!threeD) map.easeTo({ pitch: 0, bearing: 0, duration: 700 });
       return;
     }
@@ -3434,17 +3436,29 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     const isHm = heatmapRef.current;
 
     // Same path for desktop and mobile — PMTiles serves from SW cache at ~0ms.
-    // 1. Paint first: correct colors baked into GPU expression before first frame.
-    // 2. Visibility: all layers sync (water→roads→buildings order = correct occlusion frame 1).
-    // 3. setLight + easeTo: camera animation starts after layers visible; tiles render during tilt.
+    // 1. On mobile first toggle: call buildFGBCache() to populate zipToZctaIdxMapRef
+    //    (needed for heatmap tier expressions). No-op on desktop (already done at Gear 2).
+    // 2. Paint first: correct colors baked into GPU expression before first frame.
+    // 3. Visibility: all layers sync (water→roads→buildings order = correct occlusion frame 1).
+    // 4. setLight + easeTo: tilts camera; also zooms to z13 if below to ensure buildings visible.
     if (!real3dLayersCreatedRef.current) {
+      // Mobile: buildFGBCache populates zipToZctaIdxMapRef so heatmap tier expressions work.
+      // Desktop: already called in Gear 2 effect (guarded by !interactive skip on mobile).
+      if (window.innerWidth < 768) buildFGBCache();
       initReal3DLayers(map, isHm, timespanIdxRef.current ?? 2);
     } else {
       refreshBuildingColors();
       setReal3DLayersVisible(map, true);
     }
     map.setLight({ anchor: 'map' });
-    map.easeTo({ pitch: 55, bearing: -17, duration: 700 });
+    // Zoom to z13 if needed — buildings start at z12.5/z13 so user must be in range to see them.
+    const currentZoom = map.getZoom();
+    map.easeTo({
+      pitch: 55,
+      bearing: -17,
+      zoom: currentZoom < 13 ? 13 : currentZoom,
+      duration: 700,
+    });
   }, [real3D, mapReady]);
 
   // Heatmap toggle in Real3D — swap paint expressions (GPU-only on desktop, viewport re-fetch on mobile)
