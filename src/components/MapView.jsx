@@ -965,11 +965,11 @@ const NYC_BBOX_GEOM = {
   ]],
 };
 
-// All Real3D layer IDs — used for visibility toggling in setReal3DLayersVisible.
+// All Real3D layer IDs — ordered for optimal visibility toggling (roads before buildings
+// so GPU submission order matches visual stack; buildings last = they occlude roads).
 // Keep in sync with layers created by initReal3DLayers + addOpenmaptilesSourceAndLayers.
 const REAL3D_ALL_LAYER_IDS = [
   'real3d-water',
-  'real3d-buildings', 'real3d-buildings-baseplate',
   // PMTiles roads — one fill (2D) + one extrusion (3D) per fclass
   'real3d-pm-roads-motorway-fill', 'real3d-pm-roads-motorway',
   'real3d-pm-roads-trunk-fill',    'real3d-pm-roads-trunk',
@@ -977,10 +977,13 @@ const REAL3D_ALL_LAYER_IDS = [
   'real3d-pm-roads-secondary-fill','real3d-pm-roads-secondary',
   'real3d-pm-roads-tertiary-fill', 'real3d-pm-roads-tertiary',
   'real3d-pm-roads-residential-fill','real3d-pm-roads-residential',
+  // Unified building layer last — drawn on top of roads (occluding them correctly).
+  // Single layer covers z13+ with height interpolation:
+  //   z13–z13.5: flat 7m (baseplate appearance)
+  //   z13.5–z14: smooth growth to actual building height
+  //   z14+: full roof height
+  'real3d-buildings',
 ];
-
-// Building layers deferred on show so roads/water/outlines render visibly first.
-const BUILDING_DEFERRED_IDS = ['real3d-buildings-baseplate', 'real3d-buildings'];
 
 // Douglas-Peucker line simplification — reduces coordinate count while preserving shape.
 // tolerance in degrees (0.002 ≈ 200m, enough to cut ZCTA point count by ~70%).
@@ -2987,8 +2990,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       const isR3D = real3DRef.current;
       if (!isR3D) return;
       const zoom = map.getZoom();
-      // Only refresh buildings/baseplates layers that exist at the current zoom.
-      if (zoom >= 13 && (map.getLayer('real3d-buildings') || map.getLayer('real3d-buildings-baseplate'))) {
+      // Refresh building colors after pan — keeps tier expression current at z13+.
+      if (zoom >= 13 && map.getLayer('real3d-buildings')) {
         try { refreshBuildingColors(); } catch (_e) { /* */ }
       }
     };
@@ -3148,8 +3151,10 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     return expr;
   }
 
-  // Central helper — clears stale memoized exprs and re-applies building/baseplate colors.
-  // Called after any setData or toggle that may invalidate the current GPU expression.
+  // Central helper — clears stale memoized exprs and re-applies building colors.
+  // Single layer covers baseplate (z13–13.5) and full-height (z14+) via interpolated height.
+  // Heatmap toggle: rebuilds color expression to switch between standard red-cluster palette
+  // and tier-based heat palette — same _s7/_s5 shade clustering applies at all zoom states.
   function refreshBuildingColors() {
     const map = mapRef.current;
     if (!map || !map.getStyle()) return;
@@ -3159,9 +3164,6 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     if (map.getLayer('real3d-buildings')) {
       map.setPaintProperty('real3d-buildings', 'fill-extrusion-color', buildingColorExprByState(isHm, tsIdx));
     }
-    if (map.getLayer('real3d-buildings-baseplate')) {
-      map.setPaintProperty('real3d-buildings-baseplate', 'fill-extrusion-color', baseplateColorExpr(isHm, tsIdx));
-    }
   }
 
 
@@ -3170,30 +3172,6 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   // appear to shrink relative to the growing zip polygons, without becoming too thick.
   // z9-z10: original ramp/lock — DO NOT change this range.
   // z10+: +1px per zoom level from 6px base, capped at 12px at z16.
-  // Baseplate color expression — one flat dark contrast color per tier. No clustering.
-  // Baseplates (z13-14) are a visual proxy layer — no need for shade differentiation.
-  function baseplateColorExpr(isHeatmap, tsIdx = 0) {
-    const key = `bp_${isHeatmap}_${tsIdx}`;
-    if (memoizedExprs.current[key]) return memoizedExprs.current[key];
-
-    let expr;
-    if (!isHeatmap) {
-      // Standard: single flat dark red for all baseplates
-      expr = '#220505';
-    } else {
-      // Heatmap: one dark contrast color per tier, looked up by zip via match expression
-      const tierExpr = buildTierByZipExpr(tsIdx);
-      expr = ['case',
-        ['==', tierExpr, 4], '#440400',   // hot → dark red
-        ['==', tierExpr, 3], '#3d1500',   // orange → dark orange-brown
-        ['==', tierExpr, 2], '#5c4a00',   // warm → dark yellow-brown
-        ['==', tierExpr, 1], '#002910',   // cool → dark green
-        '#001f29',                         // cold → dark blue-grey
-      ];
-    }
-    memoizedExprs.current[key] = expr;
-    return expr;
-  }
 
 
   // ─── FGB building data — dual-path: instant viewport render + persistent Cache API ──
@@ -3266,18 +3244,32 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       });
     }
 
-    if (!map.getLayer('real3d-buildings-baseplate')) {
+    if (!map.getLayer('real3d-buildings')) {
       map.addLayer({
-        id: 'real3d-buildings-baseplate', type: 'fill-extrusion',
+        id: 'real3d-buildings', type: 'fill-extrusion',
         source: 'nyc-buildings',
         'source-layer': BUILDINGS_PMTILES_LAYER,
-        // Baseplate visible ONLY at z13 → z14 (hard cutoff at 14, no overlap with full buildings)
-        minzoom: 13, maxzoom: 14,
+        // Unified layer: starts at z13 (no separate baseplate layer needed).
+        // Height interpolation:
+        //   z13–z13.5: constant 7m flat appearance (baseplate visual)
+        //   z13.5–z14: smooth growth from 7m to full roof height
+        //   z14+:      constant full roof height from data
+        // Color logic: same buildingColorExprByState at all zooms (_s7 shade clustering
+        // in standard mode, tier+_s5 shade clustering in heatmap mode). Heatmap toggle
+        // swaps only the color targets via refreshBuildingColors — no layer recreation.
+        minzoom: 13,
         paint: {
-          'fill-extrusion-color': baseplateColorExpr(isHeatmap, tsIdx),
-          'fill-extrusion-height': 7,
-          'fill-extrusion-base': 0,
-          // Hard-swap: full opacity from frame 1, no fade ramp
+          'fill-extrusion-color': buildingColorExprByState(isHeatmap, tsIdx),
+          'fill-extrusion-height': ['interpolate', ['linear'], ['zoom'],
+            13,   7,
+            13.5, 7,
+            14,   ['coalesce', ['get', 'h'], 8],
+          ],
+          'fill-extrusion-base': ['interpolate', ['linear'], ['zoom'],
+            13,   0,
+            13.5, 0,
+            14,   ['coalesce', ['get', 'm'], 0],
+          ],
           'fill-extrusion-opacity': 0.95,
           'fill-extrusion-vertical-gradient': false,
           'fill-extrusion-opacity-transition': { duration: 0 },
@@ -3286,32 +3278,10 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       });
     }
 
-    if (!map.getLayer('real3d-buildings')) {
-      map.addLayer({
-        id: 'real3d-buildings', type: 'fill-extrusion',
-        source: 'nyc-buildings',
-        'source-layer': BUILDINGS_PMTILES_LAYER,
-        // Full-height buildings ONLY at z14+ (where baseplate stops)
-        minzoom: 14,
-        paint: {
-          'fill-extrusion-color': buildingColorExprByState(isHeatmap, tsIdx),
-          'fill-extrusion-height': ['coalesce', ['get', 'h'], 8],
-          'fill-extrusion-base': ['coalesce', ['get', 'm'], 0],
-          'fill-extrusion-opacity': 1.0,
-          'fill-extrusion-vertical-gradient': false,
-          'fill-extrusion-opacity-transition': { duration: 0 },
-          'fill-extrusion-color-transition': { duration: 0 },
-        },
-      });
-    }
-
-    // Layer order (bottom→top) per user spec:
-    //   sat → water → zip outlines → borough outline → roads → baseplate → buildings
-    // After addLayer the new layers go on top by default; explicitly re-anchor below
-    // anything that should sit above buildings (none in real3D), and ensure roads
-    // render BELOW baseplates by moving baseplates above the topmost road layer.
-    // Borough outline must NOT be moved on top — it stays where addBoroughOutlineLayers
-    // put it (below buildings).
+    // Layer creation order (addOpenmaptilesSourceAndLayers runs before addBuildingLayers):
+    //   sat → water → zip outlines → borough outline → roads → buildings
+    // buildings is added last so it always sits on top of roads in the GPU stack.
+    // Borough outline stays where addBoroughOutlineLayers placed it (below roads+buildings).
   }
   // water_static.geojson: 2304 features, z=10+z11 composite, dissolved tile-seams.
   // Static = same geometry at all zoom levels → warms ONCE in SW cache, never re-renders.
@@ -3424,8 +3394,10 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   }
 
   // Show/hide all Real3D layers. No source or layer destruction.
+  // Visibility is toggled synchronously — no deferred logic, no idle listeners.
+  // REAL3D_ALL_LAYER_IDS is ordered: water → roads → buildings, matching the GPU
+  // draw stack so occlusion is correct from the very first visible frame.
   function setReal3DLayersVisible(map, visible) {
-    const vis = visible ? 'visible' : 'none';
     if (!visible) {
       // Hide everything immediately when turning off
       REAL3D_ALL_LAYER_IDS.forEach(id => {
@@ -3433,28 +3405,18 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       });
       return;
     }
-    // Show non-building layers immediately so roads/water/outlines snap in first.
-    // Defer building baseplates + buildings until the map has rendered a frame —
-    // this ensures roads are visually present before buildings "load in" on top.
+    // Show all layers synchronously in render-stack order.
+    // SW-cached PMTiles tiles arrive in ~0ms so there is no visual benefit to deferring
+    // buildings — they appear as flat 7m plates at z13 (via height interpolation) and
+    // grow to full height as the user zooms, all from frame 1.
     REAL3D_ALL_LAYER_IDS.forEach(id => {
-      if (BUILDING_DEFERRED_IDS.includes(id)) return; // handled below
       if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', 'visible');
     });
-    // Deferred: show buildings after the next idle frame (or 600ms safety fallback)
-    let shown = false;
-    const showBuildings = () => {
-      if (shown) return;
-      shown = true;
-      BUILDING_DEFERRED_IDS.forEach(id => {
-        if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', 'visible');
-      });
-    };
-    map.once('idle', showBuildings);
-    setTimeout(showBuildings, 600);
   }
 
   // Real3D toggle effect — create once, then toggle visibility.
-  // On mobile: shows loading popup, defers FGB cache build, uses async baking.
+  // Layer show order: paint colors → visibility → light → easeTo.
+  // easeTo starts AFTER layers are visible so camera animation never blocks tile render.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
@@ -3470,24 +3432,11 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     }
 
     const isHm = heatmapRef.current;
-    const isMob = window.innerWidth < 768;
 
-    // Desktop: immediate (sync) path
-    if (!isMob) {
-      if (!real3dLayersCreatedRef.current) {
-        initReal3DLayers(map, isHm, timespanIdxRef.current ?? 2);
-      } else {
-        // Paint FIRST — buildings have correct colors from frame 1, no one-frame black flash
-        refreshBuildingColors();
-        setReal3DLayersVisible(map, true);
-      }
-      map.setLight({ anchor: 'map' });
-      map.easeTo({ pitch: 55, bearing: -17, duration: 700 });
-      return;
-    }
-
-    // Mobile: identical to desktop now that PMTiles handles all tile fetching natively.
-    // No popup needed — MapLibre fades tiles in as they arrive from the SW cache.
+    // Same path for desktop and mobile — PMTiles serves from SW cache at ~0ms.
+    // 1. Paint first: correct colors baked into GPU expression before first frame.
+    // 2. Visibility: all layers sync (water→roads→buildings order = correct occlusion frame 1).
+    // 3. setLight + easeTo: camera animation starts after layers visible; tiles render during tilt.
     if (!real3dLayersCreatedRef.current) {
       initReal3DLayers(map, isHm, timespanIdxRef.current ?? 2);
     } else {
