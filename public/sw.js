@@ -57,9 +57,6 @@ self.addEventListener('fetch', event => {
   const url = new URL(request.url);
   const path = url.pathname;
 
-  // ── FGB files: pass through (no longer cached — PMTiles is the only building source) ──
-  if (path.endsWith('.fgb')) return;
-
   // ── Static GeoJSON: cache-first for small same-origin assets ─────────────
   if (STATIC_PATTERNS.some(p => path.endsWith(p))) {
     event.respondWith(handleStatic(request));
@@ -113,12 +110,6 @@ async function handleStatic(request) {
   } catch (err) {
     return new Response('Static asset not available offline', { status: 503 });
   }
-}
-
-async function handleFGB(request) {
-  // FGB pipeline removed — pass-through only (kept for back-compat if any old client
-  // still tries to fetch one). Returns network response; nothing cached SW-side.
-  return fetch(request);
 }
 
 async function handlePMTiles(request) {

@@ -54,3 +54,6 @@ public/data/Brooklyn_nor.fgb
 public/data/Manhattan_nor.fgb
 public/data/Queens_nor.fgb
 public/data/Staten Island_nor.fgb
+# Centroids — replaced by PMTiles built-in zip property
+public/data/building_centroids.bin
+public/data/building_centroids.meta.json

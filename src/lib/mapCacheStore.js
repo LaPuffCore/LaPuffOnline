@@ -13,11 +13,6 @@ const mapCacheStore = {
   zipBoroughMap: null,      // { zctaFeatureIndex → boroughFeatureIndex }
   precomputedTiers: null,   // { [timespanIdx]: { tiers, zipMap, maxCount } } for all 5 timespans
 
-  // Desktop only — FGB pipeline results
-  buildingFGB: null,        // parsed FeatureCollection (381K buildings, with baked _tier_* props)
-  buildingZctaIndex: null,  // Int16Array: building feature index → ZCTA feature index (-1 = not found)
-  buildingTiersBaked: false,// true once _tier_0.._tier_4 are baked into building properties
-
   // ── Phase 2B signals (set by MapView after GL init) ────────────────────
   mapLibreReady: false,     // true when MapLibre 'load' event fires
   layersReady: false,       // true when addLayers() completes (ZCTA + borough base layers added)

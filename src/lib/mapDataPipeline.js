@@ -4,49 +4,15 @@
 // MapView.jsx retains its own copies so its render code is unchanged.
 
 import mapCacheStore from './mapCacheStore';
-import { loadBakedBuildings, saveBakedBuildings, rebakeTiersInPlace } from './mapIDBCache';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 export const GEOJSON_URL        = './data/MODZCTA_2010_WGS1984.geo.json';
 export const BOROUGH_GEOJSON_URL = './data/borough.geo.json';
-export const BOROUGH_FGBS = [
-  { name: 'BronxAndSafezones', url: './data/BronxAndSafezones_r.fgb', cacheKey: 'BronxAndSafezones_r.fgb' },
-  { name: 'Brooklyn',          url: './data/Brooklyn_r.fgb',          cacheKey: 'Brooklyn_r.fgb' },
-  { name: 'Manhattan',         url: './data/Manhattan_r.fgb',         cacheKey: 'Manhattan_r.fgb' },
-  { name: 'Queens',            url: './data/Queens_r.fgb',            cacheKey: 'Queens_r.fgb' },
-  { name: 'Staten Island',     url: './data/Staten Island_r.fgb',     cacheKey: 'Staten Island_r.fgb' },
-];
-export const FGB_CACHE_NAME     = 'lapuff-fgb-v9';     // v9: PMTiles buildings migration
 // v4: PMTiles buildings (no more FGB) — bumped to invalidate stale FGB IDB on existing clients
 export const MAP_CACHE_DONE_KEY     = 'lapuff_map_cache_v4';
-export const MAP_IDB_VERSION        = 'lapuff_idb_v4_' + FGB_CACHE_NAME;
 export const MAP_CACHE_BUILDING_KEY = 'lapuff_map_cache_building';
 
 export const ROADS_PMTILES_URL = 'https://objectstorage.us-ashburn-1.oraclecloud.com/p/yGTOMC4N2uc1uIGkliFRgP51VbnPm96W8vebh_sOqeoGil3PErp8dvWmy74pEH70/n/idfnjqqb9g0p/b/nyc-map-data/o/realfinaldeciroads.pmtiles';
-
-// Precomputed building centroid binary (Float32Array of [lng,lat] pairs).
-// Generated at build time by scripts/build_centroids.mjs. Order matches BOROUGH_FGBS
-// + per-borough FGB iteration order (deterministic). Used to skip ~80ms of PiP work
-// on desktop and to give mobile viewport queries a fast spatial pre-filter.
-export const CENTROIDS_BIN_URL = (typeof window !== 'undefined')
-  ? `${window.location.origin}${import.meta.env.BASE_URL}data/building_centroids.bin`
-  : '/data/building_centroids.bin';
-export const CENTROIDS_META_URL = (typeof window !== 'undefined')
-  ? `${window.location.origin}${import.meta.env.BASE_URL}data/building_centroids.meta.json`
-  : '/data/building_centroids.meta.json';
-
-async function loadCentroidsBin() {
-  try {
-    const [binResp, metaResp] = await Promise.all([
-      fetch(CENTROIDS_BIN_URL, { cache: 'force-cache' }),
-      fetch(CENTROIDS_META_URL, { cache: 'force-cache' }),
-    ]);
-    if (!binResp.ok || !metaResp.ok) return null;
-    const ab = await binResp.arrayBuffer();
-    const meta = await metaResp.json();
-    return { centroids: new Float32Array(ab), meta };
-  } catch (e) { return null; }
-}
 
 export const TIMESPAN_STEPS = [
   { label: '1d', days: 1 }, { label: '7d', days: 7 }, { label: '30d', days: 30 },
@@ -496,117 +462,9 @@ function computeZctaBboxes(geoData) {
   });
 }
 
-// ── FGB pipeline (legacy main-thread fallback — DELETED) ────────────────────
-// All FGB parsing/baking now lives in src/lib/mapWorker.js (off main thread).
-// runFGBPipelineWithWorker is the only path. The previously-defined
-// normalizeFGBProps / parseFGBBuffer / buildZctaIndexMap /
-// bakeAllTiersIntoBuildingsData / runFGBPipeline functions were dead code
-// (no call sites) and would have re-frozen the UI for 6-10s on the main thread
-// if ever invoked. Removed entirely; worker errors now surface via loading
-// screen rather than silently falling through.
-
-
-// ── FGB sub-pipeline (desktop, worker-based) ─────────────────────────────────
-// Parses + bakes all 5 borough FGBs in a Web Worker. Main thread stays free
-// during the ~2-4 second FGB parse, only paying the structured-clone cost
-// when each borough completes (~50-300ms per borough, sequential).
-async function runFGBPipelineWithWorker(zctaFeatures, precomputedTiers, P, onProgress) {
-  const report = (pct, msg) => onProgress?.(pct, msg);
-
-  // Step 7: Fetch all borough buffers (Cache API or network) — done on main thread
-  // so we can transfer ArrayBuffers into the worker zero-copy.
-  report(P.fgbFetch[0], 'Loading building data...');
-  const rawBufs = await Promise.all(BOROUGH_FGBS.map(async (borough) => {
-    if ('caches' in window) {
-      try {
-        const cache = await caches.open(FGB_CACHE_NAME);
-        const cached = await cache.match(borough.cacheKey);
-        if (cached) return await cached.arrayBuffer();
-      } catch (e) { /* ignore */ }
-    }
-    const resp = await fetch(borough.url);
-    if (!resp.ok) throw new Error(`FGB fetch failed for ${borough.name}: ${resp.status}`);
-    const ab = await resp.arrayBuffer();
-    if ('caches' in window) {
-      try {
-        const cache = await caches.open(FGB_CACHE_NAME);
-        await cache.put(borough.cacheKey, new Response(ab.slice(0), { headers: { 'Content-Type': 'application/octet-stream' } }));
-      } catch (e) { /* ignore */ }
-    }
-    return ab;
-  }));
-  report(P.fgbFetch[1], 'Building data cached');
-
-  // Step 8-10: Worker handles parse + index + bake in one pass.
-  return await new Promise((resolve, reject) => {
-    let worker;
-    try {
-      worker = new Worker(new URL('./fgbWorker.js', import.meta.url), { type: 'module' });
-    } catch (err) {
-      reject(err);
-      return;
-    }
-
-    const allFeatures = [];
-    const idxMaps = [];
-    mapCacheStore.buildingFGBStream = [];
-    const reportSpan = P.bake[1] - P.fgbParse[0];
-
-    worker.onmessage = (e) => {
-      const m = e.data;
-      if (m.type === 'PROGRESS') {
-        const pct = Math.min(P.fgbParse[0] + Math.round((m.pct / 100) * reportSpan), P.bake[1] - 1);
-        report(pct, m.msg);
-      } else if (m.type === 'BOROUGH_DONE') {
-        // Safe large-array merge — spread push causes stack overflow on 200K+ arrays
-        for (let _fi = 0; _fi < m.features.length; _fi++) allFeatures.push(m.features[_fi]);
-        idxMaps.push(m.idxMap);
-        mapCacheStore.buildingFGBStream.push({ borough: m.borough, features: m.features });
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new CustomEvent('lapuff:fgb-borough-ready', { detail: { borough: m.borough } }));
-        }
-      } else if (m.type === 'ALL_DONE') {
-        // Merge per-borough idxMaps into one Int16Array
-        const totalLen = idxMaps.reduce((s, a) => s + a.length, 0);
-        const merged = new Int16Array(totalLen);
-        let off = 0;
-        for (const a of idxMaps) { merged.set(a, off); off += a.length; }
-
-        const geojson = { type: 'FeatureCollection', features: allFeatures };
-        mapCacheStore.buildingFGB = geojson;
-        mapCacheStore.buildingZctaIndex = merged;
-        mapCacheStore.buildingTiersBaked = true;
-        report(P.bake[1], 'Tier data baked');
-        worker.terminate();
-        resolve();
-      } else if (m.type === 'ERROR') {
-        worker.terminate();
-        reject(new Error(m.message));
-      }
-    };
-
-    worker.onerror = (err) => {
-      worker.terminate();
-      reject(err);
-    };
-
-    // Send buffers as transferable
-    const boroughs = BOROUGH_FGBS.map((b, i) => ({
-      name: b.name, url: b.url, cacheKey: b.cacheKey, buf: rawBufs[i],
-    }));
-    const transferList = rawBufs.filter(b => b);
-    const zctaFeaturesProps = zctaFeatures.map(f => ({
-      MODZCTA: f.properties?.MODZCTA, _special: f.properties?._special,
-    }));
-    worker.postMessage(
-      { type: 'PARSE_AND_BAKE', boroughs, precomputedTiers, zctaFeaturesProps },
-      transferList
-    );
-  });
-}
-
-// ── FGB sub-pipeline (desktop fallback if worker fails) ──────────────────────
-
+// ── FGB pipeline removed ─────────────────────────────────────────────────────
+// Buildings are now served via PMTiles (nyc_buildings.pmtiles) directly by
+// MapLibre's pmtiles:// protocol. No FGB parsing, no worker, no IDB hydrate.
 
 // ── Phase 2A entry point ─────────────────────────────────────────────────────
 
@@ -623,7 +481,6 @@ export async function runPhase2A(events, isMobile, onProgress) {
   if (wasBuilding && !isDoneFlag) {
     localStorage.removeItem(MAP_CACHE_BUILDING_KEY);
     localStorage.removeItem(MAP_CACHE_DONE_KEY);
-    if ('caches' in window) caches.delete(FGB_CACHE_NAME).catch(() => {});
   }
   localStorage.setItem(MAP_CACHE_BUILDING_KEY, '1');
 

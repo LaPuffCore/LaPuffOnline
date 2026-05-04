@@ -12,10 +12,7 @@ import { pingNYCLocation, getLastLocation } from '../lib/locationService';
 import { isEventHappeningNow, isAftersWindow, isEventLive } from '../lib/eventUtils';
 import { SAMPLE_MODE } from '../lib/sampleConfig';
 import { getSampleUsersForZip } from '../lib/sampleUsers';
-import { deserialize as fgbDeserialize } from 'flatgeobuf/lib/mjs/geojson.js';
 import { fetchGeoPostFeed, fetchReactionsForPosts } from '../lib/supabase';
-import { BOROUGH_FGBS, FGB_CACHE_NAME as PIPELINE_FGB_CACHE_NAME } from '../lib/mapDataPipeline';
-import { rebakeTiersInPlace } from '../lib/mapIDBCache';
 
 const GEOJSON_URL = './data/MODZCTA_2010_WGS1984.geo.json';
 const BOROUGH_GEOJSON_URL = './data/borough.geo.json';
@@ -1526,18 +1523,9 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   const cachedTierDataRef   = useRef({ events: null, timespanIdx: -1, geoData: null, zipMap: null, maxCount: 0, tiers: [] });
   // Pre-computed tiers for all 5 timespans — slider reads from here (no recomputation)
   const precomputedTiersRef = useRef(null); // { [timespanIdx]: { tiers, zipMap, maxCount } }
-  // FGB building data — full-file load, cached forever after first parse
-  const buildingFGBRef      = useRef(null);  // parsed FeatureCollection (merged from all boroughs)
-  const buildingZctaMapRef  = useRef(null);  // Int16Array: building index → ZCTA feature index (-1 = not found)
-  const zipToZctaIdxMapRef  = useRef(null);  // {[MODZCTA]: zctaFeatureIdx} — built once, reused for mobile viewport PiP
-  const fgbLoadingRef       = useRef(false); // prevents concurrent loads
-  // Pre-computed ZCTA bounding boxes — used in fetchViewportBuildings for O(1) bbox shortcut before expensive PiP.
-  // Calculated once when geoData loads, stored as parallel array to geoDataRef.current.features.
-  const zctaBboxesRef = useRef(null); // Array<{minX, minY, maxX, maxY}> | null
+  const zipToZctaIdxMapRef  = useRef(null);  // {[MODZCTA]: zctaFeatureIdx} — needed by buildTierByZipExpr for PMTiles heatmap
   // Real3D layer lifecycle — create once, toggle visibility
   const real3dLayersCreatedRef = useRef(false); // true after first initReal3DLayers
-  // Tracks whether _tier_0.._tier_4 have been baked into building properties
-  const buildingTiersBakedRef = useRef(false);
   // Tracks borough outline 3D mode — defers opacity on FIRST entry to avoid spike artifact
   const boroughWas3DRef = useRef(false);
   // Cache key for borough outline geometry — skip expensive safezone PiP when only Real3D/opacity changes
@@ -1590,9 +1578,6 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   const [mapPostsLoading, setMapPostsLoading] = useState(false);
   const [mapPostsReactions, setMapPostsReactions] = useState({});
   const hoveredBoroughIdRef = useRef(null);
-  // Cache status for FGB loading indicator: 'idle' | 'building' | 'paused' | 'done'
-  // (kept as no-op refs for back-compat; UI surface removed since PMTiles handles loading natively)
-  const fgbCacheStatusRef = useRef('idle');
   // Event pin markers toggle
   const [showPins, setShowPins] = useState(false);
   // Borough region overlay toggle
@@ -1642,17 +1627,25 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   }, [mapReady]);
 
   // Build zip→ZCTA index map as soon as geoData is available (no `interactive` gate).
-  // This ensures buildTierByZipExpr can produce correct paint expressions even if
-  // buildFGBCache runs before interactive is set.
+  // This ensures buildTierByZipExpr can produce correct paint expressions for the
+  // PMTiles building heatmap on both desktop and mobile.
+  // Also hydrates precomputedTiersRef from mapCacheStore (set by Phase 2A) and triggers
+  // an initial paint refresh so building colors are correct on first frame.
   useEffect(() => {
-    if (!geoData?.features || zipToZctaIdxMapRef.current) return;
-    const lookup = {};
-    geoData.features.forEach((f, i) => {
-      const z = f.properties?.MODZCTA;
-      if (z) lookup[String(z)] = i;
-    });
-    zipToZctaIdxMapRef.current = lookup;
-  }, [geoData]);
+    if (!geoData?.features) return;
+    if (!zipToZctaIdxMapRef.current) {
+      const lookup = {};
+      geoData.features.forEach((f, i) => {
+        const z = f.properties?.MODZCTA;
+        if (z) lookup[String(z)] = i;
+      });
+      zipToZctaIdxMapRef.current = lookup;
+    }
+    if (mapCacheStore.precomputedTiers && !precomputedTiersRef.current) {
+      precomputedTiersRef.current = mapCacheStore.precomputedTiers;
+    }
+    refreshBuildingColors();
+  }, [geoData]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const onOnline = () => {
@@ -1683,7 +1676,6 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       else setAdjacency(buildAdjacency(features));
       if (mapCacheStore.zctaSkeleton) zctaSkeletonRef.current = mapCacheStore.zctaSkeleton;
       else zctaSkeletonRef.current = buildZctaSkeleton(mapCacheStore.geoData);
-      if (mapCacheStore.zctaBboxes) zctaBboxesRef.current = mapCacheStore.zctaBboxes;
       return;
     }
     fetch(GEOJSON_URL).then(r => r.json()).then(data => {
@@ -1758,26 +1750,6 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       mapInst.getSource('borough-hover-source').setData(boroughGeoData);
     }
   }, [geoData, boroughGeoData]);
-
-  // Pre-compute ZCTA bounding boxes once — used as O(1) shortcut before expensive PiP in fetchViewportBuildings.
-  // Skips ~95% of PiP math for buildings not near ZCTA boundaries, critical for mobile JIT streaming speed.
-  useEffect(() => {
-    if (!geoData?.features?.length) return;
-    zctaBboxesRef.current = geoData.features.map(f => {
-      if (!f.geometry) return null;
-      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-      const polys = f.geometry.type === 'MultiPolygon' ? f.geometry.coordinates : [f.geometry.coordinates];
-      for (const poly of polys) {
-        for (const ring of poly) {
-          for (const [x, y] of ring) {
-            if (x < minX) minX = x; if (x > maxX) maxX = x;
-            if (y < minY) minY = y; if (y > maxY) maxY = y;
-          }
-        }
-      }
-      return { minX, minY, maxX, maxY };
-    });
-  }, [geoData]);
 
   // Map init — make canvas background transparent so CRT can show on edges
   useEffect(() => {
@@ -2377,19 +2349,6 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     initReal3DLayers(map, heatmapRef.current, timespanIdxRef.current ?? 2);
     setReal3DLayersVisible(map, false);
   }, [mapReady, geoData]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Gear 2 — MapView Active: start desktop FGB cache as soon as Phase 2A is done.
-  // MapView mounts simultaneously with MapLoadingScreen (before Phase 2A completes), so
-  // we MUST gate on `interactive` (which becomes true only after Phase 2A + warmup finish)
-  // to ensure mapCacheStore.buildingFGB is populated before we try to hydrate it.
-  // Without this gate the effect fires while Phase 2A is still running → buildingFGB null.
-  // Mobile: defer entirely to Real3D toggle (Gear 3) — raw bytes already staged by Gear 1.
-  useEffect(() => {
-    if (!mapReady || !geoData) return;
-    if (window.innerWidth < 768) return; // mobile: Gear 3 handles cache on Real3D activation
-    if (!interactive) return; // wait for Phase 2A to complete (mapCacheStore.buildingFGB not yet set)
-    buildFGBCache();
-  }, [mapReady, geoData, interactive]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Pre-compute tiers for all 5 timespans in background.
   // Hydrate from mapCacheStore if Phase 2A already computed them; else compute fresh.
@@ -3200,59 +3159,6 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   // z9-z10: original ramp/lock — DO NOT change this range.
   // z10+: +1px per zoom level from 6px base, capped at 12px at z16.
 
-
-  // ─── FGB building data — dual-path: instant viewport render + persistent Cache API ──
-  // Path 1 (instant): fgbDeserialize(url, rect) with HTTP Range requests for current viewport.
-  // Path 2 (background): Full-file fetch → Cache API → parse → ZCTA index. Persists across sessions.
-  // When cache is ready, viewport render uses cached data instead of network.
-
-  // Normalize a single FGB feature's properties. Uses loop index i for shade clustering
-  // so objectid/FID columns are not needed in the FGB file.
-  function normalizeFGBProps(props, i) {
-    const hr = parseFloat(props?.HEIGHT_ROOF ?? props?.height_roof);
-    return {
-      height_roof: isNaN(hr) ? 8 : hr,
-      MODZCTA: props?.MODZCTA ?? null,  // preserve for tier baking
-      _s5: i % 5,
-      _s7: i % 7,
-      _tier_0: 0, _tier_1: 0, _tier_2: 0, _tier_3: 0, _tier_4: 0,
-    };
-  }
-
-  // Phase E: parseFGBBuffer + buildZctaIndexMap removed — Phase 2A worker (fgbWorker.js)
-  // owns FGB parsing and ZCTA index construction off the main thread.
-
-  // Hydrate buildingFGBRef from mapCacheStore (legacy compat). PMTiles migration:
-  // building data now lives in nyc_buildings.pmtiles, fetched via Range requests by MapLibre.
-  // This function is kept as a no-op shim so existing call sites don't crash; the actual
-  // source/layer creation happens in addBuildingLayers below.
-  function buildFGBCache() {
-    fgbCacheStatusRef.current = 'done';
-    // Populate zipToZctaIdxMapRef from mapCacheStore so tier-by-zip match expressions work
-    if (!zipToZctaIdxMapRef.current && geoDataRef.current?.features) {
-      const lookup = {};
-      const zf = geoDataRef.current.features;
-      for (let i = 0; i < zf.length; i++) {
-        const z = zf[i].properties?.MODZCTA;
-        if (z) lookup[String(z)] = i;
-      }
-      zipToZctaIdxMapRef.current = lookup;
-    }
-    if (mapCacheStore.precomputedTiers && !precomputedTiersRef.current) {
-      precomputedTiersRef.current = mapCacheStore.precomputedTiers;
-    }
-    refreshBuildingColors();
-  }
-
-  // Viewport building fetch — no-op under PMTiles. MapLibre fetches viewport tiles
-  // automatically via the pmtiles:// protocol; nothing for us to do per-pan/zoom.
-  async function fetchViewportBuildings(_map) { /* no-op (PMTiles handles viewport) */ }
-
-  // Tier baking — no-op. Tier color is now resolved via [match, ['get','z'], ...] expression
-  // built from precomputedTiersRef on demand. setPaintProperty swap handles timespan changes.
-  function bakeAllTiersIntoBuildings(_asyncMode = false) {
-    return _asyncMode ? Promise.resolve(true) : true;
-  }
 
   // Create nyc-buildings PMTiles vector source + building layers.
   // Source-layer 'building'. Per-feature props: { z=zip, b=bid, h=height_m, m=min_height, c=colour }.
