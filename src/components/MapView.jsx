@@ -2260,21 +2260,28 @@ export default function MapView({ events, headerCollapsed = false, interactive =
           };
           // Briefly add satellite raster sources during sweep so MapLibre fetches +
           // composites every satellite tile across NYC at every zoom. Cleared at end.
+          // 2-tier: ArcGIS z9-11 (sharp low-zoom), Clarity z11-15 (high-res from z11+).
           const addSatLayersForWarmup = () => {
             try {
               const layersStyle = map.getStyle().layers;
               const firstLayerId = layersStyle.length > 0 ? layersStyle[0].id : undefined;
-              if (!map.getSource('sat-source-s2')) {
-                map.addSource('sat-source-s2', { type: 'raster', tiles: ['https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2021_3857/default/GoogleMapsCompatible/{z}/{y}/{x}.jpg'], tileSize: 256, minzoom: 0, maxzoom: 15 });
+              if (!map.getSource('sat-source-arcgis')) {
+                map.addSource('sat-source-arcgis', { type: 'raster', tiles: ['https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'], tileSize: 256, minzoom: 0, maxzoom: 11 });
               }
-              if (!map.getLayer('sat-layer-s2')) map.addLayer({ id: 'sat-layer-s2', type: 'raster', source: 'sat-source-s2', minzoom: 9, maxzoom: 15, paint: { 'raster-opacity': 0.01, 'raster-fade-duration': 0 } }, firstLayerId);
+              if (!map.getSource('sat-source')) {
+                map.addSource('sat-source', { type: 'raster', tiles: ['https://clarity.maptiles.arcgis.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'], tileSize: 256, minzoom: 11, maxzoom: 19 });
+              }
+              if (!map.getLayer('sat-layer-arcgis')) map.addLayer({ id: 'sat-layer-arcgis', type: 'raster', source: 'sat-source-arcgis', maxzoom: 11, paint: { 'raster-opacity': 0.01, 'raster-fade-duration': 0 } }, firstLayerId);
+              if (!map.getLayer('sat-layer')) map.addLayer({ id: 'sat-layer', type: 'raster', source: 'sat-source', minzoom: 11, paint: { 'raster-opacity': 0.01, 'raster-fade-duration': 0 } }, firstLayerId);
             } catch (_e) { /* */ }
           };
           const removeSatLayersAfterWarmup = () => {
             if (satellite) return;
             try {
-              if (map.getLayer('sat-layer-s2')) map.removeLayer('sat-layer-s2');
-              if (map.getSource('sat-source-s2')) map.removeSource('sat-source-s2');
+              if (map.getLayer('sat-layer')) map.removeLayer('sat-layer');
+              if (map.getLayer('sat-layer-arcgis')) map.removeLayer('sat-layer-arcgis');
+              if (map.getSource('sat-source')) map.removeSource('sat-source');
+              if (map.getSource('sat-source-arcgis')) map.removeSource('sat-source-arcgis');
             } catch (_e) { /* */ }
           };
 
@@ -3002,30 +3009,49 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     if (!map || !mapReady) return;
 
     if (satellite) {
-      // Sentinel-2 cloudless 2021 (EOX IT) — single source z9-z15
-      // Swap back: replace sat-source-s2 block with the 3-tier comment block below
-      if (!map.getSource('sat-source-s2')) {
-        map.addSource('sat-source-s2', {
+      // 2-tier satellite:
+      //   z9-11  → ArcGIS World Imagery (sharp low-zoom overview)
+      //   z11-19 → Clarity (high-res cloudless mosaic — same tiles used at z13+,
+      //            also shown at z11-12 so there is one clean crossover with no Wayback)
+      if (!map.getSource('sat-source-arcgis')) {
+        map.addSource('sat-source-arcgis', {
           type: 'raster',
-          tiles: ['https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2021_3857/default/GoogleMapsCompatible/{z}/{y}/{x}.jpg'],
+          tiles: ['https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
           tileSize: 256,
           minzoom: 0,
-          maxzoom: 15,
-          attribution: '© <a href="https://s2maps.eu">Sentinel-2 cloudless</a> by <a href="https://eox.at">EOX IT Services GmbH</a>',
+          maxzoom: 11,
+        });
+      }
+      if (!map.getSource('sat-source')) {
+        map.addSource('sat-source', {
+          type: 'raster',
+          tiles: ['https://clarity.maptiles.arcgis.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+          tileSize: 256,
+          minzoom: 11,
+          maxzoom: 19,
         });
       }
       const layers = map.getStyle().layers;
       const firstLayerId = layers.length > 0 ? layers[0].id : undefined;
-      if (!map.getLayer('sat-layer-s2')) {
+      if (!map.getLayer('sat-layer-arcgis')) {
         map.addLayer({
-          id: 'sat-layer-s2', type: 'raster', source: 'sat-source-s2',
-          minzoom: 9, maxzoom: 15,
+          id: 'sat-layer-arcgis', type: 'raster', source: 'sat-source-arcgis',
+          maxzoom: 11,
+          paint: { 'raster-opacity': 1, 'raster-fade-duration': 0 },
+        }, firstLayerId);
+      }
+      if (!map.getLayer('sat-layer')) {
+        map.addLayer({
+          id: 'sat-layer', type: 'raster', source: 'sat-source',
+          minzoom: 11,
           paint: { 'raster-opacity': 1, 'raster-fade-duration': 0 },
         }, firstLayerId);
       }
     } else {
-      if (map.getLayer('sat-layer-s2')) map.removeLayer('sat-layer-s2');
-      if (map.getSource('sat-source-s2')) map.removeSource('sat-source-s2');
+      if (map.getLayer('sat-layer')) map.removeLayer('sat-layer');
+      if (map.getLayer('sat-layer-arcgis')) map.removeLayer('sat-layer-arcgis');
+      if (map.getSource('sat-source')) map.removeSource('sat-source');
+      if (map.getSource('sat-source-arcgis')) map.removeSource('sat-source-arcgis');
     }
 
     // Water opacity: 0.5 when satellite on (so imagery shows through), 0.6 otherwise

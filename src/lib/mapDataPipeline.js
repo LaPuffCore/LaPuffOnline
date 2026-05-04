@@ -67,17 +67,30 @@ function lngLatToTile(lng, lat, zoom) {
 }
 function precacheSatelliteTiles() {
   if (typeof window === 'undefined') return;
-  // Sentinel-2 cloudless 2021 (EOX IT) — single source z9-z15, no API key.
-  // To revert to 3-tier: restore the ARCGIS/WAYBACK/CLARITY url builders + loops below.
-  const S2 = (z, y, x) => `https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2021_3857/default/GoogleMapsCompatible/${z}/${y}/${x}.jpg`;
+  // 2-tier satellite precache (matches MapView sat-source-* layers):
+  //   z9-z10  → ArcGIS World Imagery (sharp low-zoom overview)
+  //   z11-z13 → Clarity (high-res cloudless mosaic — z13 tiles are the target quality;
+  //             Clarity z11/z12 are the same mosaic dataset, just coarser-resolution tiles)
+  const ARCGIS  = (z, y, x) => `https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`;
+  const CLARITY = (z, y, x) => `https://clarity.maptiles.arcgis.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`;
   const urls = [];
   const NYC = { lng1: -74.27, lat1: 40.47, lng2: -73.68, lat2: 40.93 };
-  for (const z of [9, 10, 11, 12, 13]) {
+
+  // ArcGIS z9-z10: full NYC bounding box
+  for (const z of [9, 10]) {
     const a = lngLatToTile(NYC.lng1, NYC.lat2, z), b = lngLatToTile(NYC.lng2, NYC.lat1, z);
     for (let x = a.x; x <= b.x; x++)
       for (let y = a.y; y <= b.y; y++)
-        urls.push(S2(z, y, x));
+        urls.push(ARCGIS(z, y, x));
   }
+  // Clarity z11-z13: full NYC bounding box
+  for (const z of [11, 12, 13]) {
+    const a = lngLatToTile(NYC.lng1, NYC.lat2, z), b = lngLatToTile(NYC.lng2, NYC.lat1, z);
+    for (let x = a.x; x <= b.x; x++)
+      for (let y = a.y; y <= b.y; y++)
+        urls.push(CLARITY(z, y, x));
+  }
+
   let active = 0, idx = 0;
   const MAX = 6;
   function next() {
