@@ -660,17 +660,21 @@ export async function runPhase2A(events, isMobile, onProgress) {
   // Fired at end of 2A so it doesn't block initial pipeline steps.
   // Note: dead loadCentroidsBin() call removed — building zip is baked into PMTiles features.
 
-  // ── Buildings PMTiles pre-warm (header only — full file NOT precached) ─────
-  // The 73MB file is too large for the SW full-file slice path (every Range
-  // request would decode the entire cached Response → mobile SW killed by iOS).
-  // Header pre-warm primes the PMTiles directory parser; subsequent Range
-  // requests are cached individually by the SW's per-Range fallback path.
+  // ── Buildings PMTiles pre-warm + desktop full-file SW pre-cache ──────────
+  // Desktop: PRECACHE_PMTILES tells SW to fetch the full 73MB file once.
+  // SW slice path (one large ArrayBuffer alloc per session, instant Range serves) is
+  // fine on desktop with adequate RAM.
+  // Mobile: full-file precache is skipped — 73MB alloc × 30+ Range requests per zoom
+  // = ~2GB memory churn → iOS Safari kills the SW silently → buildings never appear.
+  // On mobile the SW per-Range fallback path is used (caches individual range slices).
   report(P.bldgCache[0], 'Pre-warming building tiles...');
   const BUILDINGS_PMTILES_URL = (typeof window !== 'undefined')
     ? `${window.location.origin}${import.meta.env.BASE_URL}data/nyc_buildings.pmtiles`
     : '/data/nyc_buildings.pmtiles';
   fetch(BUILDINGS_PMTILES_URL, { headers: { Range: 'bytes=0-16383' } }).catch(() => {});
-  // No PRECACHE_PMTILES message — file is too large for safe full-file slicing.
+  if (!isMobile && navigator.serviceWorker?.controller) {
+    navigator.serviceWorker.controller.postMessage({ type: 'PRECACHE_PMTILES', url: BUILDINGS_PMTILES_URL });
+  }
   report(P.bldgCache[1], 'Building tiles ready');
 
   // ── Satellite SW precache (NYC bbox z9-z15) — last step, non-blocking ────

@@ -9,12 +9,11 @@ const SATELLITE_CACHE   = 'lapuff-satellite-v1';      // v1: ArcGIS/Wayback/Clar
 
 const MANAGED_CACHES = [PMTILES_CACHE, PMTILES_FULL_CACHE, STATIC_CACHE, SATELLITE_CACHE];
 
-// Full-file precache + in-memory slicing is FAST on desktop (one alloc per session)
-// but CATASTROPHIC for large files because every Range request decodes the entire
-// cached Response into an ArrayBuffer (e.g. 73MB × 30 requests = ~2GB of churn → iOS SW kill).
-// Only roads.pmtiles (~6MB) is small enough to safely use the slice path.
-// nyc_buildings.pmtiles (~73MB) uses the per-Range path (still cached, just one Range per request).
-const FULL_PMTILES_URL_PATTERNS = ['realfinaldeciroads.pmtiles'];
+// Full-file precache + in-memory slicing is FAST on desktop (one alloc per session,
+// instant Range serves). nyc_buildings.pmtiles (~73MB) is safe on desktop.
+// On mobile it is NOT precached (pipeline sends PRECACHE_PMTILES only if !isMobile),
+// so fullHit is always null on mobile → per-Range fallback is used automatically.
+const FULL_PMTILES_URL_PATTERNS = ['realfinaldeciroads.pmtiles', 'nyc_buildings.pmtiles'];
 
 // Satellite tile host patterns — intercepted and served cache-first from SATELLITE_CACHE
 const SATELLITE_HOST_PATTERNS = [
