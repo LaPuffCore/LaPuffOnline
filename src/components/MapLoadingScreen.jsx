@@ -221,7 +221,7 @@ export default function MapLoadingScreen({ events, onPhase2ADone, onComplete }) 
 
       {/* Subtitle */}
       {!isDone && (
-        <p className="text-white/50 text-xs md:text-sm text-center px-8 mb-8 max-w-md">
+        <p className="text-white/50 text-xs md:text-sm text-center px-8 mb-8 max-w-md truncate" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {isFirstLoad
             ? 'First load builds a full cache — subsequent loads will be much faster'
             : 'Validating and refreshing map cache…'}

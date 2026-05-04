@@ -2235,23 +2235,23 @@ export default function MapView({ events, headerCollapsed = false, interactive =
           };
           // Briefly add satellite raster sources during sweep so MapLibre fetches +
           // composites every satellite tile across NYC at every zoom. Cleared at end.
-          // 3-tier: ArcGIS z9-11, Wayback z11-13 (2018-01-18 lock), Clarity z13-15.
+          // 3-tier: ArcGIS z9-10, Wayback z11-12 (2018-01-18 lock), Clarity z13-16.
           const addSatLayersForWarmup = () => {
             try {
               const layersStyle = map.getStyle().layers;
               const firstLayerId = layersStyle.length > 0 ? layersStyle[0].id : undefined;
               if (!map.getSource('sat-source-arcgis')) {
-                map.addSource('sat-source-arcgis', { type: 'raster', tiles: ['https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'], tileSize: 256, minzoom: 0, maxzoom: 11 });
+                map.addSource('sat-source-arcgis', { type: 'raster', tiles: ['https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'], tileSize: 256, minzoom: 9, maxzoom: 10 });
               }
               if (!map.getSource('sat-source-wayback')) {
-                map.addSource('sat-source-wayback', { type: 'raster', tiles: ['https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/WMTS/1.0.0/default028mm/MapServer/tile/13045/{z}/{y}/{x}'], tileSize: 256, minzoom: 11, maxzoom: 13 });
+                map.addSource('sat-source-wayback', { type: 'raster', tiles: ['https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/WMTS/1.0.0/default028mm/MapServer/tile/13045/{z}/{y}/{x}'], tileSize: 256, minzoom: 11, maxzoom: 12 });
               }
               if (!map.getSource('sat-source')) {
-                map.addSource('sat-source', { type: 'raster', tiles: ['https://clarity.maptiles.arcgis.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'], tileSize: 256, minzoom: 13, maxzoom: 19 });
+                map.addSource('sat-source', { type: 'raster', tiles: ['https://clarity.maptiles.arcgis.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'], tileSize: 256, minzoom: 13, maxzoom: 16 });
               }
-              if (!map.getLayer('sat-layer-arcgis')) map.addLayer({ id: 'sat-layer-arcgis', type: 'raster', source: 'sat-source-arcgis', maxzoom: 12, paint: { 'raster-opacity': 0.01, 'raster-fade-duration': 0 } }, firstLayerId);
-              if (!map.getLayer('sat-layer-wayback')) map.addLayer({ id: 'sat-layer-wayback', type: 'raster', source: 'sat-source-wayback', minzoom: 10, maxzoom: 13, paint: { 'raster-opacity': 0.01, 'raster-fade-duration': 0 } }, firstLayerId);
-              if (!map.getLayer('sat-layer')) map.addLayer({ id: 'sat-layer', type: 'raster', source: 'sat-source', minzoom: 13, paint: { 'raster-opacity': 0.01, 'raster-fade-duration': 0 } }, firstLayerId);
+              if (!map.getLayer('sat-layer-arcgis')) map.addLayer({ id: 'sat-layer-arcgis', type: 'raster', source: 'sat-source-arcgis', maxzoom: 10, paint: { 'raster-opacity': 0.01, 'raster-fade-duration': 0 } }, firstLayerId);
+              if (!map.getLayer('sat-layer-wayback')) map.addLayer({ id: 'sat-layer-wayback', type: 'raster', source: 'sat-source-wayback', minzoom: 11, maxzoom: 12, paint: { 'raster-opacity': 0.01, 'raster-fade-duration': 0 } }, firstLayerId);
+              if (!map.getLayer('sat-layer')) map.addLayer({ id: 'sat-layer', type: 'raster', source: 'sat-source', minzoom: 13, maxzoom: 16, paint: { 'raster-opacity': 0.01, 'raster-fade-duration': 0 } }, firstLayerId);
             } catch (_e) { /* */ }
           };
           const removeSatLayersAfterWarmup = () => {
@@ -3013,8 +3013,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
           type: 'raster',
           tiles: ['https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
           tileSize: 256,
-          minzoom: 0,
-          maxzoom: 11,
+          minzoom: 9,
+          maxzoom: 10,
         });
       }
       if (!map.getSource('sat-source-wayback')) {
@@ -3023,7 +3023,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
           tiles: ['https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/WMTS/1.0.0/default028mm/MapServer/tile/13045/{z}/{y}/{x}'],
           tileSize: 256,
           minzoom: 11,
-          maxzoom: 13,
+          maxzoom: 12,
         });
       }
       if (!map.getSource('sat-source')) {
@@ -3032,7 +3032,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
           tiles: ['https://clarity.maptiles.arcgis.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
           tileSize: 256,
           minzoom: 13,
-          maxzoom: 19,
+          maxzoom: 16,
         });
       }
       const layers = map.getStyle().layers;
@@ -3040,21 +3040,21 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       if (!map.getLayer('sat-layer-arcgis')) {
         map.addLayer({
           id: 'sat-layer-arcgis', type: 'raster', source: 'sat-source-arcgis',
-          maxzoom: 12,  // overlaps with wayback z10-12 so wayback tiles are loaded before arcgis hides
+          maxzoom: 10,  // arcgis only for z9-10
           paint: { 'raster-opacity': 1, 'raster-fade-duration': 0 },
         }, firstLayerId);
       }
       if (!map.getLayer('sat-layer-wayback')) {
         map.addLayer({
           id: 'sat-layer-wayback', type: 'raster', source: 'sat-source-wayback',
-          minzoom: 10, maxzoom: 13,  // starts loading at z10 so tiles are ready before z11 handoff
+          minzoom: 11, maxzoom: 12,  // wayback for z11-12
           paint: { 'raster-opacity': 1, 'raster-fade-duration': 0 },
         }, firstLayerId);
       }
       if (!map.getLayer('sat-layer')) {
         map.addLayer({
           id: 'sat-layer', type: 'raster', source: 'sat-source',
-          minzoom: 13,
+          minzoom: 13, maxzoom: 16,
           paint: { 'raster-opacity': 1, 'raster-fade-duration': 0 },
         }, firstLayerId);
       }

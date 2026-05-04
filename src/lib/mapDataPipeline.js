@@ -58,18 +58,18 @@ function precacheSatelliteTiles() {
       for (let y = a.y; y <= b.y; y++)
         urls.push(WAYBACK(z, y, x));
   }
-  // Clarity z13-z15: NYC tight bbox only (z15 is the trade-off — sacrificing non-NYC bbox at lower zooms)
-  for (const z of [13, 14, 15]) {
+  // Clarity z13-z16: NYC tight bbox only (z15/16 are high-res trade-offs)
+  for (const z of [13, 14, 15, 16]) {
     const a = lngLatToTile(NYC.lng1, NYC.lat2, z), b = lngLatToTile(NYC.lng2, NYC.lat1, z);
     for (let x = a.x; x <= b.x; x++)
       for (let y = a.y; y <= b.y; y++)
         urls.push(CLARITY(z, y, x));
   }
 
-  // Mobile: drop z14-z15 to keep cache footprint manageable (~10MB vs ~45MB).
+  // Mobile: drop z15-z16 to keep cache footprint manageable (mobile precache up to z14).
   // Mobile satellite quality stays as-is per user preference; can be tuned later.
   const isMobile = window.innerWidth < 768;
-  const finalUrls = isMobile ? urls.filter(u => !/\/(14|15)\//.test(u)) : urls;
+  const finalUrls = isMobile ? urls.filter(u => !/\/(15|16)\//.test(u)) : urls;
 
   // Send to SW for cache.put (persists across sessions). SW handles parallel fetch with concurrency cap.
   if (navigator.serviceWorker?.controller) {
