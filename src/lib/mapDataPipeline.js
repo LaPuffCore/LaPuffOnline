@@ -67,11 +67,12 @@ function lngLatToTile(lng, lat, zoom) {
 }
 function precacheSatelliteTiles() {
   if (typeof window === 'undefined') return;
-  // 2-tier satellite precache (matches MapView sat-source-* layers):
-  //   z9-z10  → ArcGIS World Imagery (sharp low-zoom overview)
-  //   z11-z13 → Clarity (high-res cloudless mosaic — z13 tiles are the target quality;
-  //             Clarity z11/z12 are the same mosaic dataset, just coarser-resolution tiles)
+  // 3-tier satellite precache (matches MapView sat-source-* layers):
+  //   z9-z10  → ArcGIS World Imagery
+  //   z11-z12 → Esri Wayback release 13045 (2018-01-18 timestamp-locked mosaic)
+  //   z13     → Clarity (high-res NYC mosaic — the quality tier we want at street zoom)
   const ARCGIS  = (z, y, x) => `https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`;
+  const WAYBACK = (z, y, x) => `https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/WMTS/1.0.0/default028mm/MapServer/tile/13045/${z}/${y}/${x}`;
   const CLARITY = (z, y, x) => `https://clarity.maptiles.arcgis.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`;
   const urls = [];
   const NYC = { lng1: -74.27, lat1: 40.47, lng2: -73.68, lat2: 40.93 };
@@ -83,8 +84,16 @@ function precacheSatelliteTiles() {
       for (let y = a.y; y <= b.y; y++)
         urls.push(ARCGIS(z, y, x));
   }
-  // Clarity z11-z13: full NYC bounding box
-  for (const z of [11, 12, 13]) {
+  // Wayback z11-z12: NYC tight bbox
+  for (const z of [11, 12]) {
+    const a = lngLatToTile(NYC.lng1, NYC.lat2, z), b = lngLatToTile(NYC.lng2, NYC.lat1, z);
+    for (let x = a.x; x <= b.x; x++)
+      for (let y = a.y; y <= b.y; y++)
+        urls.push(WAYBACK(z, y, x));
+  }
+  // Clarity z13: NYC tight bbox (the primary high-zoom quality tier)
+  {
+    const z = 13;
     const a = lngLatToTile(NYC.lng1, NYC.lat2, z), b = lngLatToTile(NYC.lng2, NYC.lat1, z);
     for (let x = a.x; x <= b.x; x++)
       for (let y = a.y; y <= b.y; y++)
