@@ -2211,18 +2211,33 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         try {
           const origCenter = map.getCenter();
           const origZoom = map.getZoom();
-          // 5 borough centers + Manhattan extras — covers the entire NYC tile grid
-          const samples = [
-            [-73.97, 40.78],   // Manhattan north
-            [-73.99, 40.73],   // Manhattan mid
-            [-74.01, 40.70],   // Manhattan south
-            [-73.95, 40.68],   // Brooklyn
-            [-73.79, 40.72],   // Queens
-            [-73.87, 40.84],   // Bronx
-            [-74.15, 40.58],   // Staten Island
-          ];
-          // Walk through key zooms — z9-12 for outline/road wide views, z13-16 for close detail
-          const zooms = [9, 10, 11, 12, 13, 14, 15, 16];
+
+          // ── Aggressive grid-based warm sweep ──────────────────────────────
+          // Goal: cover the ENTIRE NYC bbox at every integer zoom so MapLibre
+          // fetches + parses every vector tile (water, roads, buildings, outlines)
+          // and compiles every fill-extrusion paint shader. Tiles land in the session
+          // tile cache so subsequent pans/zooms in-session have zero fetch cost.
+          //
+          // Tile-grid sweep counts (NYC bbox ~25mi × 25mi):
+          //   z9-10  : 1 jump (whole NYC fits in screen at min zoom)
+          //   z11    : 2 jumps (W/E split)
+          //   z12    : 4 jumps (2×2)
+          //   z13    : 9 jumps (3×3)
+          //   z14-16 : 16 jumps (4×4) — tile-dense, GPU stress test
+          // Total ≈ 65 jumps. RAF-paced ≈ 1s on desktop.
+          const NYC_BBOX = { lng1: -74.27, lat1: 40.47, lng2: -73.68, lat2: 40.93 };
+          const gridForZoom = (z, divs) => {
+            const pts = [];
+            const dLng = (NYC_BBOX.lng2 - NYC_BBOX.lng1) / divs;
+            const dLat = (NYC_BBOX.lat2 - NYC_BBOX.lat1) / divs;
+            for (let i = 0; i < divs; i++) {
+              for (let j = 0; j < divs; j++) {
+                pts.push([NYC_BBOX.lng1 + dLng * (i + 0.5), NYC_BBOX.lat1 + dLat * (j + 0.5)]);
+              }
+            }
+            return pts;
+          };
+
           const realLayers = REAL3D_ALL_LAYER_IDS;
           const setRealVis = (vis) => {
             for (const id of realLayers) {
@@ -2231,36 +2246,83 @@ export default function MapView({ events, headerCollapsed = false, interactive =
               }
             }
           };
-          // Build full sweep: for each zoom, jump to each sample point
-          const sweep = [];
-          for (const z of zooms) {
-            for (const c of samples) sweep.push({ center: c, zoom: z });
-          }
-          // 3D-mode warm: at high zooms briefly enable extruded ZCTA/upper-border opacity
-          // so MapLibre compiles their fill-extrusion paint shaders (otherwise first 3D
-          // toggle in-session triggers a compile hang).
           const setExtruded3D = (on) => {
             try {
               if (map.getLayer('zcta-extrude')) map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', on ? 0.9 : 0);
               if (map.getLayer('zcta-outline')) map.setPaintProperty('zcta-outline', 'fill-extrusion-opacity', on ? 0.95 : 0);
             } catch (_e) { /* */ }
           };
+          // Briefly enable heat-underlay during sweep so heatmap shaders compile too.
+          const setHeatVis = (on) => {
+            if (map.getLayer('heat-underlay')) {
+              try { map.setPaintProperty('heat-underlay', 'heatmap-opacity', on ? 0.5 : 0); } catch (_e) { /* */ }
+            }
+          };
+          // Briefly add satellite raster sources during sweep so MapLibre fetches +
+          // composites every satellite tile across NYC at every zoom. Cleared at end.
+          const addSatLayersForWarmup = () => {
+            try {
+              const layersStyle = map.getStyle().layers;
+              const firstLayerId = layersStyle.length > 0 ? layersStyle[0].id : undefined;
+              if (!map.getSource('sat-source-arcgis')) {
+                map.addSource('sat-source-arcgis', { type: 'raster', tiles: ['https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'], tileSize: 256, minzoom: 0, maxzoom: 11 });
+              }
+              if (!map.getSource('sat-source-wayback')) {
+                map.addSource('sat-source-wayback', { type: 'raster', tiles: ['https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/WMTS/1.0.0/default028mm/MapServer/tile/13045/{z}/{y}/{x}'], tileSize: 256, minzoom: 11, maxzoom: 13 });
+              }
+              if (!map.getSource('sat-source')) {
+                map.addSource('sat-source', { type: 'raster', tiles: ['https://clarity.maptiles.arcgis.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'], tileSize: 256, minzoom: 13, maxzoom: 19 });
+              }
+              if (!map.getLayer('sat-layer-arcgis')) map.addLayer({ id: 'sat-layer-arcgis', type: 'raster', source: 'sat-source-arcgis', maxzoom: 11, paint: { 'raster-opacity': 0.01, 'raster-fade-duration': 0 } }, firstLayerId);
+              if (!map.getLayer('sat-layer-wayback')) map.addLayer({ id: 'sat-layer-wayback', type: 'raster', source: 'sat-source-wayback', minzoom: 11, maxzoom: 13, paint: { 'raster-opacity': 0.01, 'raster-fade-duration': 0 } }, firstLayerId);
+              if (!map.getLayer('sat-layer')) map.addLayer({ id: 'sat-layer', type: 'raster', source: 'sat-source', minzoom: 13, paint: { 'raster-opacity': 0.01, 'raster-fade-duration': 0 } }, firstLayerId);
+            } catch (_e) { /* */ }
+          };
+          const removeSatLayersAfterWarmup = () => {
+            // Only remove if the user hasn't toggled satellite ON in the meantime.
+            // satellite state is captured by the satellite useEffect; check by ref.
+            if (satellite) return; // user already wants them — leave them
+            try {
+              if (map.getLayer('sat-layer')) map.removeLayer('sat-layer');
+              if (map.getLayer('sat-layer-wayback')) map.removeLayer('sat-layer-wayback');
+              if (map.getLayer('sat-layer-arcgis')) map.removeLayer('sat-layer-arcgis');
+              if (map.getSource('sat-source')) map.removeSource('sat-source');
+              if (map.getSource('sat-source-wayback')) map.removeSource('sat-source-wayback');
+              if (map.getSource('sat-source-arcgis')) map.removeSource('sat-source-arcgis');
+            } catch (_e) { /* */ }
+          };
+
+          addSatLayersForWarmup();
+
+          // Build the full sweep: tile-dense grid per zoom
+          const sweep = [];
+          for (const z of [9, 10]) for (const c of gridForZoom(z, 1)) sweep.push({ center: c, zoom: z });
+          for (const c of gridForZoom(11, 2)) sweep.push({ center: c, zoom: 11 });
+          for (const c of gridForZoom(12, 2)) sweep.push({ center: c, zoom: 12 });
+          for (const c of gridForZoom(13, 3)) sweep.push({ center: c, zoom: 13 });
+          for (const z of [14, 15, 16]) for (const c of gridForZoom(z, 4)) sweep.push({ center: c, zoom: z });
+
           let i = 0;
           const step = () => {
             if (i >= sweep.length) {
-              // Restore: default 2D state — original camera, no pitch/bearing, all Real3D layers hidden.
+              // Restore: default 2D state — original camera, no pitch/bearing,
+              // all Real3D layers hidden, satellite removed (unless user enabled it),
+              // heat-underlay opacity off, 3D extrusions off.
               setRealVis('none');
               setExtruded3D(false);
+              setHeatVis(false);
+              removeSatLayersAfterWarmup();
               map.jumpTo({ center: origCenter, zoom: origZoom, pitch: 0, bearing: 0 });
               mapCacheStore.warmupComplete = true;
               return;
             }
             const { center, zoom } = sweep[i++];
-            // At z=14+ briefly show Real3D layers to compile fill-extrusion shaders
-            // and warm a sampling of building tiles into the cache.
-            setRealVis(zoom >= 14 ? 'visible' : 'none');
-            // At z>=11 briefly enable 3D extrusions so their paint expressions compile.
+            // Briefly show Real3D layers at z>=13 (baseplates start there)
+            setRealVis(zoom >= 13 ? 'visible' : 'none');
+            // 3D extrusion shader compile at z>=11
             setExtruded3D(zoom >= 11);
+            // Heatmap underlay shader compile at all zooms briefly
+            setHeatVis(true);
             map.jumpTo({ center, zoom, pitch: zoom >= 11 ? 48 : 0, bearing: zoom >= 11 ? -17 : 0 });
             requestAnimationFrame(step);
           };
@@ -2841,7 +2903,6 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     if (!map || !mapReady) return;
     let prevZoom = map.getZoom();
     let rafId = null;
-    let mobileVpTimer = null;
     const isMob = window.innerWidth < 768;
 
     const doOutlineRebuild = () => {
@@ -2914,14 +2975,35 @@ export default function MapView({ events, headerCollapsed = false, interactive =
 
       prevZoom = zoom;
     };
+
+    // ── Safety nets ────────────────────────────────────────────────────────
+    // zoomend: force a full outline rebuild after a zoom completes — guarantees
+    //   the final integer-zoom band has fresh quad geometry even if the in-progress
+    //   debounce was cancelled mid-flight.
+    // moveend: cheap building/baseplate paint refresh after a pan completes.
+    //   PMTiles streams tiles natively, but the heatmap tier expression is a
+    //   per-zip match expression that benefits from a final paint touch on settle.
+    const onZoomEnd = () => { try { doOutlineRebuild(); } catch (_e) { /* */ } };
+    const onMoveEnd = () => {
+      const isR3D = real3DRef.current;
+      if (!isR3D) return;
+      const zoom = map.getZoom();
+      // Only refresh buildings/baseplates layers that exist at the current zoom.
+      if (zoom >= 13 && (map.getLayer('real3d-buildings') || map.getLayer('real3d-buildings-baseplate'))) {
+        try { refreshBuildingColors(); } catch (_e) { /* */ }
+      }
+    };
     map.on('zoom', onZoom);
     map.on('pitch', onZoom);
+    map.on('zoomend', onZoomEnd);
+    map.on('moveend', onMoveEnd);
     return () => {
       map.off('zoom', onZoom);
       map.off('pitch', onZoom);
+      map.off('zoomend', onZoomEnd);
+      map.off('moveend', onMoveEnd);
       if (!isMob && rafId) cancelAnimationFrame(rafId);
       else if (rafId) clearTimeout(rafId);
-      if (mobileVpTimer) clearTimeout(mobileVpTimer);
     };
   }, [mapReady]);
 

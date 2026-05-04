@@ -67,43 +67,44 @@ function lngLatToTile(lng, lat, zoom) {
 }
 function precacheSatelliteTiles() {
   if (typeof window === 'undefined') return;
-  // Satellite tile strategy (3 zoom levels):
-  //   z10: full viewport bbox — ocean baseplate, ~50 tiles
-  //   z11: NYC bounds — borough-level detail, ~30 tiles
-  //   z12: inner NYC — block-level detail for typical map zoom, ~50 tiles
-  // maxzoom in MapView sat source is now 12; MapLibre requests z10/11/12 depending
-  // on viewport zoom. Pre-caching all three prevents first-toggle stutter.
-  const ARCGIS_TILE = (z, y, x) =>
-    `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`;
+  // 3-tier hybrid satellite strategy (matches MapView sat-source-* layers):
+  //   z<11    → ArcGIS World Imagery (sharp at low zoom, free CDN)
+  //   z=11-12 → Esri Wayback release 13045 (2018-01-18) — uniform mosaic for awkward middle range
+  //   z=13    → Clarity (uniform NYC mosaic at high zoom; Maplibre fetches z14+ on demand)
+  // Pre-fetching all 3 tiers warms the browser HTTP cache so the first satellite toggle
+  // and any pan/zoom across NYC at z<=13 is instant. ~250 tiles total, ~10MB.
+  const ARCGIS  = (z, y, x) => `https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`;
+  const WAYBACK = (z, y, x) => `https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/WMTS/1.0.0/default028mm/MapServer/tile/13045/${z}/${y}/${x}`;
+  const CLARITY = (z, y, x) => `https://clarity.maptiles.arcgis.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`;
   const urls = [];
 
-  // z10: full MapLibre maxBounds
-  {
-    const z = 10, lng1 = -75.50, lat1 = 40.00, lng2 = -72.50, lat2 = 41.50;
+  // ArcGIS z9-10: full maxBounds (covers ocean / out-of-NYC pan)
+  for (const z of [9, 10]) {
+    const lng1 = -75.50, lat1 = 40.00, lng2 = -72.50, lat2 = 41.50;
     const a = lngLatToTile(lng1, lat2, z), b = lngLatToTile(lng2, lat1, z);
     for (let x = a.x; x <= b.x; x++)
       for (let y = a.y; y <= b.y; y++)
-        urls.push(ARCGIS_TILE(z, y, x));
+        urls.push(ARCGIS(z, y, x));
   }
-  // z11: NYC tight bbox
-  {
-    const z = 11, lng1 = -74.27, lat1 = 40.47, lng2 = -73.68, lat2 = 40.93;
+  // Wayback z11-12: NYC tight bbox (the awkward middle range our hybrid covers)
+  for (const z of [11, 12]) {
+    const lng1 = -74.27, lat1 = 40.47, lng2 = -73.68, lat2 = 40.93;
     const a = lngLatToTile(lng1, lat2, z), b = lngLatToTile(lng2, lat1, z);
     for (let x = a.x; x <= b.x; x++)
       for (let y = a.y; y <= b.y; y++)
-        urls.push(ARCGIS_TILE(z, y, x));
+        urls.push(WAYBACK(z, y, x));
   }
-  // z12: NYC tight bbox (~4× tile count vs z11, ~50 tiles)
+  // Clarity z13: NYC tight bbox (one zoom is enough — Maplibre overzooms z14-16 from z13)
   {
-    const z = 12, lng1 = -74.27, lat1 = 40.47, lng2 = -73.68, lat2 = 40.93;
+    const z = 13, lng1 = -74.27, lat1 = 40.47, lng2 = -73.68, lat2 = 40.93;
     const a = lngLatToTile(lng1, lat2, z), b = lngLatToTile(lng2, lat1, z);
     for (let x = a.x; x <= b.x; x++)
       for (let y = a.y; y <= b.y; y++)
-        urls.push(ARCGIS_TILE(z, y, x));
+        urls.push(CLARITY(z, y, x));
   }
-  // ~130 tiles total, ~5MB. Throttled at 4 concurrent (polite, no rate-limit risk).
+  // Throttled at 6 concurrent (polite, no rate-limit risk).
   let active = 0, idx = 0;
-  const MAX = 4;
+  const MAX = 6;
   function next() {
     while (active < MAX && idx < urls.length) {
       active++;
