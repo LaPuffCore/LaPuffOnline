@@ -2260,7 +2260,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
           };
           // Briefly add satellite raster sources during sweep so MapLibre fetches +
           // composites every satellite tile across NYC at every zoom. Cleared at end.
-          // 2-tier: ArcGIS z9-11 (sharp low-zoom), Clarity z11-15 (high-res from z11+).
+          // 3-tier: ArcGIS z9-11, Wayback z11-13 (2018-01-18 lock), Clarity z13-15.
           const addSatLayersForWarmup = () => {
             try {
               const layersStyle = map.getStyle().layers;
@@ -2268,19 +2268,25 @@ export default function MapView({ events, headerCollapsed = false, interactive =
               if (!map.getSource('sat-source-arcgis')) {
                 map.addSource('sat-source-arcgis', { type: 'raster', tiles: ['https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'], tileSize: 256, minzoom: 0, maxzoom: 11 });
               }
+              if (!map.getSource('sat-source-wayback')) {
+                map.addSource('sat-source-wayback', { type: 'raster', tiles: ['https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/WMTS/1.0.0/default028mm/MapServer/tile/13045/{z}/{y}/{x}'], tileSize: 256, minzoom: 11, maxzoom: 13 });
+              }
               if (!map.getSource('sat-source')) {
-                map.addSource('sat-source', { type: 'raster', tiles: ['https://clarity.maptiles.arcgis.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'], tileSize: 256, minzoom: 11, maxzoom: 19 });
+                map.addSource('sat-source', { type: 'raster', tiles: ['https://clarity.maptiles.arcgis.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'], tileSize: 256, minzoom: 13, maxzoom: 19 });
               }
               if (!map.getLayer('sat-layer-arcgis')) map.addLayer({ id: 'sat-layer-arcgis', type: 'raster', source: 'sat-source-arcgis', maxzoom: 11, paint: { 'raster-opacity': 0.01, 'raster-fade-duration': 0 } }, firstLayerId);
-              if (!map.getLayer('sat-layer')) map.addLayer({ id: 'sat-layer', type: 'raster', source: 'sat-source', minzoom: 11, paint: { 'raster-opacity': 0.01, 'raster-fade-duration': 0 } }, firstLayerId);
+              if (!map.getLayer('sat-layer-wayback')) map.addLayer({ id: 'sat-layer-wayback', type: 'raster', source: 'sat-source-wayback', minzoom: 11, maxzoom: 13, paint: { 'raster-opacity': 0.01, 'raster-fade-duration': 0 } }, firstLayerId);
+              if (!map.getLayer('sat-layer')) map.addLayer({ id: 'sat-layer', type: 'raster', source: 'sat-source', minzoom: 13, paint: { 'raster-opacity': 0.01, 'raster-fade-duration': 0 } }, firstLayerId);
             } catch (_e) { /* */ }
           };
           const removeSatLayersAfterWarmup = () => {
             if (satellite) return;
             try {
               if (map.getLayer('sat-layer')) map.removeLayer('sat-layer');
+              if (map.getLayer('sat-layer-wayback')) map.removeLayer('sat-layer-wayback');
               if (map.getLayer('sat-layer-arcgis')) map.removeLayer('sat-layer-arcgis');
               if (map.getSource('sat-source')) map.removeSource('sat-source');
+              if (map.getSource('sat-source-wayback')) map.removeSource('sat-source-wayback');
               if (map.getSource('sat-source-arcgis')) map.removeSource('sat-source-arcgis');
             } catch (_e) { /* */ }
           };
@@ -3009,10 +3015,11 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     if (!map || !mapReady) return;
 
     if (satellite) {
-      // 2-tier satellite:
-      //   z9-11  → ArcGIS World Imagery (sharp low-zoom overview)
-      //   z11-19 → Clarity (high-res cloudless mosaic — same tiles used at z13+,
-      //            also shown at z11-12 so there is one clean crossover with no Wayback)
+      // 3-tier satellite (restored — matches the proven tile quality mix):
+      //   z<11   → ArcGIS World Imagery (sharp at low zoom, free)
+      //   z=11-12→ Esri Wayback release 13045 (2018-01-18) — timestamp-locked mosaic,
+      //            avoids the blurry/inconsistent tiles clarity serves at these zooms
+      //   z≥13   → Clarity (uniform high-res NYC mosaic at high zoom)
       if (!map.getSource('sat-source-arcgis')) {
         map.addSource('sat-source-arcgis', {
           type: 'raster',
@@ -3022,12 +3029,21 @@ export default function MapView({ events, headerCollapsed = false, interactive =
           maxzoom: 11,
         });
       }
+      if (!map.getSource('sat-source-wayback')) {
+        map.addSource('sat-source-wayback', {
+          type: 'raster',
+          tiles: ['https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/WMTS/1.0.0/default028mm/MapServer/tile/13045/{z}/{y}/{x}'],
+          tileSize: 256,
+          minzoom: 11,
+          maxzoom: 13,
+        });
+      }
       if (!map.getSource('sat-source')) {
         map.addSource('sat-source', {
           type: 'raster',
           tiles: ['https://clarity.maptiles.arcgis.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
           tileSize: 256,
-          minzoom: 11,
+          minzoom: 13,
           maxzoom: 19,
         });
       }
@@ -3040,17 +3056,26 @@ export default function MapView({ events, headerCollapsed = false, interactive =
           paint: { 'raster-opacity': 1, 'raster-fade-duration': 0 },
         }, firstLayerId);
       }
+      if (!map.getLayer('sat-layer-wayback')) {
+        map.addLayer({
+          id: 'sat-layer-wayback', type: 'raster', source: 'sat-source-wayback',
+          minzoom: 11, maxzoom: 13,
+          paint: { 'raster-opacity': 1, 'raster-fade-duration': 0 },
+        }, firstLayerId);
+      }
       if (!map.getLayer('sat-layer')) {
         map.addLayer({
           id: 'sat-layer', type: 'raster', source: 'sat-source',
-          minzoom: 11,
+          minzoom: 13,
           paint: { 'raster-opacity': 1, 'raster-fade-duration': 0 },
         }, firstLayerId);
       }
     } else {
       if (map.getLayer('sat-layer')) map.removeLayer('sat-layer');
+      if (map.getLayer('sat-layer-wayback')) map.removeLayer('sat-layer-wayback');
       if (map.getLayer('sat-layer-arcgis')) map.removeLayer('sat-layer-arcgis');
       if (map.getSource('sat-source')) map.removeSource('sat-source');
+      if (map.getSource('sat-source-wayback')) map.removeSource('sat-source-wayback');
       if (map.getSource('sat-source-arcgis')) map.removeSource('sat-source-arcgis');
     }
 
