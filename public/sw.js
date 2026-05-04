@@ -1,8 +1,8 @@
 // LaPuff Service Worker — PMTiles full-file pre-warm + Range slicing + static GeoJSON cache + satellite tile cache.
-const SW_VERSION = 'lapuff-sw-v14';
+const SW_VERSION = 'lapuff-sw-v15';
 
 // Cache names (must match mapDataPipeline.js)
-const PMTILES_CACHE     = 'lapuff-pmtiles-sw-v3';     // v3: per-Range responses (fallback)
+const PMTILES_CACHE     = 'lapuff-pmtiles-sw-v4';     // v4: per-Range responses keyed by URL+Range (mobile fallback)
 const PMTILES_FULL_CACHE = 'lapuff-pmtiles-full-v6';  // v6: borough-FGB rebuild + SW v11
 const STATIC_CACHE      = 'lapuff-static-v1';         // v1: ZCTA + borough + water GeoJSON
 const SATELLITE_CACHE   = 'lapuff-satellite-v1';      // v1: ArcGIS/Wayback/Clarity raster tiles (cross-session persistent)
@@ -168,15 +168,19 @@ async function handlePMTiles(request) {
     } catch (e) { /* fall through to per-range cache */ }
   }
 
-  // Fallback: per-Range cache (works for any PMTiles, including partial pre-warm)
+  // Fallback: per-Range cache keyed by URL + Range header (mobile path).
+  // IMPORTANT: Cache API match uses URL-only by default, ignoring Range headers.
+  // Using a composite key ensures different byte ranges get separate cache entries.
+  const rangeHeader = request.headers.get('range') || '';
+  const compositeKey = request.url + '||range=' + rangeHeader;
   const cache = await caches.open(PMTILES_CACHE);
-  const hit = await cache.match(request);
+  const hit = await cache.match(compositeKey);
   if (hit) return hit;
 
   try {
     const resp = await fetch(request.clone());
     if (resp.ok || resp.status === 206) {
-      cache.put(request, resp.clone()).catch(() => {});
+      cache.put(compositeKey, resp.clone()).catch(() => {});
     }
     return resp;
   } catch (err) {

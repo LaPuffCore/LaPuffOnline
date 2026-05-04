@@ -2252,8 +2252,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
               if (!map.getSource('sat-source')) {
                 map.addSource('sat-source', { type: 'raster', tiles: ['https://clarity.maptiles.arcgis.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'], tileSize: 256, minzoom: 0, maxzoom: 19 });
               }
-              if (!map.getLayer('sat-layer-arcgis')) map.addLayer({ id: 'sat-layer-arcgis', type: 'raster', source: 'sat-source-arcgis', minzoom: 9, maxzoom: 11, paint: { 'raster-opacity': 0.01, 'raster-fade-duration': 0 } }, firstLayerId);
-              if (!map.getLayer('sat-layer-wayback')) map.addLayer({ id: 'sat-layer-wayback', type: 'raster', source: 'sat-source-wayback', minzoom: 11, maxzoom: 13, paint: { 'raster-opacity': 0.01, 'raster-fade-duration': 0 } }, firstLayerId);
+              if (!map.getLayer('sat-layer-arcgis')) map.addLayer({ id: 'sat-layer-arcgis', type: 'raster', source: 'sat-source-arcgis', minzoom: 9, maxzoom: 10, paint: { 'raster-opacity': 0.01, 'raster-fade-duration': 0 } }, firstLayerId);
+              if (!map.getLayer('sat-layer-wayback')) map.addLayer({ id: 'sat-layer-wayback', type: 'raster', source: 'sat-source-wayback', minzoom: 10, maxzoom: 13, paint: { 'raster-opacity': 0.01, 'raster-fade-duration': 0 } }, firstLayerId);
               if (!map.getLayer('sat-layer')) map.addLayer({ id: 'sat-layer', type: 'raster', source: 'sat-source', minzoom: 13, maxzoom: 17, paint: { 'raster-opacity': 0.01, 'raster-fade-duration': 0 } }, firstLayerId);
             } catch (_e) { /* */ }
           };
@@ -3047,14 +3047,14 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       if (!map.getLayer('sat-layer-arcgis')) {
         map.addLayer({
           id: 'sat-layer-arcgis', type: 'raster', source: 'sat-source-arcgis',
-          minzoom: 9, maxzoom: 11,  // visible z9-z10 (maxzoom exclusive)
+          minzoom: 9, maxzoom: 10,  // visible z9 only (z9.0-z9.999)
           paint: { 'raster-opacity': 1, 'raster-fade-duration': 0 },
         }, firstLayerId);
       }
       if (!map.getLayer('sat-layer-wayback')) {
         map.addLayer({
           id: 'sat-layer-wayback', type: 'raster', source: 'sat-source-wayback',
-          minzoom: 11, maxzoom: 13,  // visible z11-z12 (maxzoom exclusive)
+          minzoom: 10, maxzoom: 13,  // visible z10-z12 (maxzoom exclusive)
           paint: { 'raster-opacity': 1, 'raster-fade-duration': 0 },
         }, firstLayerId);
       }
