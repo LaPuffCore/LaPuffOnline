@@ -3367,21 +3367,18 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     // so heatmap tier expressions work without any per-toggle setup.
     // 1. Paint first: correct colors baked into GPU expression before first frame.
     // 2. Visibility: all layers sync (water→roads→buildings order = correct occlusion frame 1).
-    // 3. setLight + easeTo: tilt camera; also snap to z13 if below threshold so buildings are visible.
+    // 3. setLight + easeTo: tilt camera only (NO zoom snap — user controls zoom themselves).
     if (!real3dLayersCreatedRef.current) {
       initReal3DLayers(map, isHm, timespanIdxRef.current ?? 2);
-      setReal3DLayersVisible(map, true); // defensive: ensure visible even if initReal3DLayers misses it
     } else {
       refreshBuildingColors();
       setReal3DLayersVisible(map, true);
     }
     map.setLight({ anchor: 'map' });
-    // Snap to z13 if below — PMTiles data starts at z13, buildings invisible at lower zooms.
-    const curZoom = map.getZoom();
+    // Tilt only — no zoom change. Buildings render naturally once user is at z13+.
     map.easeTo({
       pitch: 55,
       bearing: -17,
-      ...(curZoom < 13 ? { zoom: 13 } : {}),
       duration: 700,
     });
   }, [real3D, mapReady]);
