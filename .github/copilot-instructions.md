@@ -335,6 +335,68 @@ borough-outline (fill-extrusion, unrestricted, topmost)
 - 2D fill layers and fill-extrusion layers render in SEPARATE GPU passes. Fill-extrusions ALWAYS render above 2D fills regardless of layer order. Only `moveLayer` ordering within the same layer type matters.
 - Fill-extrusion opacity < 1.0 (e.g., 0.92) forces MapLibre to use framebuffer compositing, which hides tile-seam Z-fighting artifacts. Use this trick for any fill-extrusion that shows tile seams.
 
+### MapView — Today's Major Architecture Changes (2026-05-04, commits a9402e6 → afa4e7a)
+
+**Migration: FGB → PMTiles for Real3D buildings (e1bd102)**
+- Why: 5 borough FGBs (196MB total) caused mobile OOM, slow main-thread parse (~6-10s cold), and required complex IDB caching. PMTiles streams natively via `pmtiles://` protocol — MapLibre Range-requests tiles as needed.
+- File: `public/data/nyc_buildings.pmtiles` (~73MB, z13–16, source-layer `building`).
+- Per-feature props: `{ z=zip, b=bid, h=height_m, m=min_height, c=colour }`.
+- Tippecanoe build flags: `--detect-shared-borders --coalesce-densest-as-needed --no-clipping --buffer=0` for seam dedup at build-time. **NO client-side feature-state dedup** — that approach paints features transparent globally (IDs are global to source-layer) AND OOMs from unbounded querySourceFeatures + Set growth.
+- Tier coloring: PMTiles features carry zip in `z` property. Paint expression uses `[match, ['get', 'z'], ...zipToTierIndexArr]` from `precomputedTiersRef` + `geoData` zip lookup. `refreshBuildingColors()` rebuilds the expression on heatmap/timespan change; `setPaintProperty` GPU-side swap is near-instant.
+- All FGB code dead: `parseFGBBuffer`, `bakeAllTiersIntoBuildings`, `fetchViewportBuildings` are no-op stubs. `buildingFGBRef`, `buildingZctaMapRef`, `fgbLoadingRef`, `zctaBboxesRef`, `fgbCacheStatusRef` are dead refs (left in for safety; can be removed in cleanup pass).
+
+**PMTiles rebuild from borough FGBs (b334390 + 1396ce9)**
+- Initial PMTiles had visible seams + duplicate features at borough boundaries. Rebuilt with `--no-clipping --buffer=0` and `--detect-shared-borders --coalesce-densest-as-needed`. Final file is ~73MB, fully deduped.
+
+**3-tier satellite hybrid stack (1d4b8f7)**
+- `z9–10`: ArcGIS World Imagery (`https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}`) — broad coverage, lower res OK.
+- `z11–12`: USGS Wayback imagery dated `2018-01-18` (release `13045`) — older, sharper z11/z12 tiles than current Wayback.
+- `z13+`: MapTiler Clarity (`https://api.maptiler.com/tiles/satellite-v2/{z}/{x}/{y}.jpg?key=...`) — best resolution.
+- All three exist as separate sources; satellite useEffect adds/removes based on `satellite` boolean. Layers: `sat-layer-arcgis` (maxzoom 11), `sat-layer-wayback` (minzoom 11, maxzoom 13), `sat-layer-clarity` (minzoom 13).
+- Why hybrid: Clarity at z11/z12 was blurry due to upscaling from native z13 source. ArcGIS at z9/z10 is sharper than Clarity's downscale.
+
+**Per-integer-zoom outline cache (1396ce9 + 1d4b8f7)**
+- ZCTA + borough quad geometry is identical at z14.3 vs z14.7 — only changes on integer zoom crossings.
+- Pattern: `lastIntZoomRef` tracks last integer floor; `outlineCacheRevRef` is a monotonic counter bumped when source data changes (heatmap toggle, tier recompute).
+- Zoom listener short-circuits if `floor(zoom) === lastIntZoomRef && rev === lastBuiltRev` — pan within an integer zoom band is free.
+- `zoomend` safety net: full `doOutlineRebuild()` regardless of cache, catches debounced cancellations.
+
+**Aggressive Phase 2B warm sweep (afa4e7a)**
+- After MapLibre mounts (still under loading screen), run a grid-based jumpTo sweep covering the full NYC bounding box (`-74.27, 40.47` to `-73.68, 40.93`) at every zoom level z9–16.
+- Grid divisions per zoom: z9–10=1pt, z11–12=2×2, z13=3×3, z14–16=4×4 = ~65 jumps total, RAF-paced.
+- During sweep: temporarily enables satellite layers (opacity 0.01, invisible), heat-underlay (0.5 then 0), Real3D layer visibility, 3D extrusions. Forces tile fetch + shader compile across ALL modes.
+- Tear-down: removes sat layers ONLY if user `satellite` state is false (preserves user choice if they toggled during sweep). Returns to 2D defaults. Then fires `onLoadingDone`.
+- Mobile: skip aggressive sweep (would take ~3s on low-end), just set `mapCacheStore.warmupComplete = true`.
+- **Known race**: if user toggles satellite during the 1s sweep, satellite useEffect early-returns on `getSource('sat-source')` exists check, leaving 0.01 opacity. Mitigation: rare; user can toggle off+on.
+
+**Phase 2A satellite tile precache (afa4e7a)**
+- `precacheSatelliteTiles` in `src/lib/mapDataPipeline.js` rewritten to match 3-tier hybrid: warms ArcGIS z9–10, Wayback z11–12, Clarity z13 over NYC bbox. Concurrency 6, fire-and-forget HTTP fetches into SW cache.
+
+**Service Worker v11 with STATIC_CACHE (1d4b8f7)**
+- `public/sw.js` v11. Caches:
+  - `STATIC_CACHE` (v1): ZCTA GeoJSON, borough GeoJSON, water_static.geojson — pre-loaded on activate.
+  - `PMTILES_FULL_CACHE` (v6): nyc_buildings.pmtiles + roads.pmtiles, fetched as full-file once, served as Range-extracted slices.
+  - `TILES_CACHE`: satellite tiles. LRU caps: 100 mobile / 300 desktop (`MAX_TILE_CACHE_SIZE`).
+- FGB cache path REMOVED. `handleFGB` is now a pass-through stub.
+
+**Tile cache size bump (1d4b8f7)**: 100 (mobile) / 300 (desktop) — was 50/100. Covers ~2 viewport breadths comfortably without OOM risk.
+
+**RAF-debounced heat radius (1d4b8f7)**: `updateHeatRadius` no longer fires per-frame on zoom — debounced to next paint. Topo glow doesn't need per-frame precision.
+
+**Warmup boolean guard (1d4b8f7)**: `mapCacheStore.warmupComplete` flag prevents Phase 2B sweep from re-running on subsequent map mounts within the same session.
+
+**Tier fingerprint (1d4b8f7)**: Tier data only recomputed when event-set fingerprint changes. Heatmap toggle reuses cached tiers — no recompute.
+
+**Mobile Real3D popup REMOVED (1d4b8f7)**: PMTiles streams instantly enough on mobile that the gating popup was unnecessary. Real3D toggle on mobile is now identical to desktop.
+
+**zoomend + moveend safety nets (afa4e7a)**:
+- `zoomend` → `doOutlineRebuild()` (catches any debounced cancels mid-flight).
+- `moveend` → `refreshBuildingColors()` at z>=13 only (pan-end paint settle for Real3D).
+
+**Dead state cleanup (1d4b8f7)**: `fgbCacheStatus`, `real3dLoading` UI states removed. Loading is now solely the responsibility of MapLoadingScreen + Phase 2A/2B pipeline.
+
+**Removed test files / dead code from `public/data/`**: Various scratch test files. Files in `public/data/` are only fetched if explicitly referenced — extra files don't hurt site loads.
+
 ### MapView — Changelog (current session, base commit 1c3c045)
 
 **Round 4 — Group A (safe fixes, 2026-04-16):**
