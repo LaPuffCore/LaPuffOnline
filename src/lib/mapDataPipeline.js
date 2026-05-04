@@ -70,42 +70,53 @@ function precacheSatelliteTiles() {
   // 3-tier satellite precache (matches MapView sat-source-* layers):
   //   z9-z10  → ArcGIS World Imagery
   //   z11-z12 → Esri Wayback release 13045 (2018-01-18 timestamp-locked mosaic)
-  //   z13     → Clarity (high-res NYC mosaic — the quality tier we want at street zoom)
+  //   z13-z15 → Clarity (high-res NYC mosaic — primary high-zoom quality tier)
+  // NYC tight bbox only (no NJ/CT) — trades non-NYC outer-area coverage for z15 NYC z14/z15 coverage.
+  // Tiles are stored in a dedicated SW Cache API cache (lapuff-satellite-v1) so they
+  // persist across sessions (browser HTTP cache is volatile and gets evicted aggressively).
   const ARCGIS  = (z, y, x) => `https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`;
   const WAYBACK = (z, y, x) => `https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/WMTS/1.0.0/default028mm/MapServer/tile/13045/${z}/${y}/${x}`;
   const CLARITY = (z, y, x) => `https://clarity.maptiles.arcgis.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`;
   const urls = [];
   const NYC = { lng1: -74.27, lat1: 40.47, lng2: -73.68, lat2: 40.93 };
 
-  // ArcGIS z9-z10: full NYC bounding box
   for (const z of [9, 10]) {
     const a = lngLatToTile(NYC.lng1, NYC.lat2, z), b = lngLatToTile(NYC.lng2, NYC.lat1, z);
     for (let x = a.x; x <= b.x; x++)
       for (let y = a.y; y <= b.y; y++)
         urls.push(ARCGIS(z, y, x));
   }
-  // Wayback z11-z12: NYC tight bbox
   for (const z of [11, 12]) {
     const a = lngLatToTile(NYC.lng1, NYC.lat2, z), b = lngLatToTile(NYC.lng2, NYC.lat1, z);
     for (let x = a.x; x <= b.x; x++)
       for (let y = a.y; y <= b.y; y++)
         urls.push(WAYBACK(z, y, x));
   }
-  // Clarity z13: NYC tight bbox (the primary high-zoom quality tier)
-  {
-    const z = 13;
+  // Clarity z13-z15: NYC tight bbox only (z15 is the trade-off — sacrificing non-NYC bbox at lower zooms)
+  for (const z of [13, 14, 15]) {
     const a = lngLatToTile(NYC.lng1, NYC.lat2, z), b = lngLatToTile(NYC.lng2, NYC.lat1, z);
     for (let x = a.x; x <= b.x; x++)
       for (let y = a.y; y <= b.y; y++)
         urls.push(CLARITY(z, y, x));
   }
 
+  // Mobile: drop z14-z15 to keep cache footprint manageable (~10MB vs ~45MB).
+  // Mobile satellite quality stays as-is per user preference; can be tuned later.
+  const isMobile = window.innerWidth < 768;
+  const finalUrls = isMobile ? urls.filter(u => !/\/(14|15)\//.test(u)) : urls;
+
+  // Send to SW for cache.put (persists across sessions). SW handles parallel fetch with concurrency cap.
+  if (navigator.serviceWorker?.controller) {
+    navigator.serviceWorker.controller.postMessage({ type: 'PRECACHE_SATELLITE', urls: finalUrls });
+    return;
+  }
+  // SW unavailable fallback: HTTP cache fire-and-forget.
   let active = 0, idx = 0;
   const MAX = 6;
   function next() {
-    while (active < MAX && idx < urls.length) {
+    while (active < MAX && idx < finalUrls.length) {
       active++;
-      const u = urls[idx++];
+      const u = finalUrls[idx++];
       fetch(u, { mode: 'no-cors', cache: 'force-cache' }).catch(() => {}).finally(() => { active--; next(); });
     }
   }
@@ -620,16 +631,18 @@ export async function runPhase2A(events, isMobile, onProgress) {
 
   // Progress ranges per platform
   // Desktop: 13 steps total (2A: 0→93%, 2B: 93→100%)
-  // Mobile:  8 steps total  (2A: 0→85%, 2B: 85→100%)
+  // Mobile:  9 steps total  (2A: 0→90%, 2B: 90→100%)
   const P = isMobile ? {
-    zcta:      [0,  20],
-    adj:       [20, 35],
-    skel:      [35, 43],
-    boro:      [43, 57],
-    boroSkel:  [57, 67],
-    tiers:     [67, 81],
-    roadCache: [81, 83],
-    waterCache:[83, 85],
+    zcta:      [0,  18],
+    adj:       [18, 32],
+    skel:      [32, 40],
+    boro:      [40, 53],
+    boroSkel:  [53, 63],
+    tiers:     [63, 76],
+    roadCache: [76, 79],
+    waterCache:[79, 82],
+    bldgCache: [82, 86],
+    satCache:  [86, 90],
   } : {
     zcta:      [0,  10],
     adj:       [10, 16],
@@ -639,10 +652,8 @@ export async function runPhase2A(events, isMobile, onProgress) {
     tiers:     [30, 38],
     roadCache: [38, 40],
     waterCache:[40, 42],
-    fgbFetch:  [42, 56],
-    fgbParse:  [56, 72],
-    pip:       [72, 80],
-    bake:      [80, 93],
+    bldgCache: [42, 50],
+    satCache:  [50, 93],
   };
 
   const report = (pct, msg) => onProgress?.(pct, msg);
@@ -717,9 +728,15 @@ export async function runPhase2A(events, isMobile, onProgress) {
 
   // ── Step 6: Pre-compute all 5 timespan tiers ─────────────────────────────
   report(P.tiers[0], 'Computing event heat data...');
-  // Fingerprint based on event count + most-recent event ID so a site reload with
-  // new/changed events always forces a full recompute. Same tab session = fast restore.
-  const eventFingerprint = `${(events || []).length}:${events?.[0]?.id ?? ''}:${events?.[events?.length - 1]?.id ?? ''}`;
+  // Strong fingerprint: hash of sorted event IDs catches adds/removes/reorders.
+  // Same tab session with identical events ⇒ instant restore from sessionStorage.
+  let _h = 5381 ^ (events?.length || 0);
+  const _ids = (events || []).map(e => String(e?.id ?? '')).sort();
+  for (let _k = 0; _k < _ids.length; _k++) {
+    const _s = _ids[_k];
+    for (let _j = 0; _j < _s.length; _j++) _h = ((_h << 5) + _h) ^ _s.charCodeAt(_j);
+  }
+  const eventFingerprint = `${(events || []).length}:${(_h >>> 0).toString(36)}`;
   const TIERS_SS_KEY = 'lapuff_precomputed_tiers';
   const TIERS_FINGER_KEY = 'lapuff_precomputed_tiers_fp';
   let precomputedTiers = null;
@@ -780,25 +797,16 @@ export async function runPhase2A(events, isMobile, onProgress) {
   fetch(WATER_STATIC_URL, { cache: 'force-cache' }).catch(() => {});
   report(P.waterCache[1], 'Water layer ready');
 
-  // ── Satellite tile pre-cache (background, non-blocking) ──────────────────
-  // Esri ArcGIS World Imagery tiles for NYC z10-13 (~500 tiles, ~20MB).
-  // Browser HTTP cache stores them. Fire-and-forget — first satellite toggle is instant.
-  precacheSatelliteTiles();
-
-  // Load precomputed centroid binary (background) — saves PiP work on desktop and
-  // makes mobile viewport bbox queries instant. Non-blocking; pipeline checks
-  // mapCacheStore.buildingCentroids before falling back to runtime PiP.
-  loadCentroidsBin().then(c => {
-    if (c) {
-      mapCacheStore.buildingCentroids = c.centroids;
-      mapCacheStore.buildingCentroidsMeta = c.meta;
-    }
-  }).catch(() => {});
+  // ── Satellite tile pre-cache scheduled (background, non-blocking) ────────
+  // Now uses SW Cache API (lapuff-satellite-v1) for cross-session persistence.
+  // ArcGIS z9-z10 + Wayback z11-z12 + Clarity z13-z15 NYC bbox only (~45MB desktop, ~10MB mobile).
+  // Fired at end of 2A so it doesn't block initial pipeline steps.
+  // Note: dead loadCentroidsBin() call removed — building zip is baked into PMTiles features.
 
   // ── Buildings PMTiles pre-warm + full-file SW pre-cache ────────────────────
   // Same pattern as roads. ~71MB; SW caches it once and serves Range slices in-memory.
   // Layer 'building'. Per-feature props: { z=zip, b=bid, h=height, m=min_height, c=colour }.
-  report(P.fgbFetch[0], 'Pre-warming building tiles...');
+  report(P.bldgCache[0], 'Pre-warming building tiles...');
   const BUILDINGS_PMTILES_URL = (typeof window !== 'undefined')
     ? `${window.location.origin}${import.meta.env.BASE_URL}data/nyc_buildings.pmtiles`
     : '/data/nyc_buildings.pmtiles';
@@ -806,7 +814,12 @@ export async function runPhase2A(events, isMobile, onProgress) {
   if (navigator.serviceWorker?.controller) {
     navigator.serviceWorker.controller.postMessage({ type: 'PRECACHE_PMTILES', url: BUILDINGS_PMTILES_URL });
   }
-  report(P.bake[1], 'Building tiles ready');
+  report(P.bldgCache[1], 'Building tiles ready');
+
+  // ── Satellite SW precache (NYC bbox z9-z15) — last step, non-blocking ────
+  report(P.satCache[0], 'Pre-warming satellite tiles...');
+  precacheSatelliteTiles();
+  report(P.satCache[1], 'Satellite tiles queued');
 
   // Enforce minimum 1s display time on first load so user sees the loading screen
   const elapsed = Date.now() - startTime;

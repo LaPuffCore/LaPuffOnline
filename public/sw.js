@@ -1,16 +1,24 @@
-// LaPuff Service Worker — PMTiles full-file pre-warm + Range slicing + static GeoJSON cache.
-const SW_VERSION = 'lapuff-sw-v11';
+// LaPuff Service Worker — PMTiles full-file pre-warm + Range slicing + static GeoJSON cache + satellite tile cache.
+const SW_VERSION = 'lapuff-sw-v12';
 
 // Cache names (must match mapDataPipeline.js)
 const PMTILES_CACHE     = 'lapuff-pmtiles-sw-v3';     // v3: per-Range responses (fallback)
 const PMTILES_FULL_CACHE = 'lapuff-pmtiles-full-v6';  // v6: borough-FGB rebuild + SW v11
 const STATIC_CACHE      = 'lapuff-static-v1';         // v1: ZCTA + borough + water GeoJSON
+const SATELLITE_CACHE   = 'lapuff-satellite-v1';      // v1: ArcGIS/Wayback/Clarity raster tiles (cross-session persistent)
 
-const MANAGED_CACHES = [PMTILES_CACHE, PMTILES_FULL_CACHE, STATIC_CACHE];
+const MANAGED_CACHES = [PMTILES_CACHE, PMTILES_FULL_CACHE, STATIC_CACHE, SATELLITE_CACHE];
 
 // URLs that we know are small + should be cached as full files (when SW receives PRECACHE message)
 // nyc_buildings.pmtiles (~71MB) is fully precached → in-memory range slicing = 0ms warm tile fetches
 const FULL_PMTILES_URL_PATTERNS = ['realfinaldeciroads.pmtiles', 'nyc_buildings.pmtiles'];
+
+// Satellite tile host patterns — intercepted and served cache-first from SATELLITE_CACHE
+const SATELLITE_HOST_PATTERNS = [
+  'services.arcgisonline.com',
+  'wayback.maptiles.arcgis.com',
+  'clarity.maptiles.arcgis.com',
+];
 
 // Static GeoJSON files we serve cache-first (small same-origin assets used by every map render)
 const STATIC_PATTERNS = [
@@ -67,7 +75,30 @@ self.addEventListener('fetch', event => {
     event.respondWith(handlePMTiles(request));
     return;
   }
+
+  // ── Satellite tiles: cache-first from SATELLITE_CACHE (cross-session persistent) ──
+  if (SATELLITE_HOST_PATTERNS.some(h => url.host === h || url.host.endsWith('.' + h))) {
+    event.respondWith(handleSatellite(request));
+    return;
+  }
 });
+
+// Cache-first satellite tile handler. Stores opaque (no-cors) responses too —
+// MapLibre uses them via crossOrigin='anonymous' but cache.put accepts any response type.
+async function handleSatellite(request) {
+  const cache = await caches.open(SATELLITE_CACHE);
+  const hit = await cache.match(request.url);
+  if (hit) return hit;
+  try {
+    const resp = await fetch(request);
+    if (resp && (resp.ok || resp.type === 'opaque' || resp.status === 0)) {
+      cache.put(request.url, resp.clone()).catch(() => {});
+    }
+    return resp;
+  } catch (err) {
+    return new Response('', { status: 504 });
+  }
+}
 
 async function handleStatic(request) {
   const cache = await caches.open(STATIC_CACHE);
@@ -153,19 +184,57 @@ async function handlePMTiles(request) {
 // it under URL key. Subsequent Range requests are served by slicing in-memory.
 self.addEventListener('message', event => {
   const msg = event.data;
-  if (!msg || msg.type !== 'PRECACHE_PMTILES' || !msg.url) return;
-  event.waitUntil((async () => {
-    try {
-      const cache = await caches.open(PMTILES_FULL_CACHE);
-      const url = new URL(msg.url);
-      const key = url.origin + url.pathname;
-      const existing = await cache.match(key);
-      if (existing) return; // already cached
-      const resp = await fetch(msg.url, { cache: 'reload' });
-      if (resp.ok && resp.status === 200) {
-        await cache.put(key, resp.clone());
-        console.log('[SW] Pre-cached full PMTiles:', key);
-      }
-    } catch (e) { console.warn('[SW] PRECACHE_PMTILES failed:', e); }
-  })());
+  if (!msg) return;
+
+  if (msg.type === 'PRECACHE_PMTILES' && msg.url) {
+    event.waitUntil((async () => {
+      try {
+        const cache = await caches.open(PMTILES_FULL_CACHE);
+        const url = new URL(msg.url);
+        const key = url.origin + url.pathname;
+        const existing = await cache.match(key);
+        if (existing) return; // already cached
+        const resp = await fetch(msg.url, { cache: 'reload' });
+        if (resp.ok && resp.status === 200) {
+          await cache.put(key, resp.clone());
+          console.log('[SW] Pre-cached full PMTiles:', key);
+        }
+      } catch (e) { console.warn('[SW] PRECACHE_PMTILES failed:', e); }
+    })());
+    return;
+  }
+
+  if (msg.type === 'PRECACHE_SATELLITE' && Array.isArray(msg.urls)) {
+    event.waitUntil((async () => {
+      try {
+        const cache = await caches.open(SATELLITE_CACHE);
+        const urls = msg.urls;
+        let active = 0, idx = 0;
+        const MAX = 6;
+        await new Promise(resolve => {
+          function next() {
+            if (idx >= urls.length && active === 0) { resolve(); return; }
+            while (active < MAX && idx < urls.length) {
+              const u = urls[idx++];
+              active++;
+              (async () => {
+                try {
+                  const existing = await cache.match(u);
+                  if (existing) return;
+                  const resp = await fetch(u, { mode: 'no-cors' });
+                  if (resp && (resp.ok || resp.type === 'opaque' || resp.status === 0)) {
+                    await cache.put(u, resp.clone()).catch(() => {});
+                  }
+                } catch (_e) { /* skip */ }
+                finally { active--; next(); }
+              })();
+            }
+          }
+          next();
+        });
+        console.log(`[SW] Satellite precache complete: ${urls.length} tiles`);
+      } catch (e) { console.warn('[SW] PRECACHE_SATELLITE failed:', e); }
+    })());
+    return;
+  }
 });

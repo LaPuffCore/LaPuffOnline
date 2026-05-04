@@ -1795,7 +1795,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       // Session tile cache: keeps infrastructure tiles (roads, water, outlines) warm
       // across pan/zoom so zooming out never shows black squares. Mobile gets a smaller
       // cache to stay under iOS Safari's ~4GB RAM ceiling.
-      maxTileCacheSize: window.innerWidth < 768 ? 100 : 300,
+      maxTileCacheSize: window.innerWidth < 768 ? 100 : 500,
       // Fade duration 0 = paint changes apply instantly, no cross-fade flash on outlines.
       fadeDuration: 0,
     });
@@ -2297,12 +2297,16 @@ export default function MapView({ events, headerCollapsed = false, interactive =
           addSatLayersForWarmup();
 
           // Build the full sweep: tile-dense grid per zoom
+          // Sweep value: shader compilation across all zooms + tile-fetch coverage at z9-z14.
+          // SW cache makes raw tile fetches ~0ms; warmup's main job is GPU shader compile.
           const sweep = [];
           for (const z of [9, 10]) for (const c of gridForZoom(z, 1)) sweep.push({ center: c, zoom: z });
           for (const c of gridForZoom(11, 2)) sweep.push({ center: c, zoom: 11 });
           for (const c of gridForZoom(12, 2)) sweep.push({ center: c, zoom: 12 });
           for (const c of gridForZoom(13, 4)) sweep.push({ center: c, zoom: 13 });
-          for (const z of [14, 15, 16]) for (const c of gridForZoom(z, 4)) sweep.push({ center: c, zoom: z });
+          for (const c of gridForZoom(14, 6)) sweep.push({ center: c, zoom: 14 });
+          for (const c of gridForZoom(15, 6)) sweep.push({ center: c, zoom: 15 });
+          for (const c of gridForZoom(16, 6)) sweep.push({ center: c, zoom: 16 });
 
           let i = 0;
           const step = () => {
@@ -2315,6 +2319,17 @@ export default function MapView({ events, headerCollapsed = false, interactive =
               setHeatVis(false);
               removeSatLayersAfterWarmup();
               map.jumpTo({ center: origCenter, zoom: origZoom, pitch: 0, bearing: 0 });
+              // Pre-build all 10 building heatmap match expressions (5 timespans × 2 modes)
+              // and store in memoizedExprs cache so first heatmap/timespan toggle is instant
+              // (no per-toggle expression construction). Only valid if tiers + zip→ZCTA are ready.
+              try {
+                if (precomputedTiersRef.current && zipToZctaIdxMapRef.current) {
+                  for (let ts = 0; ts < 5; ts++) {
+                    buildingColorExprByState(false, ts);
+                    buildingColorExprByState(true, ts);
+                  }
+                }
+              } catch (_e) { /* prebuild best-effort */ }
               mapCacheStore.warmupComplete = true;
               return;
             }
@@ -2339,14 +2354,13 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   }, [mapReady, geoData]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Pre-create Real3D layers at map init so first toggle is instant (just a visibility flip).
-  // Also pre-adds nyc-buildings PMTiles source (no layers) so the SW-cached PMTiles directory
+  // Also pre-adds nyc-buildings PMTiles source so the SW-cached PMTiles directory
   // is fetched/parsed before Real3D is ever toggled — eliminates header-fetch hang on toggle.
-  // On mobile: skip this — layers created on-demand when Real3D is activated to save GPU memory.
+  // Mobile: source is added (cheap), but layers are deferred to first Real3D toggle to save GPU memory.
   useEffect(() => {
-    if (window.innerWidth < 768) return; // mobile: defer to Real3D toggle
     const map = mapRef.current;
     if (!map || !mapReady || !geoData) return;
-    // Pre-add PMTiles source even before initReal3DLayers so MapLibre parses the
+    // Pre-add PMTiles source on both desktop AND mobile so MapLibre parses the
     // PMTiles directory immediately (16KB range fetch, served from SW in-memory = ~0ms warm).
     if (!map.getSource('nyc-buildings')) {
       map.addSource('nyc-buildings', {
@@ -2357,6 +2371,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         promoteId: 'b',
       });
     }
+    // Mobile: stop here — layers created on first Real3D toggle.
+    if (window.innerWidth < 768) return;
     if (real3dLayersCreatedRef.current) return;
     initReal3DLayers(map, heatmapRef.current, timespanIdxRef.current ?? 2);
     setReal3DLayersVisible(map, false);
@@ -2382,7 +2398,14 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     if (!geoData || !adjacency || !events?.length) return;
     // Fingerprint check: skip recompute if events array signature is unchanged.
     // Tier data only changes downstream of event data — same events ⇒ same tiers.
-    const fp = `${events.length}:${events[0]?.id ?? ''}:${events[events.length - 1]?.id ?? ''}`;
+    // Strong fingerprint: hash of sorted event IDs catches adds/removes/reorders.
+    let h = 5381 ^ events.length;
+    const ids = events.map(e => String(e?.id ?? '')).sort();
+    for (let k = 0; k < ids.length; k++) {
+      const s = ids[k];
+      for (let j = 0; j < s.length; j++) h = ((h << 5) + h) ^ s.charCodeAt(j);
+    }
+    const fp = `${events.length}:${(h >>> 0).toString(36)}`;
     if (lastTierFingerprintRef.current === fp && precomputedTiersRef.current) return;
     lastTierFingerprintRef.current = fp;
     if (mapCacheStore.precomputedTiers) {
@@ -3436,27 +3459,22 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     const isHm = heatmapRef.current;
 
     // Same path for desktop and mobile — PMTiles serves from SW cache at ~0ms.
-    // 1. On mobile first toggle: call buildFGBCache() to populate zipToZctaIdxMapRef
-    //    (needed for heatmap tier expressions). No-op on desktop (already done at Gear 2).
-    // 2. Paint first: correct colors baked into GPU expression before first frame.
-    // 3. Visibility: all layers sync (water→roads→buildings order = correct occlusion frame 1).
-    // 4. setLight + easeTo: tilts camera; also zooms to z13 if below to ensure buildings visible.
+    // zipToZctaIdxMapRef is populated by the geoData effect (line ~1647) for both platforms,
+    // so heatmap tier expressions work without any per-toggle setup.
+    // 1. Paint first: correct colors baked into GPU expression before first frame.
+    // 2. Visibility: all layers sync (water→roads→buildings order = correct occlusion frame 1).
+    // 3. setLight + easeTo: tilt camera only (NO zoom snap — user controls zoom themselves).
     if (!real3dLayersCreatedRef.current) {
-      // Mobile: buildFGBCache populates zipToZctaIdxMapRef so heatmap tier expressions work.
-      // Desktop: already called in Gear 2 effect (guarded by !interactive skip on mobile).
-      if (window.innerWidth < 768) buildFGBCache();
       initReal3DLayers(map, isHm, timespanIdxRef.current ?? 2);
     } else {
       refreshBuildingColors();
       setReal3DLayersVisible(map, true);
     }
     map.setLight({ anchor: 'map' });
-    // Zoom to z13 if needed — buildings start at z12.5/z13 so user must be in range to see them.
-    const currentZoom = map.getZoom();
+    // Tilt only — no zoom change. Buildings render naturally once user is at z13+.
     map.easeTo({
       pitch: 55,
       bearing: -17,
-      zoom: currentZoom < 13 ? 13 : currentZoom,
       duration: 700,
     });
   }, [real3D, mapReady]);
