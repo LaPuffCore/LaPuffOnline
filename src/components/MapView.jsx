@@ -1767,7 +1767,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       // Session tile cache: keeps infrastructure tiles (roads, water, outlines) warm
       // across pan/zoom so zooming out never shows black squares. Mobile gets a smaller
       // cache to stay under iOS Safari's ~4GB RAM ceiling.
-      maxTileCacheSize: window.innerWidth < 768 ? 100 : 500,
+      maxTileCacheSize: window.innerWidth < 768 ? 100 : 300,
       // Fade duration 0 = paint changes apply instantly, no cross-fade flash on outlines.
       fadeDuration: 0,
     });
@@ -2252,8 +2252,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
               if (!map.getSource('sat-source')) {
                 map.addSource('sat-source', { type: 'raster', tiles: ['https://clarity.maptiles.arcgis.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'], tileSize: 256, minzoom: 0, maxzoom: 19 });
               }
-              if (!map.getLayer('sat-layer-arcgis')) map.addLayer({ id: 'sat-layer-arcgis', type: 'raster', source: 'sat-source-arcgis', minzoom: 9, maxzoom: 10, paint: { 'raster-opacity': 0.01, 'raster-fade-duration': 0 } }, firstLayerId);
-              if (!map.getLayer('sat-layer-wayback')) map.addLayer({ id: 'sat-layer-wayback', type: 'raster', source: 'sat-source-wayback', minzoom: 10, maxzoom: 13, paint: { 'raster-opacity': 0.01, 'raster-fade-duration': 0 } }, firstLayerId);
+              if (!map.getLayer('sat-layer-arcgis')) map.addLayer({ id: 'sat-layer-arcgis', type: 'raster', source: 'sat-source-arcgis', minzoom: 9, maxzoom: 10.5, paint: { 'raster-opacity': 0.01, 'raster-fade-duration': 0 } }, firstLayerId);
+              if (!map.getLayer('sat-layer-wayback')) map.addLayer({ id: 'sat-layer-wayback', type: 'raster', source: 'sat-source-wayback', minzoom: 10.5, maxzoom: 13, paint: { 'raster-opacity': 0.01, 'raster-fade-duration': 0 } }, firstLayerId);
               if (!map.getLayer('sat-layer')) map.addLayer({ id: 'sat-layer', type: 'raster', source: 'sat-source', minzoom: 13, maxzoom: 17, paint: { 'raster-opacity': 0.01, 'raster-fade-duration': 0 } }, firstLayerId);
             } catch (_e) { /* */ }
           };
@@ -2398,6 +2398,9 @@ export default function MapView({ events, headerCollapsed = false, interactive =
 
   // interactive prop — disable/enable all MapLibre handlers when changed.
   // Set to false during Phase 2B loading so nothing can be accidentally interacted with.
+  // Also acts as "Gear 2": when interactive flips true (Phase 2A + warmup done), load
+  // precomputedTiers from mapCacheStore and fire an initial buildingColors refresh so
+  // heatmap colors are correct on the very first toggle without user re-triggering.
   useEffect(() => {
     interactiveRef.current = interactive;
     const map = mapRef.current;
@@ -2408,10 +2411,19 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     ];
     if (interactive) {
       handlers.forEach(h => h?.enable?.());
+      // Phase 2A just finished — sync cached tiers into render refs so first heatmap
+      // toggle is instant and shows correct colors without a redundant recompute.
+      if (mapCacheStore.precomputedTiers && !precomputedTiersRef.current) {
+        precomputedTiersRef.current = mapCacheStore.precomputedTiers;
+      }
+      if (precomputedTiersRef.current) {
+        memoizedExprs.current = {};
+        refreshBuildingColors();
+      }
     } else {
       handlers.forEach(h => h?.disable?.());
     }
-  }, [interactive]);
+  }, [interactive]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Manage hover layers based on 3D/Real3D state.
   // 3D: hover on zcta-extrude + zcta-safezone-extrusion (fill-extrusion layers).
@@ -3047,21 +3059,21 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       if (!map.getLayer('sat-layer-arcgis')) {
         map.addLayer({
           id: 'sat-layer-arcgis', type: 'raster', source: 'sat-source-arcgis',
-          minzoom: 9, maxzoom: 10,  // visible z9 only (z9.0-z9.999)
+          minzoom: 9, maxzoom: 10.5,  // visible z9–z10.499
           paint: { 'raster-opacity': 1, 'raster-fade-duration': 300 },
         }, firstLayerId);
       }
       if (!map.getLayer('sat-layer-wayback')) {
         map.addLayer({
           id: 'sat-layer-wayback', type: 'raster', source: 'sat-source-wayback',
-          minzoom: 10, maxzoom: 13,  // visible z10-z12 (maxzoom exclusive)
+          minzoom: 10.5, maxzoom: 13,  // visible z10.5–z12.999
           paint: { 'raster-opacity': 1, 'raster-fade-duration': 300 },
         }, firstLayerId);
       }
       if (!map.getLayer('sat-layer')) {
         map.addLayer({
           id: 'sat-layer', type: 'raster', source: 'sat-source',
-          minzoom: 13, maxzoom: 17,  // visible z13-z16 (maxzoom exclusive)
+          minzoom: 13, maxzoom: 17,  // visible z13–z16.999 (maxzoom exclusive)
           paint: { 'raster-opacity': 1, 'raster-fade-duration': 300 },
         }, firstLayerId);
       }
@@ -3178,7 +3190,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       map.addSource('nyc-buildings', {
         type: 'vector',
         url: `pmtiles://${BUILDINGS_PMTILES_URL}`,
-        minzoom: 12,   // nyc_buildings_z12.pmtiles native min_zoom=12
+        minzoom: 12.5,   // nyc_buildings_z12.pmtiles native min_zoom=12
         maxzoom: 16,
         promoteId: 'b',
       });
@@ -3189,21 +3201,21 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         id: 'real3d-buildings', type: 'fill-extrusion',
         source: 'nyc-buildings',
         'source-layer': BUILDINGS_PMTILES_LAYER,
-        // Unified building layer: appears at z12 as flat 7m baseplates.
+        // Unified building layer: appears at z12.5 as flat 7m baseplates.
         // Height interpolation:
-        //   z12–z13.9:  constant 7m flat appearance (baseplate visual — locked flat)
-        //   z13.9–z14:  smooth growth from 7m to full roof height
-        //   z14+:       constant full roof height from data
-        minzoom: 12,
+        //   z12.5–z13.9:  constant 7m flat appearance (baseplate visual — locked flat)
+        //   z13.9–z14:    smooth growth from 7m to full roof height
+        //   z14+:         constant full roof height from data
+        minzoom: 12.5,
         paint: {
           'fill-extrusion-color': buildingColorExprByState(isHeatmap, tsIdx),
           'fill-extrusion-height': ['interpolate', ['linear'], ['zoom'],
-            12,   7,
+            12.5, 7,
             13.9, 7,
             14,   ['coalesce', ['get', 'h'], 8],
           ],
           'fill-extrusion-base': ['interpolate', ['linear'], ['zoom'],
-            12,   0,
+            12.5, 0,
             13.9, 0,
             14,   ['coalesce', ['get', 'm'], 0],
           ],
