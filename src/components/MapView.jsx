@@ -2249,9 +2249,9 @@ export default function MapView({ events, headerCollapsed = false, interactive =
               if (!map.getSource('sat-source')) {
                 map.addSource('sat-source', { type: 'raster', tiles: ['https://clarity.maptiles.arcgis.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'], tileSize: 256, minzoom: 13, maxzoom: 16 });
               }
-              if (!map.getLayer('sat-layer-arcgis')) map.addLayer({ id: 'sat-layer-arcgis', type: 'raster', source: 'sat-source-arcgis', maxzoom: 10, paint: { 'raster-opacity': 0.01, 'raster-fade-duration': 0 } }, firstLayerId);
-              if (!map.getLayer('sat-layer-wayback')) map.addLayer({ id: 'sat-layer-wayback', type: 'raster', source: 'sat-source-wayback', minzoom: 11, maxzoom: 12, paint: { 'raster-opacity': 0.01, 'raster-fade-duration': 0 } }, firstLayerId);
-              if (!map.getLayer('sat-layer')) map.addLayer({ id: 'sat-layer', type: 'raster', source: 'sat-source', minzoom: 13, maxzoom: 16, paint: { 'raster-opacity': 0.01, 'raster-fade-duration': 0 } }, firstLayerId);
+              if (!map.getLayer('sat-layer-arcgis')) map.addLayer({ id: 'sat-layer-arcgis', type: 'raster', source: 'sat-source-arcgis', minzoom: 9, maxzoom: 11, paint: { 'raster-opacity': 0.01, 'raster-fade-duration': 0 } }, firstLayerId);
+              if (!map.getLayer('sat-layer-wayback')) map.addLayer({ id: 'sat-layer-wayback', type: 'raster', source: 'sat-source-wayback', minzoom: 11, maxzoom: 13, paint: { 'raster-opacity': 0.01, 'raster-fade-duration': 0 } }, firstLayerId);
+              if (!map.getLayer('sat-layer')) map.addLayer({ id: 'sat-layer', type: 'raster', source: 'sat-source', minzoom: 13, maxzoom: 17, paint: { 'raster-opacity': 0.01, 'raster-fade-duration': 0 } }, firstLayerId);
             } catch (_e) { /* */ }
           };
           const removeSatLayersAfterWarmup = () => {
@@ -3040,21 +3040,21 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       if (!map.getLayer('sat-layer-arcgis')) {
         map.addLayer({
           id: 'sat-layer-arcgis', type: 'raster', source: 'sat-source-arcgis',
-          maxzoom: 10,  // arcgis only for z9-10
+          minzoom: 9, maxzoom: 11,  // visible z9-z10 (maxzoom exclusive)
           paint: { 'raster-opacity': 1, 'raster-fade-duration': 0 },
         }, firstLayerId);
       }
       if (!map.getLayer('sat-layer-wayback')) {
         map.addLayer({
           id: 'sat-layer-wayback', type: 'raster', source: 'sat-source-wayback',
-          minzoom: 11, maxzoom: 12,  // wayback for z11-12
+          minzoom: 11, maxzoom: 13,  // visible z11-z12 (maxzoom exclusive)
           paint: { 'raster-opacity': 1, 'raster-fade-duration': 0 },
         }, firstLayerId);
       }
       if (!map.getLayer('sat-layer')) {
         map.addLayer({
           id: 'sat-layer', type: 'raster', source: 'sat-source',
-          minzoom: 13, maxzoom: 16,
+          minzoom: 13, maxzoom: 17,  // visible z13-z16 (maxzoom exclusive)
           paint: { 'raster-opacity': 1, 'raster-fade-duration': 0 },
         }, firstLayerId);
       }
@@ -3182,29 +3182,26 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         id: 'real3d-buildings', type: 'fill-extrusion',
         source: 'nyc-buildings',
         'source-layer': BUILDINGS_PMTILES_LAYER,
-        // Unified building layer: appears at z12.5 as flat 7m baseplates.
+        // Unified building layer: appears at z12 as flat 7m baseplates.
         // Height interpolation:
-        //   z12.5–z13.9: constant 7m flat appearance (baseplate visual)
-        //   z13.9–z14:   smooth growth from 7m to full roof height
-        //   z14+:        constant full roof height from data
-        // Source minzoom=12 ensures tiles are requested early enough for z12.5 to render.
-        minzoom: 12.5,
+        //   z12–z13.9:  constant 7m flat appearance (baseplate visual)
+        //   z13.9–z14:  smooth growth from 7m to full roof height
+        //   z14+:       constant full roof height from data
+        // Source minzoom=12 ensures tiles are requested early enough for z12 to render.
+        minzoom: 12,
         paint: {
           'fill-extrusion-color': buildingColorExprByState(isHeatmap, tsIdx),
           'fill-extrusion-height': ['interpolate', ['linear'], ['zoom'],
-            12.5, 7,
+            12,   7,
             13.9, 7,
             14,   ['coalesce', ['get', 'h'], 8],
           ],
           'fill-extrusion-base': ['interpolate', ['linear'], ['zoom'],
-            12.5, 0,
+            12,   0,
             13.9, 0,
             14,   ['coalesce', ['get', 'm'], 0],
           ],
-          'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'],
-            12.0, 0.0,
-            12.5, 1.0,
-          ],
+          'fill-extrusion-opacity': 1,
           'fill-extrusion-vertical-gradient': false,
           'fill-extrusion-opacity-transition': { duration: 0 },
           'fill-extrusion-color-transition': { duration: 0 },
