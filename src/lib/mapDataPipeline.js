@@ -463,7 +463,7 @@ function computeZctaBboxes(geoData) {
 }
 
 // ── FGB pipeline removed ─────────────────────────────────────────────────────
-// Buildings are now served via PMTiles (nyc_buildings.pmtiles) directly by
+// Buildings are now served via PMTiles (nyc_buildings_z12.pmtiles) directly by
 // MapLibre's pmtiles:// protocol. No FGB parsing, no worker, no IDB hydrate.
 
 // ── Phase 2A entry point ─────────────────────────────────────────────────────
@@ -669,8 +669,8 @@ export async function runPhase2A(events, isMobile, onProgress) {
   // On mobile the SW per-Range fallback path is used (caches individual range slices).
   report(P.bldgCache[0], 'Pre-warming building tiles...');
   const BUILDINGS_PMTILES_URL = (typeof window !== 'undefined')
-    ? `${window.location.origin}${import.meta.env.BASE_URL}data/nyc_buildings.pmtiles`
-    : '/data/nyc_buildings.pmtiles';
+    ? `${window.location.origin}${import.meta.env.BASE_URL}data/nyc_buildings_z12.pmtiles`
+    : '/data/nyc_buildings_z12.pmtiles';
   fetch(BUILDINGS_PMTILES_URL, { headers: { Range: 'bytes=0-16383' } }).catch(() => {});
   if (!isMobile && navigator.serviceWorker?.controller) {
     navigator.serviceWorker.controller.postMessage({ type: 'PRECACHE_PMTILES', url: BUILDINGS_PMTILES_URL });

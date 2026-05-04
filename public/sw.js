@@ -10,10 +10,10 @@ const SATELLITE_CACHE   = 'lapuff-satellite-v1';      // v1: ArcGIS/Wayback/Clar
 const MANAGED_CACHES = [PMTILES_CACHE, PMTILES_FULL_CACHE, STATIC_CACHE, SATELLITE_CACHE];
 
 // Full-file precache + in-memory slicing is FAST on desktop (one alloc per session,
-// instant Range serves). nyc_buildings.pmtiles (~73MB) is safe on desktop.
+// instant Range serves). nyc_buildings_z12.pmtiles (~74MB) is safe on desktop.
 // On mobile it is NOT precached (pipeline sends PRECACHE_PMTILES only if !isMobile),
 // so fullHit is always null on mobile → per-Range fallback is used automatically.
-const FULL_PMTILES_URL_PATTERNS = ['realfinaldeciroads.pmtiles', 'nyc_buildings.pmtiles'];
+const FULL_PMTILES_URL_PATTERNS = ['realfinaldeciroads.pmtiles', 'nyc_buildings_z12.pmtiles'];
 
 // Satellite tile host patterns — intercepted and served cache-first from SATELLITE_CACHE
 const SATELLITE_HOST_PATTERNS = [
@@ -50,15 +50,14 @@ self.addEventListener('activate', event => {
           return caches.delete(k);
         })
     );
-    // One-time cleanup: remove the old 73MB nyc_buildings.pmtiles full-file entry
-    // left over from SW v13 (which used the slice path catastrophically on mobile).
+    // One-time cleanup: remove old nyc_buildings.pmtiles entries (replaced by z12 variant).
     try {
       const fullCache = await caches.open(PMTILES_FULL_CACHE);
       const reqs = await fullCache.keys();
       for (const r of reqs) {
-        if (r.url.includes('nyc_buildings.pmtiles')) {
+        if (r.url.includes('nyc_buildings.pmtiles') && !r.url.includes('nyc_buildings_z12')) {
           await fullCache.delete(r);
-          console.log('[SW] Evicted oversized full-file entry:', r.url);
+          console.log('[SW] Evicted old nyc_buildings.pmtiles entry:', r.url);
         }
       }
     } catch (e) { /* ignore */ }

@@ -26,8 +26,8 @@ const MAP_CACHE_BUILDING_KEY = 'lapuff_map_cache_building';
 // in MapLoadingScreen Phase 2A so warm tiles serve from in-memory slicing (~0ms).
 // Layer: 'building'. Per-feature props: { z=zip(string), b=bid(int), h=height_m, m=min_h, c=colour }
 const BUILDINGS_PMTILES_URL = (typeof window !== 'undefined')
-  ? `${window.location.origin}${import.meta.env.BASE_URL}data/nyc_buildings.pmtiles`
-  : '/data/nyc_buildings.pmtiles';
+  ? `${window.location.origin}${import.meta.env.BASE_URL}data/nyc_buildings_z12.pmtiles`
+  : '/data/nyc_buildings_z12.pmtiles';
 const BUILDINGS_PMTILES_LAYER = 'building';
 
 // Roads PMTiles: hierarchical-dissolve road polygons (~8.5K features, 14MB) on OCI PAR.
@@ -2341,7 +2341,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       map.addSource('nyc-buildings', {
         type: 'vector',
         url: `pmtiles://${BUILDINGS_PMTILES_URL}`,
-        minzoom: 13,
+        minzoom: 12,
         maxzoom: 16,
         promoteId: 'b',
       });
@@ -3048,21 +3048,21 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         map.addLayer({
           id: 'sat-layer-arcgis', type: 'raster', source: 'sat-source-arcgis',
           minzoom: 9, maxzoom: 10,  // visible z9 only (z9.0-z9.999)
-          paint: { 'raster-opacity': 1, 'raster-fade-duration': 0 },
+          paint: { 'raster-opacity': 1, 'raster-fade-duration': 300 },
         }, firstLayerId);
       }
       if (!map.getLayer('sat-layer-wayback')) {
         map.addLayer({
           id: 'sat-layer-wayback', type: 'raster', source: 'sat-source-wayback',
           minzoom: 10, maxzoom: 13,  // visible z10-z12 (maxzoom exclusive)
-          paint: { 'raster-opacity': 1, 'raster-fade-duration': 0 },
+          paint: { 'raster-opacity': 1, 'raster-fade-duration': 300 },
         }, firstLayerId);
       }
       if (!map.getLayer('sat-layer')) {
         map.addLayer({
           id: 'sat-layer', type: 'raster', source: 'sat-source',
           minzoom: 13, maxzoom: 17,  // visible z13-z16 (maxzoom exclusive)
-          paint: { 'raster-opacity': 1, 'raster-fade-duration': 0 },
+          paint: { 'raster-opacity': 1, 'raster-fade-duration': 300 },
         }, firstLayerId);
       }
     } else {
@@ -3178,7 +3178,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       map.addSource('nyc-buildings', {
         type: 'vector',
         url: `pmtiles://${BUILDINGS_PMTILES_URL}`,
-        minzoom: 13,   // PMTiles file native min_zoom=13; matches tile availability
+        minzoom: 12,   // nyc_buildings_z12.pmtiles native min_zoom=12
         maxzoom: 16,
         promoteId: 'b',
       });
@@ -3189,21 +3189,21 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         id: 'real3d-buildings', type: 'fill-extrusion',
         source: 'nyc-buildings',
         'source-layer': BUILDINGS_PMTILES_LAYER,
-        // Unified building layer: appears at z13 as flat 7m baseplates.
+        // Unified building layer: appears at z12 as flat 7m baseplates.
         // Height interpolation:
-        //   z13–z13.9:  constant 7m flat appearance (baseplate visual)
+        //   z12–z13.9:  constant 7m flat appearance (baseplate visual — locked flat)
         //   z13.9–z14:  smooth growth from 7m to full roof height
         //   z14+:       constant full roof height from data
-        minzoom: 13,
+        minzoom: 12,
         paint: {
           'fill-extrusion-color': buildingColorExprByState(isHeatmap, tsIdx),
           'fill-extrusion-height': ['interpolate', ['linear'], ['zoom'],
-            13,   7,
+            12,   7,
             13.9, 7,
             14,   ['coalesce', ['get', 'h'], 8],
           ],
           'fill-extrusion-base': ['interpolate', ['linear'], ['zoom'],
-            13,   0,
+            12,   0,
             13.9, 0,
             14,   ['coalesce', ['get', 'm'], 0],
           ],
