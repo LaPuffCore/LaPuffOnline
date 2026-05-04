@@ -1588,12 +1588,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   const [mapPostsReactions, setMapPostsReactions] = useState({});
   const hoveredBoroughIdRef = useRef(null);
   // Cache status for FGB loading indicator: 'idle' | 'building' | 'paused' | 'done'
-  const [fgbCacheStatus, setFgbCacheStatus] = useState('idle');
-  const fgbCacheStatusRef = useRef('idle'); // ref mirror for async closures (polls in Real3D mobile gate)
-  const [fgbCacheProgress, setFgbCacheProgress] = useState(0); // 0-100
-  // Mobile Real3D loading gate — shows popup while building data loads
-  const [real3dLoading, setReal3dLoading] = useState(false);
-  const [real3dLoadProgress, setReal3dLoadProgress] = useState('');
+  // (kept as no-op refs for back-compat; UI surface removed since PMTiles handles loading natively)
+  const fgbCacheStatusRef = useRef('idle');
   // Event pin markers toggle
   const [showPins, setShowPins] = useState(false);
   // Borough region overlay toggle
@@ -1616,13 +1612,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   const valhallaTimerRef  = useRef(null);   // debounce timer handle
   const valhallaRouteCache = useRef(new Map()); // eventId → GeoJSON LineString (session cache)
 
-  // Auto-dismiss cache indicator 2 seconds after "done"
-  useEffect(() => {
-    fgbCacheStatusRef.current = fgbCacheStatus; // keep ref in sync for async closure polls
-    if (fgbCacheStatus !== 'done') return;
-    const t = setTimeout(() => setFgbCacheStatus('idle'), 2000);
-    return () => clearTimeout(t);
-  }, [fgbCacheStatus]);
+  // (legacy auto-dismiss effect for FGB cache UI removed — PMTiles handles loading natively,
+  // no user-visible cache indicator needed)
 
   heatmapRef.current   = heatmap;
   threeDRef.current    = threeD;
@@ -1801,7 +1792,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       // Session tile cache: keeps infrastructure tiles (roads, water, outlines) warm
       // across pan/zoom so zooming out never shows black squares. Mobile gets a smaller
       // cache to stay under iOS Safari's ~4GB RAM ceiling.
-      maxTileCacheSize: window.innerWidth < 768 ? 60 : 200,
+      maxTileCacheSize: window.innerWidth < 768 ? 100 : 300,
       // Fade duration 0 = paint changes apply instantly, no cross-fade flash on outlines.
       fadeDuration: 0,
     });
@@ -2200,12 +2191,17 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     setHoloColor(tier < 0 ? '#888888' : tierColor(tier));
   }
 
+  const warmupStartedRef = useRef(false);
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady || !geoData) return;
     addLayers(map, geoData, satellite);
     // Signal MapLoadingScreen Phase 2B that layers are ready → overlay will reveal the map
     mapCacheStore.layersReady = true;
+    // Warmup runs ONCE per session — even if effect deps change (geoData re-fetch etc),
+    // we never want a second sweep firing after the user is interacting with the map.
+    if (warmupStartedRef.current) return;
+    warmupStartedRef.current = true;
     // GPU warm-up: thoroughly pan across all 5 boroughs at every zoom level so the
     // session tile cache contains every roads/water/zip-outline tile NYC will ever need.
     // After this completes, every pan and zoom in the user's session is instant —
@@ -2317,8 +2313,14 @@ export default function MapView({ events, headerCollapsed = false, interactive =
 
   // Pre-compute tiers for all 5 timespans in background.
   // Hydrate from mapCacheStore if Phase 2A already computed them; else compute fresh.
+  const lastTierFingerprintRef = useRef(null);
   useEffect(() => {
     if (!geoData || !adjacency || !events?.length) return;
+    // Fingerprint check: skip recompute if events array signature is unchanged.
+    // Tier data only changes downstream of event data — same events ⇒ same tiers.
+    const fp = `${events.length}:${events[0]?.id ?? ''}:${events[events.length - 1]?.id ?? ''}`;
+    if (lastTierFingerprintRef.current === fp && precomputedTiersRef.current) return;
+    lastTierFingerprintRef.current = fp;
     if (mapCacheStore.precomputedTiers) {
       precomputedTiersRef.current = mapCacheStore.precomputedTiers;
       memoizedExprs.current = {};
@@ -2442,6 +2444,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       cachedTierDataRef.current = { events, timespanIdx, geoData, zipMap, maxCount, tiers, withHeat };
       tiersRef.current = tiers;
       withHeatRef.current = withHeat;
+      // Bump revision so the per-integer-zoom outline cache key invalidates.
+      outlineCacheRevRef.current = (outlineCacheRevRef.current + 1) | 0;
       // Publish zip heat index to localStorage — used by roaming points + future features.
       // Updated every time the heatmap data changes (events or timespan).
       try {
@@ -2796,9 +2800,22 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         // ignore paint errors (layer may not exist yet)
       }
     };
+    // RAF-debounced wrapper — coalesces multi-event 'zoom' bursts into a single
+    // paint update per frame. Heat-radius doesn't need to update mid-tick.
+    let radiusRafId = null;
+    const updateHeatRadiusDebounced = () => {
+      if (radiusRafId) return;
+      radiusRafId = requestAnimationFrame(() => {
+        radiusRafId = null;
+        updateHeatRadius();
+      });
+    };
     updateHeatRadius();
-    map.on('zoom', updateHeatRadius);
-    return () => { try { map.off('zoom', updateHeatRadius); } catch (e) { /* ignore */ } };
+    map.on('zoom', updateHeatRadiusDebounced);
+    return () => {
+      try { map.off('zoom', updateHeatRadiusDebounced); } catch (e) { /* ignore */ }
+      if (radiusRafId) cancelAnimationFrame(radiusRafId);
+    };
   }, [mapReady, heatmap, topoOn]);
 
 
@@ -2808,6 +2825,13 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     if (!map || !mapReady) return;
     map.easeTo({ pitch: threeD ? 48 : 0, bearing: threeD ? -17 : 0, duration: 700 });
   }, [threeD, mapReady]);
+
+  // Cache rev for per-integer-zoom outline rebuild — bumped any time the underlying
+  // heat data (withHeat, boroughWithColor) changes so the next zoom tick re-runs
+  // generateZctaQuadsFromSkeleton with fresh overrides. Idle pan/zoom inside the same
+  // integer-zoom band reuses the previous setData (no rebuild).
+  const outlineCacheRevRef = useRef(0);
+  const lastOutlineKeyRef = useRef('');
 
   // Outline ring width regeneration on zoom AND pitch — covers 3D and Real3D modes.
   // ZCTA outline only rebuilds in 3D (layer only exists in 3D). Borough outline rebuilds in both.
@@ -2824,6 +2848,13 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       const is3D  = threeDRef.current;
       const isR3D = real3DRef.current;
       if (!is3D && !isR3D) return;
+      // Per-integer-zoom guard: rebuild only when the integer zoom band crosses or
+      // when the underlying data revision changes (heatmap recolor / events update).
+      // Pan and fractional zoom (e.g., 14.3 → 14.7) reuse the prior setData → instant.
+      const intZoom = Math.floor(map.getZoom());
+      const key = `${intZoom}:${is3D ? 1 : 0}:${isR3D ? 1 : 0}:${outlineCacheRevRef.current}`;
+      if (key === lastOutlineKeyRef.current) return;
+      lastOutlineKeyRef.current = key;
       // ZCTA outline — 3D only
       if (is3D && map.getSource('zcta-outline')) {
         if (zctaSkeletonRef.current && withHeatRef.current) {
@@ -2903,49 +2934,67 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     if (!map || !mapReady) return;
 
     if (satellite) {
-      // Low-zoom layer: ArcGIS World Imagery — used z0-14 so the entire
-      // sub-z14 range is uniformly sourced (no provider mismatch at z11-z13).
+      // 3-tier hybrid raster stack:
+      //   z<11   → ArcGIS World Imagery (sharp at low zoom, free)
+      //   z=11-12→ Esri Wayback release 13045 (2018-01-18) — fills the awkward middle
+      //            range cleanly with a single uniform mosaic
+      //   z≥13   → Clarity (uniform NYC mosaic at high zoom)
       if (!map.getSource('sat-source-arcgis')) {
         map.addSource('sat-source-arcgis', {
           type: 'raster',
           tiles: ['https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
           tileSize: 256,
           minzoom: 0,
-          maxzoom: 14,
+          maxzoom: 11,
         });
       }
-      // High-zoom layer: Clarity (z14+) — uniform NYC mosaic at high zoom only.
+      if (!map.getSource('sat-source-wayback')) {
+        map.addSource('sat-source-wayback', {
+          type: 'raster',
+          tiles: ['https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/WMTS/1.0.0/default028mm/MapServer/tile/13045/{z}/{y}/{x}'],
+          tileSize: 256,
+          minzoom: 11,
+          maxzoom: 13,
+        });
+      }
       if (!map.getSource('sat-source')) {
         map.addSource('sat-source', {
           type: 'raster',
           tiles: ['https://clarity.maptiles.arcgis.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
           tileSize: 256,
-          minzoom: 14,
+          minzoom: 13,
           maxzoom: 19,
         });
       }
       const layers = map.getStyle().layers;
       const firstLayerId = layers.length > 0 ? layers[0].id : undefined;
-      // ArcGIS first (bottom) — visible at z<14 (uniform ArcGIS through z11-z13)
       if (!map.getLayer('sat-layer-arcgis')) {
         map.addLayer({
           id: 'sat-layer-arcgis', type: 'raster', source: 'sat-source-arcgis',
-          maxzoom: 14,
+          maxzoom: 11,
           paint: { 'raster-opacity': 1, 'raster-fade-duration': 0 },
         }, firstLayerId);
       }
-      // Clarity on top of ArcGIS — visible at z≥14
+      if (!map.getLayer('sat-layer-wayback')) {
+        map.addLayer({
+          id: 'sat-layer-wayback', type: 'raster', source: 'sat-source-wayback',
+          minzoom: 11, maxzoom: 13,
+          paint: { 'raster-opacity': 1, 'raster-fade-duration': 0 },
+        }, firstLayerId);
+      }
       if (!map.getLayer('sat-layer')) {
         map.addLayer({
           id: 'sat-layer', type: 'raster', source: 'sat-source',
-          minzoom: 14,
+          minzoom: 13,
           paint: { 'raster-opacity': 1, 'raster-fade-duration': 0 },
         }, firstLayerId);
       }
     } else {
       if (map.getLayer('sat-layer')) map.removeLayer('sat-layer');
+      if (map.getLayer('sat-layer-wayback')) map.removeLayer('sat-layer-wayback');
       if (map.getLayer('sat-layer-arcgis')) map.removeLayer('sat-layer-arcgis');
       if (map.getSource('sat-source')) map.removeSource('sat-source');
+      if (map.getSource('sat-source-wayback')) map.removeSource('sat-source-wayback');
       if (map.getSource('sat-source-arcgis')) map.removeSource('sat-source-arcgis');
     }
 
@@ -3092,8 +3141,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   // This function is kept as a no-op shim so existing call sites don't crash; the actual
   // source/layer creation happens in addBuildingLayers below.
   function buildFGBCache() {
-    setFgbCacheStatus('done');
-    setFgbCacheProgress(100);
+    fgbCacheStatusRef.current = 'done';
     // Populate zipToZctaIdxMapRef from mapCacheStore so tier-by-zip match expressions work
     if (!zipToZctaIdxMapRef.current && geoDataRef.current?.features) {
       const lookup = {};
@@ -3357,34 +3405,16 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       return;
     }
 
-    // Mobile: gated path with loading popup. PMTiles handles tile fetching natively
-    // — no FGB cache step or viewport JIT fetch needed.
-    let cancelled = false;
-    (async () => {
-      setReal3dLoading(true);
-      setReal3dLoadProgress('Preparing Real3D layers…');
-      await new Promise(r => setTimeout(r, 50));
-      if (cancelled) return;
-
-      if (!real3dLayersCreatedRef.current) {
-        initReal3DLayers(map, isHm, timespanIdxRef.current ?? 2);
-      } else {
-        // Paint correct colors before showing layers
-        refreshBuildingColors();
-        setReal3DLayersVisible(map, true);
-      }
-      if (cancelled) return;
-
-      map.setLight({ anchor: 'map' });
-      map.easeTo({ pitch: 55, bearing: -17, duration: 700 });
-      await new Promise(r => setTimeout(r, 100));
-      if (cancelled) return;
-
-      setReal3dLoading(false);
-      setReal3dLoadProgress('');
-    })();
-
-    return () => { cancelled = true; };
+    // Mobile: identical to desktop now that PMTiles handles all tile fetching natively.
+    // No popup needed — MapLibre fades tiles in as they arrive from the SW cache.
+    if (!real3dLayersCreatedRef.current) {
+      initReal3DLayers(map, isHm, timespanIdxRef.current ?? 2);
+    } else {
+      refreshBuildingColors();
+      setReal3DLayersVisible(map, true);
+    }
+    map.setLight({ anchor: 'map' });
+    map.easeTo({ pitch: 55, bearing: -17, duration: 700 });
   }, [real3D, mapReady]);
 
   // Heatmap toggle in Real3D — swap paint expressions (GPU-only on desktop, viewport re-fetch on mobile)
@@ -4616,24 +4646,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         </div>
       )}
 
-      {/* Mobile Real3D loading gate — fullscreen overlay while building data loads */}
-      {real3dLoading && (
-        <div className="fixed inset-0 z-[100001] flex items-center justify-center bg-black/80 backdrop-blur-sm">
-          <div className="flex flex-col items-center gap-4 px-8 py-6 rounded-3xl border-2 border-white/20 bg-black/90 shadow-2xl max-w-[280px]">
-            <div className="relative w-12 h-12">
-              <div className="absolute inset-0 rounded-full border-4 border-white/10" />
-              <div className="absolute inset-0 rounded-full border-4 border-t-[#7C3AED] border-r-transparent border-b-transparent border-l-transparent animate-spin" />
-            </div>
-            <div className="text-center">
-              <p className="text-white font-black text-sm tracking-wide mb-1">Loading Real3D</p>
-              <p className="text-white/50 text-xs font-semibold">{real3dLoadProgress || 'Caching and baking…'}</p>
-            </div>
-            <div className="w-full h-1 rounded-full bg-white/10 overflow-hidden">
-              <div className="h-full rounded-full bg-[#7C3AED] animate-pulse" style={{ width: '60%' }} />
-            </div>
-          </div>
-        </div>
-      )}
+      {/* (Mobile Real3D loading gate removed — PMTiles handles tile fetching natively,
+          no popup needed. MapLibre fades tiles in as they arrive from the SW cache.) */}
 
     </div>
   );

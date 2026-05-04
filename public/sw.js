@@ -1,16 +1,24 @@
-// LaPuff Service Worker — PMTiles full-file pre-warm + Range slicing.
-const SW_VERSION = 'lapuff-sw-v10';
+// LaPuff Service Worker — PMTiles full-file pre-warm + Range slicing + static GeoJSON cache.
+const SW_VERSION = 'lapuff-sw-v11';
 
 // Cache names (must match mapDataPipeline.js)
-const FGB_CACHE         = 'lapuff-fgb-v9';            // v9: bumped on PMTiles buildings migration
 const PMTILES_CACHE     = 'lapuff-pmtiles-sw-v3';     // v3: per-Range responses (fallback)
-const PMTILES_FULL_CACHE = 'lapuff-pmtiles-full-v5';  // v5: borough-FGB rebuild, no-clipping, z13-16
+const PMTILES_FULL_CACHE = 'lapuff-pmtiles-full-v6';  // v6: borough-FGB rebuild + SW v11
+const STATIC_CACHE      = 'lapuff-static-v1';         // v1: ZCTA + borough + water GeoJSON
 
-const MANAGED_CACHES = [FGB_CACHE, PMTILES_CACHE, PMTILES_FULL_CACHE];
+const MANAGED_CACHES = [PMTILES_CACHE, PMTILES_FULL_CACHE, STATIC_CACHE];
 
 // URLs that we know are small + should be cached as full files (when SW receives PRECACHE message)
 // nyc_buildings.pmtiles (~71MB) is fully precached → in-memory range slicing = 0ms warm tile fetches
 const FULL_PMTILES_URL_PATTERNS = ['realfinaldeciroads.pmtiles', 'nyc_buildings.pmtiles'];
+
+// Static GeoJSON files we serve cache-first (small same-origin assets used by every map render)
+const STATIC_PATTERNS = [
+  'MODZCTA_2010_WGS1984.geo.json',
+  'borough.geo.json',
+  'water_static.geojson',
+  'zcta_adjacency.json',
+];
 
 // ── Install: skip waiting so new SW activates immediately ────────────────────
 self.addEventListener('install', event => {
@@ -41,14 +49,12 @@ self.addEventListener('fetch', event => {
   const url = new URL(request.url);
   const path = url.pathname;
 
-  // ── FGB files: cache-first for FULL fetches, pass-through for Range ──────
-  // Desktop Phase 2A does full fetch → SW caches whole file → instant revisit.
-  // Mobile fgbDeserialize(url, rect) sends Range requests → pass through so
-  // R-tree spatial queries get correct partial bytes (browser HTTP cache handles
-  // repeat ranges; SW-caching Range responses by URL would clobber across reads).
-  if (path.endsWith('.fgb')) {
-    if (request.headers.get('range')) return; // pass-through for Range
-    event.respondWith(handleFGB(request));
+  // ── FGB files: pass through (no longer cached — PMTiles is the only building source) ──
+  if (path.endsWith('.fgb')) return;
+
+  // ── Static GeoJSON: cache-first for small same-origin assets ─────────────
+  if (STATIC_PATTERNS.some(p => path.endsWith(p))) {
+    event.respondWith(handleStatic(request));
     return;
   }
 
@@ -63,23 +69,25 @@ self.addEventListener('fetch', event => {
   }
 });
 
-async function handleFGB(request) {
-  const cacheKey = request.url;
-  const cache = await caches.open(FGB_CACHE);
-  const hit = await cache.match(cacheKey);
+async function handleStatic(request) {
+  const cache = await caches.open(STATIC_CACHE);
+  const hit = await cache.match(request.url);
   if (hit) return hit;
-
-  // Network fetch + cache
   try {
     const resp = await fetch(request);
     if (resp.ok && resp.status === 200) {
-      cache.put(cacheKey, resp.clone()).catch(() => {});
+      cache.put(request.url, resp.clone()).catch(() => {});
     }
     return resp;
   } catch (err) {
-    console.warn('[SW] FGB fetch failed:', err);
-    return new Response('FGB not available offline', { status: 503 });
+    return new Response('Static asset not available offline', { status: 503 });
   }
+}
+
+async function handleFGB(request) {
+  // FGB pipeline removed — pass-through only (kept for back-compat if any old client
+  // still tries to fetch one). Returns network response; nothing cached SW-side.
+  return fetch(request);
 }
 
 async function handlePMTiles(request) {
