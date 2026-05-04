@@ -2240,14 +2240,17 @@ export default function MapView({ events, headerCollapsed = false, interactive =
             try {
               const layersStyle = map.getStyle().layers;
               const firstLayerId = layersStyle.length > 0 ? layersStyle[0].id : undefined;
+              // Source maxzoom MUST be higher than layer maxzoom: MapLibre adds +1 to
+              // tile zoom for 256px raster tiles. Source max=19 ensures native-resolution
+              // tiles are fetched at every layer-visible zoom (no overscaling = no blur).
               if (!map.getSource('sat-source-arcgis')) {
-                map.addSource('sat-source-arcgis', { type: 'raster', tiles: ['https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'], tileSize: 256, minzoom: 9, maxzoom: 10 });
+                map.addSource('sat-source-arcgis', { type: 'raster', tiles: ['https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'], tileSize: 256, minzoom: 0, maxzoom: 19 });
               }
               if (!map.getSource('sat-source-wayback')) {
-                map.addSource('sat-source-wayback', { type: 'raster', tiles: ['https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/WMTS/1.0.0/default028mm/MapServer/tile/13045/{z}/{y}/{x}'], tileSize: 256, minzoom: 11, maxzoom: 12 });
+                map.addSource('sat-source-wayback', { type: 'raster', tiles: ['https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/WMTS/1.0.0/default028mm/MapServer/tile/13045/{z}/{y}/{x}'], tileSize: 256, minzoom: 0, maxzoom: 19 });
               }
               if (!map.getSource('sat-source')) {
-                map.addSource('sat-source', { type: 'raster', tiles: ['https://clarity.maptiles.arcgis.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'], tileSize: 256, minzoom: 13, maxzoom: 16 });
+                map.addSource('sat-source', { type: 'raster', tiles: ['https://clarity.maptiles.arcgis.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'], tileSize: 256, minzoom: 0, maxzoom: 19 });
               }
               if (!map.getLayer('sat-layer-arcgis')) map.addLayer({ id: 'sat-layer-arcgis', type: 'raster', source: 'sat-source-arcgis', minzoom: 9, maxzoom: 11, paint: { 'raster-opacity': 0.01, 'raster-fade-duration': 0 } }, firstLayerId);
               if (!map.getLayer('sat-layer-wayback')) map.addLayer({ id: 'sat-layer-wayback', type: 'raster', source: 'sat-source-wayback', minzoom: 11, maxzoom: 13, paint: { 'raster-opacity': 0.01, 'raster-fade-duration': 0 } }, firstLayerId);
@@ -3008,13 +3011,17 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       //   z=11-12→ Esri Wayback release 13045 (2018-01-18) — timestamp-locked mosaic,
       //            avoids the blurry/inconsistent tiles clarity serves at these zooms
       //   z≥13   → Clarity (uniform high-res NYC mosaic at high zoom)
+      // Source maxzoom MUST be higher than layer maxzoom: MapLibre adds +1 to tile zoom
+      // for 256px raster tiles. Source max=19 ensures native-resolution tiles fetched
+      // at every layer-visible zoom (no overscaling = no blur). Layer min/maxzoom
+      // controls the visibility band handoff between tiers.
       if (!map.getSource('sat-source-arcgis')) {
         map.addSource('sat-source-arcgis', {
           type: 'raster',
           tiles: ['https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
           tileSize: 256,
-          minzoom: 9,
-          maxzoom: 10,
+          minzoom: 0,
+          maxzoom: 19,
         });
       }
       if (!map.getSource('sat-source-wayback')) {
@@ -3022,8 +3029,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
           type: 'raster',
           tiles: ['https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/WMTS/1.0.0/default028mm/MapServer/tile/13045/{z}/{y}/{x}'],
           tileSize: 256,
-          minzoom: 11,
-          maxzoom: 12,
+          minzoom: 0,
+          maxzoom: 19,
         });
       }
       if (!map.getSource('sat-source')) {
@@ -3031,8 +3038,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
           type: 'raster',
           tiles: ['https://clarity.maptiles.arcgis.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
           tileSize: 256,
-          minzoom: 13,
-          maxzoom: 16,
+          minzoom: 0,
+          maxzoom: 19,
         });
       }
       const layers = map.getStyle().layers;
@@ -3171,7 +3178,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       map.addSource('nyc-buildings', {
         type: 'vector',
         url: `pmtiles://${BUILDINGS_PMTILES_URL}`,
-        minzoom: 12,   // was 13 — tiles requested from z12 so layer has data at z12.5
+        minzoom: 13,   // PMTiles file native min_zoom=13; matches tile availability
         maxzoom: 16,
         promoteId: 'b',
       });
@@ -3182,22 +3189,21 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         id: 'real3d-buildings', type: 'fill-extrusion',
         source: 'nyc-buildings',
         'source-layer': BUILDINGS_PMTILES_LAYER,
-        // Unified building layer: appears at z12 as flat 7m baseplates.
+        // Unified building layer: appears at z13 as flat 7m baseplates.
         // Height interpolation:
-        //   z12–z13.9:  constant 7m flat appearance (baseplate visual)
+        //   z13–z13.9:  constant 7m flat appearance (baseplate visual)
         //   z13.9–z14:  smooth growth from 7m to full roof height
         //   z14+:       constant full roof height from data
-        // Source minzoom=12 ensures tiles are requested early enough for z12 to render.
-        minzoom: 12,
+        minzoom: 13,
         paint: {
           'fill-extrusion-color': buildingColorExprByState(isHeatmap, tsIdx),
           'fill-extrusion-height': ['interpolate', ['linear'], ['zoom'],
-            12,   7,
+            13,   7,
             13.9, 7,
             14,   ['coalesce', ['get', 'h'], 8],
           ],
           'fill-extrusion-base': ['interpolate', ['linear'], ['zoom'],
-            12,   0,
+            13,   0,
             13.9, 0,
             14,   ['coalesce', ['get', 'm'], 0],
           ],
@@ -3370,6 +3376,10 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     // 3. setLight + easeTo: tilt camera only (NO zoom snap — user controls zoom themselves).
     if (!real3dLayersCreatedRef.current) {
       initReal3DLayers(map, isHm, timespanIdxRef.current ?? 2);
+      // Defensive: ensure visibility is explicitly set after creation. Layers default
+      // to 'visible' but on mobile the pre-create effect never ran setReal3DLayersVisible(false),
+      // so this is a no-op there. On desktop the pre-create hid them; this re-shows.
+      setReal3DLayersVisible(map, true);
     } else {
       refreshBuildingColors();
       setReal3DLayersVisible(map, true);

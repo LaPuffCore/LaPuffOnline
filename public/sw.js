@@ -1,5 +1,5 @@
 // LaPuff Service Worker — PMTiles full-file pre-warm + Range slicing + static GeoJSON cache + satellite tile cache.
-const SW_VERSION = 'lapuff-sw-v13';
+const SW_VERSION = 'lapuff-sw-v14';
 
 // Cache names (must match mapDataPipeline.js)
 const PMTILES_CACHE     = 'lapuff-pmtiles-sw-v3';     // v3: per-Range responses (fallback)
@@ -9,9 +9,12 @@ const SATELLITE_CACHE   = 'lapuff-satellite-v1';      // v1: ArcGIS/Wayback/Clar
 
 const MANAGED_CACHES = [PMTILES_CACHE, PMTILES_FULL_CACHE, STATIC_CACHE, SATELLITE_CACHE];
 
-// URLs that we know are small + should be cached as full files (when SW receives PRECACHE message)
-// nyc_buildings.pmtiles (~71MB) is fully precached → in-memory range slicing = 0ms warm tile fetches
-const FULL_PMTILES_URL_PATTERNS = ['realfinaldeciroads.pmtiles', 'nyc_buildings.pmtiles'];
+// Full-file precache + in-memory slicing is FAST on desktop (one alloc per session)
+// but CATASTROPHIC for large files because every Range request decodes the entire
+// cached Response into an ArrayBuffer (e.g. 73MB × 30 requests = ~2GB of churn → iOS SW kill).
+// Only roads.pmtiles (~6MB) is small enough to safely use the slice path.
+// nyc_buildings.pmtiles (~73MB) uses the per-Range path (still cached, just one Range per request).
+const FULL_PMTILES_URL_PATTERNS = ['realfinaldeciroads.pmtiles'];
 
 // Satellite tile host patterns — intercepted and served cache-first from SATELLITE_CACHE
 const SATELLITE_HOST_PATTERNS = [
@@ -37,18 +40,30 @@ self.addEventListener('install', event => {
 // ── Activate: claim all open clients, clean up stale caches ─────────────────
 self.addEventListener('activate', event => {
   self.clients.claim();
-  event.waitUntil(
-    caches.keys().then(keys =>
-      Promise.all(
-        keys
-          .filter(k => k.startsWith('lapuff-') && !MANAGED_CACHES.includes(k))
-          .map(k => {
-            console.log('[SW] Deleting stale cache:', k);
-            return caches.delete(k);
-          })
-      )
-    )
-  );
+  event.waitUntil((async () => {
+    // Drop unmanaged caches.
+    const keys = await caches.keys();
+    await Promise.all(
+      keys
+        .filter(k => k.startsWith('lapuff-') && !MANAGED_CACHES.includes(k))
+        .map(k => {
+          console.log('[SW] Deleting stale cache:', k);
+          return caches.delete(k);
+        })
+    );
+    // One-time cleanup: remove the old 73MB nyc_buildings.pmtiles full-file entry
+    // left over from SW v13 (which used the slice path catastrophically on mobile).
+    try {
+      const fullCache = await caches.open(PMTILES_FULL_CACHE);
+      const reqs = await fullCache.keys();
+      for (const r of reqs) {
+        if (r.url.includes('nyc_buildings.pmtiles')) {
+          await fullCache.delete(r);
+          console.log('[SW] Evicted oversized full-file entry:', r.url);
+        }
+      }
+    } catch (e) { /* ignore */ }
+  })());
 });
 
 // ── Fetch: intercept map data requests ──────────────────────────────────────
