@@ -58,18 +58,17 @@ function precacheSatelliteTiles() {
       for (let y = a.y; y <= b.y; y++)
         urls.push(WAYBACK(z, y, x));
   }
-  // Clarity z13-z16: NYC tight bbox only (z15/16 are high-res trade-offs)
-  for (const z of [13, 14, 15, 16]) {
+  // Clarity z13–z14 only (Stage 7: balanced approach — z15/z16 left to pan-prefetch
+  // by MapLibre on user interaction; reduces cache footprint by ~75% vs full z9–z16).
+  for (const z of [13, 14]) {
     const a = lngLatToTile(NYC.lng1, NYC.lat2, z), b = lngLatToTile(NYC.lng2, NYC.lat1, z);
     for (let x = a.x; x <= b.x; x++)
       for (let y = a.y; y <= b.y; y++)
         urls.push(CLARITY(z, y, x));
   }
 
-  // Mobile: drop z15-z16 to keep cache footprint manageable (mobile precache up to z14).
-  // Mobile satellite quality stays as-is per user preference; can be tuned later.
-  const isMobile = window.innerWidth < 768;
-  const finalUrls = isMobile ? urls.filter(u => !/\/(15|16)\//.test(u)) : urls;
+  // Balanced approach for both desktop and mobile: z9–z14 precache (per-platform tuning later).
+  const finalUrls = urls;
 
   // Send to SW for cache.put (persists across sessions). SW handles parallel fetch with concurrency cap.
   if (navigator.serviceWorker?.controller) {
@@ -660,21 +659,18 @@ export async function runPhase2A(events, isMobile, onProgress) {
   // Fired at end of 2A so it doesn't block initial pipeline steps.
   // Note: dead loadCentroidsBin() call removed — building zip is baked into PMTiles features.
 
-  // ── Buildings PMTiles pre-warm + desktop full-file SW pre-cache ──────────
-  // Desktop: PRECACHE_PMTILES tells SW to fetch the full 73MB file once.
-  // SW slice path (one large ArrayBuffer alloc per session, instant Range serves) is
-  // fine on desktop with adequate RAM.
-  // Mobile: full-file precache is skipped — 73MB alloc × 30+ Range requests per zoom
-  // = ~2GB memory churn → iOS Safari kills the SW silently → buildings never appear.
-  // On mobile the SW per-Range fallback path is used (caches individual range slices).
+  // ── Buildings PMTiles: header pre-warm ONLY (no full-file precache) ──────
+  // Stage 1 OOM fix: nyc_buildings_z12.pmtiles (~74MB) is NOT precached as a full file.
+  // The SW slice path used to alloc a fresh 74MB ArrayBuffer per Range request → multi-GB
+  // transient peak → desktop OOM. Buildings now flow through the per-Range cache exclusively
+  // (lapuff-pmtiles-sw-v4) with an LRU cap (80MB) inside the SW. Header pre-warm primes the
+  // PMTiles directory parser so first toggle is instant.
   report(P.bldgCache[0], 'Pre-warming building tiles...');
   const BUILDINGS_PMTILES_URL = (typeof window !== 'undefined')
     ? `${window.location.origin}${import.meta.env.BASE_URL}data/nyc_buildings_z12.pmtiles`
     : '/data/nyc_buildings_z12.pmtiles';
   fetch(BUILDINGS_PMTILES_URL, { headers: { Range: 'bytes=0-16383' } }).catch(() => {});
-  if (!isMobile && navigator.serviceWorker?.controller) {
-    navigator.serviceWorker.controller.postMessage({ type: 'PRECACHE_PMTILES', url: BUILDINGS_PMTILES_URL });
-  }
+  // Intentionally NO PRECACHE_PMTILES post for buildings — that triggered the 74MB alloc storm.
   report(P.bldgCache[1], 'Building tiles ready');
 
   // ── Satellite SW precache (NYC bbox z9-z15) — last step, non-blocking ────

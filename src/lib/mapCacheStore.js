@@ -13,6 +13,15 @@ const mapCacheStore = {
   zipBoroughMap: null,      // { zctaFeatureIndex → boroughFeatureIndex }
   precomputedTiers: null,   // { [timespanIdx]: { tiers, zipMap, maxCount } } for all 5 timespans
 
+  // ── Stage 4 + 6 pre-bakes (populated in Phase 2A or end of Phase 2B) ───
+  precomputedZctaFills: null,    // { [tsIdx]: withHeat-FeatureCollection } — instant setData per timespan
+  precomputedHeatPoints: null,   // { [tsIdx]: weighted-point-FeatureCollection } — heat-underlay
+  precomputedBoroughTiers: null, // { [tsIdx]: avgTiers[] } — per-borough avg tier
+  precomputedBoroughExprs: null, // { [tsIdx]: { on, off } } — borough outline color match expressions
+  outlineGeoCache: null,         // { [intZoom]: ZCTA outline GeoJSON } — per integer zoom
+  boroughOutlineGeoCache: null,  // { [intZoom]: borough outline GeoJSON }
+  prebakeFingerprint: null,      // events fingerprint that caches were built against (invalidate on change)
+
   // ── Phase 2B signals (set by MapView after GL init) ────────────────────
   mapLibreReady: false,     // true when MapLibre 'load' event fires
   layersReady: false,       // true when addLayers() completes (ZCTA + borough base layers added)

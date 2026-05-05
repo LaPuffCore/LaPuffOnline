@@ -49,6 +49,7 @@ public/data/*_nor.fgb
 public/data/*_r.fgb
 public/data/final_building.fgb
 public/data/nyc_final.pmtiles
+public/data/nyc_buildings.pmtiles
 public/data/BronxAndSafezones_nor.fgb
 public/data/Brooklyn_nor.fgb
 public/data/Manhattan_nor.fgb

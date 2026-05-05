@@ -1,19 +1,64 @@
-// LaPuff Service Worker — PMTiles full-file pre-warm + Range slicing + static GeoJSON cache + satellite tile cache.
-const SW_VERSION = 'lapuff-sw-v15';
+// LaPuff Service Worker — PMTiles Range slicing + static GeoJSON cache + satellite tile cache.
+// Stage-1 OOM fix: buildings PMTiles is NEVER served from a full-file slice (was 74MB ArrayBuffer
+// re-allocated per Range = multi-GB transient peak → desktop OOM). Buildings flow exclusively
+// through the per-Range cache (PMTILES_CACHE) with an LRU cap.
+const SW_VERSION = 'lapuff-sw-v16';
 
-// Cache names (must match mapDataPipeline.js)
-const PMTILES_CACHE     = 'lapuff-pmtiles-sw-v4';     // v4: per-Range responses keyed by URL+Range (mobile fallback)
-const PMTILES_FULL_CACHE = 'lapuff-pmtiles-full-v6';  // v6: borough-FGB rebuild + SW v11
-const STATIC_CACHE      = 'lapuff-static-v1';         // v1: ZCTA + borough + water GeoJSON
-const SATELLITE_CACHE   = 'lapuff-satellite-v1';      // v1: ArcGIS/Wayback/Clarity raster tiles (cross-session persistent)
+const PMTILES_CACHE      = 'lapuff-pmtiles-sw-v4';     // per-Range responses (URL+Range key) — used by ALL pmtiles now for buildings
+const PMTILES_FULL_CACHE = 'lapuff-pmtiles-full-v6';   // full-file slice cache — ROADS ONLY (15MB safe)
+const STATIC_CACHE       = 'lapuff-static-v1';         // ZCTA + borough + water GeoJSON
+const SATELLITE_CACHE    = 'lapuff-satellite-v1';      // ArcGIS/Wayback/Clarity raster tiles
 
 const MANAGED_CACHES = [PMTILES_CACHE, PMTILES_FULL_CACHE, STATIC_CACHE, SATELLITE_CACHE];
 
-// Full-file precache + in-memory slicing is FAST on desktop (one alloc per session,
-// instant Range serves). nyc_buildings_z12.pmtiles (~74MB) is safe on desktop.
-// On mobile it is NOT precached (pipeline sends PRECACHE_PMTILES only if !isMobile),
-// so fullHit is always null on mobile → per-Range fallback is used automatically.
-const FULL_PMTILES_URL_PATTERNS = ['realfinaldeciroads.pmtiles', 'nyc_buildings_z12.pmtiles'];
+// Only roads PMTiles uses the full-file slice path. Buildings deliberately excluded.
+const FULL_PMTILES_URL_PATTERNS = ['realfinaldeciroads.pmtiles'];
+
+// Per-URL ArrayBuffer cache (in-memory, SW-global). Roads file fetched once per SW lifetime
+// and kept as a single live ArrayBuffer reference — Range requests slice from it directly with
+// zero re-allocation. Survives until SW is terminated by the browser.
+const inMemoryFullBuffers = new Map(); // url -> ArrayBuffer
+
+// LRU cap for the per-Range buildings cache. Prevents unbounded growth when user pans across
+// many tiles. Cap is a soft-eviction triggered on cache writes.
+const BUILDINGS_RANGE_CACHE_CAP = 80 * 1024 * 1024; // 80MB; mobile fetches less so this auto-fits
+const buildingsRangeMeta = new Map(); // compositeKey -> { size, lastAccess }
+let buildingsRangeTotalBytes = 0;
+async function trackBuildingsRangeWrite(compositeKey, byteSize) {
+  buildingsRangeMeta.set(compositeKey, { size: byteSize, lastAccess: Date.now() });
+  buildingsRangeTotalBytes += byteSize;
+  if (buildingsRangeTotalBytes <= BUILDINGS_RANGE_CACHE_CAP) return;
+  try {
+    const cache = await caches.open(PMTILES_CACHE);
+    const sorted = Array.from(buildingsRangeMeta.entries()).sort((a, b) => a[1].lastAccess - b[1].lastAccess);
+    while (buildingsRangeTotalBytes > BUILDINGS_RANGE_CACHE_CAP * 0.85 && sorted.length) {
+      const [k, meta] = sorted.shift();
+      await cache.delete(k);
+      buildingsRangeMeta.delete(k);
+      buildingsRangeTotalBytes -= meta.size;
+    }
+  } catch (_e) { /* eviction best-effort */ }
+}
+
+// Satellite cache LRU — capped at 150MB. Tiles are tiny (~25KB each) so this fits ~6000 tiles.
+const SATELLITE_CACHE_CAP = 150 * 1024 * 1024;
+const satelliteMeta = new Map();
+let satelliteTotalBytes = 0;
+async function trackSatelliteWrite(url, byteSize) {
+  satelliteMeta.set(url, { size: byteSize, lastAccess: Date.now() });
+  satelliteTotalBytes += byteSize;
+  if (satelliteTotalBytes <= SATELLITE_CACHE_CAP) return;
+  try {
+    const cache = await caches.open(SATELLITE_CACHE);
+    const sorted = Array.from(satelliteMeta.entries()).sort((a, b) => a[1].lastAccess - b[1].lastAccess);
+    while (satelliteTotalBytes > SATELLITE_CACHE_CAP * 0.85 && sorted.length) {
+      const [k, meta] = sorted.shift();
+      await cache.delete(k);
+      satelliteMeta.delete(k);
+      satelliteTotalBytes -= meta.size;
+    }
+  } catch (_e) { /* */ }
+}
 
 // Satellite tile host patterns — intercepted and served cache-first from SATELLITE_CACHE
 const SATELLITE_HOST_PATTERNS = [
@@ -50,14 +95,15 @@ self.addEventListener('activate', event => {
           return caches.delete(k);
         })
     );
-    // One-time cleanup: remove old nyc_buildings.pmtiles entries (replaced by z12 variant).
+    // One-time cleanup: remove ALL nyc_buildings*.pmtiles entries from full-file cache
+    // (Stage 1 OOM fix: buildings no longer use full-file slice path).
     try {
       const fullCache = await caches.open(PMTILES_FULL_CACHE);
       const reqs = await fullCache.keys();
       for (const r of reqs) {
-        if (r.url.includes('nyc_buildings.pmtiles') && !r.url.includes('nyc_buildings_z12')) {
+        if (r.url.includes('nyc_buildings')) {
           await fullCache.delete(r);
-          console.log('[SW] Evicted old nyc_buildings.pmtiles entry:', r.url);
+          console.log('[SW] Evicted full-file building entry (Stage 1 fix):', r.url);
         }
       }
     } catch (e) { /* ignore */ }
@@ -99,11 +145,21 @@ self.addEventListener('fetch', event => {
 async function handleSatellite(request) {
   const cache = await caches.open(SATELLITE_CACHE);
   const hit = await cache.match(request.url);
-  if (hit && hit.ok) return hit;  // only serve real 200 responses from cache
+  if (hit && hit.ok) {
+    // Touch LRU on hit
+    const meta = satelliteMeta.get(request.url);
+    if (meta) meta.lastAccess = Date.now();
+    return hit;
+  }
   try {
     const resp = await fetch(request);
     if (resp && resp.ok) {
-      cache.put(request.url, resp.clone()).catch(() => {});
+      cache.put(request.url, resp.clone()).then(async () => {
+        try {
+          const cl = parseInt(resp.headers.get('content-length') || '25000', 10);
+          await trackSatelliteWrite(request.url, isNaN(cl) ? 25000 : cl);
+        } catch (_e) { /* */ }
+      }).catch(() => {});
     }
     return resp;
   } catch (err) {
@@ -127,30 +183,36 @@ async function handleStatic(request) {
 }
 
 async function handlePMTiles(request) {
-  // Strategy: check full-file cache first. If we have the entire .pmtiles cached,
-  // slice the requested byte range from it and return a synthesized 206 response.
-  // This is dramatically faster than per-Range network calls.
+  // Strategy: check in-memory ArrayBuffer first (roads only), then SW Cache full-file (roads only),
+  // else per-Range cache (buildings + roads fallback).
   const url = new URL(request.url);
   const isFullCandidate = FULL_PMTILES_URL_PATTERNS.some(p => url.href.includes(p));
+  const isBuildings = url.href.includes('nyc_buildings');
 
   if (isFullCandidate) {
     try {
-      const fullCache = await caches.open(PMTILES_FULL_CACHE);
-      const fullHit = await fullCache.match(url.origin + url.pathname);
-      if (fullHit) {
-        const range = request.headers.get('range');
-        if (!range) {
-          // No range header: return full file (e.g., a header-pre-warm fetch)
-          return fullHit.clone();
+      const cacheKey = url.origin + url.pathname;
+      // Prefer in-memory ArrayBuffer — zero alloc per Range slice.
+      let ab = inMemoryFullBuffers.get(cacheKey);
+      if (!ab) {
+        const fullCache = await caches.open(PMTILES_FULL_CACHE);
+        const fullHit = await fullCache.match(cacheKey);
+        if (fullHit) {
+          // Allocate ONCE per SW lifetime, then keep the ArrayBuffer reference for all future Range slices.
+          ab = await fullHit.arrayBuffer();
+          inMemoryFullBuffers.set(cacheKey, ab);
         }
-        // Parse Range: bytes=START-END
+      }
+      if (ab) {
+        const range = request.headers.get('range');
+        if (!range) return new Response(ab.slice(0), { status: 200 });
         const m = /bytes=(\d+)-(\d+)?/.exec(range);
         if (m) {
           const start = parseInt(m[1], 10);
           const end = m[2] ? parseInt(m[2], 10) : -1;
-          const ab = await fullHit.arrayBuffer();
           const total = ab.byteLength;
           const realEnd = end >= 0 ? Math.min(end, total - 1) : total - 1;
+          // Slice creates a small copy (typical Range = 16KB-512KB) — no full-file re-alloc.
           const slice = ab.slice(start, realEnd + 1);
           return new Response(slice, {
             status: 206,
@@ -167,19 +229,31 @@ async function handlePMTiles(request) {
     } catch (e) { /* fall through to per-range cache */ }
   }
 
-  // Fallback: per-Range cache keyed by URL + Range header (mobile path).
-  // IMPORTANT: Cache API match uses URL-only by default, ignoring Range headers.
-  // Using a composite key ensures different byte ranges get separate cache entries.
+  // Per-Range cache keyed by URL + Range header. Used by buildings (always) and roads (cold cache).
   const rangeHeader = request.headers.get('range') || '';
   const compositeKey = request.url + '||range=' + rangeHeader;
   const cache = await caches.open(PMTILES_CACHE);
   const hit = await cache.match(compositeKey);
-  if (hit) return hit;
+  if (hit) {
+    if (isBuildings) {
+      const meta = buildingsRangeMeta.get(compositeKey);
+      if (meta) meta.lastAccess = Date.now();
+    }
+    return hit;
+  }
 
   try {
     const resp = await fetch(request.clone());
     if (resp.ok || resp.status === 206) {
-      cache.put(compositeKey, resp.clone()).catch(() => {});
+      cache.put(compositeKey, resp.clone()).then(async () => {
+        if (isBuildings) {
+          try {
+            const cl = parseInt(resp.headers.get('content-length') || '0', 10);
+            const sz = isNaN(cl) || cl === 0 ? 65536 : cl; // assume 64KB if unknown
+            await trackBuildingsRangeWrite(compositeKey, sz);
+          } catch (_e) { /* */ }
+        }
+      }).catch(() => {});
     }
     return resp;
   } catch (err) {

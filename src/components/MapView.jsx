@@ -2166,6 +2166,91 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     setHoloColor(tier < 0 ? '#888888' : tierColor(tier));
   }
 
+  // Stage 4 + 6: pre-bake heatmap data + outline geocaches at end of Phase 2B warmup.
+  // Once these are populated, every heatmap toggle / timespan switch / zoom-band change
+  // is reduced to a single setData / setPaintProperty call — zero per-toggle iteration.
+  // Fingerprinted by events so a fresh events load auto-invalidates and rebuilds.
+  function runPrebakeAfterWarmup(map) {
+    if (!geoData || !adjacency) return;
+    const tiersByTs = precomputedTiersRef.current || mapCacheStore.precomputedTiers;
+    if (!tiersByTs) return;
+
+    // 1) precomputedZctaFills[ts] — withHeat FeatureCollection per timespan.
+    // 2) precomputedHeatPoints[ts] — heat-underlay weighted point GeoJSON.
+    const zctaFills = {};
+    const heatPoints = {};
+    const boroughTiers = {};
+    const boroughExprs = {};
+    const TIER_COLORS = ['#00ccdd', '#00dd66', '#f5c800', '#dd6600', '#cc0d00'];
+    const boroughCount = (mapCacheStore.boroughGeoData?.features || []).length || 0;
+
+    for (let ts = 0; ts < 5; ts++) {
+      const pre = tiersByTs[ts];
+      if (!pre) continue;
+      const { zipMap, maxCount, tiers } = pre;
+      const withHeat = {
+        ...geoData,
+        features: geoData.features.map((f, i) => {
+          const tier = tiers[i];
+          const zip = String(f.properties.MODZCTA || '');
+          const rawHeat = f.properties._special ? 0 : normalizeHeat(zipMap[zip]?.length || 0, maxCount);
+          return { ...f, properties: { ...f.properties, _heat: rawHeat, _tier: tier < 0 ? 0 : tier } };
+        }),
+      };
+      zctaFills[ts] = withHeat;
+      heatPoints[ts] = buildHeatUnderlayPoints(withHeat, tiers);
+
+      // Per-borough avg tier + match expression. Populated only if boroughGeoData + zipBoroughMap exist.
+      if (boroughCount && mapCacheStore.zipBoroughMap) {
+        const avgTiers = computeBoroughAvgTiers(tiers, mapCacheStore.zipBoroughMap, boroughCount);
+        boroughTiers[ts] = avgTiers;
+        const onExpr = ['match', ['get', '_boroughIdx']];
+        const offExpr = ['match', ['get', '_boroughIdx']];
+        for (let bi = 0; bi < boroughCount; bi++) {
+          const t = avgTiers[bi] ?? 0;
+          onExpr.push(bi, TIER_COLORS[Math.max(0, Math.min(4, t))]);
+          offExpr.push(bi, '#ff2200');
+        }
+        onExpr.push('#ff2200');
+        offExpr.push('#ff2200');
+        boroughExprs[ts] = { on: onExpr, off: offExpr };
+      }
+    }
+
+    mapCacheStore.precomputedZctaFills = zctaFills;
+    mapCacheStore.precomputedHeatPoints = heatPoints;
+    mapCacheStore.precomputedBoroughTiers = boroughTiers;
+    mapCacheStore.precomputedBoroughExprs = boroughExprs;
+
+    // 3) outlineGeoCache[intZoom] — ZCTA outline GeoJSON per integer zoom band (z9–z16).
+    // Static for the session (no heatmap dependency for geometry; widths only).
+    const outCache = {};
+    const boroughOutCache = {};
+    const tsRef = (timespanIdxRef.current ?? 2);
+    const baseFc = zctaFills[tsRef] || zctaFills[2] || zctaFills[0];
+    if (baseFc) {
+      for (let z = 9; z <= 16; z++) {
+        try {
+          const w = getZoomAwareOutlineWidth(map, z, threeD);
+          outCache[z] = createZctaOutlineGeoJSON(baseFc, w);
+        } catch (_e) { /* skip this zoom band */ }
+      }
+    }
+    if (mapCacheStore.boroughSkeleton) {
+      for (let z = 9; z <= 16; z++) {
+        try {
+          const w = getZoomAwareOutlineWidth(map, z, threeD) * (z < 12 ? 4 : 1.5);
+          boroughOutCache[z] = generateBoroughQuadsFromSkeleton(mapCacheStore.boroughSkeleton, w, {});
+        } catch (_e) { /* */ }
+      }
+    }
+    mapCacheStore.outlineGeoCache = outCache;
+    mapCacheStore.boroughOutlineGeoCache = boroughOutCache;
+
+    // Fingerprint = bind to current events signature so a fresh events load invalidates.
+    mapCacheStore.prebakeFingerprint = lastTierFingerprintRef.current || null;
+  }
+
   const warmupStartedRef = useRef(false);
   useEffect(() => {
     const map = mapRef.current;
@@ -2323,6 +2408,9 @@ export default function MapView({ events, headerCollapsed = false, interactive =
                   }
                 }
               } catch (_e) { /* prebuild best-effort */ }
+              // Stage 4 + 6: pre-bake heatmap data + outline geometry caches so all
+              // future toggles are instant setData/setPaintProperty calls.
+              try { runPrebakeAfterWarmup(map); } catch (_e) { /* best-effort */ }
               mapCacheStore.warmupComplete = true;
               return;
             }
@@ -2357,7 +2445,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       map.addSource('nyc-buildings', {
         type: 'vector',
         url: `pmtiles://${BUILDINGS_PMTILES_URL}`,
-        minzoom: 12,
+        minzoom: 13,
         maxzoom: 16,
         promoteId: 'b',
       });
@@ -2386,6 +2474,15 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     const fp = `${events.length}:${(h >>> 0).toString(36)}`;
     if (lastTierFingerprintRef.current === fp && precomputedTiersRef.current) return;
     lastTierFingerprintRef.current = fp;
+    // Stage 6: invalidate prebake caches when events change (will be rebuilt next time
+    // runPrebakeAfterWarmup runs OR consumed-as-fallback meanwhile).
+    if (mapCacheStore.prebakeFingerprint && mapCacheStore.prebakeFingerprint !== fp) {
+      mapCacheStore.precomputedZctaFills = null;
+      mapCacheStore.precomputedHeatPoints = null;
+      mapCacheStore.precomputedBoroughTiers = null;
+      mapCacheStore.precomputedBoroughExprs = null;
+      mapCacheStore.prebakeFingerprint = null;
+    }
     if (mapCacheStore.precomputedTiers) {
       precomputedTiersRef.current = mapCacheStore.precomputedTiers;
       memoizedExprs.current = {};
@@ -2407,6 +2504,11 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         // refresh the paint expression to pick up new tier values.
         memoizedExprs.current = {};
         refreshBuildingColors();
+        // Stage 6: rebuild prebake caches in background using the fresh tiers.
+        try {
+          const map = mapRef.current;
+          if (map) requestIdleCallback ? requestIdleCallback(() => runPrebakeAfterWarmup(map)) : setTimeout(() => runPrebakeAfterWarmup(map), 0);
+        } catch (_e) { /* */ }
       }
     })();
     return () => { cancelled = true; };
@@ -2501,7 +2603,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     let zipMap, maxCount, tiers, withHeat;
 
     if (dataChanged) {
-      // Try pre-computed first (instant). Fallback to live computation.
+      // Stage 6: prefer pre-baked data when available (instant, no per-feature mapping).
+      const preFill = mapCacheStore.precomputedZctaFills?.[timespanIdx];
       const precomputed = precomputedTiersRef.current?.[timespanIdx];
       if (precomputed) {
         ({ zipMap, maxCount, tiers } = precomputed);
@@ -2509,15 +2612,19 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         ({ zipMap, maxCount } = buildZipEventMap(events, TIMESPAN_STEPS[timespanIdx].days));
         tiers = computeTiers(geoData.features, zipMap, maxCount, adjacency);
       }
-      withHeat = {
-        ...geoData,
-        features: geoData.features.map((f, i) => {
-          const tier = tiers[i];
-          const zip = String(f.properties.MODZCTA || '');
-          const rawHeat = f.properties._special ? 0 : normalizeHeat(zipMap[zip]?.length || 0, maxCount);
-          return { ...f, properties: { ...f.properties, _heat: rawHeat, _tier: tier < 0 ? 0 : tier } };
-        }),
-      };
+      if (preFill) {
+        withHeat = preFill;
+      } else {
+        withHeat = {
+          ...geoData,
+          features: geoData.features.map((f, i) => {
+            const tier = tiers[i];
+            const zip = String(f.properties.MODZCTA || '');
+            const rawHeat = f.properties._special ? 0 : normalizeHeat(zipMap[zip]?.length || 0, maxCount);
+            return { ...f, properties: { ...f.properties, _heat: rawHeat, _tier: tier < 0 ? 0 : tier } };
+          }),
+        };
+      }
       cachedTierDataRef.current = { events, timespanIdx, geoData, zipMap, maxCount, tiers, withHeat };
       tiersRef.current = tiers;
       withHeatRef.current = withHeat;
@@ -2548,7 +2655,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     // No separate canvas needed — `['within']` handles NYC restriction, topo glow radiates naturally.
     if (map.getSource('heat-underlay')) {
       if (heatmap && topoOn) {
-        map.getSource('heat-underlay').setData(buildHeatUnderlayPoints(withHeat, tiers));
+        const prePts = mapCacheStore.precomputedHeatPoints?.[timespanIdx];
+        map.getSource('heat-underlay').setData(prePts || buildHeatUnderlayPoints(withHeat, tiers));
         map.setPaintProperty('heat-underlay', 'heatmap-opacity', 0.50);
       } else {
         map.setPaintProperty('heat-underlay', 'heatmap-opacity', 0);
@@ -3274,7 +3382,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       map.addSource('nyc-buildings', {
         type: 'vector',
         url: `pmtiles://${BUILDINGS_PMTILES_URL}`,
-        minzoom: 12.5,   // nyc_buildings_z12.pmtiles native min_zoom=12
+        // Stage 3: source minzoom 13 (no z12 tile fetches — saves bandwidth + SW cache).
+        minzoom: 13,
         maxzoom: 16,
         promoteId: 'b',
       });
@@ -3285,23 +3394,22 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         id: 'real3d-buildings', type: 'fill-extrusion',
         source: 'nyc-buildings',
         'source-layer': BUILDINGS_PMTILES_LAYER,
-        // Unified building layer: appears at z12.5 as flat 7m baseplates.
-        // Height interpolation:
-        //   z12.5–z13.9:  constant 7m flat appearance (baseplate visual — locked flat)
-        //   z13.9–z14:    smooth growth from 7m to full roof height
-        //   z14+:         constant full roof height from data
-        minzoom: 12.5,
+        // Stage 3 baseplate retune:
+        //   z13–z14.1:  locked flat 7m baseplate appearance
+        //   z14.1–z14.2: ~1s grow to full height
+        //   z14.2+:     constant full roof height
+        minzoom: 13,
         paint: {
           'fill-extrusion-color': buildingColorExprByState(isHeatmap, tsIdx),
           'fill-extrusion-height': ['interpolate', ['linear'], ['zoom'],
-            12.5, 7,
-            13.9, 7,
-            14,   ['coalesce', ['get', 'h'], 8],
+            13,    7,
+            14.1,  7,
+            14.2,  ['coalesce', ['get', 'h'], 8],
           ],
           'fill-extrusion-base': ['interpolate', ['linear'], ['zoom'],
-            12.5, 0,
-            13.9, 0,
-            14,   ['coalesce', ['get', 'm'], 0],
+            13,    0,
+            14.1,  0,
+            14.2,  ['coalesce', ['get', 'm'], 0],
           ],
           'fill-extrusion-opacity': 1,
           'fill-extrusion-vertical-gradient': false,
@@ -3310,11 +3418,6 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         },
       });
     }
-
-    // Layer creation order (addOpenmaptilesSourceAndLayers runs before addBuildingLayers):
-    //   sat → water → zip outlines → borough outline → roads → buildings
-    // buildings is added last so it always sits on top of roads in the GPU stack.
-    // Borough outline stays where addBoroughOutlineLayers placed it (below roads+buildings).
   }
   // water_static.geojson: 2304 features, z=10+z11 composite, dissolved tile-seams.
   // Static = same geometry at all zoom levels → warms ONCE in SW cache, never re-renders.
@@ -3472,14 +3575,25 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     // 3. setLight + easeTo: tilt camera only (NO zoom snap — user controls zoom themselves).
     if (!real3dLayersCreatedRef.current) {
       initReal3DLayers(map, isHm, timespanIdxRef.current ?? 2);
-      // Defensive: ensure visibility is explicitly set after creation. Layers default
-      // to 'visible' but on mobile the pre-create effect never ran setReal3DLayersVisible(false),
-      // so this is a no-op there. On desktop the pre-create hid them; this re-shows.
       setReal3DLayersVisible(map, true);
     } else {
       refreshBuildingColors();
       setReal3DLayersVisible(map, true);
     }
+    // Stage 2: Enforce render order after Real3D init/show. moveLayer is metadata-only
+    // (no GPU re-render) and safe to call repeatedly. Each call is guarded by both
+    // layer existence checks to avoid throws.
+    const safeMove = (a, b) => {
+      try {
+        if (map.getLayer && map.getLayer(a) && map.getLayer(b)) {
+          map.moveLayer(a, b);
+        }
+      } catch (_e) { /* ignore */ }
+    };
+    safeMove('zcta-outline', 'real3d-buildings');
+    safeMove('borough-outline', 'real3d-buildings');
+    safeMove('real3d-water', 'heat-underlay');
+    safeMove('zcta-fill', 'zcta-outline');
     map.setLight({ anchor: 'map' });
     // Tilt only — no zoom change. Buildings render naturally once user is at z13+.
     map.easeTo({
