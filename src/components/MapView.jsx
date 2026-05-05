@@ -3433,17 +3433,17 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       }
 
       if (!map.getLayer('real3d-water')) {
-        // No 'before' anchor = inserts at END of the current layer list.
-        // At this point the list contains: satellite (bottom) → zcta layers → borough layers.
-        // Water goes ABOVE all of them in the 2D pass, which is the correct visual order:
-        //   satellite → zcta-fill → zcta-line* → real3d-water → (roads added below, no before = above water)
-        // Fill-extrusions (buildings, borough outline, road extrusions) are always in the 3D FBO
-        // pass which composites ON TOP of the entire 2D result regardless of list position.
+        // Insert BEFORE heat-underlay = position 0 in the style list (below every fill-extrusion).
+        // This was the working position in d156a04. MapLibre composites fill-extrusion FBO groups
+        // inline at each group boundary. Having a 2D fill at the very bottom ensures all
+        // fill-extrusion groups (zcta, borough, buildings, roads) are contiguous above it and
+        // composite IN ORDER on top of zcta-fill — so buildings/roads always occlude zcta-fill. ✓
+        const waterBeforeId = map.getLayer('heat-underlay') ? 'heat-underlay' : undefined;
         map.addLayer({
           id: 'real3d-water', type: 'fill',
           source: 'water-static',
           paint: { 'fill-color': '#0e1f35', 'fill-opacity': 0.85 },
-        });
+        }, waterBeforeId);
       }
 
       // ── PMTILES ROADS (Real3D mode) ──────────────────────────────────────────
