@@ -75,7 +75,7 @@ const HEAT_MID_COLORS = {
   cool:   '#33b366',
   warm:   '#b39900',
   orange: '#cc6622',
-  hot:    '#cc3333',
+  hot:    '#ff0000',
 };
 
 // FIX REAL3D: 5 wide-range shades per heatmap tier for building cluster coloring.
@@ -2806,6 +2806,18 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       }
     }
 
+    // Real3D override: hide 2D zcta boundary lines.
+    // Buildings and baseplates (fill-extrusion, 3D FBO pass) naturally occlude the area at z13+.
+    // 2D lines (line type, 2D pass) have no depth test against fill-extrusions — they bleed
+    // through building walls. Hiding them in Real3D removes this x-ray artifact.
+    // zcta-outline (the 3D fill-extrusion ring) is NOT activated here — at small heights
+    // it would conflict with the 7m baseplates. Buildings provide the visual boundary.
+    if (real3D && !threeD) {
+      map.setPaintProperty('zcta-line',       'line-opacity', 0);
+      map.setPaintProperty('zcta-line-glow',  'line-opacity', 0);
+      map.setPaintProperty('zcta-line-glow2', 'line-opacity', 0);
+    }
+
     // Hover fill: only in 2D modes (3D hover is handled via extrusion color)
     // Fix 7: Nearly solid purple selection when satellite off + (2D or Real3D). Keep 0.5 for satellite on.
     const hoverOpacity = satellite ? 0.5 : 0.85;
@@ -3432,13 +3444,18 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         });
       }
 
-      const waterBeforeId = map.getLayer('heat-underlay') ? 'heat-underlay' : undefined;
       if (!map.getLayer('real3d-water')) {
+        // No 'before' anchor = inserts at END of the current layer list.
+        // At this point the list contains: satellite (bottom) → zcta layers → borough layers.
+        // Water goes ABOVE all of them in the 2D pass, which is the correct visual order:
+        //   satellite → zcta-fill → zcta-line* → real3d-water → (roads added below, no before = above water)
+        // Fill-extrusions (buildings, borough outline, road extrusions) are always in the 3D FBO
+        // pass which composites ON TOP of the entire 2D result regardless of list position.
         map.addLayer({
           id: 'real3d-water', type: 'fill',
           source: 'water-static',
           paint: { 'fill-color': '#0e1f35', 'fill-opacity': 0.85 },
-        }, waterBeforeId);
+        });
       }
 
       // ── PMTILES ROADS (Real3D mode) ──────────────────────────────────────────
