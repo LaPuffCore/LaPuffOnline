@@ -1109,7 +1109,7 @@ function buildColoredBoroughFeatures(boroughGeoData, avgTiers, isHeatmap) {
       properties: {
         ...f.properties,
         _tier: isHeatmap ? (avgTiers[i] ?? 0) : 0,
-        _color: isHeatmap ? midTierColor(avgTiers[i] ?? 0) : OUTLINE_COLOR,
+        _color: isHeatmap ? midTierColor(avgTiers[i] ?? 0) : '#ff0000',
         _boroughIdx: rankMap[i],  // 0=lowest tier … 4=highest tier (red always last/on top)
       },
     })),
@@ -2657,7 +2657,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       if (heatmap && topoOn) {
         const prePts = mapCacheStore.precomputedHeatPoints?.[timespanIdx];
         map.getSource('heat-underlay').setData(prePts || buildHeatUnderlayPoints(withHeat, tiers));
-        map.setPaintProperty('heat-underlay', 'heatmap-opacity', 0.50);
+        map.setPaintProperty('heat-underlay', 'heatmap-opacity', satellite ? 0.25 : 0.50);
       } else {
         map.setPaintProperty('heat-underlay', 'heatmap-opacity', 0);
       }
@@ -2905,8 +2905,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         // geometry from appearing. MapLibre blends the geometry naturally as pitch changes.
         const is3D = threeD || real3D;
         boroughWas3DRef.current = is3D;
-        map.setPaintProperty('borough-outline', 'fill-extrusion-opacity',
-          is3D ? ['interpolate', ['linear'], ['zoom'], 9, 0.4, 11, 1.0] : 0);
+        map.setPaintProperty('borough-outline', 'fill-extrusion-opacity', is3D ? 1.0 : 0);
       } else {
         map.setPaintProperty('borough-outline', 'fill-extrusion-opacity', 0);
         boroughWithColorRef.current = null;
@@ -3457,14 +3456,16 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       // _z baked into PMTiles: motorway 0.6 → residential 0.1.
       const HEIGHT_EXPR = ['max', ['coalesce', ['get', '_z'], 0.1], 0.1];
       const ROAD_FCLASSES = [
-        { fclass: 'motorway',    minz: 9,  colorOff: '#850000', opacityOff: 0.95 },
-        { fclass: 'trunk',       minz: 9,  colorOff: '#850000', opacityOff: 0.95 },
-        { fclass: 'primary',     minz: 11, colorOff: '#850000', opacityOff: 0.92 },
-        { fclass: 'secondary',   minz: 11, colorOff: '#850000', opacityOff: 0.92 },
-        { fclass: 'tertiary',    minz: 12, colorOff: '#cc1100', opacityOff: 0.88 },
-        { fclass: 'residential', minz: 12, colorOff: '#cc1100', opacityOff: 0.88 },
+        { fclass: 'motorway',    minz: 9,  colorOff: '#4d0000', opacityOff: 1.0 },
+        { fclass: 'trunk',       minz: 9,  colorOff: '#4d0000', opacityOff: 1.0 },
+        { fclass: 'primary',     minz: 11, colorOff: '#ff4040', opacityOff: 1.0 },
+        { fclass: 'secondary',   minz: 11, colorOff: '#ff4040', opacityOff: 1.0 },
+        { fclass: 'tertiary',    minz: 12, colorOff: '#ff4040', opacityOff: 1.0 },
+        { fclass: 'residential', minz: 12, colorOff: '#ff4040', opacityOff: 1.0 },
       ];
-      const HM_OPACITY = 0.4;
+      // Heatmap ON road opacity: fade in z12→0, ramp up to 0.6 at z16 (zoom-aware black roads).
+      const HM_EXT_OPACITY  = ['interpolate', ['linear'], ['zoom'], 12, 0, 13, 0.30, 13.5, 0.35, 16, 0.6];
+      const HM_FILL_OPACITY = 0.35;
       if (!map.getSource('roads-pm')) {
         map.addSource('roads-pm', { type: 'vector', url: `pmtiles://${ROADS_PMTILES_URL}` });
       }
@@ -3483,7 +3484,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
             filter: ['==', ['get', 'fclass'], r.fclass],
             paint: {
               'fill-color':     isHeatmap ? '#000000' : r.colorOff,
-              'fill-opacity':   ['interpolate', ['linear'], ['zoom'], 12.5, isHeatmap ? HM_OPACITY : r.opacityOff, 14, 0],
+              'fill-opacity':   ['interpolate', ['linear'], ['zoom'], 12.5, isHeatmap ? HM_FILL_OPACITY : r.opacityOff, 14, 0],
               'fill-antialias': true,
             },
           });
@@ -3501,7 +3502,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
               'fill-extrusion-color':   isHeatmap ? '#000000' : r.colorOff,
               'fill-extrusion-height':  HEIGHT_EXPR,
               'fill-extrusion-base':    0,
-              'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0, 13.5, isHeatmap ? HM_OPACITY : r.opacityOff],
+              'fill-extrusion-opacity': isHeatmap ? HM_EXT_OPACITY : ['interpolate', ['linear'], ['zoom'], 12, 0, 13.5, r.opacityOff],
               'fill-extrusion-vertical-gradient': false,
             },
           });
@@ -3611,26 +3612,27 @@ export default function MapView({ events, headerCollapsed = false, interactive =
 
     // PMTiles roads: update color + zoom-interpolated opacity expressions.
     const ROAD_FCLASS_PAINT = [
-      { fclass: 'motorway',    colorOff: '#850000', opacityOff: 0.95 },
-      { fclass: 'trunk',       colorOff: '#850000', opacityOff: 0.95 },
-      { fclass: 'primary',     colorOff: '#850000', opacityOff: 0.92 },
-      { fclass: 'secondary',   colorOff: '#850000', opacityOff: 0.92 },
-      { fclass: 'tertiary',    colorOff: '#cc1100', opacityOff: 0.88 },
-      { fclass: 'residential', colorOff: '#cc1100', opacityOff: 0.88 },
+      { fclass: 'motorway',    colorOff: '#4d0000', opacityOff: 1.0 },
+      { fclass: 'trunk',       colorOff: '#4d0000', opacityOff: 1.0 },
+      { fclass: 'primary',     colorOff: '#ff4040', opacityOff: 1.0 },
+      { fclass: 'secondary',   colorOff: '#ff4040', opacityOff: 1.0 },
+      { fclass: 'tertiary',    colorOff: '#ff4040', opacityOff: 1.0 },
+      { fclass: 'residential', colorOff: '#ff4040', opacityOff: 1.0 },
     ];
-    const HM_OPACITY = 0.4;
+    const HM_EXT_OPACITY  = ['interpolate', ['linear'], ['zoom'], 12, 0, 13, 0.30, 13.5, 0.35, 16, 0.6];
+    const HM_FILL_OPACITY = 0.35;
     ROAD_FCLASS_PAINT.forEach(({ fclass, colorOff, opacityOff }) => {
       const fillId = `real3d-pm-roads-${fclass}-fill`;
       const extId  = `real3d-pm-roads-${fclass}`;
       if (map.getLayer(fillId)) {
         map.setPaintProperty(fillId, 'fill-color',   heatmap ? '#000000' : colorOff);
         map.setPaintProperty(fillId, 'fill-opacity',
-          ['interpolate', ['linear'], ['zoom'], 13, heatmap ? HM_OPACITY : opacityOff, 14, 0]);
+          ['interpolate', ['linear'], ['zoom'], 13, heatmap ? HM_FILL_OPACITY : opacityOff, 14, 0]);
       }
       if (map.getLayer(extId)) {
         map.setPaintProperty(extId, 'fill-extrusion-color',   heatmap ? '#000000' : colorOff);
         map.setPaintProperty(extId, 'fill-extrusion-opacity',
-          ['interpolate', ['linear'], ['zoom'], 13, 0, 14, heatmap ? HM_OPACITY : opacityOff]);
+          heatmap ? HM_EXT_OPACITY : ['interpolate', ['linear'], ['zoom'], 13, 0, 14, opacityOff]);
       }
     });
     // Safezone opacity

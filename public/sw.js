@@ -2,14 +2,15 @@
 // Stage-1 OOM fix: buildings PMTiles is NEVER served from a full-file slice (was 74MB ArrayBuffer
 // re-allocated per Range = multi-GB transient peak → desktop OOM). Buildings flow exclusively
 // through the per-Range cache (PMTILES_CACHE) with an LRU cap.
-const SW_VERSION = 'lapuff-sw-v16';
+const SW_VERSION = 'lapuff-sw-v17';
 
-const PMTILES_CACHE      = 'lapuff-pmtiles-sw-v4';     // per-Range responses (URL+Range key) — used by ALL pmtiles now for buildings
-const PMTILES_FULL_CACHE = 'lapuff-pmtiles-full-v6';   // full-file slice cache — ROADS ONLY (15MB safe)
-const STATIC_CACHE       = 'lapuff-static-v1';         // ZCTA + borough + water GeoJSON
-const SATELLITE_CACHE    = 'lapuff-satellite-v1';      // ArcGIS/Wayback/Clarity raster tiles
+const PMTILES_CACHE              = 'lapuff-pmtiles-sw-v4';     // per-Range responses (URL+Range key) — used by ALL pmtiles now for buildings
+const PMTILES_FULL_CACHE         = 'lapuff-pmtiles-full-v6';   // full-file slice cache — ROADS ONLY (15MB safe)
+const STATIC_CACHE               = 'lapuff-static-v1';         // ZCTA + borough + water GeoJSON
+const SATELLITE_PERSISTENT_CACHE = 'lapuff-sat-persistent-v1'; // z9–z14 tiles — NEVER evicted; z15–z16 overflow fills spare room
+const SATELLITE_DYNAMIC_CACHE    = 'lapuff-sat-dynamic-v1';    // z15–z16 tiles — LRU 30MB
 
-const MANAGED_CACHES = [PMTILES_CACHE, PMTILES_FULL_CACHE, STATIC_CACHE, SATELLITE_CACHE];
+const MANAGED_CACHES = [PMTILES_CACHE, PMTILES_FULL_CACHE, STATIC_CACHE, SATELLITE_PERSISTENT_CACHE, SATELLITE_DYNAMIC_CACHE];
 
 // Only roads PMTiles uses the full-file slice path. Buildings deliberately excluded.
 const FULL_PMTILES_URL_PATTERNS = ['realfinaldeciroads.pmtiles'];
@@ -21,7 +22,7 @@ const inMemoryFullBuffers = new Map(); // url -> ArrayBuffer
 
 // LRU cap for the per-Range buildings cache. Prevents unbounded growth when user pans across
 // many tiles. Cap is a soft-eviction triggered on cache writes.
-const BUILDINGS_RANGE_CACHE_CAP = 80 * 1024 * 1024; // 80MB; mobile fetches less so this auto-fits
+const BUILDINGS_RANGE_CACHE_CAP = 140 * 1024 * 1024; // 140MB; mobile fetches less so this auto-fits
 const buildingsRangeMeta = new Map(); // compositeKey -> { size, lastAccess }
 let buildingsRangeTotalBytes = 0;
 async function trackBuildingsRangeWrite(compositeKey, byteSize) {
@@ -40,24 +41,51 @@ async function trackBuildingsRangeWrite(compositeKey, byteSize) {
   } catch (_e) { /* eviction best-effort */ }
 }
 
-// Satellite cache LRU — capped at 150MB. Tiles are tiny (~25KB each) so this fits ~6000 tiles.
-const SATELLITE_CACHE_CAP = 150 * 1024 * 1024;
-const satelliteMeta = new Map();
-let satelliteTotalBytes = 0;
-async function trackSatelliteWrite(url, byteSize) {
-  satelliteMeta.set(url, { size: byteSize, lastAccess: Date.now() });
-  satelliteTotalBytes += byteSize;
-  if (satelliteTotalBytes <= SATELLITE_CACHE_CAP) return;
-  try {
-    const cache = await caches.open(SATELLITE_CACHE);
-    const sorted = Array.from(satelliteMeta.entries()).sort((a, b) => a[1].lastAccess - b[1].lastAccess);
-    while (satelliteTotalBytes > SATELLITE_CACHE_CAP * 0.85 && sorted.length) {
-      const [k, meta] = sorted.shift();
-      await cache.delete(k);
-      satelliteMeta.delete(k);
-      satelliteTotalBytes -= meta.size;
-    }
-  } catch (_e) { /* */ }
+// Satellite cache — two-bucket system:
+//   PERSISTENT (60MB): z9–z14 tiles are NEVER evicted. z15–z16 overflow entries fill any spare
+//     capacity (~6MB after ~54MB z9–z14 fill) and are evicted first if cap is hit.
+//   DYNAMIC (30MB): z15–z16 tiles only, pure LRU. Independent eviction from persistent.
+const SAT_PERSISTENT_CAP = 60 * 1024 * 1024;  // 60MB
+const SAT_DYNAMIC_CAP    = 30 * 1024 * 1024;  // 30MB
+
+const satPersistentMeta = new Map(); // url -> {size, zoom, isOverflow, lastAccess}
+let satPersistentTotal = 0;
+let satPersistentOverflowTotal = 0;
+
+const satDynamicMeta = new Map(); // url -> {size, lastAccess}
+let satDynamicTotal = 0;
+
+// Extract zoom level from a satellite tile URL.
+// ArcGIS/Clarity: .../MapServer/tile/{z}/{y}/{x}
+// Wayback:        .../MapServer/tile/13045/{z}/{y}/{x}  (version id before zoom)
+function extractSatZoom(url) {
+  const m = /\/tile\/(?:13045\/)?(\d+)\/\d+\/\d+/.exec(url);
+  return m ? parseInt(m[1], 10) : -1;
+}
+
+async function evictSatPersistentOverflows(cache, needed) {
+  const overflows = Array.from(satPersistentMeta.entries())
+    .filter(([, m]) => m.isOverflow)
+    .sort((a, b) => a[1].lastAccess - b[1].lastAccess);
+  let freed = 0;
+  for (const [k, meta] of overflows) {
+    if (freed >= needed) break;
+    await cache.delete(k).catch(() => {});
+    satPersistentMeta.delete(k);
+    satPersistentTotal        -= meta.size;
+    satPersistentOverflowTotal -= meta.size;
+    freed += meta.size;
+  }
+}
+
+async function evictSatDynamic(cache) {
+  const sorted = Array.from(satDynamicMeta.entries()).sort((a, b) => a[1].lastAccess - b[1].lastAccess);
+  while (satDynamicTotal > SAT_DYNAMIC_CAP * 0.85 && sorted.length) {
+    const [k, meta] = sorted.shift();
+    await cache.delete(k).catch(() => {});
+    satDynamicMeta.delete(k);
+    satDynamicTotal -= meta.size;
+  }
 }
 
 // Satellite tile host patterns — intercepted and served cache-first from SATELLITE_CACHE
@@ -139,31 +167,83 @@ self.addEventListener('fetch', event => {
   }
 });
 
-// Cache-first satellite tile handler.
-// Only caches and serves CORS responses (resp.ok === true).
-// Opaque (no-cors) responses cannot be used as WebGL raster tile textures.
+// Cache-first satellite tile handler — two-bucket routing by zoom level.
+// z9–z14 → persistent bucket (never evicted unless overflow). z15–z16 → dynamic bucket + overflow.
 async function handleSatellite(request) {
-  const cache = await caches.open(SATELLITE_CACHE);
-  const hit = await cache.match(request.url);
-  if (hit && hit.ok) {
-    // Touch LRU on hit
-    const meta = satelliteMeta.get(request.url);
-    if (meta) meta.lastAccess = Date.now();
-    return hit;
-  }
-  try {
-    const resp = await fetch(request);
-    if (resp && resp.ok) {
-      cache.put(request.url, resp.clone()).then(async () => {
-        try {
-          const cl = parseInt(resp.headers.get('content-length') || '25000', 10);
-          await trackSatelliteWrite(request.url, isNaN(cl) ? 25000 : cl);
-        } catch (_e) { /* */ }
-      }).catch(() => {});
+  const zoom = extractSatZoom(request.url);
+  const isPersistentZoom = zoom >= 0 && zoom <= 14;
+
+  if (isPersistentZoom) {
+    // z9–z14: serve from persistent bucket.
+    const cache = await caches.open(SATELLITE_PERSISTENT_CACHE);
+    const hit = await cache.match(request.url);
+    if (hit && hit.ok) {
+      const meta = satPersistentMeta.get(request.url);
+      if (meta) meta.lastAccess = Date.now();
+      return hit;
     }
-    return resp;
-  } catch (err) {
-    return new Response('', { status: 504 });
+    try {
+      const resp = await fetch(request);
+      if (resp && resp.ok) {
+        const cl = parseInt(resp.headers.get('content-length') || '25000', 10);
+        const sz = isNaN(cl) ? 25000 : cl;
+        // Evict overflow entries to make room if needed (z9–z14 always takes priority).
+        if (satPersistentTotal + sz > SAT_PERSISTENT_CAP) {
+          await evictSatPersistentOverflows(cache, (satPersistentTotal + sz) - SAT_PERSISTENT_CAP * 0.95);
+        }
+        cache.put(request.url, resp.clone()).then(() => {
+          satPersistentMeta.set(request.url, { size: sz, zoom, isOverflow: false, lastAccess: Date.now() });
+          satPersistentTotal += sz;
+        }).catch(() => {});
+      }
+      return resp;
+    } catch (_err) {
+      return new Response('', { status: 504 });
+    }
+  } else {
+    // z15–z16: check dynamic bucket, then check persistent overflow.
+    const dynCache = await caches.open(SATELLITE_DYNAMIC_CACHE);
+    const dynHit = await dynCache.match(request.url);
+    if (dynHit && dynHit.ok) {
+      const meta = satDynamicMeta.get(request.url);
+      if (meta) meta.lastAccess = Date.now();
+      return dynHit;
+    }
+    const perCache = await caches.open(SATELLITE_PERSISTENT_CACHE);
+    const perHit = await perCache.match(request.url);
+    if (perHit && perHit.ok) {
+      const meta = satPersistentMeta.get(request.url);
+      if (meta) meta.lastAccess = Date.now();
+      return perHit;
+    }
+    try {
+      const resp = await fetch(request);
+      if (resp && resp.ok) {
+        const cl = parseInt(resp.headers.get('content-length') || '25000', 10);
+        const sz = isNaN(cl) ? 25000 : cl;
+        // Try persistent overflow first — use spare capacity beyond z9–z14 fill (~54MB typical).
+        const persistentHeadroom = SAT_PERSISTENT_CAP - (satPersistentTotal - satPersistentOverflowTotal);
+        if (persistentHeadroom >= sz) {
+          perCache.put(request.url, resp.clone()).then(() => {
+            satPersistentMeta.set(request.url, { size: sz, zoom, isOverflow: true, lastAccess: Date.now() });
+            satPersistentTotal        += sz;
+            satPersistentOverflowTotal += sz;
+          }).catch(() => {});
+        } else {
+          // No persistent overflow room — use dynamic bucket.
+          if (satDynamicTotal + sz > SAT_DYNAMIC_CAP) {
+            await evictSatDynamic(dynCache);
+          }
+          dynCache.put(request.url, resp.clone()).then(() => {
+            satDynamicMeta.set(request.url, { size: sz, lastAccess: Date.now() });
+            satDynamicTotal += sz;
+          }).catch(() => {});
+        }
+      }
+      return resp;
+    } catch (_err) {
+      return new Response('', { status: 504 });
+    }
   }
 }
 
@@ -290,7 +370,8 @@ self.addEventListener('message', event => {
   if (msg.type === 'PRECACHE_SATELLITE' && Array.isArray(msg.urls)) {
     event.waitUntil((async () => {
       try {
-        const cache = await caches.open(SATELLITE_CACHE);
+        // All precached tiles are z9–z14 — always write to persistent bucket.
+        const cache = await caches.open(SATELLITE_PERSISTENT_CACHE);
         const urls = msg.urls;
         let active = 0, idx = 0;
         const MAX = 6;
