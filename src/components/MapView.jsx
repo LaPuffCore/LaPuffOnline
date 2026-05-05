@@ -2897,8 +2897,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         map.setPaintProperty('borough-outline', 'fill-extrusion-color', ['coalesce', ['get', '_color'], OUTLINE_COLOR]);
         // Base 0 → full extrusion blocks from ground to max height.
         // Height stagger by _boroughIdx * 0.1m prevents Z-fighting at shared top edges.
-        map.setPaintProperty('borough-outline', 'fill-extrusion-base',   0);
-        map.setPaintProperty('borough-outline', 'fill-extrusion-height', ['+', 32, ['*', 0.1, ['coalesce', ['get', '_boroughIdx'], 0]]]);
+        map.setPaintProperty('borough-outline', 'fill-extrusion-base',   0.5);
+        map.setPaintProperty('borough-outline', 'fill-extrusion-height', ['+', 32.5, ['*', 0.1, ['coalesce', ['get', '_boroughIdx'], 0]]]);
         // Borough outlines only visible in 3D and Real3D modes (fill-extrusions appear
         // as flat rings at pitch=0 which looks wrong in 2D). Render immediately —
         // the camera easeTo animation is just a visual transition and should not block
@@ -3468,9 +3468,15 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         { fclass: 'tertiary',    minz: 12, colorOff: '#ff4040', opacityOff: 1.0 },
         { fclass: 'residential', minz: 12, colorOff: '#ff4040', opacityOff: 1.0 },
       ];
-      // Heatmap ON road opacity: fade in z12→0, ramp up to 0.6 at z16 (zoom-aware black roads).
-      const HM_EXT_OPACITY  = ['interpolate', ['linear'], ['zoom'], 12, 0, 13, 0.30, 13.5, 0.35, 16, 0.6];
-      const HM_FILL_OPACITY = 0.35;
+      // Roads are ALWAYS opaque (1.0) in BOTH heatmap and non-heatmap mode.
+      // Visual dimming for heatmap is achieved via solid black color, not opacity.
+      // Hard-cut handoff between 2D fill and 3D extrusion at z12.5→z13 (1-tick overlap):
+      //   2D fill: solid 1.0 until z13 then 0
+      //   3D ext : solid 1.0 from z12.5 onward
+      // Opacity 1.0 forces MapLibre's depth-tested FBO path so 3D roads properly
+      // occlude (and are occluded by) other 3D extrusions and 2D fills.
+      const HM_EXT_OPACITY  = 1.0;
+      const HM_FILL_OPACITY = 1.0;
       if (!map.getSource('roads-pm')) {
         map.addSource('roads-pm', { type: 'vector', url: `pmtiles://${ROADS_PMTILES_URL}` });
       }
@@ -3489,7 +3495,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
             filter: ['==', ['get', 'fclass'], r.fclass],
             paint: {
               'fill-color':     isHeatmap ? '#000000' : r.colorOff,
-              'fill-opacity':   ['interpolate', ['linear'], ['zoom'], 12.5, isHeatmap ? HM_FILL_OPACITY : r.opacityOff, 14, 0],
+              'fill-opacity':   ['step', ['zoom'], isHeatmap ? HM_FILL_OPACITY : r.opacityOff, 13, 0],
               'fill-antialias': true,
             },
           });
@@ -3505,9 +3511,9 @@ export default function MapView({ events, headerCollapsed = false, interactive =
             filter: ['==', ['get', 'fclass'], r.fclass],
             paint: {
               'fill-extrusion-color':   isHeatmap ? '#000000' : r.colorOff,
-              'fill-extrusion-height':  HEIGHT_EXPR,
-              'fill-extrusion-base':    0,
-              'fill-extrusion-opacity': isHeatmap ? HM_EXT_OPACITY : ['interpolate', ['linear'], ['zoom'], 12, 0, 13.5, r.opacityOff],
+              'fill-extrusion-height':  ['+', HEIGHT_EXPR, 0.3],
+              'fill-extrusion-base':    0.3,
+              'fill-extrusion-opacity': ['step', ['zoom'], 0, 12.5, isHeatmap ? HM_EXT_OPACITY : r.opacityOff],
               'fill-extrusion-vertical-gradient': false,
             },
           });
@@ -3531,35 +3537,10 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     // DO NOT moveLayer('borough-outline') to top — it must stay below roads + buildings.
     real3dLayersCreatedRef.current = true;
 
-    // ── OPTION B: enforce visual stack via moveLayer ────────────────────────
-    // MapLibre stack rule: moveLayer(layerId, beforeId) places layerId IMMEDIATELY
-    // BEFORE beforeId in the style list (= visually BELOW beforeId in the 2D pass).
-    // We push all 2D zcta layers (fill + lines + hover) BELOW real3d-water.
-    // Effect:
-    //   - 2D pass order becomes: ... → zcta-fill → zcta-line* → real3d-water → road-fills
-    //   - Road fills, water, and the 3D FBO (buildings/borough/road extrusions/zcta-outline)
-    //     all draw above zcta-fill/zcta-line.
-    //   - zcta-fill / zcta-line are still visible — they only obscure satellite + bg.
-    // Why earlier safeMove broke things:
-    //   The bad call was moveLayer('real3d-water', 'heat-underlay') which sank water to
-    //   the very bottom. We do NOT touch water here. Each move is guarded so a missing
-    //   layer is a no-op, never a throw.
-    const safeMove = (layerId, beforeId) => {
-      try {
-        if (map.getLayer && map.getLayer(layerId) && map.getLayer(beforeId)) {
-          map.moveLayer(layerId, beforeId);
-        }
-      } catch (_e) { /* ignore */ }
-    };
-    // Order matters: move the bottom-most one first so subsequent moves stay below water.
-    // After each move, both layers exist; the moved one sits just before 'real3d-water'.
-    safeMove('zcta-fill',          'real3d-water');
-    safeMove('zcta-hover',         'real3d-water');
-    safeMove('zcta-safezone-hover','real3d-water');
-    safeMove('zcta-safe-line',     'real3d-water');
-    safeMove('zcta-line-glow2',    'real3d-water');
-    safeMove('zcta-line-glow',     'real3d-water');
-    safeMove('zcta-line',          'real3d-water');
+    // Layer-order moveLayer (Option B) reverted: it could not solve the underlying
+    // depth issue — translucent fill-extrusions go through the painter's path where
+    // 2D fills earlier in the list paint over them regardless of moveLayer position.
+    // Real fix: Fix A (opacity 1.0 forces FBO depth-tested path) + Fix B (base bump).
 
     // Apply correct paint expressions immediately so layers have proper colors from frame 1.
     // Must run after real3dLayersCreatedRef=true so refreshBuildingColors can find the layers.
@@ -3641,20 +3622,21 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       { fclass: 'tertiary',    colorOff: '#ff4040', opacityOff: 1.0 },
       { fclass: 'residential', colorOff: '#ff4040', opacityOff: 1.0 },
     ];
-    const HM_EXT_OPACITY  = ['interpolate', ['linear'], ['zoom'], 12, 0, 13, 0.30, 13.5, 0.35, 16, 0.6];
-    const HM_FILL_OPACITY = 0.35;
+    // Roads ALWAYS opaque (1.0) in both heatmap and non-heatmap. Hard-cut z12.5→z13.
+    const HM_EXT_OPACITY  = 1.0;
+    const HM_FILL_OPACITY = 1.0;
     ROAD_FCLASS_PAINT.forEach(({ fclass, colorOff, opacityOff }) => {
       const fillId = `real3d-pm-roads-${fclass}-fill`;
       const extId  = `real3d-pm-roads-${fclass}`;
       if (map.getLayer(fillId)) {
         map.setPaintProperty(fillId, 'fill-color',   heatmap ? '#000000' : colorOff);
         map.setPaintProperty(fillId, 'fill-opacity',
-          ['interpolate', ['linear'], ['zoom'], 13, heatmap ? HM_FILL_OPACITY : opacityOff, 14, 0]);
+          ['step', ['zoom'], heatmap ? HM_FILL_OPACITY : opacityOff, 13, 0]);
       }
       if (map.getLayer(extId)) {
         map.setPaintProperty(extId, 'fill-extrusion-color',   heatmap ? '#000000' : colorOff);
         map.setPaintProperty(extId, 'fill-extrusion-opacity',
-          heatmap ? HM_EXT_OPACITY : ['interpolate', ['linear'], ['zoom'], 13, 0, 14, opacityOff]);
+          ['step', ['zoom'], 0, 12.5, heatmap ? HM_EXT_OPACITY : opacityOff]);
       }
     });
     // Safezone opacity

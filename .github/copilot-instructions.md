@@ -28,6 +28,8 @@
 - `EventTile` and `EventDetailPopup` should stay visually and behaviorally aligned where they share event UI.
 - Map view uses Maplibre GL js and Maptiler API, with custom styling and theming applied via CSS variables.
 
+## Everything below this is context specific and is not deterministic, it represents past history and may not be accurate, do not rely on it full or exclude options because of what is said but do note that it may contain useful insights and information about the codebase and conventions that have been established so far, but always verify against the actual code and user instructions for the current task at hand.
+
 ## Archival Inertia Ability
 - You have the power to record known conventions and logic in the section below this for future reference. 
 - This can help maintain consistency and speed up future tasks by reducing the need to re-derive or re-discover established patterns.
