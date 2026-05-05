@@ -1482,7 +1482,7 @@ function MapPostsPanelView({ panel, posts, reactions, sort, setSort, page, setPa
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
-export default function MapView({ events, headerCollapsed = false, interactive = true }) {
+export default function MapView({ events, headerCollapsed = false, interactive = true, phase2ADone = false }) {
   const [topoOn, setTopoOn] = useState(() => {
     try {
       const v = localStorage.getItem('lapuff_topo_on');
@@ -2170,9 +2170,27 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady || !geoData) return;
+    // Gate: Phase 2A must be done before warmup. This ensures precomputedTiers
+    // is populated in mapCacheStore when warmup's expression pre-build runs.
+    if (!phase2ADone) return;
     addLayers(map, geoData, satellite);
     // Signal MapLoadingScreen Phase 2B that layers are ready → overlay will reveal the map
     mapCacheStore.layersReady = true;
+    // Phase 2A just finished — sync its precomputedTiers + zipToZcta refs NOW so the
+    // expression pre-build at the end of the sweep always has data. Without this,
+    // the geoData effect (which fires before Phase 2A finishes) would have found
+    // mapCacheStore.precomputedTiers null and left precomputedTiersRef unset.
+    if (mapCacheStore.precomputedTiers && !precomputedTiersRef.current) {
+      precomputedTiersRef.current = mapCacheStore.precomputedTiers;
+    }
+    if (!zipToZctaIdxMapRef.current && geoData?.features) {
+      const lookup = {};
+      geoData.features.forEach((f, i) => {
+        const z = f.properties?.MODZCTA;
+        if (z) lookup[String(z)] = i;
+      });
+      zipToZctaIdxMapRef.current = lookup;
+    }
     // Warmup runs ONCE per session — even if effect deps change (geoData re-fetch etc),
     // we never want a second sweep firing after the user is interacting with the map.
     if (warmupStartedRef.current) return;
@@ -2326,9 +2344,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       // Mobile: skip warmup zoom cycle but still signal completion so loading screen advances.
       mapCacheStore.warmupComplete = true;
     }
-  }, [mapReady, geoData]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Pre-create Real3D layers at map init so first toggle is instant (just a visibility flip).
+  }, [mapReady, geoData, phase2ADone]); // eslint-disable-line react-hooks/exhaustive-deps
   // Also pre-adds nyc-buildings PMTiles source so the SW-cached PMTiles directory
   // is fetched/parsed before Real3D is ever toggled — eliminates header-fetch hang on toggle.
   // Mobile: source is added (cheap), but layers are deferred to first Real3D toggle to save GPU memory.
@@ -2984,16 +3000,11 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     //   per-zip match expression that benefits from a final paint touch on settle.
     const onZoomEnd = () => { try { doOutlineRebuild(); } catch (_e) { /* */ } };
     const onMoveEnd = () => {
-      const isR3D = real3DRef.current;
-      if (!isR3D) return;
-      // Only repaint buildings on pan when heatmap is on — in standard mode, building
-      // colors are _s7 shade (objectid % 7), never change on pan, no repaint needed.
-      if (!heatmapRef.current) return;
-      const zoom = map.getZoom();
-      // Refresh building colors after pan — keeps tier expression current at z13+.
-      if (zoom >= 13 && map.getLayer('real3d-buildings')) {
-        try { refreshBuildingColors(); } catch (_e) { /* */ }
-      }
+      // PMTiles buildings use a [match, ['get','z'], ...] data-driven expression set
+      // via setPaintProperty — this expression is persistent on the layer and MapLibre
+      // automatically applies it to all newly streamed tiles on pan/zoom. No need to
+      // call refreshBuildingColors() on moveend. (This was needed in the feature-state
+      // era but is dead/harmful overhead for the match-expression approach.)
     };
     map.on('zoom', onZoom);
     map.on('pitch', onZoom);
@@ -3091,6 +3102,79 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       map.setPaintProperty('real3d-water', 'fill-opacity', satellite ? 0.5 : 0.6);
     }
   }, [satellite, real3D, mapReady]);
+
+  // SATELLITE PAN PREFETCH: On movestart, compute tiles for a viewport + 25% buffer
+  // and fire fire-and-forget fetches. SW caches them so MapLibre requests hit SW cache
+  // instead of network, eliminating the blank-edge delay during panning.
+  // On moveend, fires a second pass to catch any tiles missed during rapid movement.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+
+    // Convert lng/lat/zoom to tile x/y (standard Web Mercator slippy tile math)
+    function lngLatToTileXY(lng, lat, z) {
+      const n = Math.pow(2, z);
+      const x = Math.floor((lng + 180) / 360 * n);
+      const latRad = lat * Math.PI / 180;
+      const y = Math.floor((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2 * n);
+      return { x: Math.max(0, Math.min(n - 1, x)), y: Math.max(0, Math.min(n - 1, y)) };
+    }
+
+    // Pick tile URL template and zoom for the current map zoom
+    function getTileUrlFn(mapZoom) {
+      const z = Math.floor(mapZoom);
+      if (mapZoom < 10.5) {
+        // ArcGIS band
+        return { tileZ: Math.min(z, 10), fn: (tz, y, x) => `https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${tz}/${y}/${x}` };
+      } else if (mapZoom < 13) {
+        // Wayback band
+        return { tileZ: Math.min(z, 12), fn: (tz, y, x) => `https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/WMTS/1.0.0/default028mm/MapServer/tile/13045/${tz}/${y}/${x}` };
+      } else {
+        // Clarity band
+        return { tileZ: Math.min(z, 16), fn: (tz, y, x) => `https://clarity.maptiles.arcgis.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${tz}/${y}/${x}` };
+      }
+    }
+
+    // Prefetch tiles in the current viewport + 25% buffer on each side
+    function prefetchSatTiles() {
+      if (!satelliteRef.current) return;
+      try {
+        const bounds = map.getBounds();
+        const zoom = map.getZoom();
+        const { tileZ, fn } = getTileUrlFn(zoom);
+        // Expand bounds by ~25% in each direction
+        const lngSpan = bounds.getEast() - bounds.getWest();
+        const latSpan = bounds.getNorth() - bounds.getSouth();
+        const w = bounds.getWest()  - lngSpan * 0.25;
+        const e = bounds.getEast()  + lngSpan * 0.25;
+        const n = Math.min(85, bounds.getNorth() + latSpan * 0.25);
+        const s = Math.max(-85, bounds.getSouth() - latSpan * 0.25);
+        const tl = lngLatToTileXY(w, n, tileZ);
+        const br = lngLatToTileXY(e, s, tileZ);
+        const urls = [];
+        for (let x = tl.x; x <= br.x; x++) {
+          for (let y = tl.y; y <= br.y; y++) {
+            urls.push(fn(tileZ, y, x));
+          }
+        }
+        // Fire via SW for cache persistence; fallback to direct fetch if SW unavailable
+        if (navigator.serviceWorker?.controller) {
+          navigator.serviceWorker.controller.postMessage({ type: 'PRECACHE_SATELLITE', urls });
+        } else {
+          urls.forEach(u => fetch(u, { credentials: 'omit' }).catch(() => {}));
+        }
+      } catch (_e) { /* best-effort */ }
+    }
+
+    const onMoveStart = () => prefetchSatTiles();
+    const onMoveEndSat = () => prefetchSatTiles(); // confirm pass
+    map.on('movestart', onMoveStart);
+    map.on('moveend', onMoveEndSat);
+    return () => {
+      map.off('movestart', onMoveStart);
+      map.off('moveend', onMoveEndSat);
+    };
+  }, [mapReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
 
   // Building color expression — uses bid % 7 (standard) / bid % 5 (heatmap shade clusters).
