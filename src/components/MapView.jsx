@@ -2806,18 +2806,6 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       }
     }
 
-    // Real3D override: hide 2D zcta boundary lines.
-    // Buildings and baseplates (fill-extrusion, 3D FBO pass) naturally occlude the area at z13+.
-    // 2D lines (line type, 2D pass) have no depth test against fill-extrusions — they bleed
-    // through building walls. Hiding them in Real3D removes this x-ray artifact.
-    // zcta-outline (the 3D fill-extrusion ring) is NOT activated here — at small heights
-    // it would conflict with the 7m baseplates. Buildings provide the visual boundary.
-    if (real3D && !threeD) {
-      map.setPaintProperty('zcta-line',       'line-opacity', 0);
-      map.setPaintProperty('zcta-line-glow',  'line-opacity', 0);
-      map.setPaintProperty('zcta-line-glow2', 'line-opacity', 0);
-    }
-
     // Hover fill: only in 2D modes (3D hover is handled via extrusion color)
     // Fix 7: Nearly solid purple selection when satellite off + (2D or Real3D). Keep 0.5 for satellite on.
     const hoverOpacity = satellite ? 0.5 : 0.85;
@@ -3542,6 +3530,37 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     buildingAssignCleanupRef.current = () => {};
     // DO NOT moveLayer('borough-outline') to top — it must stay below roads + buildings.
     real3dLayersCreatedRef.current = true;
+
+    // ── OPTION B: enforce visual stack via moveLayer ────────────────────────
+    // MapLibre stack rule: moveLayer(layerId, beforeId) places layerId IMMEDIATELY
+    // BEFORE beforeId in the style list (= visually BELOW beforeId in the 2D pass).
+    // We push all 2D zcta layers (fill + lines + hover) BELOW real3d-water.
+    // Effect:
+    //   - 2D pass order becomes: ... → zcta-fill → zcta-line* → real3d-water → road-fills
+    //   - Road fills, water, and the 3D FBO (buildings/borough/road extrusions/zcta-outline)
+    //     all draw above zcta-fill/zcta-line.
+    //   - zcta-fill / zcta-line are still visible — they only obscure satellite + bg.
+    // Why earlier safeMove broke things:
+    //   The bad call was moveLayer('real3d-water', 'heat-underlay') which sank water to
+    //   the very bottom. We do NOT touch water here. Each move is guarded so a missing
+    //   layer is a no-op, never a throw.
+    const safeMove = (layerId, beforeId) => {
+      try {
+        if (map.getLayer && map.getLayer(layerId) && map.getLayer(beforeId)) {
+          map.moveLayer(layerId, beforeId);
+        }
+      } catch (_e) { /* ignore */ }
+    };
+    // Order matters: move the bottom-most one first so subsequent moves stay below water.
+    // After each move, both layers exist; the moved one sits just before 'real3d-water'.
+    safeMove('zcta-fill',          'real3d-water');
+    safeMove('zcta-hover',         'real3d-water');
+    safeMove('zcta-safezone-hover','real3d-water');
+    safeMove('zcta-safe-line',     'real3d-water');
+    safeMove('zcta-line-glow2',    'real3d-water');
+    safeMove('zcta-line-glow',     'real3d-water');
+    safeMove('zcta-line',          'real3d-water');
+
     // Apply correct paint expressions immediately so layers have proper colors from frame 1.
     // Must run after real3dLayersCreatedRef=true so refreshBuildingColors can find the layers.
     refreshBuildingColors();
