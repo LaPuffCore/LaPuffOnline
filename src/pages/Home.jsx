@@ -781,6 +781,7 @@ export default function Home({ events = [], eventsLoading = false }) {
                 events={events}
                 headerCollapsed={headerCollapsed}
                 interactive={mapCacheReady}
+                phase2ADone={mapPhase2ADone}
               />
             )}
             {mapEntered && !mapCacheReady && (
