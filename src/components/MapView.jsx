@@ -55,7 +55,7 @@ const HEAT_COLORS = {
 };
 
 // Full-saturation neon for outlines — always visually dominant over fills
-const OUTLINE_COLOR = '#ff2200';
+const OUTLINE_COLOR = '#ff0000';
 const OUTLINE_GLOW  = '#ff0000';
 
 // Darkened heatmap tier colors for upper 3D border and borough outlines.
@@ -3401,14 +3401,14 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         paint: {
           'fill-extrusion-color': buildingColorExprByState(isHeatmap, tsIdx),
           'fill-extrusion-height': ['interpolate', ['linear'], ['zoom'],
-            13,    7,
-            14.1,  7,
-            14.2,  ['coalesce', ['get', 'h'], 8],
+            13,   7,
+            13.7, 7,
+            13.9, ['coalesce', ['get', 'h'], 8],
           ],
           'fill-extrusion-base': ['interpolate', ['linear'], ['zoom'],
-            13,    0,
-            14.1,  0,
-            14.2,  ['coalesce', ['get', 'm'], 0],
+            13,   0,
+            13.7, 0,
+            13.9, ['coalesce', ['get', 'm'], 0],
           ],
           'fill-extrusion-opacity': 1,
           'fill-extrusion-vertical-gradient': false,
@@ -3581,20 +3581,6 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       refreshBuildingColors();
       setReal3DLayersVisible(map, true);
     }
-    // Stage 2: Enforce render order after Real3D init/show. moveLayer is metadata-only
-    // (no GPU re-render) and safe to call repeatedly. Each call is guarded by both
-    // layer existence checks to avoid throws.
-    const safeMove = (a, b) => {
-      try {
-        if (map.getLayer && map.getLayer(a) && map.getLayer(b)) {
-          map.moveLayer(a, b);
-        }
-      } catch (_e) { /* ignore */ }
-    };
-    safeMove('zcta-outline', 'real3d-buildings');
-    safeMove('borough-outline', 'real3d-buildings');
-    safeMove('real3d-water', 'heat-underlay');
-    safeMove('zcta-fill', 'zcta-outline');
     map.setLight({ anchor: 'map' });
     // Tilt only — no zoom change. Buildings render naturally once user is at z13+.
     map.easeTo({
