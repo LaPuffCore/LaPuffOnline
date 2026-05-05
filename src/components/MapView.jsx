@@ -2695,7 +2695,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         } else {
           // 1a/1b: solid fill if heatmap on, satellite off, topo off; else transparent
         if (heatmap && !satellite && !topoOn) {
-          map.setPaintProperty('zcta-fill', 'fill-opacity', 1.0);
+          map.setPaintProperty('zcta-fill', 'fill-opacity', real3D ? 0.95 : 1.0);
         } else {
           map.setPaintProperty('zcta-fill', 'fill-opacity', satellite || topoOn ? 0.35 : 0.45);
         }
@@ -2742,7 +2742,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         map.setPaintProperty('zcta-cap', 'fill-extrusion-height', 1);
         map.setPaintProperty('zcta-cap', 'fill-extrusion-base', 0);
         map.setPaintProperty('zcta-cap', 'fill-extrusion-opacity', 0);
-        map.setPaintProperty('zcta-line',      'line-opacity', 1);
+        map.setPaintProperty('zcta-line',      'line-opacity', real3D ? 0.95 : 1);
         map.setPaintProperty('zcta-line-glow', 'line-opacity', satellite ? 0.55 : 0.75);
         map.setPaintProperty('zcta-line-glow2','line-opacity', satellite ? 0.25 : 0.35);
       }
@@ -2758,7 +2758,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         if (threeD) {
           map.setPaintProperty('zcta-fill', 'fill-opacity', 0);
         } else {
-          map.setPaintProperty('zcta-fill', 'fill-opacity', satellite ? 0.65 : 0.75); // unchanged, more visible dark fill for non-heatmap
+          map.setPaintProperty('zcta-fill', 'fill-opacity', real3D ? (satellite ? 0.45 : 0.75) : (satellite ? 0.65 : 0.75)); // Real3D caps fill < 1.0 to force translucent pass (depth-test passes through 3D extrusions)
         }
 
       if (threeD) {
@@ -2800,7 +2800,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         map.setPaintProperty('zcta-cap', 'fill-extrusion-height', 1);
         map.setPaintProperty('zcta-cap', 'fill-extrusion-base', 0);
         map.setPaintProperty('zcta-cap', 'fill-extrusion-opacity', 0);
-        map.setPaintProperty('zcta-line',      'line-opacity', 1);
+        map.setPaintProperty('zcta-line',      'line-opacity', real3D ? 0.95 : 1);
         map.setPaintProperty('zcta-line-glow', 'line-opacity', satellite ? 0.55 : 0.75);
         map.setPaintProperty('zcta-line-glow2','line-opacity', satellite ? 0.25 : 0.35);
       }
