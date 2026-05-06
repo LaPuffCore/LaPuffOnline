@@ -2738,7 +2738,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-color', withHoverColor(extrudeColorExpr));
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-base', 0);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-height', 0.2);
-        map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', 1.0);
+        // Combo C: heatmap=ON, sat=OFF → 1.0. Combo D: heatmap=ON, sat=ON → 0.6
+        map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', satellite ? 0.6 : 1.0);
         map.setPaintProperty('zcta-floor', 'fill-extrusion-opacity', 0);
         map.setPaintProperty('zcta-cap', 'fill-extrusion-height', 1);
         map.setPaintProperty('zcta-cap', 'fill-extrusion-base', 0);
@@ -2812,7 +2813,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-color', '#1a0505');
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-base', 0);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-height', 0.2);
-        map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', 1.0);
+        // Combo A: heatmap=OFF, sat=OFF → 0.9. Combo B: heatmap=OFF, sat=ON → 0.6
+        map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', satellite ? 0.6 : 0.9);
         map.setPaintProperty('zcta-floor', 'fill-extrusion-opacity', 0);
         map.setPaintProperty('zcta-cap', 'fill-extrusion-height', 1);
         map.setPaintProperty('zcta-cap', 'fill-extrusion-base', 0);
@@ -2879,7 +2881,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         map.setPaintProperty('zcta-outline', 'fill-extrusion-height', ['+', heatmap ? extrudeH : flatH, 18]);
       } else if (real3D) {
         // Fix C: thin 0.5m ring at ground — enters 3D depth pass, gets occluded by buildings/roads
-        map.setPaintProperty('zcta-outline', 'fill-extrusion-color', upperBorderColorExpr);
+        // Always #ff0000 opaque in Real3D regardless of heatmap or satellite state
+        map.setPaintProperty('zcta-outline', 'fill-extrusion-color', '#ff0000');
         map.setPaintProperty('zcta-outline', 'fill-extrusion-base', 0);
         map.setPaintProperty('zcta-outline', 'fill-extrusion-height', 0.5);
       } else {
@@ -3441,13 +3444,13 @@ export default function MapView({ events, headerCollapsed = false, interactive =
           'fill-extrusion-color': buildingColorExprByState(isHeatmap, tsIdx),
           'fill-extrusion-height': ['interpolate', ['linear'], ['zoom'],
             13,   7,
-            13.7, 7,
-            13.9, ['coalesce', ['get', 'h'], 8],
+            14.1, 7,
+            14.2, ['coalesce', ['get', 'h'], 8],
           ],
           'fill-extrusion-base': ['interpolate', ['linear'], ['zoom'],
             13,   0,
-            13.7, 0,
-            13.9, ['coalesce', ['get', 'm'], 0],
+            14.1, 0,
+            14.2, ['coalesce', ['get', 'm'], 0],
           ],
           'fill-extrusion-opacity': 1,
           'fill-extrusion-vertical-gradient': false,
@@ -3502,30 +3505,25 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       const ROAD_FCLASSES = [
         { fclass: 'motorway',    minz: 9,  colorOff: '#4d0000', opacityOff: 1.0 },
         { fclass: 'trunk',       minz: 9,  colorOff: '#4d0000', opacityOff: 1.0 },
-        { fclass: 'primary',     minz: 11, colorOff: '#ff4040', opacityOff: 1.0 },
-        { fclass: 'secondary',   minz: 11, colorOff: '#ff4040', opacityOff: 1.0 },
-        { fclass: 'tertiary',    minz: 12, colorOff: '#ff4040', opacityOff: 1.0 },
-        { fclass: 'residential', minz: 12, colorOff: '#ff4040', opacityOff: 1.0 },
+        { fclass: 'primary',     minz: 11, colorOff: '#ff3d3d', opacityOff: 1.0 },
+        { fclass: 'secondary',   minz: 11, colorOff: '#ff3d3d', opacityOff: 1.0 },
+        { fclass: 'tertiary',    minz: 12, colorOff: '#ff3d3d', opacityOff: 1.0 },
+        { fclass: 'residential', minz: 12, colorOff: '#ff3d3d', opacityOff: 1.0 },
       ];
-      // Roads are ALWAYS opaque (1.0) in BOTH heatmap and non-heatmap mode.
-      // Visual dimming for heatmap is achieved via solid black color, not opacity.
-      // Hard-cut handoff between 2D fill and 3D extrusion at z12.5→z13 (1-tick overlap):
-      //   2D fill: solid 1.0 until z13 then 0
-      //   3D ext : solid 1.0 from z12.5 onward
-      // Opacity 1.0 forces MapLibre's depth-tested FBO path so 3D roads properly
-      // occlude (and are occluded by) other 3D extrusions and 2D fills.
-      const HM_EXT_OPACITY  = 1.0;
-      const HM_FILL_OPACITY = 1.0;
+      // Roads are ALWAYS opaque (1.0) when heatmap OFF.
+      // Heatmap ON: black 0.4 opacity extrusions (visual dimming while retaining road shape).
+      // 2D fill layers are DISABLED (opacity 0) — all roads are 3D fill-extrusion from each
+      // class's minzoom so they participate in the shared GPU depth pass with buildings/zcta.
+      const HM_EXT_OPACITY  = 0.4;
+      const HM_FILL_OPACITY = 0;
       if (!map.getSource('roads-pm')) {
         map.addSource('roads-pm', { type: 'vector', url: `pmtiles://${ROADS_PMTILES_URL}` });
       }
       for (const r of ROAD_FCLASSES) {
         const fillId = `real3d-pm-roads-${r.fclass}-fill`;
         const extId  = `real3d-pm-roads-${r.fclass}`;
-        // 2D fill: full polygon footprint, antialiased, zero 3D overhead.
-        // Must be GONE by z14 — at z14+ only 3D extrusion roads are visible so
-        // buildings can properly occlude them via the GPU depth buffer.
-        // Crossfade window z12.5→z14: extrusion has time to load before fill disappears.
+        // 2D fill: DISABLED — opacity always 0. All roads are purely 3D fill-extrusions
+        // so they participate in the GPU depth pass with buildings/zcta-extrude.
         if (!map.getLayer(fillId)) {
           map.addLayer({
             id: fillId, type: 'fill',
@@ -3534,25 +3532,25 @@ export default function MapView({ events, headerCollapsed = false, interactive =
             filter: ['==', ['get', 'fclass'], r.fclass],
             paint: {
               'fill-color':     isHeatmap ? '#000000' : r.colorOff,
-              'fill-opacity':   ['step', ['zoom'], isHeatmap ? HM_FILL_OPACITY : r.opacityOff, 13, 0],
-              'fill-antialias': true,
+              'fill-opacity':   0,
+              'fill-antialias': false,
             },
           });
         }
-        // 3D extrusion: minzoom 12 so tiles start streaming early.
-        // Fade IN at z12→z13.5 so roads are fully visible before z14 (when buildings arrive).
-        // Full opacity at z13.5+ ensures roads never disappear before buildings take over.
+        // 3D extrusion: from each class's natural minzoom (motorway z9, primary z11, tertiary z12).
+        // No crossfade window — extrusion starts immediately at minzoom, always at full opacity
+        // when heatmap OFF. Heatmap ON: black 0.4. Buildings occlude roads via shared depth buffer.
         if (!map.getLayer(extId)) {
           map.addLayer({
             id: extId, type: 'fill-extrusion',
             source: 'roads-pm', 'source-layer': ROADS_PMTILES_LAYER,
-            minzoom: 12,
+            minzoom: r.minz,
             filter: ['==', ['get', 'fclass'], r.fclass],
             paint: {
               'fill-extrusion-color':   isHeatmap ? '#000000' : r.colorOff,
               'fill-extrusion-height':  ['+', HEIGHT_EXPR, 0.8],
               'fill-extrusion-base':    0.8,
-              'fill-extrusion-opacity': ['step', ['zoom'], 0, 12.5, isHeatmap ? HM_EXT_OPACITY : r.opacityOff],
+              'fill-extrusion-opacity': isHeatmap ? HM_EXT_OPACITY : r.opacityOff,
               'fill-extrusion-vertical-gradient': false,
             },
           });
@@ -3654,28 +3652,24 @@ export default function MapView({ events, headerCollapsed = false, interactive =
 
     // PMTiles roads: update color + zoom-interpolated opacity expressions.
     const ROAD_FCLASS_PAINT = [
-      { fclass: 'motorway',    colorOff: '#4d0000', opacityOff: 1.0 },
-      { fclass: 'trunk',       colorOff: '#4d0000', opacityOff: 1.0 },
-      { fclass: 'primary',     colorOff: '#ff4040', opacityOff: 1.0 },
-      { fclass: 'secondary',   colorOff: '#ff4040', opacityOff: 1.0 },
-      { fclass: 'tertiary',    colorOff: '#ff4040', opacityOff: 1.0 },
-      { fclass: 'residential', colorOff: '#ff4040', opacityOff: 1.0 },
+      { fclass: 'motorway',    minz: 9,  colorOff: '#4d0000', opacityOff: 1.0 },
+      { fclass: 'trunk',       minz: 9,  colorOff: '#4d0000', opacityOff: 1.0 },
+      { fclass: 'primary',     minz: 11, colorOff: '#ff3d3d', opacityOff: 1.0 },
+      { fclass: 'secondary',   minz: 11, colorOff: '#ff3d3d', opacityOff: 1.0 },
+      { fclass: 'tertiary',    minz: 12, colorOff: '#ff3d3d', opacityOff: 1.0 },
+      { fclass: 'residential', minz: 12, colorOff: '#ff3d3d', opacityOff: 1.0 },
     ];
-    // Roads ALWAYS opaque (1.0) in both heatmap and non-heatmap. Hard-cut z12.5→z13.
-    const HM_EXT_OPACITY  = 1.0;
-    const HM_FILL_OPACITY = 1.0;
+    // 2D fills are always 0 opacity. 3D extrusions: full opacity when heatmap OFF, black 0.4 when ON.
+    const HM_EXT_OPACITY  = 0.4;
     ROAD_FCLASS_PAINT.forEach(({ fclass, colorOff, opacityOff }) => {
       const fillId = `real3d-pm-roads-${fclass}-fill`;
       const extId  = `real3d-pm-roads-${fclass}`;
       if (map.getLayer(fillId)) {
-        map.setPaintProperty(fillId, 'fill-color',   heatmap ? '#000000' : colorOff);
-        map.setPaintProperty(fillId, 'fill-opacity',
-          ['step', ['zoom'], heatmap ? HM_FILL_OPACITY : opacityOff, 13, 0]);
+        map.setPaintProperty(fillId, 'fill-opacity', 0);
       }
       if (map.getLayer(extId)) {
         map.setPaintProperty(extId, 'fill-extrusion-color',   heatmap ? '#000000' : colorOff);
-        map.setPaintProperty(extId, 'fill-extrusion-opacity',
-          ['step', ['zoom'], 0, 12.5, heatmap ? HM_EXT_OPACITY : opacityOff]);
+        map.setPaintProperty(extId, 'fill-extrusion-opacity', heatmap ? HM_EXT_OPACITY : opacityOff);
       }
     });
     // Safezone opacity
