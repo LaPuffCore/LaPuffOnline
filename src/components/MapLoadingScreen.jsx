@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { runPhase2A } from '../lib/mapDataPipeline';
+import { runPhase2A, MAP_CACHE_DONE_KEY } from '../lib/mapDataPipeline';
 import mapCacheStore from '../lib/mapCacheStore';
 
 const MESSAGES = [
@@ -96,7 +96,7 @@ function shuffle(arr) {
 //   onComplete    — callback: Home sets mapCacheReady=true → overlay disappears
 export default function MapLoadingScreen({ events, onPhase2ADone, onComplete }) {
   const isMobile = window.innerWidth < 768;
-  const isFirstLoad = !localStorage.getItem('lapuff_map_cache_v3');
+  const isFirstLoad = !localStorage.getItem(MAP_CACHE_DONE_KEY);
 
   const [progress, setProgress] = useState(0);
   const [isDone, setIsDone] = useState(false);

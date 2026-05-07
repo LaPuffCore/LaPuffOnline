@@ -2701,7 +2701,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
           // heatmap OFF + sat OFF → 1.0  |  heatmap ON + sat OFF → 1.0
           // heatmap OFF + sat ON  → 0.4  |  heatmap ON + sat ON  → 0.4
           if (real3D) {
-            map.setPaintProperty('zcta-fill', 'fill-opacity', satellite ? 0.4 : 1.0);
+            map.setPaintProperty('zcta-fill', 'fill-opacity', satellite ? 0.6 : 1.0);
           } else if (!satellite && !topoOn) {
             map.setPaintProperty('zcta-fill', 'fill-opacity', 1.0);
           } else {
@@ -2771,7 +2771,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
           // Real3D 4-combo zcta-fill matrix (same as 2D behavior):
           // sat OFF → 1.0 opaque  |  sat ON → 0.4
           map.setPaintProperty('zcta-fill', 'fill-opacity',
-            real3D ? (satellite ? 0.4 : 1.0) : (satellite ? 0.65 : 0.75));
+            real3D ? (satellite ? 0.6 : 1.0) : (satellite ? 0.65 : 0.75));
         }
 
       if (threeD) {
