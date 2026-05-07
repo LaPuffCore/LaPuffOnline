@@ -2425,7 +2425,9 @@ export default function MapView({ events, headerCollapsed = false, interactive =
             setExtruded3D(zoom >= 11);
             // Heatmap underlay shader compile at all zooms briefly
             setHeatVis(true);
-            map.jumpTo({ center, zoom, pitch: zoom >= 11 ? 48 : 0, bearing: zoom >= 11 ? -17 : 0 });
+            // Pitch matrix: real3d (55) at z>=14 for real3d shader compile, 3D (48) at z11-13.
+            const pitchSweep = zoom >= 14 ? 55 : (zoom >= 11 ? 48 : 0);
+            map.jumpTo({ center, zoom, pitch: pitchSweep, bearing: zoom >= 11 ? -17 : 0 });
             requestAnimationFrame(step);
           };
           // Defer one frame so layer pre-creation effect runs first.
@@ -2433,8 +2435,78 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         } catch (_e) { mapCacheStore.warmupComplete = true; /* warmup best-effort */ }
       });
     } else {
-      // Mobile: skip warmup zoom cycle but still signal completion so loading screen advances.
-      mapCacheStore.warmupComplete = true;
+      // Mobile: lite warmup sweep + expression pre-build + prebake.
+      // Smaller grid (≈16 jumps vs 65 desktop) keeps total mobile sweep ~600-800ms.
+      // All runs reset to 2D state at end so no active GPU drag during normal usage.
+      requestAnimationFrame(() => {
+        try {
+          const origCenter = map.getCenter();
+          const origZoom = map.getZoom();
+          const NYC_BBOX_M = { lng1: -74.27, lat1: 40.47, lng2: -73.68, lat2: 40.93 };
+          const gridForZoomM = (z, divs) => {
+            const pts = [];
+            const dLng = (NYC_BBOX_M.lng2 - NYC_BBOX_M.lng1) / divs;
+            const dLat = (NYC_BBOX_M.lat2 - NYC_BBOX_M.lat1) / divs;
+            for (let i = 0; i < divs; i++) for (let j = 0; j < divs; j++)
+              pts.push([NYC_BBOX_M.lng1 + dLng * (i + 0.5), NYC_BBOX_M.lat1 + dLat * (j + 0.5)]);
+            return pts;
+          };
+          const realLayersM = REAL3D_ALL_LAYER_IDS;
+          const setRealVisM = (vis) => {
+            for (const id of realLayersM) {
+              if (map.getLayer(id)) { try { map.setLayoutProperty(id, 'visibility', vis); } catch (_e) {} }
+            }
+          };
+          const setExtruded3DM = (on) => {
+            try {
+              if (map.getLayer('zcta-extrude')) map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', on ? 0.9 : 0);
+              if (map.getLayer('zcta-outline')) map.setPaintProperty('zcta-outline', 'fill-extrusion-opacity', on ? 0.95 : 0);
+            } catch (_e) {}
+          };
+          const setHeatVisM = (on) => {
+            if (map.getLayer('heat-underlay')) {
+              try { map.setPaintProperty('heat-underlay', 'heatmap-opacity', on ? 0.5 : 0); } catch (_e) {}
+            }
+          };
+          // Lite mobile sweep: cover all integer zooms once with reduced grid density.
+          // Total ≈ 16 jumps vs desktop's 65. Real3D pitch=55 at z>=14 to compile real3d shaders.
+          const sweepM = [];
+          for (const z of [9, 10, 11, 12]) for (const c of gridForZoomM(z, 1)) sweepM.push({ center: c, zoom: z });
+          for (const c of gridForZoomM(13, 2)) sweepM.push({ center: c, zoom: 13 });
+          for (const c of gridForZoomM(14, 2)) sweepM.push({ center: c, zoom: 14 });
+          for (const c of gridForZoomM(15, 2)) sweepM.push({ center: c, zoom: 15 });
+          for (const c of gridForZoomM(16, 2)) sweepM.push({ center: c, zoom: 16 });
+          let mi = 0;
+          const stepM = () => {
+            if (mi >= sweepM.length) {
+              setRealVisM('none');
+              setExtruded3DM(false);
+              setHeatVisM(false);
+              map.jumpTo({ center: origCenter, zoom: origZoom, pitch: 0, bearing: 0 });
+              try {
+                if (precomputedTiersRef.current && zipToZctaIdxMapRef.current) {
+                  for (let ts = 0; ts < 5; ts++) {
+                    buildingColorExprByState(false, ts);
+                    buildingColorExprByState(true, ts);
+                  }
+                }
+              } catch (_e) {}
+              try { runPrebakeAfterWarmup(map); } catch (_e) {}
+              mapCacheStore.warmupComplete = true;
+              return;
+            }
+            const { center, zoom } = sweepM[mi++];
+            setRealVisM(zoom >= 13 ? 'visible' : 'none');
+            setExtruded3DM(zoom >= 11);
+            setHeatVisM(true);
+            // Use real3d pitch (55) at z>=14 so real3d shaders compile under correct projection
+            const pitch = zoom >= 14 ? 55 : (zoom >= 11 ? 48 : 0);
+            map.jumpTo({ center, zoom, pitch, bearing: zoom >= 11 ? -17 : 0 });
+            requestAnimationFrame(stepM);
+          };
+          requestAnimationFrame(stepM);
+        } catch (_e) { mapCacheStore.warmupComplete = true; }
+      });
     }
   }, [mapReady, geoData, phase2ADone]); // eslint-disable-line react-hooks/exhaustive-deps
   // Also pre-adds nyc-buildings PMTiles source so the SW-cached PMTiles directory
@@ -2454,8 +2526,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         promoteId: 'b',
       });
     }
-    // Mobile: stop here — layers created on first Real3D toggle.
-    if (window.innerWidth < 768) return;
+    // Mobile: pre-create Real3D layers too (cheap; visibility=none after warmup ⇒ 0 GPU draw cost,
+    // but layers + paint exprs exist so first toggle is instant).
     if (real3dLayersCreatedRef.current) return;
     initReal3DLayers(map, heatmapRef.current, timespanIdxRef.current ?? 2);
     setReal3DLayersVisible(map, false);

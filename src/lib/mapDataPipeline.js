@@ -485,31 +485,32 @@ export async function runPhase2A(events, isMobile, onProgress) {
 
   const startTime = Date.now();
 
-  // Progress ranges per platform
+  // Progress ranges per platform — recalibrated to actual step costs.
+  // Heaviest steps: ZCTA fetch+parse, tier compute, satellite precache (background but accounted for).
+  // Mobile: 11 steps total (2A: 0→85%, 2B: 85→100%) — mobile now also runs warmup sweep.
   // Desktop: 13 steps total (2A: 0→93%, 2B: 93→100%)
-  // Mobile:  9 steps total  (2A: 0→90%, 2B: 90→100%)
   const P = isMobile ? {
-    zcta:      [0,  18],
-    adj:       [18, 32],
-    skel:      [32, 40],
-    boro:      [40, 53],
-    boroSkel:  [53, 63],
-    tiers:     [63, 76],
-    roadCache: [76, 79],
-    waterCache:[79, 82],
-    bldgCache: [82, 86],
-    satCache:  [86, 90],
+    zcta:      [0,  20],
+    adj:       [20, 28],
+    skel:      [28, 36],
+    boro:      [36, 46],
+    boroSkel:  [46, 54],
+    tiers:     [54, 70],
+    roadCache: [70, 73],
+    waterCache:[73, 76],
+    bldgCache: [76, 80],
+    satCache:  [80, 85],
   } : {
-    zcta:      [0,  10],
-    adj:       [10, 16],
-    skel:      [16, 20],
-    boro:      [20, 26],
-    boroSkel:  [26, 30],
-    tiers:     [30, 38],
-    roadCache: [38, 40],
-    waterCache:[40, 42],
-    bldgCache: [42, 50],
-    satCache:  [50, 93],
+    zcta:      [0,  12],
+    adj:       [12, 18],
+    skel:      [18, 24],
+    boro:      [24, 32],
+    boroSkel:  [32, 38],
+    tiers:     [38, 58],
+    roadCache: [58, 62],
+    waterCache:[62, 65],
+    bldgCache: [65, 72],
+    satCache:  [72, 93],
   };
 
   const report = (pct, msg) => onProgress?.(pct, msg);

@@ -2,7 +2,7 @@
 // Stage-1 OOM fix: buildings PMTiles is NEVER served from a full-file slice (was 74MB ArrayBuffer
 // re-allocated per Range = multi-GB transient peak → desktop OOM). Buildings flow exclusively
 // through the per-Range cache (PMTILES_CACHE) with an LRU cap.
-const SW_VERSION = 'lapuff-sw-v17';
+const SW_VERSION = 'lapuff-sw-v18';
 
 const PMTILES_CACHE              = 'lapuff-pmtiles-sw-v4';     // per-Range responses (URL+Range key) — used by ALL pmtiles now for buildings
 const PMTILES_FULL_CACHE         = 'lapuff-pmtiles-full-v6';   // full-file slice cache — ROADS ONLY (15MB safe)
@@ -135,6 +135,16 @@ self.addEventListener('activate', event => {
         }
       }
     } catch (e) { /* ignore */ }
+    // Telemetry: log actual storage quota so we can tune caps without code changes.
+    try {
+      if (navigator.storage && navigator.storage.estimate) {
+        const est = await navigator.storage.estimate();
+        const usedMB  = ((est.usage  || 0) / 1048576).toFixed(1);
+        const quotaMB = ((est.quota  || 0) / 1048576).toFixed(0);
+        const pct     = est.quota ? ((est.usage / est.quota) * 100).toFixed(1) : '?';
+        console.log(`[SW v18] Storage: ${usedMB}MB used / ${quotaMB}MB quota (${pct}%)`);
+      }
+    } catch (_e) { /* unsupported on some browsers */ }
   })());
 });
 

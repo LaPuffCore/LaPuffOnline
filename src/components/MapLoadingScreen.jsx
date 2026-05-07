@@ -156,9 +156,10 @@ export default function MapLoadingScreen({ events, onPhase2ADone, onComplete }) 
       if (lrReady && wmReady) {
         clearInterval(phase2BPollRef.current);
         setProgress(100);
-        // Enforce 2s minimum display time so loading screen never flickers out
+        // Minimum 1s display time, ONLY enforced if we got here in under 1s.
+        // If pipeline already took >1s, reveal map immediately.
         const elapsed = Date.now() - mountTimeRef.current;
-        const remain  = Math.max(0, 2000 - elapsed);
+        const remain  = elapsed < 1000 ? (1000 - elapsed) : 0;
         setTimeout(() => {
           isDoneRef.current = true;
           setIsDone(true);
