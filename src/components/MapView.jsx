@@ -24,7 +24,8 @@ const MAP_CACHE_BUILDING_KEY = 'lapuff_map_cache_building';
 // Buildings PMTiles — same-origin GitHub Pages, SW range-cached. ~71MB, never fully loaded
 // at runtime; MapLibre fetches only viewport tiles via HTTP Range. SW pre-warms full file
 // in MapLoadingScreen Phase 2A so warm tiles serve from in-memory slicing (~0ms).
-// Layer: 'building'. Per-feature props: { z=zip(string), b=bid(int), h=height_m, m=min_h, c=colour }
+// Layer: 'building'. Per-feature props: { z=zip(string), b=bid(int), h=height_ft, m=min_h_ft, c=colour }
+// NOTE: h and m are stored in FEET. Always multiply by 0.3048 in fill-extrusion-height/base expressions.
 const BUILDINGS_PMTILES_URL = (typeof window !== 'undefined')
   ? `${window.location.origin}${import.meta.env.BASE_URL}data/nyc_buildings_z12.pmtiles`
   : '/data/nyc_buildings_z12.pmtiles';
@@ -3487,15 +3488,23 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         minzoom: 13,
         paint: {
           'fill-extrusion-color': buildingColorExprByState(isHeatmap, tsIdx),
+          // h and m are stored in FEET in the PMTiles. Multiply by 0.3048 to convert to meters
+          // (MapLibre fill-extrusion-height is always in meters).
+          // Baseplate phase: z13-z14.1 = flat 1m slab (visual footprint only, no real height).
+          // Growth phase:    z14.1-z14.2 = zoom-driven interpolation from 1m → actual roof height.
+          // Full height:     z14.2+ = constant at actual h*0.3048 meters.
+          // Default fallback for missing h: 25ft ≈ 7.6m (typical 2-story NYC walk-up).
           'fill-extrusion-height': ['interpolate', ['linear'], ['zoom'],
-            13,   7,
-            14.1, 7,
-            14.2, ['coalesce', ['get', 'h'], 8],
+            13,   1,
+            14.1, 1,
+            14.2, ['*', ['coalesce', ['get', 'h'], 25], 0.3048],
           ],
+          // Base is 0 at z13-14.1. At z14.2+ use m (min_height in feet → meters).
+          // Most buildings have m=0 so base stays 0.
           'fill-extrusion-base': ['interpolate', ['linear'], ['zoom'],
             13,   0,
             14.1, 0,
-            14.2, ['coalesce', ['get', 'm'], 0],
+            14.2, ['*', ['coalesce', ['get', 'm'], 0], 0.3048],
           ],
           'fill-extrusion-opacity': 1,
           'fill-extrusion-vertical-gradient': false,
