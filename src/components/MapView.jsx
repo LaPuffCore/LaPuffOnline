@@ -2255,12 +2255,16 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady || !geoData) return;
-    // Gate: Phase 2A must be done before warmup. This ensures precomputedTiers
-    // is populated in mapCacheStore when warmup's expression pre-build runs.
-    if (!phase2ADone) return;
+    // addLayers fires immediately on mapReady+geoData (no phase2ADone gate) so that
+    // zcta-fill is inserted into the MapLibre style list BEFORE road fill layers
+    // (added later by initReal3DLayers). Later-added fills paint on top in painter's pass,
+    // so road fills must come after zcta-fill to appear above it visually.
     addLayers(map, geoData, satellite);
     // Signal MapLoadingScreen Phase 2B that layers are ready → overlay will reveal the map
     mapCacheStore.layersReady = true;
+    // Gate: Phase 2A must complete before the warmup sweep so precomputedTiers is
+    // populated in mapCacheStore when warmup's expression pre-build runs.
+    if (!phase2ADone) return;
     // Phase 2A just finished — sync its precomputedTiers + zipToZcta refs NOW so the
     // expression pre-build at the end of the sweep always has data. Without this,
     // the geoData effect (which fires before Phase 2A finishes) would have found
@@ -3493,7 +3497,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
             filter: ['==', ['get', 'fclass'], r.fclass],
             paint: {
               'fill-color':     isHeatmap ? '#000000' : r.colorOff,
-              'fill-opacity':   ['interpolate', ['linear'], ['zoom'], 12.5, isHeatmap ? HM_OPACITY : r.opacityOff, 14, 0],
+              'fill-opacity':   ['interpolate', ['linear'], ['zoom'], 12.5, isHeatmap ? HM_OPACITY : r.opacityOff, 13, 0],
               'fill-antialias': true,
             },
           });
@@ -3510,7 +3514,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
               'fill-extrusion-color':   isHeatmap ? '#000000' : r.colorOff,
               'fill-extrusion-height':  HEIGHT_EXPR,
               'fill-extrusion-base':    0,
-              'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0, 13.5, isHeatmap ? HM_OPACITY : r.opacityOff],
+              'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'], 12.5, 0, 13, isHeatmap ? HM_OPACITY : r.opacityOff],
               'fill-extrusion-vertical-gradient': false,
             },
           });
@@ -3619,7 +3623,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       { fclass: 'tertiary',    colorOff: '#cc1100', opacityOff: 0.88 },
       { fclass: 'residential', colorOff: '#cc1100', opacityOff: 0.88 },
     ];
-    // 2D fills: crossfade z13=full → z14=0. 3D extrusions: crossfade z13=0 → z14=full.
+    // 2D fills: crossfade z12.5=full → z13=0. 3D extrusions: crossfade z12.5=0 → z13=full.
     const HM_OPACITY = 0.4;
     ROAD_FCLASS_PAINT.forEach(({ fclass, colorOff, opacityOff }) => {
       const fillId = `real3d-pm-roads-${fclass}-fill`;
@@ -3627,12 +3631,12 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       if (map.getLayer(fillId)) {
         map.setPaintProperty(fillId, 'fill-color',   heatmap ? '#000000' : colorOff);
         map.setPaintProperty(fillId, 'fill-opacity',
-          ['interpolate', ['linear'], ['zoom'], 13, heatmap ? HM_OPACITY : opacityOff, 14, 0]);
+          ['interpolate', ['linear'], ['zoom'], 12.5, heatmap ? HM_OPACITY : opacityOff, 13, 0]);
       }
       if (map.getLayer(extId)) {
         map.setPaintProperty(extId, 'fill-extrusion-color',   heatmap ? '#000000' : colorOff);
         map.setPaintProperty(extId, 'fill-extrusion-opacity',
-          ['interpolate', ['linear'], ['zoom'], 13, 0, 14, heatmap ? HM_OPACITY : opacityOff]);
+          ['interpolate', ['linear'], ['zoom'], 12.5, 0, 13, heatmap ? HM_OPACITY : opacityOff]);
       }
     });
     // Safezone opacity
