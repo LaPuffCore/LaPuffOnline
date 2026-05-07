@@ -58,3 +58,7 @@ public/data/Staten Island_nor.fgb
 # Centroids — replaced by PMTiles built-in zip property
 public/data/building_centroids.bin
 public/data/building_centroids.meta.json
+
+public/data/targetmapview.jsx
+public/data/oldestmapview.jsx
+public/data/oldermapview.jsx
