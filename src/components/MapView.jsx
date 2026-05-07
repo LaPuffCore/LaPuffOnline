@@ -2239,12 +2239,11 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       }
     }
     if (mapCacheStore.boroughSkeleton) {
-      for (let z = 9; z <= 16; z++) {
-        try {
-          const w = getZoomAwareOutlineWidth(map, z, threeD) * (z < 12 ? 4 : 1.5);
-          boroughOutCache[z] = generateBoroughQuadsFromSkeleton(mapCacheStore.boroughSkeleton, w, {});
-        } catch (_e) { /* */ }
-      }
+      // Note: borough outline geometry (generateBoroughQuadsFromSkeleton) depends on
+      // map.getZoom() internally via getZoomAwareOutlineWidth. Pre-baking at wrong zoom
+      // produces wildly-scaled quads. borough outline is computed fresh in doOutlineRebuild
+      // (called on integer zoom crossings only) — already fast enough via skeleton cache.
+      boroughOutCache; // kept empty intentionally
     }
     mapCacheStore.outlineGeoCache = outCache;
     mapCacheStore.boroughOutlineGeoCache = boroughOutCache;
@@ -3140,27 +3139,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       // Borough outline — all modes
       if (map.getSource('borough-source')) {
         const filterSet = boroughQuadFilterRef.current;
-        // Fast path: use pre-baked cache from runPrebakeAfterWarmup.
-        // Cache contains base quad geometry per integer zoom band — we only need to
-        // merge in current per-feature overrides (color, _boroughIdx) at swap time.
-        // This avoids the heavy generateBoroughQuadsFromSkeleton ring-offset math
-        // on every zoom-band crossing, eliminating the visible "blink/lag" during
-        // zoom transitions. setData of pre-baked GeoJSON is near-instant.
-        const cached = mapCacheStore.boroughOutlineGeoCache?.[intZoom];
-        if (cached && boroughWithColorRef.current) {
-          const overrides = boroughWithColorRef.current.features.map(f => f.properties);
-          // Cached quads are produced from per-borough skeleton in fixed feature order.
-          // Each output quad's properties merge overrides via skeleton index baked in
-          // at gen time as `_boroughIdx`. Apply by index lookup on the cached features.
-          let features = cached.features.map((q) => {
-            const bi = q.properties?._boroughIdx;
-            const ov = (typeof bi === 'number' && overrides[bi]) ? overrides[bi] : {};
-            return { ...q, properties: { ...q.properties, ...ov } };
-          });
-          if (filterSet && filterSet.size > 0) features = features.filter((_, i) => !filterSet.has(i));
-          map.getSource('borough-source').setData({ ...cached, features });
-        } else if (boroughSkeletonRef.current && boroughWithColorRef.current) {
-          // Fallback: cache miss (pre-bake hasn't completed yet) — fresh compute.
+        if (boroughSkeletonRef.current && boroughWithColorRef.current) {
           const overrides = boroughWithColorRef.current.features.map(f => f.properties);
           let quads = generateBoroughQuadsFromSkeleton(boroughSkeletonRef.current, getZoomAwareOutlineWidth(map, 18, true), overrides);
           if (filterSet && filterSet.size > 0) quads = { ...quads, features: quads.features.filter((_, i) => !filterSet.has(i)) };
