@@ -3,7 +3,7 @@
 > **Living document**: These instructions reflect the **current working version** of the codebase, not a finalized spec. Values, thresholds, and architecture may change as the project evolves. Always treat this as "where we are now" and update it as changes land.
 
 ## Scope First
-- Start with the smallest relevant scope.
+- Start with the smallest relevant scope please.
 - Do **not** read the full codebase for every task.
 - Only expand to nearby files when the change clearly affects shared logic, styling, data flow, or reused components.
 
