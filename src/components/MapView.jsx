@@ -2698,11 +2698,11 @@ export default function MapView({ events, headerCollapsed = false, interactive =
           map.setPaintProperty('zcta-fill', 'fill-opacity', 0);
         } else {
           // 1a/1b: solid fill if heatmap on, satellite off, topo off; else transparent.
-          // Real3D: 2D zcta-fill stays visible (occluded by opaque buildings via render order).
+          // Real3D: zcta-fill hidden so dark buildings are visible against the base (not blended into same-color fill).
         if (heatmap && !satellite && !topoOn) {
-          map.setPaintProperty('zcta-fill', 'fill-opacity', 1.0);
+          map.setPaintProperty('zcta-fill', 'fill-opacity', real3D ? 0 : 1.0);
         } else {
-          map.setPaintProperty('zcta-fill', 'fill-opacity', satellite || topoOn ? 0.35 : 0.45);
+          map.setPaintProperty('zcta-fill', 'fill-opacity', real3D ? 0 : (satellite || topoOn ? 0.35 : 0.45));
         }
         }
 
@@ -2765,8 +2765,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         if (threeD) {
           map.setPaintProperty('zcta-fill', 'fill-opacity', 0);
         } else {
-          // Real3D: 2D zcta-fill stays visible (occluded by opaque buildings via render order).
-          map.setPaintProperty('zcta-fill', 'fill-opacity', satellite ? 0.65 : 0.75);
+          // Real3D: zcta-fill hidden so buildings render visibly against the dark base.
+          map.setPaintProperty('zcta-fill', 'fill-opacity', real3D ? 0 : (satellite ? 0.65 : 0.75));
         }
 
       if (threeD) {
