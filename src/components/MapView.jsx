@@ -2661,7 +2661,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       if (heatmap && topoOn) {
         const prePts = mapCacheStore.precomputedHeatPoints?.[timespanIdx];
         map.getSource('heat-underlay').setData(prePts || buildHeatUnderlayPoints(withHeat, tiers));
-        map.setPaintProperty('heat-underlay', 'heatmap-opacity', satellite ? 0.25 : 0.50);
+        map.setPaintProperty('heat-underlay', 'heatmap-opacity', 1.0);
       } else {
         map.setPaintProperty('heat-underlay', 'heatmap-opacity', 0);
       }
@@ -2697,13 +2697,16 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         if (threeD) {
           map.setPaintProperty('zcta-fill', 'fill-opacity', 0);
         } else {
-          // 1a/1b: solid fill if heatmap on, satellite off, topo off; else transparent.
-          // Real3D: zcta-fill hidden so dark buildings are visible against the base (not blended into same-color fill).
-        if (heatmap && !satellite && !topoOn) {
-          map.setPaintProperty('zcta-fill', 'fill-opacity', real3D ? 0 : 1.0);
-        } else {
-          map.setPaintProperty('zcta-fill', 'fill-opacity', real3D ? 0 : (satellite || topoOn ? 0.35 : 0.45));
-        }
+          // Real3D 4-combo zcta-fill matrix (same as 2D behavior):
+          // heatmap OFF + sat OFF → 1.0  |  heatmap ON + sat OFF → 1.0
+          // heatmap OFF + sat ON  → 0.4  |  heatmap ON + sat ON  → 0.4
+          if (real3D) {
+            map.setPaintProperty('zcta-fill', 'fill-opacity', satellite ? 0.4 : 1.0);
+          } else if (!satellite && !topoOn) {
+            map.setPaintProperty('zcta-fill', 'fill-opacity', 1.0);
+          } else {
+            map.setPaintProperty('zcta-fill', 'fill-opacity', satellite || topoOn ? 0.35 : 0.45);
+          }
         }
 
 
@@ -2765,8 +2768,10 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         if (threeD) {
           map.setPaintProperty('zcta-fill', 'fill-opacity', 0);
         } else {
-          // Real3D: zcta-fill hidden so buildings render visibly against the dark base.
-          map.setPaintProperty('zcta-fill', 'fill-opacity', real3D ? 0 : (satellite ? 0.65 : 0.75));
+          // Real3D 4-combo zcta-fill matrix (same as 2D behavior):
+          // sat OFF → 1.0 opaque  |  sat ON → 0.4
+          map.setPaintProperty('zcta-fill', 'fill-opacity',
+            real3D ? (satellite ? 0.4 : 1.0) : (satellite ? 0.65 : 0.75));
         }
 
       if (threeD) {
@@ -3470,12 +3475,12 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       // _z baked into PMTiles: motorway 0.6 → residential 0.1.
       const HEIGHT_EXPR = ['max', ['coalesce', ['get', '_z'], 0.1], 0.1];
       const ROAD_FCLASSES = [
-        { fclass: 'motorway',    minz: 9,  colorOff: '#850000', opacityOff: 0.95 },
-        { fclass: 'trunk',       minz: 9,  colorOff: '#850000', opacityOff: 0.95 },
-        { fclass: 'primary',     minz: 11, colorOff: '#850000', opacityOff: 0.92 },
-        { fclass: 'secondary',   minz: 11, colorOff: '#850000', opacityOff: 0.92 },
-        { fclass: 'tertiary',    minz: 12, colorOff: '#cc1100', opacityOff: 0.88 },
-        { fclass: 'residential', minz: 12, colorOff: '#cc1100', opacityOff: 0.88 },
+        { fclass: 'motorway',    minz: 9,  colorOff: '#8a0000', opacityOff: 1.0 },
+        { fclass: 'trunk',       minz: 9,  colorOff: '#8a0000', opacityOff: 1.0 },
+        { fclass: 'primary',     minz: 11, colorOff: '#8a0000', opacityOff: 1.0 },
+        { fclass: 'secondary',   minz: 11, colorOff: '#8a0000', opacityOff: 1.0 },
+        { fclass: 'tertiary',    minz: 12, colorOff: '#e02424', opacityOff: 1.0 },
+        { fclass: 'residential', minz: 12, colorOff: '#e02424', opacityOff: 1.0 },
       ];
       // Dual-layer crossfade per fclass: 2D fill fades OUT z12.5→z14, 3D extrusion fades IN z12→z13.5.
       // At z9–z12.5: only 2D fill visible.
@@ -3616,12 +3621,12 @@ export default function MapView({ events, headerCollapsed = false, interactive =
 
     // PMTiles roads: update color + zoom-interpolated opacity expressions.
     const ROAD_FCLASS_PAINT = [
-      { fclass: 'motorway',    colorOff: '#850000', opacityOff: 0.95 },
-      { fclass: 'trunk',       colorOff: '#850000', opacityOff: 0.95 },
-      { fclass: 'primary',     colorOff: '#850000', opacityOff: 0.92 },
-      { fclass: 'secondary',   colorOff: '#850000', opacityOff: 0.92 },
-      { fclass: 'tertiary',    colorOff: '#cc1100', opacityOff: 0.88 },
-      { fclass: 'residential', colorOff: '#cc1100', opacityOff: 0.88 },
+      { fclass: 'motorway',    colorOff: '#8a0000', opacityOff: 1.0 },
+      { fclass: 'trunk',       colorOff: '#8a0000', opacityOff: 1.0 },
+      { fclass: 'primary',     colorOff: '#8a0000', opacityOff: 1.0 },
+      { fclass: 'secondary',   colorOff: '#8a0000', opacityOff: 1.0 },
+      { fclass: 'tertiary',    colorOff: '#e02424', opacityOff: 1.0 },
+      { fclass: 'residential', colorOff: '#e02424', opacityOff: 1.0 },
     ];
     // 2D fills: crossfade z12.5=full → z13=0. 3D extrusions: crossfade z12.5=0 → z13=full.
     const HM_OPACITY = 0.4;
