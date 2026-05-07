@@ -967,13 +967,15 @@ const NYC_BBOX_GEOM = {
 // Keep in sync with layers created by initReal3DLayers + addOpenmaptilesSourceAndLayers.
 const REAL3D_ALL_LAYER_IDS = [
   'real3d-water',
-  // PMTiles roads — one fill (2D) + one extrusion (3D) per fclass
-  'real3d-pm-roads-motorway-fill', 'real3d-pm-roads-motorway',
-  'real3d-pm-roads-trunk-fill',    'real3d-pm-roads-trunk',
-  'real3d-pm-roads-primary-fill',  'real3d-pm-roads-primary',
-  'real3d-pm-roads-secondary-fill','real3d-pm-roads-secondary',
-  'real3d-pm-roads-tertiary-fill', 'real3d-pm-roads-tertiary',
-  'real3d-pm-roads-residential-fill','real3d-pm-roads-residential',
+  // PMTiles roads — 2D fill ONLY per fclass (z9-z16). 3D extrusions removed: 2D fills paint
+  // below all fill-extrusion layers (separate GPU pass), so buildings + borough-outline
+  // automatically occlude roads from z14+. Eliminates 3D road compute entirely.
+  'real3d-pm-roads-motorway-fill',
+  'real3d-pm-roads-trunk-fill',
+  'real3d-pm-roads-primary-fill',
+  'real3d-pm-roads-secondary-fill',
+  'real3d-pm-roads-tertiary-fill',
+  'real3d-pm-roads-residential-fill',
   // Unified building layer last — drawn on top of roads (occluding them correctly).
   // Single layer covers z12.5+ with height interpolation:
   //   z13–z13.9: flat 7m (baseplate appearance — locked constant)
@@ -3138,7 +3140,27 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       // Borough outline — all modes
       if (map.getSource('borough-source')) {
         const filterSet = boroughQuadFilterRef.current;
-        if (boroughSkeletonRef.current && boroughWithColorRef.current) {
+        // Fast path: use pre-baked cache from runPrebakeAfterWarmup.
+        // Cache contains base quad geometry per integer zoom band — we only need to
+        // merge in current per-feature overrides (color, _boroughIdx) at swap time.
+        // This avoids the heavy generateBoroughQuadsFromSkeleton ring-offset math
+        // on every zoom-band crossing, eliminating the visible "blink/lag" during
+        // zoom transitions. setData of pre-baked GeoJSON is near-instant.
+        const cached = mapCacheStore.boroughOutlineGeoCache?.[intZoom];
+        if (cached && boroughWithColorRef.current) {
+          const overrides = boroughWithColorRef.current.features.map(f => f.properties);
+          // Cached quads are produced from per-borough skeleton in fixed feature order.
+          // Each output quad's properties merge overrides via skeleton index baked in
+          // at gen time as `_boroughIdx`. Apply by index lookup on the cached features.
+          let features = cached.features.map((q) => {
+            const bi = q.properties?._boroughIdx;
+            const ov = (typeof bi === 'number' && overrides[bi]) ? overrides[bi] : {};
+            return { ...q, properties: { ...q.properties, ...ov } };
+          });
+          if (filterSet && filterSet.size > 0) features = features.filter((_, i) => !filterSet.has(i));
+          map.getSource('borough-source').setData({ ...cached, features });
+        } else if (boroughSkeletonRef.current && boroughWithColorRef.current) {
+          // Fallback: cache miss (pre-bake hasn't completed yet) — fresh compute.
           const overrides = boroughWithColorRef.current.features.map(f => f.properties);
           let quads = generateBoroughQuadsFromSkeleton(boroughSkeletonRef.current, getZoomAwareOutlineWidth(map, 18, true), overrides);
           if (filterSet && filterSet.size > 0) quads = { ...quads, features: quads.features.filter((_, i) => !filterSet.has(i)) };
@@ -3533,19 +3555,11 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       }
 
       // ── PMTILES ROADS (Real3D mode) ──────────────────────────────────────────
-      // Dual-layer per fclass: 2D fill (z9→z14) + 3D extrusion (z13→z14+).
-      // SEAMLESS HANDOFF: both layers overlap at z13-z14 with an opacity crossfade.
-      // Fill fades OUT (opacityFull→0) from z13 to z14.
-      // Extrusion fades IN (0→opacityFull) from z13 to z14.
-      // 2D fill and fill-extrusion are separate GPU passes — zero Z-fighting in the overlap zone.
-      // At z14+ buildings occlude 3D road slabs via shared depth buffer.
-      // Roads: dual-layer per fclass.
-      // INSIGHT: Roads only need depth-occlusion by buildings at z14+ (that's when buildings
-      // appear). So use flat `fill` (2D, no 3D compute) for z9→z14, and `fill-extrusion`
-      // only at z14+ for proper GPU depth occlusion. This eliminates ALL far-zoom pixelation
-      // (no thin perspective sliver) and saves significant 3D geometry compute at z9-13.
-      // _z baked into PMTiles: motorway 0.6 → residential 0.1.
-      const HEIGHT_EXPR = ['max', ['coalesce', ['get', '_z'], 0.1], 0.1];
+      // 2D fill ONLY per fclass at z9-z16. 3D extrusions removed: 2D fill renders in the
+      // 2D pass below all fill-extrusion layers (buildings, borough-outline) so they
+      // automatically occlude roads at z14+ via painter's algorithm — no shared depth
+      // buffer needed. Eliminates ALL 3D road compute and seamlessness/perspective issues.
+      // Layer order (bottom→top in 2D pass): water → roads → (FE pass: borough-outline → buildings).
       const ROAD_FCLASSES = [
         { fclass: 'motorway',    minz: 9,  colorOff: '#8a0000', opacityOff: 1.0 },
         { fclass: 'trunk',       minz: 9,  colorOff: '#8a0000', opacityOff: 1.0 },
@@ -3554,18 +3568,13 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         { fclass: 'tertiary',    minz: 12, colorOff: '#e02424', opacityOff: 1.0 },
         { fclass: 'residential', minz: 12, colorOff: '#e02424', opacityOff: 1.0 },
       ];
-      // Dual-layer crossfade per fclass: 2D fill fades OUT z12.5→z14, 3D extrusion fades IN z12→z13.5.
-      // At z9–z12.5: only 2D fill visible.
-      // At z12–z14: overlap zone — both layers partially visible for seamless transition.
-      // At z14+: only 3D extrusions — buildings occlude roads via shared GPU depth buffer.
       const HM_OPACITY = 0.4;
       if (!map.getSource('roads-pm')) {
         map.addSource('roads-pm', { type: 'vector', url: `pmtiles://${ROADS_PMTILES_URL}` });
       }
       for (const r of ROAD_FCLASSES) {
         const fillId = `real3d-pm-roads-${r.fclass}-fill`;
-        const extId  = `real3d-pm-roads-${r.fclass}`;
-        // 2D fill: full polygon footprint, antialiased. Fades out z12.5→z14.
+        // 2D fill: full polygon footprint, antialiased. Visible z9→z16 (no fade-out).
         if (!map.getLayer(fillId)) {
           map.addLayer({
             id: fillId, type: 'fill',
@@ -3574,25 +3583,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
             filter: ['==', ['get', 'fclass'], r.fclass],
             paint: {
               'fill-color':     isHeatmap ? '#000000' : r.colorOff,
-              'fill-opacity':   ['interpolate', ['linear'], ['zoom'], 12.5, isHeatmap ? HM_OPACITY : r.opacityOff, 13, 0],
+              'fill-opacity':   isHeatmap ? HM_OPACITY : r.opacityOff,
               'fill-antialias': true,
-            },
-          });
-        }
-        // 3D extrusion: minzoom 12 (early tile streaming), fades IN z12→z13.5.
-        // Fully visible at z13.5 before buildings appear at z14.
-        if (!map.getLayer(extId)) {
-          map.addLayer({
-            id: extId, type: 'fill-extrusion',
-            source: 'roads-pm', 'source-layer': ROADS_PMTILES_LAYER,
-            minzoom: 12,
-            filter: ['==', ['get', 'fclass'], r.fclass],
-            paint: {
-              'fill-extrusion-color':   isHeatmap ? '#000000' : r.colorOff,
-              'fill-extrusion-height':  HEIGHT_EXPR,
-              'fill-extrusion-base':    0,
-              'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'], 12.5, 0, 13, isHeatmap ? HM_OPACITY : r.opacityOff],
-              'fill-extrusion-vertical-gradient': false,
             },
           });
         }
@@ -3700,20 +3692,13 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       { fclass: 'tertiary',    colorOff: '#e02424', opacityOff: 1.0 },
       { fclass: 'residential', colorOff: '#e02424', opacityOff: 1.0 },
     ];
-    // 2D fills: crossfade z12.5=full → z13=0. 3D extrusions: crossfade z12.5=0 → z13=full.
+    // 2D fills only at z9-z16 (3D extrusions removed). Constant opacity, no crossfade.
     const HM_OPACITY = 0.4;
     ROAD_FCLASS_PAINT.forEach(({ fclass, colorOff, opacityOff }) => {
       const fillId = `real3d-pm-roads-${fclass}-fill`;
-      const extId  = `real3d-pm-roads-${fclass}`;
       if (map.getLayer(fillId)) {
         map.setPaintProperty(fillId, 'fill-color',   heatmap ? '#000000' : colorOff);
-        map.setPaintProperty(fillId, 'fill-opacity',
-          ['interpolate', ['linear'], ['zoom'], 12.5, heatmap ? HM_OPACITY : opacityOff, 13, 0]);
-      }
-      if (map.getLayer(extId)) {
-        map.setPaintProperty(extId, 'fill-extrusion-color',   heatmap ? '#000000' : colorOff);
-        map.setPaintProperty(extId, 'fill-extrusion-opacity',
-          ['interpolate', ['linear'], ['zoom'], 12.5, 0, 13, heatmap ? HM_OPACITY : opacityOff]);
+        map.setPaintProperty(fillId, 'fill-opacity', heatmap ? HM_OPACITY : opacityOff);
       }
     });
     // Safezone opacity
