@@ -661,15 +661,15 @@ export async function runPhase2A(events, isMobile, onProgress) {
   // Note: dead loadCentroidsBin() call removed — building zip is baked into PMTiles features.
 
   // ── Buildings PMTiles: header pre-warm ONLY (no full-file precache) ──────
-  // Stage 1 OOM fix: nyc_buildings_z12.pmtiles (~74MB) is NOT precached as a full file.
-  // The SW slice path used to alloc a fresh 74MB ArrayBuffer per Range request → multi-GB
+  // Stage 1 OOM fix: nyc_buildings_final.pmtiles (~95MB) is NOT precached as a full file.
+  // The SW slice path used to alloc a fresh ArrayBuffer per Range request → multi-GB
   // transient peak → desktop OOM. Buildings now flow through the per-Range cache exclusively
-  // (lapuff-pmtiles-sw-v4) with an LRU cap (80MB) inside the SW. Header pre-warm primes the
+  // (lapuff-pmtiles-sw-v4) with an LRU cap inside the SW. Header pre-warm primes the
   // PMTiles directory parser so first toggle is instant.
   report(P.bldgCache[0], 'Pre-warming building tiles...');
   const BUILDINGS_PMTILES_URL = (typeof window !== 'undefined')
-    ? `${window.location.origin}${import.meta.env.BASE_URL}data/nyc_buildings_z12.pmtiles`
-    : '/data/nyc_buildings_z12.pmtiles';
+    ? `${window.location.origin}${import.meta.env.BASE_URL}data/nyc_buildings_final.pmtiles`
+    : '/data/nyc_buildings_final.pmtiles';
   fetch(BUILDINGS_PMTILES_URL, { headers: { Range: 'bytes=0-16383' } }).catch(() => {});
   // Intentionally NO PRECACHE_PMTILES post for buildings — that triggered the 74MB alloc storm.
   report(P.bldgCache[1], 'Building tiles ready');

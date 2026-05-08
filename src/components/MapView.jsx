@@ -27,8 +27,8 @@ const MAP_CACHE_BUILDING_KEY = 'lapuff_map_cache_building';
 // Layer: 'building'. Per-feature props: { z=zip(string), b=bid(int), h=height_ft, m=min_h_ft, c=colour }
 // NOTE: h and m are stored in FEET. Always multiply by 0.3048 in fill-extrusion-height/base expressions.
 const BUILDINGS_PMTILES_URL = (typeof window !== 'undefined')
-  ? `${window.location.origin}${import.meta.env.BASE_URL}data/nyc_buildings.pmtiles`
-  : '/data/nyc_buildings.pmtiles';
+  ? `${window.location.origin}${import.meta.env.BASE_URL}data/nyc_buildings_final.pmtiles`
+  : '/data/nyc_buildings_final.pmtiles';
 const BUILDINGS_PMTILES_LAYER = 'building';
 
 // Roads PMTiles: hierarchical-dissolve road polygons (~8.5K features, 14MB) on OCI PAR.
