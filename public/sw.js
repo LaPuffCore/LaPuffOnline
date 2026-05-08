@@ -22,7 +22,7 @@ const inMemoryFullBuffers = new Map(); // url -> ArrayBuffer
 
 // LRU cap for the per-Range buildings cache. Prevents unbounded growth when user pans across
 // many tiles. Cap is a soft-eviction triggered on cache writes.
-const BUILDINGS_RANGE_CACHE_CAP = 140 * 1024 * 1024; // 140MB; mobile fetches less so this auto-fits
+const BUILDINGS_RANGE_CACHE_CAP = 200 * 1024 * 1024; // 200MB; mobile fetches less so this auto-fits
 const buildingsRangeMeta = new Map(); // compositeKey -> { size, lastAccess }
 let buildingsRangeTotalBytes = 0;
 async function trackBuildingsRangeWrite(compositeKey, byteSize) {

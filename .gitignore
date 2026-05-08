@@ -62,3 +62,5 @@ public/data/building_centroids.meta.json
 public/data/targetmapview.jsx
 public/data/oldestmapview.jsx
 public/data/oldermapview.jsx
+# Damaged PMTiles build (double-quantized from z13 tiles)
+public/data/nyc_buildings_z12.pmtiles

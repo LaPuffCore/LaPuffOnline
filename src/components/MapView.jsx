@@ -27,8 +27,8 @@ const MAP_CACHE_BUILDING_KEY = 'lapuff_map_cache_building';
 // Layer: 'building'. Per-feature props: { z=zip(string), b=bid(int), h=height_ft, m=min_h_ft, c=colour }
 // NOTE: h and m are stored in FEET. Always multiply by 0.3048 in fill-extrusion-height/base expressions.
 const BUILDINGS_PMTILES_URL = (typeof window !== 'undefined')
-  ? `${window.location.origin}${import.meta.env.BASE_URL}data/nyc_buildings_z12.pmtiles`
-  : '/data/nyc_buildings_z12.pmtiles';
+  ? `${window.location.origin}${import.meta.env.BASE_URL}data/nyc_buildings.pmtiles`
+  : '/data/nyc_buildings.pmtiles';
 const BUILDINGS_PMTILES_LAYER = 'building';
 
 // Roads PMTiles: hierarchical-dissolve road polygons (~8.5K features, 14MB) on OCI PAR.
@@ -443,12 +443,14 @@ function zctaLineWidthExpr(mult = 1) {
 // T3 3D PIXELIZATION: Smooth continuous zoom-aware width scaling.
 // ZCTA (base 14m): 14m flat until zoom 10.5, then ramps to 64m at zoom 9.
 // Borough (base 18m): 1x at zoom≥11, 2x ramp at zoom 10-11, 3x ramp at zoom ≤9.
-function getZoomAwareOutlineWidth(map, baseMeters = 14, is3D = false) {
+// zoomOverride / pitchOverride: supply integer zoom / pitch for pre-baking geometry at
+// a specific zoom band without relying on the live map state.
+function getZoomAwareOutlineWidth(map, baseMeters = 14, is3D = false, zoomOverride = null, pitchOverride = null) {
   if (!map || typeof map.getZoom !== 'function') return baseMeters;
   // If 3D/Real3D mode is active, use the new split-scale logic.
   if (is3D) {
-    const zoom = map.getZoom();
-    const pitch = map.getPitch ? map.getPitch() : 0;
+    const zoom = zoomOverride ?? map.getZoom();
+    const pitch = pitchOverride ?? (map.getPitch ? map.getPitch() : 0);
     const pitchFactor = 1 + (pitch / 90) * 0.55;
     // Borough outline (baseMeters=18): constant 1.5x at zoom>=12, 2.5x at zoom 11-12, ramp to 7x at zoom<=9.
     if (baseMeters >= 15) {
@@ -475,7 +477,7 @@ function getZoomAwareOutlineWidth(map, baseMeters = 14, is3D = false) {
   }
 
   // Non-3D behavior (2D and Real3D flat outlines): apply requested adjustments
-  const zoom = map.getZoom();
+  const zoom = zoomOverride ?? map.getZoom();
   // Increase base starting size by +4 pixels (measured at zoom 9.5)
   const refLat = (map.getCenter && map.getCenter().lat) ? map.getCenter().lat : 40.71;
   const metersPerPixelAt95 = 156543.03392 * Math.cos(refLat * Math.PI / 180) / Math.pow(2, 9.5);
@@ -494,7 +496,7 @@ function getZoomAwareOutlineWidth(map, baseMeters = 14, is3D = false) {
   const denom = 9.5 - 9; // 0.5
   const scale = Math.pow(targetAt9 / adjBase, 1 / denom);
   const multiplier = Math.pow(scale, t);
-  const pitch = map.getPitch ? map.getPitch() : 0;
+  const pitch = pitchOverride ?? (map.getPitch ? map.getPitch() : 0);
   const pitchFactor = 1 + (pitch / 90) * 0.55;
 
   // Lock visual pixel width at zoom 10: scale meters up by 2^(zoom-10) for zoom > 10
@@ -2240,11 +2242,18 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       }
     }
     if (mapCacheStore.boroughSkeleton) {
-      // Note: borough outline geometry (generateBoroughQuadsFromSkeleton) depends on
-      // map.getZoom() internally via getZoomAwareOutlineWidth. Pre-baking at wrong zoom
-      // produces wildly-scaled quads. borough outline is computed fresh in doOutlineRebuild
-      // (called on integer zoom crossings only) — already fast enough via skeleton cache.
-      boroughOutCache; // kept empty intentionally
+      // Pre-bake borough outline geometry for each integer zoom band z9–z16.
+      // Width is computed at each integer zoom with a fixed reference pitch (55 = real3D max),
+      // which is at most 3% wider than 3D-mode pitch (48) — imperceptible difference.
+      // Color overrides are NOT baked in; they are merged live in doOutlineRebuild so that
+      // heatmap recolors and timespan changes update correctly without re-baking.
+      const PREBAKE_PITCH = 55;
+      for (let z = 9; z <= 16; z++) {
+        try {
+          const w = getZoomAwareOutlineWidth(map, 18, true, z, PREBAKE_PITCH);
+          boroughOutCache[z] = generateBoroughQuadsFromSkeleton(mapCacheStore.boroughSkeleton, w, null);
+        } catch (_e) { /* skip bad zoom band */ }
+      }
     }
     mapCacheStore.outlineGeoCache = outCache;
     mapCacheStore.boroughOutlineGeoCache = boroughOutCache;
@@ -3142,7 +3151,21 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         const filterSet = boroughQuadFilterRef.current;
         if (boroughSkeletonRef.current && boroughWithColorRef.current) {
           const overrides = boroughWithColorRef.current.features.map(f => f.properties);
-          let quads = generateBoroughQuadsFromSkeleton(boroughSkeletonRef.current, getZoomAwareOutlineWidth(map, 18, true), overrides);
+          // Use pre-baked geometry for this integer zoom band when available —
+          // avoids regenerating quad geometry on every zoom crossing (fast path).
+          // Merge live color overrides by _boroughIdx so heatmap recolors still apply.
+          const cachedBase = mapCacheStore.boroughOutlineGeoCache?.[intZoom];
+          let quads;
+          if (cachedBase) {
+            const features = cachedBase.features.map(q => {
+              const bi = q.properties?._boroughIdx;
+              const ov = (typeof bi === 'number' && overrides[bi]) ? overrides[bi] : {};
+              return { ...q, properties: { ...q.properties, ...ov } };
+            });
+            quads = { ...cachedBase, features };
+          } else {
+            quads = generateBoroughQuadsFromSkeleton(boroughSkeletonRef.current, getZoomAwareOutlineWidth(map, 18, true), overrides);
+          }
           if (filterSet && filterSet.size > 0) quads = { ...quads, features: quads.features.filter((_, i) => !filterSet.has(i)) };
           map.getSource('borough-source').setData(quads);
         } else if (boroughWithColorRef.current) {
@@ -3572,7 +3595,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
             paint: {
               'fill-color':     isHeatmap ? '#000000' : r.colorOff,
               'fill-opacity':   isHeatmap ? HM_OPACITY : r.opacityOff,
-              'fill-antialias': true,
+              'fill-antialias': false,
             },
           });
         }
