@@ -2368,7 +2368,9 @@ export default function MapView({ events, headerCollapsed = false, interactive =
                 map.addSource('sat-source-wayback', { type: 'raster', tiles: ['https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/WMTS/1.0.0/default028mm/MapServer/tile/13045/{z}/{y}/{x}'], tileSize: 256, minzoom: 0, maxzoom: 19 });
               }
               if (!map.getSource('sat-source')) {
-                map.addSource('sat-source', { type: 'raster', tiles: ['https://clarity.maptiles.arcgis.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'], tileSize: 256, minzoom: 0, maxzoom: 19 });
+                // USGS National Map (1m CE95 accuracy, no API key, unlimited) — swap back to Clarity if worse:
+                // tiles: ['https://clarity.maptiles.arcgis.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}']
+                map.addSource('sat-source', { type: 'raster', tiles: ['https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}'], tileSize: 256, minzoom: 0, maxzoom: 16 });
               }
               if (!map.getLayer('sat-layer-arcgis')) map.addLayer({ id: 'sat-layer-arcgis', type: 'raster', source: 'sat-source-arcgis', minzoom: 9, maxzoom: 10.5, paint: { 'raster-opacity': 0.01, 'raster-fade-duration': 0 } }, firstLayerId);
               if (!map.getLayer('sat-layer-wayback')) map.addLayer({ id: 'sat-layer-wayback', type: 'raster', source: 'sat-source-wayback', minzoom: 10.5, maxzoom: 13, paint: { 'raster-opacity': 0.01, 'raster-fade-duration': 0 } }, firstLayerId);
@@ -3277,10 +3279,12 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       if (!map.getSource('sat-source')) {
         map.addSource('sat-source', {
           type: 'raster',
-          tiles: ['https://clarity.maptiles.arcgis.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+          // USGS National Map (1m CE95 accuracy, no API key, unlimited) — swap back to Clarity if worse:
+          // tiles: ['https://clarity.maptiles.arcgis.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+          tiles: ['https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}'],
           tileSize: 256,
           minzoom: 0,
-          maxzoom: 19,
+          maxzoom: 16,
         });
       }
       const layers = map.getStyle().layers;
@@ -3348,8 +3352,9 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         // Wayback band
         return { tileZ: Math.min(z, 12), fn: (tz, y, x) => `https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/WMTS/1.0.0/default028mm/MapServer/tile/13045/${tz}/${y}/${x}` };
       } else {
-        // Clarity band
-        return { tileZ: Math.min(z, 16), fn: (tz, y, x) => `https://clarity.maptiles.arcgis.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${tz}/${y}/${x}` };
+        // USGS National Map band — swap back to Clarity if worse:
+        // return { tileZ: Math.min(z, 16), fn: (tz, y, x) => `https://clarity.maptiles.arcgis.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${tz}/${y}/${x}` };
+        return { tileZ: Math.min(z, 16), fn: (tz, y, x) => `https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/${tz}/${y}/${x}` };
       }
     }
 
