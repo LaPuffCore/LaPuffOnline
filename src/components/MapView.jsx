@@ -2374,11 +2374,9 @@ export default function MapView({ events, headerCollapsed = false, interactive =
           const removeSatLayersAfterWarmup = () => {
             if (satellite) return;
             try {
-              if (map.getLayer('sat-layer-doitt')) map.removeLayer('sat-layer-doitt');
               if (map.getLayer('sat-layer')) map.removeLayer('sat-layer');
               if (map.getLayer('sat-layer-wayback')) map.removeLayer('sat-layer-wayback');
               if (map.getLayer('sat-layer-arcgis')) map.removeLayer('sat-layer-arcgis');
-              if (map.getSource('sat-source-doitt')) map.removeSource('sat-source-doitt');
               if (map.getSource('sat-source')) map.removeSource('sat-source');
               if (map.getSource('sat-source-wayback')) map.removeSource('sat-source-wayback');
               if (map.getSource('sat-source-arcgis')) map.removeSource('sat-source-arcgis');
@@ -3289,34 +3287,27 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         }, firstLayerId);
       }
       // === NYC DoITT Orthophoto overlay at z13+ ===
-      // NY State orthos.its.ny.gov 2022 imagery — same survey as building footprints,
-      // near-zero ortho offset vs Clarity's ~1.5m CE90 horizontal error.
-      // Stacked ON TOP of sat-layer (Clarity). Inside NYC: DoITT tiles render (opaque).
-      // Outside NYC bbox: DoITT returns 404 → MapLibre skips → Clarity shows through.
-      // To revert: comment out the doitt source+layer add/remove blocks below.
-      if (!map.getSource('sat-source-doitt')) {
-        map.addSource('sat-source-doitt', {
-          type: 'raster',
-          tiles: ['https://orthos.its.ny.gov/ArcGIS/rest/services/wms/2022/MapServer/tile/{z}/{y}/{x}'],
-          tileSize: 256,
-          minzoom: 0,
-          maxzoom: 19,
-        });
-      }
-      if (!map.getLayer('sat-layer-doitt')) {
-        map.addLayer({
-          id: 'sat-layer-doitt', type: 'raster', source: 'sat-source-doitt',
-          minzoom: 13, maxzoom: 17,
-          paint: { 'raster-opacity': 1, 'raster-fade-duration': 300 },
-        }, firstLayerId);
-      }
+      // REVERTED — DoITT tiles are not continuous (NYC only) causing visible edges.
+      // Clarity-only is the active z13+ source. DoITT code kept as comment for reference.
+      // if (!map.getSource('sat-source-doitt')) {
+      //   map.addSource('sat-source-doitt', {
+      //     type: 'raster',
+      //     tiles: ['https://orthos.its.ny.gov/ArcGIS/rest/services/wms/2022/MapServer/tile/{z}/{y}/{x}'],
+      //     tileSize: 256, minzoom: 0, maxzoom: 19,
+      //   });
+      // }
+      // if (!map.getLayer('sat-layer-doitt')) {
+      //   map.addLayer({
+      //     id: 'sat-layer-doitt', type: 'raster', source: 'sat-source-doitt',
+      //     minzoom: 13, maxzoom: 17,
+      //     paint: { 'raster-opacity': 1, 'raster-fade-duration': 300 },
+      //   }, firstLayerId);
+      // }
       // === End NYC DoITT block ===
     } else {
-      if (map.getLayer('sat-layer-doitt')) map.removeLayer('sat-layer-doitt'); // DoITT cleanup
       if (map.getLayer('sat-layer')) map.removeLayer('sat-layer');
       if (map.getLayer('sat-layer-wayback')) map.removeLayer('sat-layer-wayback');
       if (map.getLayer('sat-layer-arcgis')) map.removeLayer('sat-layer-arcgis');
-      if (map.getSource('sat-source-doitt')) map.removeSource('sat-source-doitt'); // DoITT cleanup
       if (map.getSource('sat-source')) map.removeSource('sat-source');
       if (map.getSource('sat-source-wayback')) map.removeSource('sat-source-wayback');
       if (map.getSource('sat-source-arcgis')) map.removeSource('sat-source-arcgis');
