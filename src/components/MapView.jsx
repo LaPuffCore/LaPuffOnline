@@ -1849,7 +1849,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     }
 
     // Extrusion base — fully opaque, blocks everything below.
-    // Filter excludes _special (safe zone) features — handled solely by zcta-safezone-extrusion.
+    // Filter excludes _special (safe zone) features — handled by zcta-safezone-fill (2D).
     map.addLayer({
       id: 'zcta-extrude', type: 'fill-extrusion', source: 'zcta',
       filter: ['!=', ['get', '_special'], true],
@@ -1864,7 +1864,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     // Floor — thin slab inside each 3D block, visible only when camera enters the block.
     // Same color as the block but half opacity. Height 1m (base 0) avoids z-fighting.
     // Occluded by zcta-extrude walls when viewed from outside.
-    // Filter excludes _special (safe zone) features — handled solely by zcta-safezone-extrusion.
+    // Filter excludes _special (safe zone) features — handled by zcta-safezone-fill (2D).
     map.addLayer({
       id: 'zcta-floor', type: 'fill-extrusion', source: 'zcta',
       filter: ['!=', ['get', '_special'], true],
@@ -1878,7 +1878,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     });
 
     // Flat fill — slightly transparent dark red to differentiate regions from bg without solid fill.
-    // Excludes _special (safe zone) features — those are handled by zcta-safezone-extrusion below.
+    // Excludes _special (safe zone) features — those are handled by zcta-safezone-fill below.
     map.addLayer({
       id: 'zcta-fill', type: 'fill', source: 'zcta',
       filter: ['!=', ['get', '_special'], true],
@@ -1888,19 +1888,14 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       },
     });
 
-    // D1/D2: Safe zone extrusion — minimal height (1m) so features (parks, water, buildings)
-    // above it remain visible. White fill serves as ground plane; features sit on top.
-    // At 0° pitch a 1m extrusion is visually flat top-down.
+    // Safezone fill — 2D fill (not extrusion) so it renders in the 2D pass and never
+    // z-fights with buildings or 3D fill-extrusions. Hover is handled by zcta-safezone-hover.
     map.addLayer({
-      id: 'zcta-safezone-extrusion', type: 'fill-extrusion', source: 'zcta',
+      id: 'zcta-safezone-fill', type: 'fill', source: 'zcta',
       filter: ['==', ['get', '_special'], true],
       paint: {
-        // Purple on hover, white otherwise — consistent hover feedback in all 3D modes
-        'fill-extrusion-color': ['case', ['boolean', ['feature-state', 'hovered'], false], '#7C3AED', '#ffffff'],
-        'fill-extrusion-height': 1,
-        'fill-extrusion-base': 0,
-        'fill-extrusion-opacity': 1.0,
-        'fill-extrusion-vertical-gradient': false,
+        'fill-color': '#ffffff',
+        'fill-opacity': sat ? 0.22 : 1.0,
       },
     });
 
@@ -1932,11 +1927,12 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       },
     });
 
-    // Safe zone outline — hidden in 3D and Real3D modes (zcta-safezone-extrusion is sole renderer)
+    // Safe zone outline — always visible in 2D/Real3D; hidden in 3D mode where 2D lines
+    // pass through fill-extrusions (x-ray artifact). zcta-safezone-fill provides the ground color.
     map.addLayer({
       id: 'zcta-safe-line', type: 'line', source: 'zcta',
       filter: ['==', ['get', '_special'], true],
-      paint: { 'line-color': '#000000', 'line-width': zctaLineWidthExpr(0.8), 'line-offset': 1, 'line-opacity': (is3D || isReal3D) ? 0 : 1 },
+      paint: { 'line-color': '#000000', 'line-width': zctaLineWidthExpr(0.8), 'line-offset': 1, 'line-opacity': is3D ? 0 : 1 },
     });
 
     // Ground boundary glows (non-special) — hidden in 3D mode
@@ -2085,7 +2081,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     const handleBoroughFillHover = e => {
       if (!e.features.length) return;
       // Check all possible ZCTA layers (varies by 2D/3D mode) for zip under cursor
-      const zctaLayers = ['zcta-fill', 'zcta-extrude', 'zcta-safezone-hover', 'zcta-safezone-extrusion']
+      const zctaLayers = ['zcta-fill', 'zcta-extrude', 'zcta-safezone-hover', 'zcta-safezone-fill']
         .filter(l => map.getLayer(l));
       if (zctaLayers.length > 0 && map.queryRenderedFeatures(e.point, { layers: zctaLayers }).length > 0) {
         // A zip is under the cursor — clear borough hover and let ZCTA handlers manage
@@ -2120,7 +2116,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     const handleBoroughFillClick = e => {
       if (!e.features.length) return;
       // Zip takes priority for clicks too
-      const zctaLayers = ['zcta-fill', 'zcta-extrude', 'zcta-safezone-hover', 'zcta-safezone-extrusion']
+      const zctaLayers = ['zcta-fill', 'zcta-extrude', 'zcta-safezone-hover', 'zcta-safezone-fill']
         .filter(l => map.getLayer(l));
       if (zctaLayers.length > 0 && map.queryRenderedFeatures(e.point, { layers: zctaLayers }).length > 0) return;
       const boroughName = String(e.features[0].properties.BoroName || '');
@@ -2633,10 +2629,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   }, [interactive]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Manage hover layers based on 3D/Real3D state.
-  // 3D: hover on zcta-extrude + zcta-safezone-extrusion (fill-extrusion layers).
-  // 2D: hover on zcta-fill + zcta-safezone-hover (fill layers).
-  // Real3D: hover on zcta-fill + zcta-safezone-hover + zcta-safezone-extrusion
-  //         (safezone extrusion covers the 2D fill, so we need both).
+  // 3D: hover on zcta-extrude + zcta-safezone-fill (2D fill, no z-fighting in 3D).
+  // 2D/Real3D: hover on zcta-fill + zcta-safezone-hover.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady || !map.getLayer('zcta-fill')) return;
@@ -2645,7 +2639,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     if (!handleZctaHover) return;
 
     // Clear all previous hover registrations first
-    ['zcta-fill', 'zcta-extrude', 'zcta-safezone-hover', 'zcta-safezone-extrusion'].forEach(layerId => {
+    ['zcta-fill', 'zcta-extrude', 'zcta-safezone-hover', 'zcta-safezone-fill'].forEach(layerId => {
       if (!map.getLayer(layerId)) return;
       map.off('mousemove', layerId, handleZctaHover);
       map.off('mouseleave', layerId, handleZctaLeave);
@@ -2653,13 +2647,15 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     });
 
     if (threeD) {
-      // 3D mode: hover on extruded zips + safezone extrusion
+      // 3D mode: hover on extruded zips + safezone fill
       map.on('mousemove', 'zcta-extrude', handleZctaHover);
       map.on('mouseleave', 'zcta-extrude', handleZctaLeave);
       map.on('click', 'zcta-extrude', handleZctaClick);
-      map.on('mousemove', 'zcta-safezone-extrusion', handleZctaHover);
-      map.on('mouseleave', 'zcta-safezone-extrusion', handleZctaLeave);
-      map.on('click', 'zcta-safezone-extrusion', handleZctaClick);
+      if (map.getLayer('zcta-safezone-fill')) {
+        map.on('mousemove', 'zcta-safezone-fill', handleZctaHover);
+        map.on('mouseleave', 'zcta-safezone-fill', handleZctaLeave);
+        map.on('click', 'zcta-safezone-fill', handleZctaClick);
+      }
     } else {
       // 2D / Real3D: hover on flat fill + safezone hover fill
       map.on('mousemove', 'zcta-fill', handleZctaHover);
@@ -2668,12 +2664,6 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       map.on('mousemove', 'zcta-safezone-hover', handleZctaHover);
       map.on('mouseleave', 'zcta-safezone-hover', handleZctaLeave);
       map.on('click', 'zcta-safezone-hover', handleZctaClick);
-      // In Real3D, safezone extrusion covers the 2D fill — also register on it
-      if (real3D && map.getLayer('zcta-safezone-extrusion')) {
-        map.on('mousemove', 'zcta-safezone-extrusion', handleZctaHover);
-        map.on('mouseleave', 'zcta-safezone-extrusion', handleZctaLeave);
-        map.on('click', 'zcta-safezone-extrusion', handleZctaClick);
-      }
     }
   }, [threeD, real3D, mapReady]);
 
@@ -2797,8 +2787,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
 
       if (threeD) {
         map.setPaintProperty('zcta-safe-line', 'line-opacity', 0);
-        // Safezone extrusion is the sole white renderer — ensure it stays visible in all 3D/Real3D modes
-        if (map.getLayer('zcta-safezone-extrusion')) map.setPaintProperty('zcta-safezone-extrusion', 'fill-extrusion-opacity', satellite ? 0.22 : 1.0);
+        // zcta-safezone-fill is a 2D fill — keep it at satellite opacity in 3D mode
+        if (map.getLayer('zcta-safezone-fill')) map.setPaintProperty('zcta-safezone-fill', 'fill-opacity', satellite ? 0.22 : 1.0);
 
         const extrudeColorExpr = ['step', ['get', '_tier'], HEAT_COLORS.cold, 1, HEAT_COLORS.cool, 2, HEAT_COLORS.warm, 3, HEAT_COLORS.orange, 4, HEAT_COLORS.hot];
         // FIX SATELLITE: 3D+heatmap extrusion stays solid (1.0) even when satellite is on
@@ -2825,9 +2815,9 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       } else {
         // 2D heatmap — also used for Real3D (2D zcta-fill + zcta-line stay visible;
         // opaque 3D buildings and roads occlude them via render order).
-        // safe-line hidden in Real3D because safezone-extrusion handles it there.
-        map.setPaintProperty('zcta-safe-line', 'line-opacity', real3D ? 0 : 1);
-        if (map.getLayer('zcta-safezone-extrusion')) map.setPaintProperty('zcta-safezone-extrusion', 'fill-extrusion-opacity', satellite ? 0.22 : 1.0);
+        // safe-line visible in Real3D (zcta-safezone-fill is 2D, no z-fighting).
+        map.setPaintProperty('zcta-safe-line', 'line-opacity', 1);
+        if (map.getLayer('zcta-safezone-fill')) map.setPaintProperty('zcta-safezone-fill', 'fill-opacity', satellite ? 0.22 : 1.0);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-color', '#1a0505');
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-height', 0);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', 0);
@@ -2861,8 +2851,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
 
       if (threeD) {
         map.setPaintProperty('zcta-safe-line', 'line-opacity', 0);
-        // Safezone extrusion is the sole white renderer — ensure it stays visible in all 3D/Real3D modes
-        if (map.getLayer('zcta-safezone-extrusion')) map.setPaintProperty('zcta-safezone-extrusion', 'fill-extrusion-opacity', satellite ? 0.22 : 1.0);
+        // zcta-safezone-fill is a 2D fill — keep it visible at satellite opacity in 3D mode
+        if (map.getLayer('zcta-safezone-fill')) map.setPaintProperty('zcta-safezone-fill', 'fill-opacity', satellite ? 0.22 : 1.0);
         // FIX SATELLITE: 3D no-heatmap extrusion is semi-transparent when satellite is on
         const flatColorExpr = '#220202';
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-color', withHoverColor(flatColorExpr));
@@ -2887,9 +2877,9 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         map.setPaintProperty('zcta-line-glow2', 'line-opacity', 0);
       } else {
         // 2D non-heatmap — also used for Real3D (2D zcta-fill + zcta-line stay visible).
-        // safe-line hidden in Real3D because safezone-extrusion handles it there.
-        map.setPaintProperty('zcta-safe-line', 'line-opacity', real3D ? 0 : 1);
-        if (map.getLayer('zcta-safezone-extrusion')) map.setPaintProperty('zcta-safezone-extrusion', 'fill-extrusion-opacity', satellite ? 0.22 : 1.0);
+        // safe-line visible in Real3D (zcta-safezone-fill is 2D, no z-fighting).
+        map.setPaintProperty('zcta-safe-line', 'line-opacity', 1);
+        if (map.getLayer('zcta-safezone-fill')) map.setPaintProperty('zcta-safezone-fill', 'fill-opacity', satellite ? 0.22 : 1.0);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-color', '#1a0505');
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-height', 0);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', 0);
@@ -3153,21 +3143,11 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         const filterSet = boroughQuadFilterRef.current;
         if (boroughSkeletonRef.current && boroughWithColorRef.current) {
           const overrides = boroughWithColorRef.current.features.map(f => f.properties);
-          // Use pre-baked geometry for this integer zoom band when available —
-          // avoids regenerating quad geometry on every zoom crossing (fast path).
-          // Merge live color overrides by _boroughIdx so heatmap recolors still apply.
-          const cachedBase = mapCacheStore.boroughOutlineGeoCache?.[intZoom];
-          let quads;
-          if (cachedBase) {
-            const features = cachedBase.features.map(q => {
-              const bi = q.properties?._boroughIdx;
-              const ov = (typeof bi === 'number' && overrides[bi]) ? overrides[bi] : {};
-              return { ...q, properties: { ...q.properties, ...ov } };
-            });
-            quads = { ...cachedBase, features };
-          } else {
-            quads = generateBoroughQuadsFromSkeleton(boroughSkeletonRef.current, getZoomAwareOutlineWidth(map, 18, true), overrides);
-          }
+          const filterSet = boroughQuadFilterRef.current;
+          // Always regenerate from skeleton with live color overrides — 5 boroughs = trivially fast.
+          // The prebaked geo cache (boroughOutlineGeoCache) is NOT used here because its quads lack
+          // _boroughIdx, making the override merge lookup fail silently (colors fall back to red).
+          let quads = generateBoroughQuadsFromSkeleton(boroughSkeletonRef.current, getZoomAwareOutlineWidth(map, 18, true), overrides);
           if (filterSet && filterSet.size > 0) quads = { ...quads, features: quads.features.filter((_, i) => !filterSet.has(i)) };
           map.getSource('borough-source').setData(quads);
         } else if (boroughWithColorRef.current) {
@@ -3342,9 +3322,9 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       if (map.getSource('sat-source-arcgis')) map.removeSource('sat-source-arcgis');
     }
 
-    // Water opacity: 0.5 when satellite on (so imagery shows through), 0.6 otherwise
+    // Water opacity: 0.6 always (user spec — satellite imagery shows through water color, not opacity)
     if (map.getLayer('real3d-water')) {
-      map.setPaintProperty('real3d-water', 'fill-opacity', satellite ? 0.5 : 0.6);
+      map.setPaintProperty('real3d-water', 'fill-opacity', 0.6);
     }
   }, [satellite, real3D, mapReady]);
 
@@ -3573,7 +3553,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       if (!map.getSource('water-static')) {
         map.addSource('water-static', {
           type: 'geojson',
-          data: `${import.meta.env.BASE_URL}data/watersimpleX.json?v=1`,
+          data: `${import.meta.env.BASE_URL}data/finalwatercomplex.json?v=1`,
         });
       }
 
@@ -3740,8 +3720,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     });
     // Safezone opacity
     const isSat = satelliteRef?.current ?? satellite;
-    if (map.getLayer('zcta-safezone-extrusion')) {
-      map.setPaintProperty('zcta-safezone-extrusion', 'fill-extrusion-opacity', isSat ? 0.22 : 1.0);
+    if (map.getLayer('zcta-safezone-fill')) {
+      map.setPaintProperty('zcta-safezone-fill', 'fill-opacity', isSat ? 0.22 : 1.0);
     }
 
     // PMTiles buildings paint refresh — identical desktop/mobile, no fetch needed.

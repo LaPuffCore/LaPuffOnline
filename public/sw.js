@@ -99,7 +99,7 @@ const SATELLITE_HOST_PATTERNS = [
 const STATIC_PATTERNS = [
   'MODZCTA_2010_WGS1984.geo.json',
   'borough.geo.json',
-  'watersimpleX.json',
+  'finalwatercomplex.json',
   'zcta_adjacency.json',
 ];
 

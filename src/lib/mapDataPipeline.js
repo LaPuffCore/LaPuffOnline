@@ -649,8 +649,8 @@ export async function runPhase2A(events, isMobile, onProgress) {
   // ── Water static GeoJSON pre-cache ──────────────────────────────────────
   report(P.waterCache[0], 'Pre-warming water layer...');
   const WATER_STATIC_URL = (typeof window !== 'undefined')
-    ? `${window.location.origin}${import.meta.env.BASE_URL}data/watersimpleX.json`
-    : '/data/watersimpleX.json';
+    ? `${window.location.origin}${import.meta.env.BASE_URL}data/finalwatercomplex.json`
+    : '/data/finalwatercomplex.json';
   fetch(WATER_STATIC_URL, { cache: 'force-cache' }).catch(() => {});
   report(P.waterCache[1], 'Water layer ready');
 
