@@ -64,3 +64,4 @@ public/data/oldestmapview.jsx
 public/data/oldermapview.jsx
 # Damaged PMTiles build (double-quantized from z13 tiles)
 public/data/nyc_buildings_z12.pmtiles
+public/data/final6deciroads.json

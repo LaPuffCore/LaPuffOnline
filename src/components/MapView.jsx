@@ -1745,11 +1745,18 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       if (mapCacheStore.boroughSkeleton) boroughSkeletonRef.current = mapCacheStore.boroughSkeleton;
       else boroughSkeletonRef.current = buildBoroughSkeleton(mapCacheStore.boroughGeoData);
       if (mapCacheStore.zipBoroughMap) zipBoroughMapRef.current = mapCacheStore.zipBoroughMap;
+      // Force the heatmap effect to re-run the full PiP path with the now-ready skeleton.
+      // Prevents fragmentation caused by createOutlineGeoJSON fallback producing wrong quad indices.
+      boroughGeoKeyRef.current = null;
+      boroughQuadFilterRef.current = null;
       return;
     }
     fetch(BOROUGH_GEOJSON_URL).then(r => r.json()).then(data => {
       setBoroughGeoData(data);
       boroughSkeletonRef.current = buildBoroughSkeleton(data);
+      // Same reset — ensures first render after fetch uses skeleton (not fallback) indices
+      boroughGeoKeyRef.current = null;
+      boroughQuadFilterRef.current = null;
     }).catch(err => console.warn('Borough GeoJSON load failed:', err));
   }, []);
 
@@ -1998,6 +2005,24 @@ export default function MapView({ events, headerCollapsed = false, interactive =
           'fill-extrusion-vertical-gradient': false,
           'fill-extrusion-opacity-transition': { duration: 0 },
           'fill-extrusion-color-transition': { duration: 0 },
+        },
+      });
+    }
+    // Borough line overlay — raw borough MultiPolygon edges, GPU zoom-interpolated line-width.
+    // Handles far-zoom (z<13) visibility smoothly without 3D geometry rebuilds.
+    // The 3D fill-extrusion stays at constant z13+ size; this line layer grows instead.
+    // Color matches the per-borough heatmap/standard tier color via _color property.
+    if (!map.getSource('borough-line-source')) {
+      map.addSource('borough-line-source', { type: 'geojson', data: { type: 'FeatureCollection', features: [] }, generateId: false, tolerance: 0 });
+      map.addLayer({
+        id: 'borough-line-overlay', type: 'line', source: 'borough-line-source',
+        maxzoom: 13,
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: {
+          'line-color':   ['coalesce', ['get', '_color'], OUTLINE_COLOR],
+          'line-opacity': 0,
+          'line-width':   ['interpolate', ['linear'], ['zoom'], 9,12, 10,8, 11,5, 12,3, 12.9,2],
+          'line-opacity-transition': { duration: 0 },
         },
       });
     }
@@ -2988,6 +3013,11 @@ export default function MapView({ events, headerCollapsed = false, interactive =
             : boroughQuads;
           map.getSource('borough-source').setData(filtered);
         }
+        // Borough line overlay (z<13 smooth visibility): update raw borough source with colored features.
+        // Uses the same coloredBorough (with _color per feature) so color stays in sync with heatmap.
+        if (map.getSource('borough-line-source')) {
+          map.getSource('borough-line-source').setData(coloredBorough);
+        }
         // Borough color: read baked _color from features — mid-brightness for visibility
         map.setPaintProperty('borough-outline', 'fill-extrusion-color', ['coalesce', ['get', '_color'], OUTLINE_COLOR]);
         // Base 0 → full extrusion blocks from ground to max height.
@@ -3001,8 +3031,15 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         const is3D = threeD || real3D;
         boroughWas3DRef.current = is3D;
         map.setPaintProperty('borough-outline', 'fill-extrusion-opacity', is3D ? 1.0 : 0);
+        // Line overlay: visible in 3D/Real3D at z<13 (maxzoom handles z13+)
+        if (map.getLayer('borough-line-overlay')) {
+          map.setPaintProperty('borough-line-overlay', 'line-opacity', is3D ? 1.0 : 0);
+        }
       } else {
         map.setPaintProperty('borough-outline', 'fill-extrusion-opacity', 0);
+        if (map.getLayer('borough-line-overlay')) {
+          map.setPaintProperty('borough-line-overlay', 'line-opacity', 0);
+        }
         boroughWithColorRef.current = null;
         boroughAvgTiersRef.current = [];
         boroughQuadFilterRef.current = null;
@@ -3611,13 +3648,13 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       // All widths are GPU paint-property interpolation: zero CPU per frame, no z-fighting.
       // maxzoom:13 — fill polygon footprint is wide enough at z13+ to stand alone.
       const ROAD_LINE_WIDTHS = [
-        // stops: interleaved [zoom, px, ...] pairs — values much wider so roads are clearly visible
-        { fclass: 'motorway',    minz: 9,  color: '#8a0000', stops: [9,22, 10,18, 11,14, 12,9, 12.9,4] },
-        { fclass: 'trunk',       minz: 9,  color: '#8a0000', stops: [9,22, 10,18, 11,14, 12,9, 12.9,4] },
-        { fclass: 'primary',     minz: 9,  color: '#8a0000', stops: [9,14, 10,12, 11,9,  12,6, 12.9,3] },
-        { fclass: 'secondary',   minz: 9,  color: '#8a0000', stops: [9,14, 10,12, 11,9,  12,6, 12.9,3] },
-        { fclass: 'tertiary',    minz: 10, color: '#e02424', stops: [10,8,  11,6,  12,4,  12.9,2] },
-        { fclass: 'residential', minz: 11, color: '#e02424', stops: [11,5,  12,3,  12.9,1.5] },
+        // stops: interleaved [zoom, px, ...] pairs — 1/4 of initial large test values
+        { fclass: 'motorway',    minz: 9,  color: '#8a0000', stops: [9,5.5, 10,4.5, 11,3.5, 12,2.25, 12.9,1] },
+        { fclass: 'trunk',       minz: 9,  color: '#8a0000', stops: [9,5.5, 10,4.5, 11,3.5, 12,2.25, 12.9,1] },
+        { fclass: 'primary',     minz: 9,  color: '#8a0000', stops: [9,3.5, 10,3,   11,2.25, 12,1.5, 12.9,0.75] },
+        { fclass: 'secondary',   minz: 9,  color: '#8a0000', stops: [9,3.5, 10,3,   11,2.25, 12,1.5, 12.9,0.75] },
+        { fclass: 'tertiary',    minz: 10, color: '#e02424', stops: [10,2,  11,1.5,  12,1,   12.9,0.5] },
+        { fclass: 'residential', minz: 11, color: '#e02424', stops: [11,1.25, 12,0.75, 12.9,0.4] },
       ];
       for (const rl of ROAD_LINE_WIDTHS) {
         const lineId = `real3d-pm-roads-${rl.fclass}-line`;
