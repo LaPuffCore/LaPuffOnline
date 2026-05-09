@@ -2021,7 +2021,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         paint: {
           'line-color':   ['coalesce', ['get', '_color'], OUTLINE_COLOR],
           'line-opacity': 0,
-          'line-width':   ['interpolate', ['linear'], ['zoom'], 9,12, 10,8, 11,5, 12,3, 12.9,2],
+          'line-width':   ['interpolate', ['linear'], ['zoom'], 9,6, 10,5.6, 11,4, 12,3, 12.9,2],
           'line-opacity-transition': { duration: 0 },
         },
       });
@@ -3648,13 +3648,13 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       // All widths are GPU paint-property interpolation: zero CPU per frame, no z-fighting.
       // maxzoom:13 — fill polygon footprint is wide enough at z13+ to stand alone.
       const ROAD_LINE_WIDTHS = [
-        // stops: interleaved [zoom, px, ...] pairs — 1/4 of initial large test values
-        { fclass: 'motorway',    minz: 9,  color: '#8a0000', stops: [9,5.5, 10,4.5, 11,3.5, 12,2.25, 12.9,1] },
-        { fclass: 'trunk',       minz: 9,  color: '#8a0000', stops: [9,5.5, 10,4.5, 11,3.5, 12,2.25, 12.9,1] },
-        { fclass: 'primary',     minz: 9,  color: '#8a0000', stops: [9,3.5, 10,3,   11,2.25, 12,1.5, 12.9,0.75] },
-        { fclass: 'secondary',   minz: 9,  color: '#8a0000', stops: [9,3.5, 10,3,   11,2.25, 12,1.5, 12.9,0.75] },
-        { fclass: 'tertiary',    minz: 10, color: '#e02424', stops: [10,2,  11,1.5,  12,1,   12.9,0.5] },
-        { fclass: 'residential', minz: 11, color: '#e02424', stops: [11,1.25, 12,0.75, 12.9,0.4] },
+        // z9: -50%, z10: -40%, z11 unchanged (motorway/trunk/primary/secondary), z11 -20% (tertiary/residential)
+        { fclass: 'motorway',    minz: 9,  color: '#8a0000', stops: [9,2.75, 10,2.7, 11,3.5, 12,2.25, 12.9,1] },
+        { fclass: 'trunk',       minz: 9,  color: '#8a0000', stops: [9,2.75, 10,2.7, 11,3.5, 12,2.25, 12.9,1] },
+        { fclass: 'primary',     minz: 9,  color: '#8a0000', stops: [9,1.75, 10,1.8, 11,2.25, 12,1.5, 12.9,0.75] },
+        { fclass: 'secondary',   minz: 9,  color: '#8a0000', stops: [9,1.75, 10,1.8, 11,2.25, 12,1.5, 12.9,0.75] },
+        { fclass: 'tertiary',    minz: 10, color: '#e02424', stops: [10,1.2, 11,1.2, 12,1,   12.9,0.5] },
+        { fclass: 'residential', minz: 11, color: '#e02424', stops: [11,1.0, 12,0.75, 12.9,0.4] },
       ];
       for (const rl of ROAD_LINE_WIDTHS) {
         const lineId = `real3d-pm-roads-${rl.fclass}-line`;
