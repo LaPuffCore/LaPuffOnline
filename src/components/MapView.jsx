@@ -2021,7 +2021,9 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         paint: {
           'line-color':   ['coalesce', ['get', '_color'], OUTLINE_COLOR],
           'line-opacity': 0,
+          // Width at each zoom stop. Offset = half width → line draws fully outside polygon.
           'line-width':   ['interpolate', ['linear'], ['zoom'], 9,6, 10,5.6, 11,4, 12,3, 12.9,2],
+          'line-offset':  ['interpolate', ['linear'], ['zoom'], 9,3, 10,2.8, 11,2, 12,1.5, 12.9,1],
           'line-opacity-transition': { duration: 0 },
         },
       });
@@ -2983,9 +2985,13 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         const coloredBorough = buildColoredBoroughFeatures(boroughGeoDataRef.current, avgTiers, heatmap);
         boroughWithColorRef.current = coloredBorough;
 
-        // Key = geometry-affecting parameters only (NOT real3D/threeD — those only change opacity+width)
-        const boroughGeoKey = `${heatmap ? 1 : 0}|${timespanIdx}|${events?.length ?? 0}`;
-        const widthMeters   = getZoomAwareOutlineWidth(map, 18, threeD || real3D);
+        // Key = geometry-affecting parameters. is3D MUST be included: 2D vs 3D quads have
+        // different physical widths → different safezone PiP results → different filterSet indices.
+        // Reusing a 2D-derived filterSet on 3D quads (or vice versa) causes fragmentation.
+        const is3D = threeD || real3D;
+        const boroughGeoKey = `${heatmap ? 1 : 0}|${timespanIdx}|${events?.length ?? 0}|${is3D ? 1 : 0}`;
+        // Freeze 3D extrusion width at z13 equivalent — 2D line overlay handles far-zoom growth.
+        const widthMeters   = getZoomAwareOutlineWidth(map, 18, is3D, is3D ? 13 : null);
 
         // Use precomputed skeleton path (O(vertices) linear math, no polygon normalization).
         // Fall back to createOutlineGeoJSON only on first render before skeleton is ready.
@@ -3028,7 +3034,6 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         // as flat rings at pitch=0 which looks wrong in 2D). Render immediately —
         // the camera easeTo animation is just a visual transition and should not block
         // geometry from appearing. MapLibre blends the geometry naturally as pitch changes.
-        const is3D = threeD || real3D;
         boroughWas3DRef.current = is3D;
         map.setPaintProperty('borough-outline', 'fill-extrusion-opacity', is3D ? 1.0 : 0);
         // Line overlay: visible in 3D/Real3D at z<13 (maxzoom handles z13+)
@@ -3190,11 +3195,13 @@ export default function MapView({ events, headerCollapsed = false, interactive =
           // Always regenerate from skeleton with live color overrides — 5 boroughs = trivially fast.
           // The prebaked geo cache (boroughOutlineGeoCache) is NOT used here because its quads lack
           // _boroughIdx, making the override merge lookup fail silently (colors fall back to red).
-          let quads = generateBoroughQuadsFromSkeleton(boroughSkeletonRef.current, getZoomAwareOutlineWidth(map, 18, true), overrides);
+          // zoomOverride=13: width is frozen at the z13 equivalent (27m) — 2D line overlay handles
+          // far-zoom growth so the fill-extrusion geometry never needs to change size on zoom.
+          let quads = generateBoroughQuadsFromSkeleton(boroughSkeletonRef.current, getZoomAwareOutlineWidth(map, 18, true, 13), overrides);
           if (filterSet && filterSet.size > 0) quads = { ...quads, features: quads.features.filter((_, i) => !filterSet.has(i)) };
           map.getSource('borough-source').setData(quads);
         } else if (boroughWithColorRef.current) {
-          let quads = createOutlineGeoJSON(boroughWithColorRef.current, getZoomAwareOutlineWidth(map, 18, true));
+          let quads = createOutlineGeoJSON(boroughWithColorRef.current, getZoomAwareOutlineWidth(map, 18, true, 13));
           if (filterSet && filterSet.size > 0) quads = { ...quads, features: quads.features.filter((_, i) => !filterSet.has(i)) };
           map.getSource('borough-source').setData(quads);
         }
@@ -3616,12 +3623,15 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       const ROAD_FCLASSES = [
         { fclass: 'motorway',    minz: 9,  colorOff: '#8a0000', opacityOff: 1.0 },
         { fclass: 'trunk',       minz: 9,  colorOff: '#8a0000', opacityOff: 1.0 },
-        { fclass: 'primary',     minz: 11, colorOff: '#8a0000', opacityOff: 1.0 },
-        { fclass: 'secondary',   minz: 11, colorOff: '#8a0000', opacityOff: 1.0 },
+        { fclass: 'primary',     minz: 9,  colorOff: '#8a0000', opacityOff: 1.0 },
+        { fclass: 'secondary',   minz: 9,  colorOff: '#8a0000', opacityOff: 1.0 },
         { fclass: 'tertiary',    minz: 12, colorOff: '#e02424', opacityOff: 1.0 },
         { fclass: 'residential', minz: 12, colorOff: '#e02424', opacityOff: 1.0 },
       ];
-      const HM_OPACITY = 0.4;
+      // When heatmap ON: fill opacity is 0.2 below z13 (overlaps with line at 0.2 = combined 0.4).
+      // At z13+ line is gone (maxzoom:13) so fill steps up to 0.4 to maintain visual weight.
+      const HM_FILL_OPACITY = ['step', ['zoom'], 0.2, 13, 0.4];
+      const HM_LINE_OPACITY = 0.2; // line only exists below z13; combined with fill = 0.4
       if (!map.getSource('roads-pm')) {
         map.addSource('roads-pm', { type: 'vector', url: `pmtiles://${ROADS_PMTILES_URL}` });
       }
@@ -3636,7 +3646,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
             filter: ['==', ['get', 'fclass'], r.fclass],
             paint: {
               'fill-color':     isHeatmap ? '#000000' : r.colorOff,
-              'fill-opacity':   isHeatmap ? HM_OPACITY : r.opacityOff,
+              'fill-opacity':   isHeatmap ? HM_FILL_OPACITY : r.opacityOff,
               'fill-antialias': false,
             },
           });
@@ -3648,13 +3658,14 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       // All widths are GPU paint-property interpolation: zero CPU per frame, no z-fighting.
       // maxzoom:13 — fill polygon footprint is wide enough at z13+ to stand alone.
       const ROAD_LINE_WIDTHS = [
-        // z9: -50%, z10: -40%, z11 unchanged (motorway/trunk/primary/secondary), z11 -20% (tertiary/residential)
+        // z9/z10 primary/secondary: -50%/-40% per user tuning (item 7)
+        // tertiary/residential: start at z12 only (item 6)
         { fclass: 'motorway',    minz: 9,  color: '#8a0000', stops: [9,2.75, 10,2.7, 11,3.5, 12,2.25, 12.9,1] },
         { fclass: 'trunk',       minz: 9,  color: '#8a0000', stops: [9,2.75, 10,2.7, 11,3.5, 12,2.25, 12.9,1] },
-        { fclass: 'primary',     minz: 9,  color: '#8a0000', stops: [9,1.75, 10,1.8, 11,2.25, 12,1.5, 12.9,0.75] },
-        { fclass: 'secondary',   minz: 9,  color: '#8a0000', stops: [9,1.75, 10,1.8, 11,2.25, 12,1.5, 12.9,0.75] },
-        { fclass: 'tertiary',    minz: 10, color: '#e02424', stops: [10,1.2, 11,1.2, 12,1,   12.9,0.5] },
-        { fclass: 'residential', minz: 11, color: '#e02424', stops: [11,1.0, 12,0.75, 12.9,0.4] },
+        { fclass: 'primary',     minz: 9,  color: '#8a0000', stops: [9,0.9,  10,1.1, 11,2.25, 12,1.5, 12.9,0.75] },
+        { fclass: 'secondary',   minz: 9,  color: '#8a0000', stops: [9,0.9,  10,1.1, 11,2.25, 12,1.5, 12.9,0.75] },
+        { fclass: 'tertiary',    minz: 12, color: '#e02424', stops: [12,1,   12.9,0.5] },
+        { fclass: 'residential', minz: 12, color: '#e02424', stops: [12,0.75, 12.9,0.4] },
       ];
       for (const rl of ROAD_LINE_WIDTHS) {
         const lineId = `real3d-pm-roads-${rl.fclass}-line`;
@@ -3669,7 +3680,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
             paint: {
               'line-color':   isHeatmap ? '#000000' : rl.color,
               'line-width':   ['interpolate', ['linear'], ['zoom'], ...rl.stops],
-              'line-opacity': isHeatmap ? HM_OPACITY : 1.0,
+              'line-opacity': isHeatmap ? HM_LINE_OPACITY : 1.0,
             },
           });
         }
@@ -3777,19 +3788,21 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       { fclass: 'tertiary',    colorOff: '#e02424', opacityOff: 1.0 },
       { fclass: 'residential', colorOff: '#e02424', opacityOff: 1.0 },
     ];
-    // 2D fills only at z9-z16 (3D extrusions removed). Constant opacity, no crossfade.
-    const HM_OPACITY = 0.4;
+    // 2D fills only at z9-z16 (3D extrusions removed). 
+    // Heatmap ON: fill=0.2 below z13 (line contributes 0.2 too = combined 0.4); fill steps to 0.4 at z13+ when line gone.
+    const HM_FILL_OPACITY = ['step', ['zoom'], 0.2, 13, 0.4];
+    const HM_LINE_OPACITY = 0.2;
     ROAD_FCLASS_PAINT.forEach(({ fclass, colorOff, opacityOff }) => {
       const fillId = `real3d-pm-roads-${fclass}-fill`;
       if (map.getLayer(fillId)) {
         map.setPaintProperty(fillId, 'fill-color',   heatmap ? '#000000' : colorOff);
-        map.setPaintProperty(fillId, 'fill-opacity', heatmap ? HM_OPACITY : opacityOff);
+        map.setPaintProperty(fillId, 'fill-opacity', heatmap ? HM_FILL_OPACITY : opacityOff);
       }
       // Update matching line overlay (color + opacity; line-width expression stays constant)
       const lineId = `real3d-pm-roads-${fclass}-line`;
       if (map.getLayer(lineId)) {
         map.setPaintProperty(lineId, 'line-color',   heatmap ? '#000000' : colorOff);
-        map.setPaintProperty(lineId, 'line-opacity', heatmap ? HM_OPACITY : 1.0);
+        map.setPaintProperty(lineId, 'line-opacity', heatmap ? HM_LINE_OPACITY : 1.0);
       }
     });
     // Safezone opacity
