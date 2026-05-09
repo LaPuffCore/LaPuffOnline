@@ -979,6 +979,14 @@ const REAL3D_ALL_LAYER_IDS = [
   'real3d-pm-roads-secondary-fill',
   'real3d-pm-roads-tertiary-fill',
   'real3d-pm-roads-residential-fill',
+  // Road width line overlays (z9–z13): GPU-interpolated zoom-width for far-zoom visibility.
+  // Same color as fill. maxzoom:13 — fill polygon is wide enough above z13.
+  'real3d-pm-roads-motorway-line',
+  'real3d-pm-roads-trunk-line',
+  'real3d-pm-roads-primary-line',
+  'real3d-pm-roads-secondary-line',
+  'real3d-pm-roads-tertiary-line',
+  'real3d-pm-roads-residential-line',
   // Unified building layer last — drawn on top of roads (occluding them correctly).
   // Single layer covers z12.5+ with height interpolation:
   //   z13–z13.9: flat 7m (baseplate appearance — locked constant)
@@ -3597,6 +3605,38 @@ export default function MapView({ events, headerCollapsed = false, interactive =
           });
         }
       }
+
+      // Road width line overlays (z9–z13): zoom-interpolated line-width for far-zoom
+      // road visibility. Uses same roads-pm source — line layers trace the road geometry.
+      // All widths are GPU paint-property interpolation: zero CPU per frame, no z-fighting.
+      // maxzoom:13 — fill polygon footprint is wide enough at z13+ to stand alone.
+      const ROAD_LINE_WIDTHS = [
+        // stops: interleaved [zoom, px, ...] pairs — values much wider so roads are clearly visible
+        { fclass: 'motorway',    minz: 9,  color: '#8a0000', stops: [9,22, 10,18, 11,14, 12,9, 12.9,4] },
+        { fclass: 'trunk',       minz: 9,  color: '#8a0000', stops: [9,22, 10,18, 11,14, 12,9, 12.9,4] },
+        { fclass: 'primary',     minz: 9,  color: '#8a0000', stops: [9,14, 10,12, 11,9,  12,6, 12.9,3] },
+        { fclass: 'secondary',   minz: 9,  color: '#8a0000', stops: [9,14, 10,12, 11,9,  12,6, 12.9,3] },
+        { fclass: 'tertiary',    minz: 10, color: '#e02424', stops: [10,8,  11,6,  12,4,  12.9,2] },
+        { fclass: 'residential', minz: 11, color: '#e02424', stops: [11,5,  12,3,  12.9,1.5] },
+      ];
+      for (const rl of ROAD_LINE_WIDTHS) {
+        const lineId = `real3d-pm-roads-${rl.fclass}-line`;
+        if (!map.getLayer(lineId)) {
+          map.addLayer({
+            id: lineId, type: 'line',
+            source: 'roads-pm', 'source-layer': ROADS_PMTILES_LAYER,
+            minzoom: rl.minz,
+            maxzoom: 13,
+            filter: ['==', ['get', 'fclass'], rl.fclass],
+            layout: { 'line-cap': 'round', 'line-join': 'round' },
+            paint: {
+              'line-color':   isHeatmap ? '#000000' : rl.color,
+              'line-width':   ['interpolate', ['linear'], ['zoom'], ...rl.stops],
+              'line-opacity': isHeatmap ? HM_OPACITY : 1.0,
+            },
+          });
+        }
+      }
       // Buildings: FGB pipeline (addBuildingLayers called separately in initReal3DLayers).
     } catch (err) { console.warn('addOpenmaptilesSourceAndLayers failed:', err); }
   }
@@ -3707,6 +3747,12 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       if (map.getLayer(fillId)) {
         map.setPaintProperty(fillId, 'fill-color',   heatmap ? '#000000' : colorOff);
         map.setPaintProperty(fillId, 'fill-opacity', heatmap ? HM_OPACITY : opacityOff);
+      }
+      // Update matching line overlay (color + opacity; line-width expression stays constant)
+      const lineId = `real3d-pm-roads-${fclass}-line`;
+      if (map.getLayer(lineId)) {
+        map.setPaintProperty(lineId, 'line-color',   heatmap ? '#000000' : colorOff);
+        map.setPaintProperty(lineId, 'line-opacity', heatmap ? HM_OPACITY : 1.0);
       }
     });
     // Safezone opacity
