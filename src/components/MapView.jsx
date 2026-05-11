@@ -1992,7 +1992,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     map.addLayer({
       id: 'zcta-safe-line', type: 'line', source: 'zcta',
       filter: ['==', ['get', '_special'], true],
-      paint: { 'line-color': '#000000', 'line-width': zctaLineWidthExpr(0.8), 'line-offset': 1, 'line-opacity': is3D ? 0 : 1 },
+      paint: { 'line-color': '#000000', 'line-width': zctaLineWidthExpr(0.8), 'line-offset': -1, 'line-opacity': is3D ? 0 : 1 },
     });
 
     // Ground boundary glows (non-special) — hidden in 3D mode
@@ -3670,7 +3670,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       // z12–z13: 20% more visible (fill=0.25, line=0.25; combined=0.5).
       // z13+: line gone, fill steps to 0.5 to maintain visual weight (20% more than old 0.4).
       const HM_FILL_OPACITY = ['step', ['zoom'], 0.1, 12, 0.25, 13, 0.5];
-      const HM_LINE_OPACITY = 0.3; // flat 0.3 across all zooms when heatmap on
+      const HM_LINE_OPACITY = 0.2; // flat 0.2 across all zooms when heatmap on
       if (!map.getSource('roads-pm')) {
         map.addSource('roads-pm', { type: 'vector', url: `pmtiles://${ROADS_PMTILES_URL}` });
       }
@@ -3831,7 +3831,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     ];
     // Item 4: heatmap opacity rework (same values as addOpenmaptilesSourceAndLayers).
     const HM_FILL_OPACITY = ['step', ['zoom'], 0.1, 12, 0.25, 13, 0.5];
-    const HM_LINE_OPACITY = 0.3; // flat 0.3 across all zooms when heatmap on
+    const HM_LINE_OPACITY = 0.2; // flat 0.2 across all zooms when heatmap on
     ROAD_FCLASS_PAINT.forEach(({ fclass, colorOff, opacityOff, opacityFadeExpr }) => {
       const fillId = `real3d-pm-roads-${fclass}-fill`;
       if (map.getLayer(fillId)) {
