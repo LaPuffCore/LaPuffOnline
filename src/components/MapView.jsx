@@ -2014,6 +2014,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     // Color matches the per-borough heatmap/standard tier color via _color property.
     if (!map.getSource('borough-line-source')) {
       map.addSource('borough-line-source', { type: 'geojson', data: { type: 'FeatureCollection', features: [] }, generateId: false, tolerance: 0 });
+      // Inserted BEFORE zcta-fill so zip fills render on top, hiding any inward overlap.
+      // line-offset = half line-width → line extends fully outward from borough boundary only.
       map.addLayer({
         id: 'borough-line-overlay', type: 'line', source: 'borough-line-source',
         maxzoom: 13,
@@ -2021,12 +2023,12 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         paint: {
           'line-color':   ['coalesce', ['get', '_color'], OUTLINE_COLOR],
           'line-opacity': 0,
-          // Width at each zoom stop. Offset = half width → line draws fully outside polygon.
-          'line-width':   ['interpolate', ['linear'], ['zoom'], 9,6, 10,5.6, 11,4, 12,3, 12.9,2],
-          'line-offset':  ['interpolate', ['linear'], ['zoom'], 9,3, 10,2.8, 11,2, 12,1.5, 12.9,1],
+          // Item 1: widths tuned down. Offset = half width → outward-only direction.
+          'line-width':   ['interpolate', ['linear'], ['zoom'], 9,1.8, 10,2.24, 11,3.2, 12,3, 12.9,2],
+          'line-offset':  ['interpolate', ['linear'], ['zoom'], 9,0.9, 10,1.12, 11,1.6, 12,1.5, 12.9,1],
           'line-opacity-transition': { duration: 0 },
         },
-      });
+      }, map.getLayer('zcta-fill') ? 'zcta-fill' : undefined);
     }
     // Borough hover fill + outline for interaction (uses raw borough polygons)
     if (!map.getSource('borough-hover-source')) {
@@ -2769,7 +2771,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       if (heatmap && topoOn) {
         const prePts = mapCacheStore.precomputedHeatPoints?.[timespanIdx];
         map.getSource('heat-underlay').setData(prePts || buildHeatUnderlayPoints(withHeat, tiers));
-        map.setPaintProperty('heat-underlay', 'heatmap-opacity', 1.0);
+        map.setPaintProperty('heat-underlay', 'heatmap-opacity', satellite ? 0.6 : 0.9);
       } else {
         map.setPaintProperty('heat-underlay', 'heatmap-opacity', 0);
       }
@@ -3365,9 +3367,9 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       if (map.getSource('sat-source-arcgis')) map.removeSource('sat-source-arcgis');
     }
 
-    // Water opacity: 0.6 always (user spec — satellite imagery shows through water color, not opacity)
+    // Water opacity: 1.0 when satellite off (full dark water color), 0.5 when satellite on (imagery shows through)
     if (map.getLayer('real3d-water')) {
-      map.setPaintProperty('real3d-water', 'fill-opacity', 0.6);
+      map.setPaintProperty('real3d-water', 'fill-opacity', satellite ? 0.5 : 1.0);
     }
   }, [satellite, real3D, mapReady]);
 
@@ -3621,17 +3623,20 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       // buffer needed. Eliminates ALL 3D road compute and seamlessness/perspective issues.
       // Layer order (bottom→top in 2D pass): water → roads → (FE pass: borough-outline → buildings).
       const ROAD_FCLASSES = [
-        { fclass: 'motorway',    minz: 9,  colorOff: '#8a0000', opacityOff: 1.0 },
-        { fclass: 'trunk',       minz: 9,  colorOff: '#8a0000', opacityOff: 1.0 },
-        { fclass: 'primary',     minz: 9,  colorOff: '#8a0000', opacityOff: 1.0 },
-        { fclass: 'secondary',   minz: 9,  colorOff: '#8a0000', opacityOff: 1.0 },
-        { fclass: 'tertiary',    minz: 12, colorOff: '#e02424', opacityOff: 1.0 },
-        { fclass: 'residential', minz: 12, colorOff: '#e02424', opacityOff: 1.0 },
+        { fclass: 'motorway',    minz: 9,  colorOff: '#6b0000', opacityOff: 1.0 },
+        { fclass: 'trunk',       minz: 9,  colorOff: '#6b0000', opacityOff: 1.0 },
+        { fclass: 'primary',     minz: 9,  colorOff: '#6b0000', opacityOff: 1.0 },
+        { fclass: 'secondary',   minz: 9,  colorOff: '#6b0000', opacityOff: 1.0 },
+        // Item 2: tertiary/residential fade in from z11→z12 (opacity 0→1)
+        { fclass: 'tertiary',    minz: 11, colorOff: '#e02424', opacityOff: 1.0, opacityFadeExpr: ['interpolate', ['linear'], ['zoom'], 11, 0, 12, 1.0] },
+        { fclass: 'residential', minz: 11, colorOff: '#e02424', opacityOff: 1.0, opacityFadeExpr: ['interpolate', ['linear'], ['zoom'], 11, 0, 12, 1.0] },
       ];
-      // When heatmap ON: fill opacity is 0.2 below z13 (overlaps with line at 0.2 = combined 0.4).
-      // At z13+ line is gone (maxzoom:13) so fill steps up to 0.4 to maintain visual weight.
-      const HM_FILL_OPACITY = ['step', ['zoom'], 0.2, 13, 0.4];
-      const HM_LINE_OPACITY = 0.2; // line only exists below z13; combined with fill = 0.4
+      // Item 4: heatmap opacity rework.
+      // Below z12: 50% of previous values (fill=0.1, line=0.1; combined=0.2).
+      // z12–z13: 20% more visible (fill=0.25, line=0.25; combined=0.5).
+      // z13+: line gone, fill steps to 0.5 to maintain visual weight (20% more than old 0.4).
+      const HM_FILL_OPACITY = ['step', ['zoom'], 0.1, 12, 0.25, 13, 0.5];
+      const HM_LINE_OPACITY = ['step', ['zoom'], 0.1, 12, 0.25]; // line only exists below z13
       if (!map.getSource('roads-pm')) {
         map.addSource('roads-pm', { type: 'vector', url: `pmtiles://${ROADS_PMTILES_URL}` });
       }
@@ -3646,7 +3651,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
             filter: ['==', ['get', 'fclass'], r.fclass],
             paint: {
               'fill-color':     isHeatmap ? '#000000' : r.colorOff,
-              'fill-opacity':   isHeatmap ? HM_FILL_OPACITY : r.opacityOff,
+              'fill-opacity':   isHeatmap ? HM_FILL_OPACITY : (r.opacityFadeExpr || r.opacityOff),
               'fill-antialias': false,
             },
           });
@@ -3660,10 +3665,10 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       const ROAD_LINE_WIDTHS = [
         // z9/z10 primary/secondary: -50%/-40% per user tuning (item 7)
         // tertiary/residential: start at z12 only (item 6)
-        { fclass: 'motorway',    minz: 9,  color: '#8a0000', stops: [9,2.75, 10,2.7, 11,3.5, 12,2.25, 12.9,1] },
-        { fclass: 'trunk',       minz: 9,  color: '#8a0000', stops: [9,2.75, 10,2.7, 11,3.5, 12,2.25, 12.9,1] },
-        { fclass: 'primary',     minz: 9,  color: '#8a0000', stops: [9,0.9,  10,1.1, 11,2.25, 12,1.5, 12.9,0.75] },
-        { fclass: 'secondary',   minz: 9,  color: '#8a0000', stops: [9,0.9,  10,1.1, 11,2.25, 12,1.5, 12.9,0.75] },
+        { fclass: 'motorway',    minz: 9,  color: '#6b0000', stops: [9,2.75, 10,2.7, 11,3.5, 12,2.25, 12.9,1] },
+        { fclass: 'trunk',       minz: 9,  color: '#6b0000', stops: [9,2.75, 10,2.7, 11,3.5, 12,2.25, 12.9,1] },
+        { fclass: 'primary',     minz: 9,  color: '#6b0000', stops: [9,0.9,  10,1.1, 11,2.25, 12,1.5, 12.9,0.75] },
+        { fclass: 'secondary',   minz: 9,  color: '#6b0000', stops: [9,0.9,  10,1.1, 11,2.25, 12,1.5, 12.9,0.75] },
         { fclass: 'tertiary',    minz: 12, color: '#e02424', stops: [12,1,   12.9,0.5] },
         { fclass: 'residential', minz: 12, color: '#e02424', stops: [12,0.75, 12.9,0.4] },
       ];
@@ -3781,22 +3786,21 @@ export default function MapView({ events, headerCollapsed = false, interactive =
 
     // PMTiles roads: update color + zoom-interpolated opacity expressions.
     const ROAD_FCLASS_PAINT = [
-      { fclass: 'motorway',    colorOff: '#8a0000', opacityOff: 1.0 },
-      { fclass: 'trunk',       colorOff: '#8a0000', opacityOff: 1.0 },
-      { fclass: 'primary',     colorOff: '#8a0000', opacityOff: 1.0 },
-      { fclass: 'secondary',   colorOff: '#8a0000', opacityOff: 1.0 },
-      { fclass: 'tertiary',    colorOff: '#e02424', opacityOff: 1.0 },
-      { fclass: 'residential', colorOff: '#e02424', opacityOff: 1.0 },
+      { fclass: 'motorway',    colorOff: '#6b0000', opacityOff: 1.0 },
+      { fclass: 'trunk',       colorOff: '#6b0000', opacityOff: 1.0 },
+      { fclass: 'primary',     colorOff: '#6b0000', opacityOff: 1.0 },
+      { fclass: 'secondary',   colorOff: '#6b0000', opacityOff: 1.0 },
+      { fclass: 'tertiary',    colorOff: '#e02424', opacityOff: 1.0, opacityFadeExpr: ['interpolate', ['linear'], ['zoom'], 11, 0, 12, 1.0] },
+      { fclass: 'residential', colorOff: '#e02424', opacityOff: 1.0, opacityFadeExpr: ['interpolate', ['linear'], ['zoom'], 11, 0, 12, 1.0] },
     ];
-    // 2D fills only at z9-z16 (3D extrusions removed). 
-    // Heatmap ON: fill=0.2 below z13 (line contributes 0.2 too = combined 0.4); fill steps to 0.4 at z13+ when line gone.
-    const HM_FILL_OPACITY = ['step', ['zoom'], 0.2, 13, 0.4];
-    const HM_LINE_OPACITY = 0.2;
-    ROAD_FCLASS_PAINT.forEach(({ fclass, colorOff, opacityOff }) => {
+    // Item 4: heatmap opacity rework (same values as addOpenmaptilesSourceAndLayers).
+    const HM_FILL_OPACITY = ['step', ['zoom'], 0.1, 12, 0.25, 13, 0.5];
+    const HM_LINE_OPACITY = ['step', ['zoom'], 0.1, 12, 0.25];
+    ROAD_FCLASS_PAINT.forEach(({ fclass, colorOff, opacityOff, opacityFadeExpr }) => {
       const fillId = `real3d-pm-roads-${fclass}-fill`;
       if (map.getLayer(fillId)) {
         map.setPaintProperty(fillId, 'fill-color',   heatmap ? '#000000' : colorOff);
-        map.setPaintProperty(fillId, 'fill-opacity', heatmap ? HM_FILL_OPACITY : opacityOff);
+        map.setPaintProperty(fillId, 'fill-opacity', heatmap ? HM_FILL_OPACITY : (opacityFadeExpr || opacityOff));
       }
       // Update matching line overlay (color + opacity; line-width expression stays constant)
       const lineId = `real3d-pm-roads-${fclass}-line`;
