@@ -98,7 +98,7 @@ const SATELLITE_HOST_PATTERNS = [
 // Static GeoJSON files we serve cache-first (small same-origin assets used by every map render)
 const STATIC_PATTERNS = [
   'MODZCTA_2010_WGS1984.geo.json',
-  'borough.geo.json',
+  'finalboroughnsafe.json',
   'finalwatercomplex.json',
   'zcta_adjacency.json',
 ];

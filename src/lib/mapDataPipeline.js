@@ -7,9 +7,9 @@ import mapCacheStore from './mapCacheStore';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 export const GEOJSON_URL        = './data/MODZCTA_2010_WGS1984.geo.json';
-export const BOROUGH_GEOJSON_URL = './data/borough.geo.json';
-// v4: PMTiles buildings (no more FGB) — bumped to invalidate stale FGB IDB on existing clients
-export const MAP_CACHE_DONE_KEY     = 'lapuff_map_cache_v4';
+export const BOROUGH_GEOJSON_URL = './data/finalboroughnsafe.json';
+// v5: new finalboroughnsafe.json borough file (13 safezones explicit, slivers removed)
+export const MAP_CACHE_DONE_KEY     = 'lapuff_map_cache_v5';
 export const MAP_CACHE_BUILDING_KEY = 'lapuff_map_cache_building';
 
 // Bump this string whenever nyc_buildings.pmtiles is replaced on the server.
@@ -432,6 +432,26 @@ function computeTiers(features, zipMap, maxCount, adjacency) {
   return tiers;
 }
 
+function filterBoroughData(data) {
+  if (!data || !data.features) return data;
+  const filtered = data.features.filter(f => {
+    if (f.properties?.Safezone > 0) return false;
+    const g = f.geometry;
+    if (!g) return false;
+    let area = 0;
+    const polys = g.type === 'MultiPolygon' ? g.coordinates : g.type === 'Polygon' ? [g.coordinates] : [];
+    for (const poly of polys) {
+      const ring = poly[0];
+      if (!ring) continue;
+      let a = 0;
+      for (let i = 0; i < ring.length - 1; i++) a += ring[i][0] * ring[i+1][1] - ring[i+1][0] * ring[i][1];
+      area += Math.abs(a / 2);
+    }
+    return area >= 1.42e-6;
+  });
+  return { ...data, features: filtered };
+}
+
 function computeZipBoroughMap(zctaFeatures, boroughFeatures) {
   const result = {};
   zctaFeatures.forEach((f, i) => {
@@ -591,7 +611,7 @@ export async function runPhase2A(events, isMobile, onProgress) {
 
   // ── Step 4: Borough GeoJSON ──────────────────────────────────────────────
   report(P.boro[0], 'Fetching borough data...');
-  const boroughGeoData = await fetch(BOROUGH_GEOJSON_URL).then(r => r.json());
+  const boroughGeoData = filterBoroughData(await fetch(BOROUGH_GEOJSON_URL).then(r => r.json()));
   report(P.boro[1], 'Borough data loaded');
 
   // ── Step 5: Borough skeleton + zip-borough map ───────────────────────────

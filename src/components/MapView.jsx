@@ -15,10 +15,10 @@ import { getSampleUsersForZip } from '../lib/sampleUsers';
 import { fetchGeoPostFeed, fetchReactionsForPosts } from '../lib/supabase';
 
 const GEOJSON_URL = './data/MODZCTA_2010_WGS1984.geo.json';
-const BOROUGH_GEOJSON_URL = './data/borough.geo.json';
+const BOROUGH_GEOJSON_URL = './data/finalboroughnsafe.json';
 
 // MapLoadingScreen gate keys
-const MAP_CACHE_DONE_KEY     = 'lapuff_map_cache_v4';
+const MAP_CACHE_DONE_KEY     = 'lapuff_map_cache_v5';
 const MAP_CACHE_BUILDING_KEY = 'lapuff_map_cache_building';
 
 // Buildings PMTiles — same-origin GitHub Pages, SW range-cached. ~71MB, never fully loaded
@@ -1135,6 +1135,29 @@ function buildColoredBoroughFeatures(boroughGeoData, avgTiers, isHeatmap) {
   };
 }
 
+// Filter new-format borough GeoJSON to only non-safezone, non-sliver features.
+// Safezones (Safezone > 0) get no outline extrusion — just their ZCTA inner line.
+// Slivers < ~10,000 m² (≈ 1.42e-6 deg²) are excluded to avoid artifact quads.
+function filterBoroughData(data) {
+  if (!data || !data.features) return data;
+  const filtered = data.features.filter(f => {
+    if (f.properties?.Safezone > 0) return false;
+    const g = f.geometry;
+    if (!g) return false;
+    let area = 0;
+    const polys = g.type === 'MultiPolygon' ? g.coordinates : g.type === 'Polygon' ? [g.coordinates] : [];
+    for (const poly of polys) {
+      const ring = poly[0];
+      if (!ring) continue;
+      let a = 0;
+      for (let i = 0; i < ring.length - 1; i++) a += ring[i][0] * ring[i+1][1] - ring[i+1][0] * ring[i][1];
+      area += Math.abs(a / 2);
+    }
+    return area >= 1.42e-6;
+  });
+  return { ...data, features: filtered };
+}
+
 // Remove borough outline quads that overlap safezone areas (ZCTA features with _special=true).
 // Interior borough edges are KEPT for visual clarity; only safezone-adjacent quads are removed
 // because their extrusion conflicts with the white safezone fill-extrusion.
@@ -1747,20 +1770,19 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   // Borough GeoJSON — hydrate from mapCacheStore if Phase 2A ran, else fetch
   useEffect(() => {
     if (mapCacheStore.boroughGeoData) {
+      // Phase 2A already pre-filtered; use directly
       setBoroughGeoData(mapCacheStore.boroughGeoData);
       if (mapCacheStore.boroughSkeleton) boroughSkeletonRef.current = mapCacheStore.boroughSkeleton;
       else boroughSkeletonRef.current = buildBoroughSkeleton(mapCacheStore.boroughGeoData);
       if (mapCacheStore.zipBoroughMap) zipBoroughMapRef.current = mapCacheStore.zipBoroughMap;
-      // Force the heatmap effect to re-run the full PiP path with the now-ready skeleton.
-      // Prevents fragmentation caused by createOutlineGeoJSON fallback producing wrong quad indices.
       boroughGeoKeyRef.current = null;
       boroughQuadFilterRef.current = null;
       return;
     }
-    fetch(BOROUGH_GEOJSON_URL).then(r => r.json()).then(data => {
+    fetch(BOROUGH_GEOJSON_URL).then(r => r.json()).then(rawData => {
+      const data = filterBoroughData(rawData);
       setBoroughGeoData(data);
       boroughSkeletonRef.current = buildBoroughSkeleton(data);
-      // Same reset — ensures first render after fetch uses skeleton (not fallback) indices
       boroughGeoKeyRef.current = null;
       boroughQuadFilterRef.current = null;
     }).catch(err => console.warn('Borough GeoJSON load failed:', err));
@@ -1994,24 +2016,6 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         'line-color': OUTLINE_COLOR, 'line-width': zctaLineWidthExpr(1),
         'line-opacity': is3D ? 0 : 1,
         'line-opacity-transition': { duration: 0 }, 'line-width-transition': { duration: 0 },
-      },
-    });
-
-    // 3D far-zoom boundary line — interpolates 3px→0px from z9→z12 to bridge the gap while
-    // zcta-outline (annular ring cap) is frozen at z12 size. Only shown in 3D mode.
-    // Width transitions smoothly so zcta-outline ring is unneeded at low zoom.
-    map.addLayer({
-      id: 'zcta-3d-line', type: 'line', source: 'zcta',
-      filter: ['!=', ['get', '_special'], true],
-      minzoom: 9, maxzoom: 12,
-      layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: {
-        'line-color': OUTLINE_COLOR,
-        'line-opacity': 0,
-        'line-width': ['interpolate', ['linear'], ['zoom'], 9, 3, 12, 0],
-        'line-offset': ['interpolate', ['linear'], ['zoom'], 9, 1.5, 12, 0],
-        'line-width-transition': { duration: 0 },
-        'line-opacity-transition': { duration: 0 },
       },
     });
 
@@ -2868,8 +2872,6 @@ export default function MapView({ events, headerCollapsed = false, interactive =
           map.setPaintProperty('zcta-safe-extrude', 'fill-extrusion-opacity', 0.72);
         }
         if (map.getLayer('zcta-safezone-fill')) map.setPaintProperty('zcta-safezone-fill', 'fill-opacity', 0);
-        // Show far-zoom 2D line to bridge z9–z12 (zcta-outline annular cap is frozen at z12 size)
-        if (map.getLayer('zcta-3d-line')) map.setPaintProperty('zcta-3d-line', 'line-opacity', 1);
 
         const extrudeColorExpr = ['step', ['get', '_tier'], HEAT_COLORS.cold, 1, HEAT_COLORS.cool, 2, HEAT_COLORS.warm, 3, HEAT_COLORS.orange, 4, HEAT_COLORS.hot];
         // FIX SATELLITE: 3D+heatmap extrusion stays solid (1.0) even when satellite is on
@@ -2898,7 +2900,6 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         // opaque 3D buildings and roads occlude them via render order).
         // safe-line visible in Real3D (zcta-safezone-fill is 2D, no z-fighting).
         if (map.getLayer('zcta-safe-extrude')) map.setPaintProperty('zcta-safe-extrude', 'fill-extrusion-opacity', 0);
-        if (map.getLayer('zcta-3d-line')) map.setPaintProperty('zcta-3d-line', 'line-opacity', 0);
         map.setPaintProperty('zcta-safe-line', 'line-opacity', 1);
         if (map.getLayer('zcta-safezone-fill')) map.setPaintProperty('zcta-safezone-fill', 'fill-opacity', satellite ? 0.22 : 1.0);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-color', '#1a0505');
@@ -2942,8 +2943,6 @@ export default function MapView({ events, headerCollapsed = false, interactive =
           map.setPaintProperty('zcta-safe-extrude', 'fill-extrusion-opacity', 0.72);
         }
         if (map.getLayer('zcta-safezone-fill')) map.setPaintProperty('zcta-safezone-fill', 'fill-opacity', 0);
-        // Show far-zoom 2D line to bridge z9–z12 (zcta-outline annular cap is frozen at z12 size)
-        if (map.getLayer('zcta-3d-line')) map.setPaintProperty('zcta-3d-line', 'line-opacity', 1);
         // FIX SATELLITE: 3D no-heatmap extrusion is semi-transparent when satellite is on
         const flatColorExpr = '#220202';
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-color', withHoverColor(flatColorExpr));
@@ -2970,7 +2969,6 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         // 2D non-heatmap — also used for Real3D (2D zcta-fill + zcta-line stay visible).
         // safe-line visible in Real3D (zcta-safezone-fill is 2D, no z-fighting).
         if (map.getLayer('zcta-safe-extrude')) map.setPaintProperty('zcta-safe-extrude', 'fill-extrusion-opacity', 0);
-        if (map.getLayer('zcta-3d-line')) map.setPaintProperty('zcta-3d-line', 'line-opacity', 0);
         map.setPaintProperty('zcta-safe-line', 'line-opacity', 1);
         if (map.getLayer('zcta-safezone-fill')) map.setPaintProperty('zcta-safezone-fill', 'fill-opacity', satellite ? 0.22 : 1.0);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-color', '#1a0505');
@@ -3045,13 +3043,11 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         const coloredBorough = buildColoredBoroughFeatures(boroughGeoDataRef.current, avgTiers, heatmap);
         boroughWithColorRef.current = coloredBorough;
 
-        // Key = geometry-affecting parameters. is3D MUST be included: 2D vs 3D quads have
-        // different physical widths → different safezone PiP results → different filterSet indices.
-        // Reusing a 2D-derived filterSet on 3D quads (or vice versa) causes fragmentation.
+        // Key = geometry-affecting parameters.
         const is3D = threeD || real3D;
         const boroughGeoKey = `${heatmap ? 1 : 0}|${timespanIdx}|${events?.length ?? 0}|${is3D ? 1 : 0}`;
         // Real3D: freeze at z13 equivalent — 2D line overlay handles far-zoom growth.
-        // 3D (threeD): no freeze — fill-extrusion itself resizes per zoom (no 2D line in 3D mode).
+        // 3D (threeD): no freeze — fill-extrusion itself resizes per zoom.
         const widthMeters = getZoomAwareOutlineWidth(map, 18, is3D, real3D ? 13 : null);
 
         // Use precomputed skeleton path (O(vertices) linear math, no polygon normalization).
@@ -3064,22 +3060,9 @@ export default function MapView({ events, headerCollapsed = false, interactive =
           boroughQuads = createOutlineGeoJSON(coloredBorough, widthMeters);
         }
 
-        // Only redo the expensive safezone PiP filter when tier/heatmap data actually changed.
-        // On Real3D/3D toggle the geometry key doesn't change — reuse boroughQuadFilterRef.
-        if (boroughGeoKey !== boroughGeoKeyRef.current || !boroughQuadFilterRef.current) {
-          const safezoneFeatures = geoData?.features?.filter(f => f.properties?._special) || [];
-          const { filtered, removedIdxSet } = removeSafezoneOverlapQuads(boroughQuads, safezoneFeatures);
-          boroughQuadFilterRef.current = removedIdxSet;
-          boroughGeoKeyRef.current = boroughGeoKey;
-          map.getSource('borough-source').setData(filtered);
-        } else {
-          // Fast path: re-apply cached filter (O(n) index filter, no PiP)
-          const filterSet = boroughQuadFilterRef.current;
-          const filtered = filterSet.size > 0
-            ? { ...boroughQuads, features: boroughQuads.features.filter((_, i) => !filterSet.has(i)) }
-            : boroughQuads;
-          map.getSource('borough-source').setData(filtered);
-        }
+        // Safezones are pre-filtered from boroughSkeletonRef — no PiP needed.
+        boroughGeoKeyRef.current = boroughGeoKey;
+        map.getSource('borough-source').setData(boroughQuads);
         // Borough line overlay (z<13 smooth visibility): update raw borough source with colored features.
         // Uses the same coloredBorough (with _color per feature) so color stays in sync with heatmap.
         if (map.getSource('borough-line-source')) {
@@ -3233,47 +3216,28 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       // when the underlying data revision changes (heatmap recolor / events update).
       // Pan and fractional zoom (e.g., 14.3 → 14.7) reuse the prior setData → instant.
       const intZoom = Math.floor(map.getZoom());
-      // In 3D mode, zcta-outline is frozen at z12 size — use 12 as the key so there are no
-      // per-zoom rebuilds. zcta-3d-line (CSS interpolation) handles far-zoom bandwidth smoothly.
-      const zctaKeyZoom = is3D ? 12 : intZoom;
-      const key = `${zctaKeyZoom}:${is3D ? 1 : 0}:${isR3D ? 1 : 0}:${outlineCacheRevRef.current}`;
+      const key = `${intZoom}:${is3D ? 1 : 0}:${isR3D ? 1 : 0}:${outlineCacheRevRef.current}`;
       if (key === lastOutlineKeyRef.current) return;
       lastOutlineKeyRef.current = key;
-      // ZCTA outline — 3D only; frozen at z12 width for smooth far-zoom (zcta-3d-line bridges z9–z12)
+      // ZCTA outline — 3D only; ring naturally widens at far zoom via getZoomAwareOutlineWidth
       if (is3D && map.getSource('zcta-outline')) {
         if (zctaSkeletonRef.current && withHeatRef.current) {
           const overrides = withHeatRef.current.features.map(f => f.properties);
           map.getSource('zcta-outline').setData(
-            generateZctaQuadsFromSkeleton(zctaSkeletonRef.current, getZoomAwareOutlineWidth(map, undefined, true, 12), overrides)
+            generateZctaQuadsFromSkeleton(zctaSkeletonRef.current, getZoomAwareOutlineWidth(map, undefined, true), overrides)
           );
         } else if (withHeatRef.current) {
-          map.getSource('zcta-outline').setData(createZctaOutlineGeoJSON(withHeatRef.current, getZoomAwareOutlineWidth(map, undefined, true, 12)));
+          map.getSource('zcta-outline').setData(createZctaOutlineGeoJSON(withHeatRef.current, getZoomAwareOutlineWidth(map, undefined, true)));
         }
       }
-      // Borough outline — all modes
+      // Borough outline — all modes; safezones pre-filtered from boroughSkeletonRef
       if (map.getSource('borough-source')) {
-        const filterSet = boroughQuadFilterRef.current;
         if (boroughSkeletonRef.current && boroughWithColorRef.current) {
           const overrides = boroughWithColorRef.current.features.map(f => f.properties);
-          const filterSet = boroughQuadFilterRef.current;
-          // Always regenerate from skeleton with live color overrides — 5 boroughs = trivially fast.
-          // Real3D: frozen at z13 equivalent (2D line handles far-zoom). 3D: per-zoom resize.
-          let quads = generateBoroughQuadsFromSkeleton(boroughSkeletonRef.current, getZoomAwareOutlineWidth(map, 18, true, isR3D ? 13 : null), overrides);
-          if (!isR3D && is3D) {
-            // 3D mode quads change size per zoom → cached filterSet is stale across zoom changes.
-            // Recompute safezone PiP fresh to prevent gaps/overlaps near safezone boundaries.
-            const safezoneFeatures = withHeatRef.current?.features?.filter(f => f.properties?._special) || [];
-            const { filtered, removedIdxSet } = removeSafezoneOverlapQuads(quads, safezoneFeatures);
-            boroughQuadFilterRef.current = removedIdxSet;
-            map.getSource('borough-source').setData(filtered);
-          } else {
-            if (filterSet && filterSet.size > 0) quads = { ...quads, features: quads.features.filter((_, i) => !filterSet.has(i)) };
-            map.getSource('borough-source').setData(quads);
-          }
+          const quads = generateBoroughQuadsFromSkeleton(boroughSkeletonRef.current, getZoomAwareOutlineWidth(map, 18, true, isR3D ? 13 : null), overrides);
+          map.getSource('borough-source').setData(quads);
         } else if (boroughWithColorRef.current) {
-          let quads = createOutlineGeoJSON(boroughWithColorRef.current, getZoomAwareOutlineWidth(map, 18, true, isR3D ? 13 : null));
-          const filterSet = boroughQuadFilterRef.current;
-          if (filterSet && filterSet.size > 0) quads = { ...quads, features: quads.features.filter((_, i) => !filterSet.has(i)) };
+          const quads = createOutlineGeoJSON(boroughWithColorRef.current, getZoomAwareOutlineWidth(map, 18, true, isR3D ? 13 : null));
           map.getSource('borough-source').setData(quads);
         }
       }
