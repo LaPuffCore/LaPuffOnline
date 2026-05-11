@@ -2820,8 +2820,9 @@ export default function MapView({ events, headerCollapsed = false, interactive =
 
       if (threeD) {
         map.setPaintProperty('zcta-safe-line', 'line-opacity', 0);
-        // zcta-safezone-fill is a 2D fill — keep it at satellite opacity in 3D mode
-        if (map.getLayer('zcta-safezone-fill')) map.setPaintProperty('zcta-safezone-fill', 'fill-opacity', satellite ? 0.22 : 1.0);
+        // zcta-safezone-fill is a 2D fill that renders after the FE group — hide in 3D to prevent
+        // x-ray artifact (white safezone showing on top of dark red extrusions).
+        if (map.getLayer('zcta-safezone-fill')) map.setPaintProperty('zcta-safezone-fill', 'fill-opacity', 0);
 
         const extrudeColorExpr = ['step', ['get', '_tier'], HEAT_COLORS.cold, 1, HEAT_COLORS.cool, 2, HEAT_COLORS.warm, 3, HEAT_COLORS.orange, 4, HEAT_COLORS.hot];
         // FIX SATELLITE: 3D+heatmap extrusion stays solid (1.0) even when satellite is on
@@ -2884,8 +2885,9 @@ export default function MapView({ events, headerCollapsed = false, interactive =
 
       if (threeD) {
         map.setPaintProperty('zcta-safe-line', 'line-opacity', 0);
-        // zcta-safezone-fill is a 2D fill — keep it visible at satellite opacity in 3D mode
-        if (map.getLayer('zcta-safezone-fill')) map.setPaintProperty('zcta-safezone-fill', 'fill-opacity', satellite ? 0.22 : 1.0);
+        // zcta-safezone-fill is a 2D fill that renders after the FE group — hide in 3D to prevent
+        // x-ray artifact (white safezone showing on top of dark red extrusions).
+        if (map.getLayer('zcta-safezone-fill')) map.setPaintProperty('zcta-safezone-fill', 'fill-opacity', 0);
         // FIX SATELLITE: 3D no-heatmap extrusion is semi-transparent when satellite is on
         const flatColorExpr = '#220202';
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-color', withHoverColor(flatColorExpr));
