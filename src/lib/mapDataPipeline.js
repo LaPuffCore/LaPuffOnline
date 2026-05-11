@@ -12,6 +12,12 @@ export const BOROUGH_GEOJSON_URL = './data/borough.geo.json';
 export const MAP_CACHE_DONE_KEY     = 'lapuff_map_cache_v4';
 export const MAP_CACHE_BUILDING_KEY = 'lapuff_map_cache_building';
 
+// Bump this string whenever nyc_buildings.pmtiles is replaced on the server.
+// On mismatch the client sends INVALIDATE_BUILDINGS_CACHE to the SW so stale
+// Range responses from the old file layout are purged before MapLibre loads.
+export const BUILDINGS_PMTILES_VER     = 'nyc_buildings_pmtiles_v1';
+export const BUILDINGS_PMTILES_VER_KEY = 'lapuff_buildings_pmtiles_ver';
+
 export const ROADS_PMTILES_URL = 'https://objectstorage.us-ashburn-1.oraclecloud.com/p/yGTOMC4N2uc1uIGkliFRgP51VbnPm96W8vebh_sOqeoGil3PErp8dvWmy74pEH70/n/idfnjqqb9g0p/b/nyc-map-data/o/realfinaldeciroads.pmtiles';
 
 export const TIMESPAN_STEPS = [
@@ -474,6 +480,18 @@ function computeZctaBboxes(geoData) {
  * @param {Function} onProgress - (pct: number, msg: string) => void
  */
 export async function runPhase2A(events, isMobile, onProgress) {
+  // Buildings PMTiles version guard: if nyc_buildings.pmtiles has been replaced on the server,
+  // stale Range responses in the SW cache (keyed by URL+Range) will serve wrong byte offsets for
+  // the new file layout. We version-stamp a localStorage key and post INVALIDATE_BUILDINGS_CACHE
+  // to the SW when the stamp is missing or outdated — clearing all nyc_buildings Range entries.
+  try {
+    const storedVer = localStorage.getItem(BUILDINGS_PMTILES_VER_KEY);
+    if (storedVer !== BUILDINGS_PMTILES_VER && navigator.serviceWorker?.controller) {
+      navigator.serviceWorker.controller.postMessage({ type: 'INVALIDATE_BUILDINGS_CACHE' });
+      localStorage.setItem(BUILDINGS_PMTILES_VER_KEY, BUILDINGS_PMTILES_VER);
+    }
+  } catch (_) { /* ignore — localStorage unavailable in some private-mode browsers */ }
+
   // Corruption guard: incomplete previous build → wipe and force full rebuild
   const wasBuilding = localStorage.getItem(MAP_CACHE_BUILDING_KEY);
   const isDoneFlag  = localStorage.getItem(MAP_CACHE_DONE_KEY);

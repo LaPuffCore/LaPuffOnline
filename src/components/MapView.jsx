@@ -1122,7 +1122,13 @@ function buildColoredBoroughFeatures(boroughGeoData, avgTiers, isHeatmap) {
       properties: {
         ...f.properties,
         _tier: isHeatmap ? (avgTiers[i] ?? 0) : 0,
-        _color: isHeatmap ? (avgTiers[i] >= 3 && avgTiers[i] < 4 ? '#ff3c00' : midTierColor(avgTiers[i] ?? 0)) : '#ff0000',
+        _color: isHeatmap ? (
+          avgTiers[i] >= 4 ? midTierColor(4) :   // hot — standard HEAT_MID
+          avgTiers[i] >= 3 ? '#ff3300' :          // orange
+          avgTiers[i] >= 2 ? midTierColor(2) :    // warm — standard HEAT_MID
+          avgTiers[i] >= 1 ? '#02f733' :          // cool → bright green
+          '#057ef7'                                // cold → bright blue
+        ) : '#ff0000',
         _boroughIdx: rankMap[i],  // 0=lowest tier … 4=highest tier (red always last/on top)
       },
     })),
@@ -1879,7 +1885,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     // Floor — thin slab inside each 3D block, visible only when camera enters the block.
     // Same color as the block but half opacity. Height 1m (base 0) avoids z-fighting.
     // Occluded by zcta-extrude walls when viewed from outside.
-    // Filter excludes _special (safe zone) features — handled by zcta-safezone-fill (2D).
+    // Filter excludes _special (safe zone) features — handled by zcta-safe-extrude (3D) or zcta-safezone-fill (2D).
     map.addLayer({
       id: 'zcta-floor', type: 'fill-extrusion', source: 'zcta',
       filter: ['!=', ['get', '_special'], true],
@@ -1892,8 +1898,24 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       },
     });
 
+    // Safezone extrusion — white flat slab that participates in the fill-extrusion depth buffer.
+    // In 3D mode this is the correct way to show safezones: the tall adjacent zip extrusions
+    // will properly occlude this from the camera's perspective (depth-tested inside the FBO).
+    // A 2D fill (zcta-safezone-fill) would composite ON TOP of the FBO — the x-ray artifact.
+    // Hidden by default (opacity=0); activated in 3D mode by the heatmap effect.
+    map.addLayer({
+      id: 'zcta-safe-extrude', type: 'fill-extrusion', source: 'zcta',
+      filter: ['==', ['get', '_special'], true],
+      paint: {
+        'fill-extrusion-color': '#ffffff',
+        'fill-extrusion-height': 0,
+        'fill-extrusion-base': 0,
+        'fill-extrusion-opacity': 0,
+      },
+    });
+
     // Flat fill — slightly transparent dark red to differentiate regions from bg without solid fill.
-    // Excludes _special (safe zone) features — those are handled by zcta-safezone-fill below.
+    // Excludes _special (safe zone) features — those are handled by zcta-safe-extrude (3D) or zcta-safezone-fill (2D).
     map.addLayer({
       id: 'zcta-fill', type: 'fill', source: 'zcta',
       filter: ['!=', ['get', '_special'], true],
@@ -1943,7 +1965,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     });
 
     // Safe zone outline — always visible in 2D/Real3D; hidden in 3D mode where 2D lines
-    // pass through fill-extrusions (x-ray artifact). zcta-safezone-fill provides the ground color.
+    // pass through fill-extrusions (x-ray artifact). zcta-safe-extrude provides the ground color in 3D.
     map.addLayer({
       id: 'zcta-safe-line', type: 'line', source: 'zcta',
       filter: ['==', ['get', '_special'], true],
@@ -1972,6 +1994,24 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         'line-color': OUTLINE_COLOR, 'line-width': zctaLineWidthExpr(1),
         'line-opacity': is3D ? 0 : 1,
         'line-opacity-transition': { duration: 0 }, 'line-width-transition': { duration: 0 },
+      },
+    });
+
+    // 3D far-zoom boundary line — interpolates 3px→0px from z9→z12 to bridge the gap while
+    // zcta-outline (annular ring cap) is frozen at z12 size. Only shown in 3D mode.
+    // Width transitions smoothly so zcta-outline ring is unneeded at low zoom.
+    map.addLayer({
+      id: 'zcta-3d-line', type: 'line', source: 'zcta',
+      filter: ['!=', ['get', '_special'], true],
+      minzoom: 9, maxzoom: 12,
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': OUTLINE_COLOR,
+        'line-opacity': 0,
+        'line-width': ['interpolate', ['linear'], ['zoom'], 9, 3, 12, 0],
+        'line-offset': ['interpolate', ['linear'], ['zoom'], 9, 1.5, 12, 0],
+        'line-width-transition': { duration: 0 },
+        'line-opacity-transition': { duration: 0 },
       },
     });
 
@@ -2016,14 +2056,14 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       map.addSource('borough-line-source', { type: 'geojson', data: { type: 'FeatureCollection', features: [] }, generateId: false, tolerance: 0 });
       map.addLayer({
         id: 'borough-line-overlay', type: 'line', source: 'borough-line-source',
-        maxzoom: 14,
+        maxzoom: 13,
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: {
           'line-color':   ['coalesce', ['get', '_color'], OUTLINE_COLOR],
           'line-opacity': 0,
           // Outward-only: line-offset = half line-width. Fades out by z14.
-          'line-width':   ['interpolate', ['linear'], ['zoom'], 9,4, 10,3.5, 11,3, 12,2.5, 13,2, 14,0],
-          'line-offset':  ['interpolate', ['linear'], ['zoom'], 9,2, 10,1.75, 11,1.5, 12,1.25, 13,1, 14,0],
+          'line-width':   ['interpolate', ['linear'], ['zoom'], 9,2.5, 10,2, 11,1.5, 12,1, 13,0],
+          'line-offset':  ['interpolate', ['linear'], ['zoom'], 9,1.25, 10,1, 11,0.75, 12,0.5, 13,0],
           'line-opacity-transition': { duration: 0 },
         },
       }, map.getLayer('zcta-fill') ? 'zcta-fill' : undefined);
@@ -2820,9 +2860,16 @@ export default function MapView({ events, headerCollapsed = false, interactive =
 
       if (threeD) {
         map.setPaintProperty('zcta-safe-line', 'line-opacity', 0);
-        // zcta-safezone-fill is a 2D fill that renders after the FE group — hide in 3D to prevent
-        // x-ray artifact (white safezone showing on top of dark red extrusions).
+        // In 3D mode: use zcta-safe-extrude (fill-extrusion) so safezones depth-test against
+        // zip extrusions. zcta-safezone-fill (2D) would composite above the FBO — x-ray artifact.
+        if (map.getLayer('zcta-safe-extrude')) {
+          map.setPaintProperty('zcta-safe-extrude', 'fill-extrusion-color', '#ffffff');
+          map.setPaintProperty('zcta-safe-extrude', 'fill-extrusion-height', 1);
+          map.setPaintProperty('zcta-safe-extrude', 'fill-extrusion-opacity', 0.72);
+        }
         if (map.getLayer('zcta-safezone-fill')) map.setPaintProperty('zcta-safezone-fill', 'fill-opacity', 0);
+        // Show far-zoom 2D line to bridge z9–z12 (zcta-outline annular cap is frozen at z12 size)
+        if (map.getLayer('zcta-3d-line')) map.setPaintProperty('zcta-3d-line', 'line-opacity', 1);
 
         const extrudeColorExpr = ['step', ['get', '_tier'], HEAT_COLORS.cold, 1, HEAT_COLORS.cool, 2, HEAT_COLORS.warm, 3, HEAT_COLORS.orange, 4, HEAT_COLORS.hot];
         // FIX SATELLITE: 3D+heatmap extrusion stays solid (1.0) even when satellite is on
@@ -2850,6 +2897,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         // 2D heatmap — also used for Real3D (2D zcta-fill + zcta-line stay visible;
         // opaque 3D buildings and roads occlude them via render order).
         // safe-line visible in Real3D (zcta-safezone-fill is 2D, no z-fighting).
+        if (map.getLayer('zcta-safe-extrude')) map.setPaintProperty('zcta-safe-extrude', 'fill-extrusion-opacity', 0);
+        if (map.getLayer('zcta-3d-line')) map.setPaintProperty('zcta-3d-line', 'line-opacity', 0);
         map.setPaintProperty('zcta-safe-line', 'line-opacity', 1);
         if (map.getLayer('zcta-safezone-fill')) map.setPaintProperty('zcta-safezone-fill', 'fill-opacity', satellite ? 0.22 : 1.0);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-color', '#1a0505');
@@ -2885,9 +2934,16 @@ export default function MapView({ events, headerCollapsed = false, interactive =
 
       if (threeD) {
         map.setPaintProperty('zcta-safe-line', 'line-opacity', 0);
-        // zcta-safezone-fill is a 2D fill that renders after the FE group — hide in 3D to prevent
-        // x-ray artifact (white safezone showing on top of dark red extrusions).
+        // In 3D mode: use zcta-safe-extrude (fill-extrusion) so safezones depth-test against
+        // zip extrusions. zcta-safezone-fill (2D) would composite above the FBO — x-ray artifact.
+        if (map.getLayer('zcta-safe-extrude')) {
+          map.setPaintProperty('zcta-safe-extrude', 'fill-extrusion-color', '#ffffff');
+          map.setPaintProperty('zcta-safe-extrude', 'fill-extrusion-height', 1);
+          map.setPaintProperty('zcta-safe-extrude', 'fill-extrusion-opacity', 0.72);
+        }
         if (map.getLayer('zcta-safezone-fill')) map.setPaintProperty('zcta-safezone-fill', 'fill-opacity', 0);
+        // Show far-zoom 2D line to bridge z9–z12 (zcta-outline annular cap is frozen at z12 size)
+        if (map.getLayer('zcta-3d-line')) map.setPaintProperty('zcta-3d-line', 'line-opacity', 1);
         // FIX SATELLITE: 3D no-heatmap extrusion is semi-transparent when satellite is on
         const flatColorExpr = '#220202';
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-color', withHoverColor(flatColorExpr));
@@ -2913,6 +2969,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       } else {
         // 2D non-heatmap — also used for Real3D (2D zcta-fill + zcta-line stay visible).
         // safe-line visible in Real3D (zcta-safezone-fill is 2D, no z-fighting).
+        if (map.getLayer('zcta-safe-extrude')) map.setPaintProperty('zcta-safe-extrude', 'fill-extrusion-opacity', 0);
+        if (map.getLayer('zcta-3d-line')) map.setPaintProperty('zcta-3d-line', 'line-opacity', 0);
         map.setPaintProperty('zcta-safe-line', 'line-opacity', 1);
         if (map.getLayer('zcta-safezone-fill')) map.setPaintProperty('zcta-safezone-fill', 'fill-opacity', satellite ? 0.22 : 1.0);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-color', '#1a0505');
@@ -3175,18 +3233,21 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       // when the underlying data revision changes (heatmap recolor / events update).
       // Pan and fractional zoom (e.g., 14.3 → 14.7) reuse the prior setData → instant.
       const intZoom = Math.floor(map.getZoom());
-      const key = `${intZoom}:${is3D ? 1 : 0}:${isR3D ? 1 : 0}:${outlineCacheRevRef.current}`;
+      // In 3D mode, zcta-outline is frozen at z12 size — use 12 as the key so there are no
+      // per-zoom rebuilds. zcta-3d-line (CSS interpolation) handles far-zoom bandwidth smoothly.
+      const zctaKeyZoom = is3D ? 12 : intZoom;
+      const key = `${zctaKeyZoom}:${is3D ? 1 : 0}:${isR3D ? 1 : 0}:${outlineCacheRevRef.current}`;
       if (key === lastOutlineKeyRef.current) return;
       lastOutlineKeyRef.current = key;
-      // ZCTA outline — 3D only
+      // ZCTA outline — 3D only; frozen at z12 width for smooth far-zoom (zcta-3d-line bridges z9–z12)
       if (is3D && map.getSource('zcta-outline')) {
         if (zctaSkeletonRef.current && withHeatRef.current) {
           const overrides = withHeatRef.current.features.map(f => f.properties);
           map.getSource('zcta-outline').setData(
-            generateZctaQuadsFromSkeleton(zctaSkeletonRef.current, getZoomAwareOutlineWidth(map, undefined, true), overrides)
+            generateZctaQuadsFromSkeleton(zctaSkeletonRef.current, getZoomAwareOutlineWidth(map, undefined, true, 12), overrides)
           );
         } else if (withHeatRef.current) {
-          map.getSource('zcta-outline').setData(createZctaOutlineGeoJSON(withHeatRef.current, getZoomAwareOutlineWidth(map, undefined, true)));
+          map.getSource('zcta-outline').setData(createZctaOutlineGeoJSON(withHeatRef.current, getZoomAwareOutlineWidth(map, undefined, true, 12)));
         }
       }
       // Borough outline — all modes

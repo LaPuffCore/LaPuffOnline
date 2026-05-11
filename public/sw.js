@@ -359,6 +359,26 @@ self.addEventListener('message', event => {
   const msg = event.data;
   if (!msg) return;
 
+  if (msg.type === 'INVALIDATE_BUILDINGS_CACHE') {
+    event.waitUntil((async () => {
+      try {
+        const cache = await caches.open(PMTILES_CACHE);
+        const keys = await cache.keys();
+        const stale = keys.filter(r => r.url.includes('nyc_buildings'));
+        await Promise.all(stale.map(r => cache.delete(r)));
+        // Reset in-memory LRU tracking for buildings
+        for (const [k] of buildingsRangeMeta) {
+          if (k.includes('nyc_buildings')) {
+            buildingsRangeMeta.delete(k);
+          }
+        }
+        buildingsRangeTotalBytes = 0;
+        console.log(`[SW] Invalidated ${stale.length} stale nyc_buildings range entries`);
+      } catch (e) { console.warn('[SW] INVALIDATE_BUILDINGS_CACHE failed:', e); }
+    })());
+    return;
+  }
+
   if (msg.type === 'PRECACHE_PMTILES' && msg.url) {
     event.waitUntil((async () => {
       try {
