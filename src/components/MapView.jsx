@@ -14,7 +14,7 @@ import { SAMPLE_MODE } from '../lib/sampleConfig';
 import { getSampleUsersForZip } from '../lib/sampleUsers';
 import { fetchGeoPostFeed, fetchReactionsForPosts } from '../lib/supabase';
 
-const GEOJSON_URL = './data/MODZCTA_2010_WGS1984.geo.json';
+const GEOJSON_URL = './data/finalmodzcta.json';
 const BOROUGH_GEOJSON_URL = './data/finalboroughnsafe.json';
 
 // MapLoadingScreen gate keys
@@ -1722,43 +1722,20 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     }
     fetch(GEOJSON_URL).then(r => r.json()).then(data => {
       const features = [];
-      let safezoneCounter = 0;
 
       data.features.forEach((f, i) => {
         let zip = String(f.properties.MODZCTA || f.properties.modzcta || '');
 
-        if (isSpecialZip(zip) && f.geometry?.type === 'MultiPolygon') {
-          // Split each sub-polygon into its own individually numbered safezone feature.
-          // This lets events and hover labels target the exact zone (e.g. "Safe Zone 3").
-          f.geometry.coordinates.forEach((polyCoords, pi) => {
-            const szNum = ++safezoneCounter;
-            const modzcta = `SAFEZONE_${szNum}`;
-            let szFeature = {
-              ...f,
-              geometry: { type: 'Polygon', coordinates: polyCoords },
-              properties: {
-                ...f.properties,
-                MODZCTA: modzcta,
-                _special: true,
-                _safezoneNum: szNum,
-                label: `Safezone ${szNum}`,
-              },
-            };
-            szFeature = enforceGeoJSONWinding(szFeature);
-            features.push({ ...szFeature, id: i * 1000 + pi });
-          });
-        } else {
-          // Normal zip or already-encoded safezone
-          if (isSpecialZip(zip) && !zip.startsWith('SAFEZONE')) {
-            // Single-polygon special zip — assign as SAFEZONE_N
-            const szNum = ++safezoneCounter;
-            const modzcta = `SAFEZONE_${szNum}`;
-            f = { ...f, properties: { ...f.properties, MODZCTA: modzcta, _special: true, _safezoneNum: szNum, label: `Safezone ${szNum}` } };
-          }
-          // D6: enforce correct GeoJSON winding on all features
-          f = enforceGeoJSONWinding(f);
-          features.push({ ...f, id: i });
+        if (isSpecialZip(zip)) {
+          // finalmodzcta.json: 99999 features are individual Polygons with Safezone integer
+          // baked in (1–13 from finalboroughnsafe.json spatial join).
+          const szNum = f.properties.Safezone || 0;
+          const modzcta = `SAFEZONE_${szNum}`;
+          f = { ...f, properties: { ...f.properties, MODZCTA: modzcta, _special: true, _safezoneNum: szNum, label: `Safezone ${szNum}` } };
         }
+        // Enforce correct GeoJSON winding on all features
+        f = enforceGeoJSONWinding(f);
+        features.push({ ...f, id: i });
       });
       setGeoData({ ...data, features });
       setAdjacency(buildAdjacency(features));
@@ -1954,7 +1931,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       filter: ['==', ['get', '_special'], true],
       paint: {
         'fill-color': '#ffffff',
-        'fill-opacity': sat ? 0.22 : 1.0,
+        'fill-opacity': sat ? 0.6 : 1.0,
         'fill-outline-color': 'rgba(0,0,0,0)',
       },
     });
@@ -2870,7 +2847,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         if (map.getLayer('zcta-safe-extrude')) {
           map.setPaintProperty('zcta-safe-extrude', 'fill-extrusion-color', '#ffffff');
           map.setPaintProperty('zcta-safe-extrude', 'fill-extrusion-height', 1);
-          map.setPaintProperty('zcta-safe-extrude', 'fill-extrusion-opacity', 0.72);
+          map.setPaintProperty('zcta-safe-extrude', 'fill-extrusion-opacity', satellite ? 0.6 : 0.72);
         }
         if (map.getLayer('zcta-safezone-fill')) map.setPaintProperty('zcta-safezone-fill', 'fill-opacity', 0);
 
@@ -2902,7 +2879,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         // safe-line visible in Real3D (zcta-safezone-fill is 2D, no z-fighting).
         if (map.getLayer('zcta-safe-extrude')) map.setPaintProperty('zcta-safe-extrude', 'fill-extrusion-opacity', 0);
         map.setPaintProperty('zcta-safe-line', 'line-opacity', 1);
-        if (map.getLayer('zcta-safezone-fill')) map.setPaintProperty('zcta-safezone-fill', 'fill-opacity', satellite ? 0.22 : 1.0);
+        if (map.getLayer('zcta-safezone-fill')) map.setPaintProperty('zcta-safezone-fill', 'fill-opacity', satellite ? 0.6 : 1.0);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-color', '#1a0505');
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-height', 0);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', 0);
@@ -2941,7 +2918,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         if (map.getLayer('zcta-safe-extrude')) {
           map.setPaintProperty('zcta-safe-extrude', 'fill-extrusion-color', '#ffffff');
           map.setPaintProperty('zcta-safe-extrude', 'fill-extrusion-height', 1);
-          map.setPaintProperty('zcta-safe-extrude', 'fill-extrusion-opacity', 0.72);
+          map.setPaintProperty('zcta-safe-extrude', 'fill-extrusion-opacity', satellite ? 0.6 : 0.72);
         }
         if (map.getLayer('zcta-safezone-fill')) map.setPaintProperty('zcta-safezone-fill', 'fill-opacity', 0);
         // FIX SATELLITE: 3D no-heatmap extrusion is semi-transparent when satellite is on
@@ -2971,7 +2948,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         // safe-line visible in Real3D (zcta-safezone-fill is 2D, no z-fighting).
         if (map.getLayer('zcta-safe-extrude')) map.setPaintProperty('zcta-safe-extrude', 'fill-extrusion-opacity', 0);
         map.setPaintProperty('zcta-safe-line', 'line-opacity', 1);
-        if (map.getLayer('zcta-safezone-fill')) map.setPaintProperty('zcta-safezone-fill', 'fill-opacity', satellite ? 0.22 : 1.0);
+        if (map.getLayer('zcta-safezone-fill')) map.setPaintProperty('zcta-safezone-fill', 'fill-opacity', satellite ? 0.6 : 1.0);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-color', '#1a0505');
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-height', 0);
         map.setPaintProperty('zcta-extrude', 'fill-extrusion-opacity', 0);
@@ -3848,7 +3825,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     // Safezone opacity
     const isSat = satelliteRef?.current ?? satellite;
     if (map.getLayer('zcta-safezone-fill')) {
-      map.setPaintProperty('zcta-safezone-fill', 'fill-opacity', isSat ? 0.22 : 1.0);
+      map.setPaintProperty('zcta-safezone-fill', 'fill-opacity', isSat ? 0.6 : 1.0);
     }
 
     // PMTiles buildings paint refresh — identical desktop/mobile, no fetch needed.

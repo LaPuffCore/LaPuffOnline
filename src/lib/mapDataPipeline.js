@@ -6,10 +6,10 @@
 import mapCacheStore from './mapCacheStore';
 
 // ── Constants ────────────────────────────────────────────────────────────────
-export const GEOJSON_URL        = './data/MODZCTA_2010_WGS1984.geo.json';
+export const GEOJSON_URL        = './data/finalmodzcta.json';
 export const BOROUGH_GEOJSON_URL = './data/finalboroughnsafe.json';
-// v5: new finalboroughnsafe.json borough file (13 safezones explicit, slivers removed)
-export const MAP_CACHE_DONE_KEY     = 'lapuff_map_cache_v5';
+// v6: finalmodzcta.json with Safezone integers baked in, named by finalboroughnsafe.json
+export const MAP_CACHE_DONE_KEY     = 'lapuff_map_cache_v6';
 export const MAP_CACHE_BUILDING_KEY = 'lapuff_map_cache_building';
 
 // Bump this string whenever nyc_buildings.pmtiles is replaced on the server.
@@ -557,31 +557,18 @@ export async function runPhase2A(events, isMobile, onProgress) {
   report(P.zcta[0], 'Fetching zone boundaries...');
   const rawGeo = await fetch(GEOJSON_URL).then(r => r.json());
   const features = [];
-  let safezoneCounter = 0;
 
   rawGeo.features.forEach((f, i) => {
     let zip = String(f.properties.MODZCTA || f.properties.modzcta || '');
-    if (isSpecialZip(zip) && f.geometry?.type === 'MultiPolygon') {
-      f.geometry.coordinates.forEach((polyCoords, pi) => {
-        const szNum = ++safezoneCounter;
-        const modzcta = `SAFEZONE_${szNum}`;
-        let szFeature = {
-          ...f,
-          geometry: { type: 'Polygon', coordinates: polyCoords },
-          properties: { ...f.properties, MODZCTA: modzcta, _special: true, _safezoneNum: szNum, label: `Safezone ${szNum}` },
-        };
-        szFeature = enforceGeoJSONWinding(szFeature);
-        features.push({ ...szFeature, id: i * 1000 + pi });
-      });
-    } else {
-      if (isSpecialZip(zip) && !zip.startsWith('SAFEZONE')) {
-        const szNum = ++safezoneCounter;
-        const modzcta = `SAFEZONE_${szNum}`;
-        f = { ...f, properties: { ...f.properties, MODZCTA: modzcta, _special: true, _safezoneNum: szNum, label: `Safezone ${szNum}` } };
-      }
-      f = enforceGeoJSONWinding(f);
-      features.push({ ...f, id: i });
+    if (isSpecialZip(zip)) {
+      // finalmodzcta.json: 99999 features are individual Polygons with Safezone integer
+      // baked in (1–13 from finalboroughnsafe.json spatial join).
+      const szNum = f.properties.Safezone || 0;
+      const modzcta = `SAFEZONE_${szNum}`;
+      f = { ...f, properties: { ...f.properties, MODZCTA: modzcta, _special: true, _safezoneNum: szNum, label: `Safezone ${szNum}` } };
     }
+    f = enforceGeoJSONWinding(f);
+    features.push({ ...f, id: i });
   });
 
   const geoData = { ...rawGeo, features };
