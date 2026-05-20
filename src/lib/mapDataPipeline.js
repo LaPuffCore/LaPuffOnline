@@ -491,6 +491,24 @@ function computeZctaBboxes(geoData) {
 // Buildings are now served via PMTiles (nyc_buildings_z12.pmtiles) directly by
 // MapLibre's pmtiles:// protocol. No FGB parsing, no worker, no IDB hydrate.
 
+// Duplicated from MapView.jsx — kept in sync for Phase 2A pre-computation.
+function computeBoroughAvgTiersLocal(tiers, zipBoroughMap, boroughCount) {
+  const TIER_POINTS = [0, 2, 3, 4, 5];
+  const boroughTotalPts = new Array(boroughCount).fill(0);
+  Object.entries(zipBoroughMap).forEach(([idx, bi]) => {
+    const i = parseInt(idx);
+    const tier = Math.min(4, Math.max(0, tiers[i] ?? 0));
+    boroughTotalPts[bi] += TIER_POINTS[tier];
+  });
+  const indexed = boroughTotalPts.map((pts, i) => ({ pts, i }));
+  indexed.sort((a, b) => b.pts - a.pts);
+  const ranked = new Array(boroughCount).fill(0);
+  for (let pos = 0; pos < indexed.length; pos++) {
+    ranked[indexed[pos].i] = Math.max(0, 4 - pos);
+  }
+  return ranked;
+}
+
 // ── Phase 2A entry point ─────────────────────────────────────────────────────
 
 /**
@@ -651,6 +669,28 @@ export async function runPhase2A(events, isMobile, onProgress) {
   }
   report(P.tiers[1], 'Heat data ready');
 
+  // Pre-compute borough event counts and tier rankings for all 5 timespans (Phase 2A addition).
+  // Stored as boroughEventCountsByTimespan[timespanIdx][boroughIdx] → count
+  // and boroughTiersByTimespan[timespanIdx][boroughIdx] → tier (0-4)
+  const boroughCount = boroughGeoData.features.length;
+  const boroughEventCountsByTimespan = {};
+  const boroughTiersByTimespan = {};
+  if (boroughCount > 0 && zipBoroughMap) {
+    for (let idx = 0; idx < TIMESPAN_STEPS.length; idx++) {
+      const { zipMap, tiers } = precomputedTiers[idx];
+      const counts = new Array(boroughCount).fill(0);
+      geoData.features.forEach((f, i) => {
+        const bi = zipBoroughMap[i];
+        if (bi === undefined) return;
+        const zip = String(f.properties?.MODZCTA || '');
+        const evts = zipMap[zip] || [];
+        counts[bi] += evts.length;
+      });
+      boroughEventCountsByTimespan[idx] = counts.reduce((acc, c, i) => { acc[i] = c; return acc; }, {});
+      boroughTiersByTimespan[idx] = computeBoroughAvgTiersLocal(tiers, zipBoroughMap, boroughCount);
+    }
+  }
+
   // ── Write all 2A data to store ────────────────────────────────────────────
   mapCacheStore.geoData        = geoData;
   mapCacheStore.adjacency      = adjacency;
@@ -660,6 +700,8 @@ export async function runPhase2A(events, isMobile, onProgress) {
   mapCacheStore.boroughSkeleton = boroughSkeleton;
   mapCacheStore.zipBoroughMap  = zipBoroughMap;
   mapCacheStore.precomputedTiers = precomputedTiers;
+  mapCacheStore.boroughEventCountsByTimespan = boroughEventCountsByTimespan;
+  mapCacheStore.boroughTiersByTimespan = boroughTiersByTimespan;
 
 // ── Road header pre-warm + full-file SW pre-cache ───────────────────────
   // SW receives PRECACHE_PMTILES → fetches full file once → serves Range slices in-memory.

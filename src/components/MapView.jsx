@@ -1310,7 +1310,7 @@ function AftersCheckInModal({ event, onClose }) {
 // Consolidated from old ZipHologram + ZipHologramMobile (95% duplicated).
 // `mobile`   → smaller canvas, lower depth, no scanline overlay / CRT flash
 // `embedded` → mobile only: render inline (no fixed positioning, no header)
-function ZipHologram({ feature, color, onClose, leftOffset = 0, mobile = false, embedded = false }) {
+function ZipHologram({ feature, color, onClose, leftOffset = 0, mobile = false, embedded = false, boroughMode = false, boroughName = '' }) {
   const canvasRef = useRef(null);
   const animRef   = useRef(null);
   const timeRef   = useRef(0);
@@ -1376,6 +1376,8 @@ function ZipHologram({ feature, color, onClose, leftOffset = 0, mobile = false, 
   }, [onClose, mobile]);
 
   const zipLabel = feature?.properties?.MODZCTA;
+  const holoTitle = boroughMode ? `BOROUGH — ${boroughName} — ISOLATED` : `ZIP ${zipLabel} — ISOLATED`;
+  const holoSubtitle = boroughMode ? '◈ Borough Holographic Mode ◈' : '◈ Holographic Extrusion Mode ◈';
 
   if (mobile && embedded) {
     return (
@@ -1389,11 +1391,11 @@ function ZipHologram({ feature, color, onClose, leftOffset = 0, mobile = false, 
     return (
       <div className="absolute inset-x-0 top-0 z-40 flex flex-col" style={{ height: '50%', background: 'rgba(0,0,0,0.78)', backdropFilter: 'blur(4px)' }}>
         <div className="flex items-center justify-between px-3 py-2 flex-shrink-0">
-          <div style={{ color, textShadow: `0 0 12px ${color}` }} className="font-black text-sm tracking-widest uppercase">ZIP {zipLabel} — ISOLATED</div>
+          <div style={{ color, textShadow: `0 0 12px ${color}` }} className="font-black text-sm tracking-widest uppercase">{holoTitle}</div>
           <button onClick={onClose} className="w-8 h-8 rounded-full border font-black text-xs flex items-center justify-center hover:bg-white/20" style={{ borderColor: color, color }}>✕</button>
         </div>
         <canvas ref={canvasRef} width={W_PX} height={H_PX} style={{ width: '100%', flex: 1, minHeight: 0, borderTop: `1px solid ${color}44`, background: '#000000bb' }} />
-        <div className="text-center py-1 text-[10px] font-black tracking-widest opacity-40 uppercase flex-shrink-0" style={{ color }}>◈ Hologram ◈</div>
+        <div className="text-center py-1 text-[10px] font-black tracking-widest opacity-40 uppercase flex-shrink-0" style={{ color }}>{holoSubtitle}</div>
       </div>
     );
   }
@@ -1402,12 +1404,12 @@ function ZipHologram({ feature, color, onClose, leftOffset = 0, mobile = false, 
       <div className="absolute inset-0" style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)' }} />
       <div className="relative pointer-events-auto flex flex-col items-center" style={{ width: 480, maxWidth: '90%', zIndex: 1 }}>
         <div className="flex items-center justify-between w-full mb-3 px-1">
-          <div style={{ color, textShadow: `0 0 12px ${color}` }} className="font-black text-lg tracking-widest uppercase">ZIP {zipLabel} — ISOLATED</div>
+          <div style={{ color, textShadow: `0 0 12px ${color}` }} className="font-black text-lg tracking-widest uppercase">{holoTitle}</div>
           <button onClick={onClose} className="w-9 h-9 rounded-full border-2 font-black text-sm flex items-center justify-center hover:bg-white/20" style={{ borderColor: color, color }}>✕</button>
         </div>
         <canvas ref={canvasRef} width={W_PX} height={H_PX} style={{ width: '100%', height: H_PX, borderRadius: 18, border: `2px solid ${color}`, boxShadow: `0 0 40px ${color}66, 0 0 80px ${color}33`, background: '#000000cc' }} />
         <div className="absolute pointer-events-none" style={{ top: 44, left: 0, right: 0, height: H_PX, background: 'repeating-linear-gradient(transparent, transparent 3px, rgba(0,0,0,0.25) 3px, rgba(0,0,0,0.25) 4px)', borderRadius: 18 }} />
-        <div className="mt-3 text-xs font-black tracking-widest opacity-50 uppercase" style={{ color }}>◈ Holographic Extrusion Mode ◈</div>
+        <div className="mt-3 text-xs font-black tracking-widest opacity-50 uppercase" style={{ color }}>{holoSubtitle}</div>
       </div>
     </div>
   );
@@ -1606,6 +1608,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   const [locLoading,    setLocLoading]    = useState(false);
   const [holoFeature,   setHoloFeature]   = useState(null);
   const [holoColor,     setHoloColor]     = useState(HEAT_COLORS.cold);
+  const [holoBoroughMode, setHoloBoroughMode] = useState(false);
+  const [holoBoroughName, setHoloBoroughName] = useState('');
   const [isMobile,      setIsMobile]      = useState(false);
   const [isOffline,     setIsOffline]     = useState(() => !navigator.onLine);
   const [connectionNotice, setConnectionNotice] = useState('');
@@ -1620,6 +1624,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   const [mapPostsLoading, setMapPostsLoading] = useState(false);
   const [mapPostsReactions, setMapPostsReactions] = useState({});
   const hoveredBoroughIdRef = useRef(null);
+  const hoveredBoroughNameRef = useRef(null); // Tracks borough name for ZCTA batch boroughHover feature states
   // Event pin markers toggle
   const [showPins, setShowPins] = useState(false);
   // Borough region overlay toggle
@@ -1666,6 +1671,34 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   useEffect(() => {
     if (!mapReady) return;
     fetch(ROADS_PMTILES_URL, { headers: { Range: 'bytes=0-16383' } }).catch(() => {});
+  }, [mapReady]);
+
+  // One-time: add ZCTA borough-hover highlight layers (respond to 'boroughHover' feature state)
+  useEffect(() => {
+    if (!mapReady) return;
+    const map = mapRef.current;
+    if (!map || map.getLayer('zcta-borough-highlight')) return;
+    try {
+      map.addLayer({
+        id: 'zcta-borough-highlight',
+        type: 'fill',
+        source: 'zcta',
+        paint: {
+          'fill-color': '#7C3AED',
+          'fill-opacity': ['case', ['boolean', ['feature-state', 'boroughHover'], false], 0.10, 0],
+        },
+      });
+      map.addLayer({
+        id: 'zcta-borough-highlight-line',
+        type: 'line',
+        source: 'zcta',
+        paint: {
+          'line-color': '#9333EA',
+          'line-opacity': ['case', ['boolean', ['feature-state', 'boroughHover'], false], 0.55, 0],
+          'line-width': 1.5,
+        },
+      });
+    } catch (_e) { /* layers might already exist if map was reused */ }
   }, [mapReady]);
 
   // Build zip→ZCTA index map as soon as geoData is available (no `interactive` gate).
@@ -2131,34 +2164,79 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       }
     });
 
+    // Helper: batch-set 'boroughHover' feature state on all ZCTA features in a borough
+    const setBoroughHoverStates = (boroughName, active) => {
+      const data = geoDataRef.current;
+      if (!data) return;
+      const bIdx = BOROUGH_DATA.findIndex(b => b.name === boroughName);
+      if (bIdx < 0) return;
+      data.features.forEach((_, idx) => {
+        if (zipBoroughMapRef.current[idx] === bIdx) {
+          map.setFeatureState({ source: 'zcta', id: idx }, { boroughHover: active });
+        }
+      });
+    };
+
     // Borough hover via 'borough-hover-fill' layer.
-    // When cursor is inside a borough polygon, we check if a ZCTA zip is also under the cursor.
-    // If yes → zip takes priority (return early, existing ZCTA handlers manage it).
-    // If no (cursor in harbour/water border area) → borough hover activates.
+    // Task 1.1: also checks pixel-radius proximity to 'borough-line-overlay' so hovering
+    // near the line stroke activates borough hover even when a ZCTA is under the cursor.
+    // Task 1.2: batch-updates 'boroughHover' feature state on all ZCTA features in borough.
     const handleBoroughFillHover = e => {
       if (!e.features.length) return;
-      // Check all possible ZCTA layers (varies by 2D/3D mode) for zip under cursor
+      const f = e.features[0];
+      const newBoroughName = String(f.properties.BoroName || '');
+
+      // Check if cursor is within ~6px of the borough line stroke
+      const lineFeats = map.queryRenderedFeatures(
+        [[e.point.x - 6, e.point.y - 6], [e.point.x + 6, e.point.y + 6]],
+        { layers: ['borough-line-overlay'].filter(l => map.getLayer(l)) }
+      );
+      const nearLine = lineFeats.length > 0;
+
+      // Check if a ZCTA zip is directly under the cursor (exact point, not padded)
       const zctaLayers = ['zcta-fill', 'zcta-extrude', 'zcta-safezone-hover', 'zcta-safezone-fill']
         .filter(l => map.getLayer(l));
-      if (zctaLayers.length > 0 && map.queryRenderedFeatures(e.point, { layers: zctaLayers }).length > 0) {
-        // A zip is under the cursor — clear borough hover and let ZCTA handlers manage
+      const zctaUnder = zctaLayers.length > 0 && map.queryRenderedFeatures(e.point, { layers: zctaLayers }).length > 0;
+
+      // ZCTA takes priority unless cursor is near the borough line stroke
+      if (zctaUnder && !nearLine) {
         if (hoveredBoroughIdRef.current !== null) {
           map.setFeatureState({ source: 'borough-hover-source', id: hoveredBoroughIdRef.current }, { hovered: false });
           hoveredBoroughIdRef.current = null;
+          if (hoveredBoroughNameRef.current) {
+            setBoroughHoverStates(hoveredBoroughNameRef.current, false);
+            hoveredBoroughNameRef.current = null;
+          }
           setHoveredBorough(null);
         }
         return;
       }
-      // No zip under cursor → this is harbour/water border area: activate borough hover
-      const f = e.features[0];
+
+      // Borough hover activates. If near line and ZCTA also present, suppress ZCTA hover.
+      if (nearLine && zctaUnder) {
+        if (hoveredIdRef.current !== null) {
+          map.setFeatureState({ source: 'zcta', id: hoveredIdRef.current }, { hovered: false });
+          hoveredIdRef.current = null;
+        }
+        setHoveredZip(null);
+        setTooltipPos(null);
+      }
+
       if (hoveredBoroughIdRef.current !== f.id) {
-        if (hoveredBoroughIdRef.current !== null)
+        if (hoveredBoroughIdRef.current !== null) {
           map.setFeatureState({ source: 'borough-hover-source', id: hoveredBoroughIdRef.current }, { hovered: false });
+        }
+        // Clear ZCTA highlight for previous borough
+        if (hoveredBoroughNameRef.current && hoveredBoroughNameRef.current !== newBoroughName) {
+          setBoroughHoverStates(hoveredBoroughNameRef.current, false);
+        }
         hoveredBoroughIdRef.current = f.id;
         map.setFeatureState({ source: 'borough-hover-source', id: f.id }, { hovered: true });
+        hoveredBoroughNameRef.current = newBoroughName;
+        setBoroughHoverStates(newBoroughName, true);
       }
       map.getCanvas().style.cursor = 'pointer';
-      setHoveredBorough(String(f.properties.BoroName || ''));
+      setHoveredBorough(newBoroughName);
       setTooltipPos({ x: e.point.x, y: e.point.y });
     };
     const handleBoroughFillLeave = () => {
@@ -2166,24 +2244,32 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         map.setFeatureState({ source: 'borough-hover-source', id: hoveredBoroughIdRef.current }, { hovered: false });
         hoveredBoroughIdRef.current = null;
       }
+      if (hoveredBoroughNameRef.current) {
+        setBoroughHoverStates(hoveredBoroughNameRef.current, false);
+        hoveredBoroughNameRef.current = null;
+      }
       setHoveredBorough(null);
       if (hoveredIdRef.current === null) map.getCanvas().style.cursor = '';
     };
-    // Left-click on borough border area → events+colonists side panel (right)
+    // Left-click on borough border area → open all three panels + hologram (Task 1.7)
     const handleBoroughFillClick = e => {
       if (!e.features.length) return;
-      // Zip takes priority for clicks too
       const zctaLayers = ['zcta-fill', 'zcta-extrude', 'zcta-safezone-hover', 'zcta-safezone-fill']
         .filter(l => map.getLayer(l));
       if (zctaLayers.length > 0 && map.queryRenderedFeatures(e.point, { layers: zctaLayers }).length > 0) return;
       const boroughName = String(e.features[0].properties.BoroName || '');
-      if (boroughName) openBoroughSidePanel(boroughName);
+      if (boroughName) {
+        openBoroughSidePanel(boroughName);
+        setMapPostsPanel({ type: 'borough', value: boroughName }); setMapPostsPage(0);
+        openBoroughHologram(boroughName);
+      }
     };
     map.on('mousemove', 'borough-hover-fill', handleBoroughFillHover);
     map.on('mouseleave', 'borough-hover-fill', handleBoroughFillLeave);
     map.on('click', 'borough-hover-fill', handleBoroughFillClick);
 
     // Mobile long-press: 1 second hold on zip opens MapPostsPanel; hold on borough border opens borough events panel
+    // Task 1.3: immediately shows visual selection highlight on touchstart; clears on cancel.
     const canvas = map.getCanvas();
     let touchTimer = null;
     let touchPoint = null;
@@ -2192,6 +2278,35 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       const touch = e.touches[0];
       const rect = canvas.getBoundingClientRect();
       touchPoint = { x: touch.clientX - rect.left, y: touch.clientY - rect.top };
+
+      // Immediate visual highlight on touch start
+      const zipFeatsImm = map.queryRenderedFeatures([touchPoint.x, touchPoint.y], { layers: ['zcta-fill', 'zcta-safezone-hover'] });
+      if (zipFeatsImm.length > 0) {
+        const fImm = zipFeatsImm[0];
+        if (hoveredIdRef.current !== null && hoveredIdRef.current !== fImm.id)
+          map.setFeatureState({ source: 'zcta', id: hoveredIdRef.current }, { hovered: false });
+        hoveredIdRef.current = fImm.id;
+        map.setFeatureState({ source: 'zcta', id: fImm.id }, { hovered: true });
+        const zipImm = String(fImm.properties.MODZCTA || '');
+        const isSafezoneImm = !!fImm.properties._special;
+        setHoveredZip(isSafezoneImm ? `SAFE:${zipImm}` : zipImm);
+      } else {
+        const boroughFeatsImm = map.queryRenderedFeatures([touchPoint.x, touchPoint.y], { layers: ['borough-hover-fill'] });
+        if (boroughFeatsImm.length > 0) {
+          const bfImm = boroughFeatsImm[0];
+          const bnImm = String(bfImm.properties.BoroName || '');
+          if (bnImm) {
+            if (hoveredBoroughIdRef.current !== null && hoveredBoroughIdRef.current !== bfImm.id)
+              map.setFeatureState({ source: 'borough-hover-source', id: hoveredBoroughIdRef.current }, { hovered: false });
+            hoveredBoroughIdRef.current = bfImm.id;
+            map.setFeatureState({ source: 'borough-hover-source', id: bfImm.id }, { hovered: true });
+            hoveredBoroughNameRef.current = bnImm;
+            setBoroughHoverStates(bnImm, true);
+            setHoveredBorough(bnImm);
+          }
+        }
+      }
+
       touchTimer = setTimeout(() => {
         if (!touchPoint) return;
         const zipFeats = map.queryRenderedFeatures([touchPoint.x, touchPoint.y], { layers: ['zcta-fill', 'zcta-safezone-hover'] });
@@ -2208,7 +2323,25 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         }
       }, 1000);
     };
-    const onTouchCancel = () => { clearTimeout(touchTimer); touchPoint = null; };
+    const onTouchCancel = () => {
+      clearTimeout(touchTimer);
+      touchPoint = null;
+      // Clear visual highlights on cancel/move
+      if (hoveredIdRef.current !== null) {
+        map.setFeatureState({ source: 'zcta', id: hoveredIdRef.current }, { hovered: false });
+        hoveredIdRef.current = null;
+        setHoveredZip(null);
+      }
+      if (hoveredBoroughIdRef.current !== null) {
+        map.setFeatureState({ source: 'borough-hover-source', id: hoveredBoroughIdRef.current }, { hovered: false });
+        hoveredBoroughIdRef.current = null;
+        if (hoveredBoroughNameRef.current) {
+          setBoroughHoverStates(hoveredBoroughNameRef.current, false);
+          hoveredBoroughNameRef.current = null;
+        }
+        setHoveredBorough(null);
+      }
+    };
     canvas.addEventListener('touchstart', onTouchStart, { passive: true });
     canvas.addEventListener('touchmove', onTouchCancel, { passive: true });
     canvas.addEventListener('touchend', onTouchCancel, { passive: true });
@@ -2220,6 +2353,27 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     const feat = data.features.find(f => f.id === clickedFeature.id) || clickedFeature;
     const idx = data.features.findIndex(f => f.id === clickedFeature.id);
     const tier = tiersRef.current[idx] ?? 0;
+    setHoloBoroughMode(false);
+    setHoloBoroughName('');
+    setHoloFeature(feat);
+    setHoloColor(tier < 0 ? '#888888' : tierColor(tier));
+  }
+
+  function openBoroughHologram(boroughNameOrFeature) {
+    const boroughGeoDataVal = boroughGeoDataRef.current;
+    if (!boroughGeoDataVal) return;
+    const boroughName = typeof boroughNameOrFeature === 'string'
+      ? boroughNameOrFeature
+      : String(boroughNameOrFeature?.properties?.BoroName || '');
+    if (!boroughName) return;
+    const feat = boroughGeoDataVal.features.find(f => f.properties.BoroName === boroughName)
+      || (typeof boroughNameOrFeature !== 'string' ? boroughNameOrFeature : null);
+    if (!feat) return;
+    const avgTiers = boroughAvgTiersRef.current || [];
+    const boroughIdx = BOROUGH_DATA.findIndex(b => b.name === boroughName);
+    const tier = boroughIdx >= 0 ? (avgTiers[boroughIdx] ?? 0) : 0;
+    setHoloBoroughMode(true);
+    setHoloBoroughName(boroughName);
     setHoloFeature(feat);
     setHoloColor(tier < 0 ? '#888888' : tierColor(tier));
   }
@@ -4366,8 +4520,10 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   }, [showPins, events, mapReady, timespanIdx]);
 
   // Borough region overlay — creates MapLibre Marker boxes for each NYC borough.
-  // Shows future event count, participant count (async), and heat rank when heatmap is ON.
-  // Zoom-responsive scale: larger at z9-10, smaller at z13+.
+  // Task 1.7: panels are clickable — clicking opens right panel + posts panel + hologram.
+  // Task 1.8: DOM elements tagged with data attrs for imperative timespan updates.
+  // Task 1.9: scale applied to inner wrapper (not MapLibre-controlled root element).
+  //           Corrected zoom scale: z9=0.25, z10=0.70, z11-z16=1.0 (linear interpolation).
   useEffect(() => {
     const map = mapRef.current;
 
@@ -4383,27 +4539,31 @@ export default function MapView({ events, headerCollapsed = false, interactive =
 
     const nowDay = new Date(); nowDay.setHours(0, 0, 0, 0);
     const avgTiers = boroughAvgTiersRef.current || [];
-    const domBoxes = {};
 
-    BOROUGH_DATA.forEach((bd, idx) => {
+    BOROUGH_DATA.forEach((bd, boroughIdx) => {
       const eventCount = (events || []).filter(e =>
         !e._auto && !e._sample &&
         e.borough === bd.name &&
         new Date(e.event_date + 'T00:00:00') >= nowDay
       ).length;
-      const tier = avgTiers[idx] ?? -1;
+      const tier = avgTiers[boroughIdx] ?? -1;
       const rank = (heatmap && tier >= 0) ? tierHeatLabel(tier) : null;
 
-      const el = document.createElement('div');
-      el.style.cssText = [
+      // Outer element: MapLibre controls its style.transform for positioning — do NOT touch it.
+      const outerEl = document.createElement('div');
+      outerEl.style.cssText = 'pointer-events:auto;cursor:pointer;transform-origin:bottom center;';
+
+      // Inner element: we control scale transforms here safely.
+      const innerEl = document.createElement('div');
+      innerEl.setAttribute('data-borough-name', bd.name);
+      innerEl.setAttribute('data-borough-idx', String(boroughIdx));
+      innerEl.style.cssText = [
         'background:rgba(0,0,0,0.72)',
         'color:#fff',
         'font-family:Nunito,sans-serif',
         'border:1.5px solid rgba(255,255,255,0.22)',
         'border-radius:10px',
         'padding:8px 14px',
-        'pointer-events:none',
-        'z-index:99999',
         'font-size:13px',
         'font-weight:700',
         'text-align:center',
@@ -4411,57 +4571,74 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         'backdrop-filter:blur(4px)',
         '-webkit-backdrop-filter:blur(4px)',
         'transform-origin:bottom center',
+        'transition:transform 150ms ease',
       ].join(';');
 
       const nameEl = document.createElement('div');
       nameEl.textContent = bd.name;
       nameEl.style.cssText = 'font-size:15px;font-weight:900;margin-bottom:5px;letter-spacing:0.01em;';
-      el.appendChild(nameEl);
+      innerEl.appendChild(nameEl);
 
       const evEl = document.createElement('div');
+      evEl.setAttribute('data-count', '1');
       evEl.textContent = `🎉 ${eventCount} upcoming`;
       evEl.style.cssText = 'font-size:12px;opacity:0.9;margin-bottom:3px;';
-      el.appendChild(evEl);
+      innerEl.appendChild(evEl);
 
       const pEl = document.createElement('div');
       pEl.textContent = '👥 loading…';
       pEl.style.cssText = 'font-size:12px;opacity:0.75;';
-      el.appendChild(pEl);
-      domBoxes[bd.name] = { pEl };
+      innerEl.appendChild(pEl);
 
+      const tierEl = document.createElement('div');
+      tierEl.setAttribute('data-tier', '1');
       if (rank) {
-        const hEl = document.createElement('div');
-        hEl.textContent = `🔥 ${rank.label}`;
-        hEl.style.cssText = `font-size:11px;font-weight:900;margin-top:5px;color:${rank.color};`;
-        el.appendChild(hEl);
+        tierEl.textContent = `🔥 ${rank.label}`;
+        tierEl.style.cssText = `font-size:11px;font-weight:900;margin-top:5px;color:${rank.color};`;
+      } else {
+        tierEl.style.cssText = 'display:none;font-size:11px;font-weight:900;margin-top:5px;';
       }
+      innerEl.appendChild(tierEl);
 
-      const marker = new maplibregl.Marker({ element: el, offset: [0, -52], anchor: 'bottom' })
+      // Task 1.7: clicking the panel opens all three panels simultaneously
+      outerEl.onclick = (e) => {
+        e.stopPropagation();
+        openBoroughSidePanel(bd.name);
+        setMapPostsPanel({ type: 'borough', value: bd.name }); setMapPostsPage(0);
+        openBoroughHologram(bd.name);
+        setHoveredBorough(bd.name);
+      };
+
+      outerEl.appendChild(innerEl);
+
+      const marker = new maplibregl.Marker({ element: outerEl, offset: [0, -52], anchor: 'bottom' })
         .setLngLat([bd.lng, bd.lat])
         .addTo(map);
       regionMarkersRef.current.push(marker);
+
+      // Async: load participant counts per borough
+      getBoroughColonists(bd.name).then(colonists => {
+        if (pEl) pEl.textContent = `👥 ${colonists.length} in borough`;
+      }).catch(() => {});
     });
 
-    // Zoom-responsive sizing
+    // Task 1.9: zoom-responsive scale on inner wrapper (not on MapLibre root element).
+    // z9=0.25, z10=0.70, z11+=1.0 with linear interpolation.
     const updateScale = () => {
       const z = map.getZoom();
-      const scale = Math.min(1.25, Math.max(0.6, 1.25 - (z - 9) * 0.13));
+      let scale;
+      if (z >= 11) scale = 1.0;
+      else if (z >= 10) scale = 0.70 + (z - 10) * 0.30;
+      else scale = 0.25 + Math.max(0, z - 9) * 0.45;
+      scale = Math.max(0.25, Math.min(1.0, scale));
       regionMarkersRef.current.forEach(m => {
-        m.getElement().style.transform = `scale(${scale.toFixed(3)})`;
+        const inner = m.getElement().querySelector('[data-borough-name]');
+        if (inner) inner.style.transform = `scale(${scale.toFixed(3)})`;
       });
     };
-    updateScale();
+    updateScale(); // Apply initial scale immediately (Task 1.7: no zoom event needed)
     regionZoomHandlerRef.current = updateScale;
     map.on('zoom', updateScale);
-
-    // Async: load participant counts per borough
-    BOROUGH_DATA.forEach(async (bd) => {
-      try {
-        const colonists = await getBoroughColonists(bd.name);
-        const box = domBoxes[bd.name];
-        if (box?.pEl) box.pEl.textContent = `👥 ${colonists.length} in borough`;
-      } catch (_e) { /* ignore */ }
-    });
 
     return () => {
       regionMarkersRef.current.forEach(m => m.remove());
@@ -4472,6 +4649,55 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       }
     };
   }, [showRegion, mapReady, heatmap]);
+
+  // Task 1.8: Imperatively update borough panel event counts and tier labels when timespan changes.
+  // No remount — updates DOM nodes tagged with data-count and data-tier directly.
+  useEffect(() => {
+    if (!showRegion || !mapReady) return;
+    const nowDay = new Date(); nowDay.setHours(0, 0, 0, 0);
+    const tierData = precomputedTiersRef.current?.[timespanIdx];
+    const avgTiers = boroughAvgTiersRef.current || [];
+    const geoFeatures = geoDataRef.current?.features || [];
+
+    BOROUGH_DATA.forEach((bd, boroughIdx) => {
+      const innerEl = document.querySelector(`[data-borough-name="${bd.name}"]`);
+      if (!innerEl) return;
+
+      // Recompute event count for this timespan using precomputed zipMap
+      let eventCount = 0;
+      if (tierData?.zipMap) {
+        geoFeatures.forEach((f, i) => {
+          if (zipBoroughMapRef.current[i] === boroughIdx) {
+            const zip = String(f.properties?.MODZCTA || '');
+            if (zip && tierData.zipMap[zip]) eventCount += tierData.zipMap[zip].length;
+          }
+        });
+      } else {
+        eventCount = (events || []).filter(e =>
+          !e._auto && !e._sample &&
+          e.borough === bd.name &&
+          new Date(e.event_date + 'T00:00:00') >= nowDay
+        ).length;
+      }
+
+      const evEl = innerEl.querySelector('[data-count]');
+      if (evEl) evEl.textContent = `🎉 ${eventCount} upcoming`;
+
+      // Update tier/hotness label
+      const tier = avgTiers[boroughIdx] ?? -1;
+      const rank = (heatmap && tier >= 0) ? tierHeatLabel(tier) : null;
+      const tierEl = innerEl.querySelector('[data-tier]');
+      if (tierEl) {
+        if (rank) {
+          tierEl.textContent = `🔥 ${rank.label}`;
+          tierEl.style.color = rank.color;
+          tierEl.style.display = '';
+        } else {
+          tierEl.style.display = 'none';
+        }
+      }
+    });
+  }, [timespanIdx, showRegion, events, heatmap]);
 
   useEffect(() => {
     const h = e => { if (e.key === 'Escape') { setHoloFeature(null); setSideZip(null); setSideEvents([]); setSideColonists([]); setSideBorough(null); setSideBoroughEvents([]); setSideBoroughColonists([]); } };
@@ -4834,25 +5060,25 @@ export default function MapView({ events, headerCollapsed = false, interactive =
                   )} />
                 )}
                 {/* Colonists */}
-                {sideBoroughColonists.length > 0 && (
-                  <>
-                    <p className="text-purple-300/70 text-[10px] font-bold uppercase tracking-widest mb-2 mt-4">Top Colonists</p>
-                    {sideBoroughColonists.slice(0, 10).map((u, i) => (
-                      <div key={i} className="flex items-center gap-2 py-1.5 border-b border-white/5">
-                        <span className="text-white/30 text-[10px] w-4 text-right">{i + 1}</span>
-                        <span className="text-white text-xs font-semibold flex-1">{u.username || 'Orbiter'}</span>
-                        <span className="text-yellow-400 text-[10px] font-bold">⚡ {u.clout_points || 0}</span>
-                      </div>
-                    ))}
-                  </>
-                )}
+                <PaginatedSection items={sideBoroughColonists} pageSize={10}
+                  headerLabel="Top Colonists" headerColor="text-purple-300/70"
+                  emptyMsg="No colonists yet"
+                  renderItem={(u, i) => (
+                    <div key={i} className="flex items-center gap-2 py-1.5 border-b border-white/5">
+                      <span className="text-white/30 text-[10px] w-4 text-right">{i + 1}</span>
+                      <span className="text-white text-xs font-semibold flex-1">{u.username || 'Orbiter'}</span>
+                      <span className="text-yellow-400 text-[10px] font-bold">⚡ {u.clout_points || 0}</span>
+                    </div>
+                  )} />
               </div>
             </div>
           )}
 
           {/* ── MOBILE: hologram top 50%, side panel bottom 50% ── */}
-          {holoFeature && isMobile && !sideZip && (
-            <ZipHologram mobile feature={holoFeature} color={holoColor} onClose={() => setHoloFeature(null)} />
+          {holoFeature && isMobile && !sideZip && !sideBorough && (
+            <ZipHologram mobile feature={holoFeature} color={holoColor}
+              onClose={() => { setHoloFeature(null); setHoloBoroughMode(false); setHoloBoroughName(''); }}
+              boroughMode={holoBoroughMode} boroughName={holoBoroughName} />
           )}
 
           {(sideZip || holoFeature) && isMobile && (
@@ -4888,7 +5114,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
                   >✕</button>
                 </div>
                 {holoFeature && (
-                  <ZipHologram mobile feature={holoFeature} color={holoColor} embedded onClose={null} />
+                  <ZipHologram mobile feature={holoFeature} color={holoColor} embedded onClose={null}
+                    boroughMode={holoBoroughMode} boroughName={holoBoroughName} />
                 )}
               </div>
 
@@ -4956,8 +5183,10 @@ export default function MapView({ events, headerCollapsed = false, interactive =
 
           {/* Desktop hologram — offset right if MapPostsPanel (left 1/3) is open */}
           {holoFeature && !isMobile && (
-            <ZipHologram feature={holoFeature} color={holoColor} onClose={() => setHoloFeature(null)}
-              leftOffset={mapPostsPanel ? '33.333%' : 0} />
+            <ZipHologram feature={holoFeature} color={holoColor}
+              onClose={() => { setHoloFeature(null); setHoloBoroughMode(false); setHoloBoroughName(''); }}
+              leftOffset={mapPostsPanel ? '33.333%' : 0}
+              boroughMode={holoBoroughMode} boroughName={holoBoroughName} />
           )}
 
           {/* ── MOBILE: Borough side panel (full-screen, same as zip panel) ── */}
@@ -4993,18 +5222,16 @@ export default function MapView({ events, headerCollapsed = false, interactive =
                     </div>
                   )} />
                 )}
-                {sideBoroughColonists.length > 0 && (
-                  <>
-                    <p className="text-purple-300/70 text-[10px] font-bold uppercase tracking-widest mb-2 mt-4">Top Colonists</p>
-                    {sideBoroughColonists.slice(0, 10).map((u, i) => (
-                      <div key={i} className="flex items-center gap-2 py-1.5 border-b border-white/5">
-                        <span className="text-white/30 text-[10px] w-4 text-right">{i + 1}</span>
-                        <span className="text-white text-xs font-semibold flex-1">{u.username || 'Orbiter'}</span>
-                        <span className="text-yellow-400 text-[10px] font-bold">⚡ {u.clout_points || 0}</span>
-                      </div>
-                    ))}
-                  </>
-                )}
+                <PaginatedSection items={sideBoroughColonists} pageSize={10}
+                  headerLabel="Top Colonists" headerColor="text-purple-300/70"
+                  emptyMsg="No colonists yet"
+                  renderItem={(u, i) => (
+                    <div key={i} className="flex items-center gap-2 py-1.5 border-b border-white/5">
+                      <span className="text-white/30 text-[10px] w-4 text-right">{i + 1}</span>
+                      <span className="text-white text-xs font-semibold flex-1">{u.username || 'Orbiter'}</span>
+                      <span className="text-yellow-400 text-[10px] font-bold">⚡ {u.clout_points || 0}</span>
+                    </div>
+                  )} />
               </div>
             </div>
           )}
