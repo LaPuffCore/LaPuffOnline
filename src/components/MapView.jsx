@@ -2096,13 +2096,18 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       map.addLayer({
         id: 'borough-hover-outline', type: 'line', source: 'borough-hover-source',
         paint: {
-          'line-color': '#4C1D95',
+          'line-color': '#7C3AED',
           'line-width': ['case', ['boolean', ['feature-state', 'hovered'], false], 3, 0],
           'line-opacity': ['case', ['boolean', ['feature-state', 'hovered'], false], 1, 0],
         },
       });
-      // No borough-border-hit line layer — we use 'borough-hover-fill' events directly,
-      // with a queryRenderedFeatures guard that skips when a ZCTA zip is under the cursor.
+      // Wide invisible border for hit detection — 0.001 opacity keeps it queryable
+      // in ALL modes (unlike borough-line-overlay which is 0-opacity in 2D/3D).
+      // 16px width means 8px extends outside the polygon boundary = "small distance out" zone.
+      map.addLayer({
+        id: 'borough-hover-border', type: 'line', source: 'borough-hover-source',
+        paint: { 'line-color': '#7C3AED', 'line-opacity': 0.001, 'line-width': 16 },
+      });
     }
     const handleZctaHover = e => {
       if (!e.features.length) return;
@@ -2186,10 +2191,12 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       const f = e.features[0];
       const newBoroughName = String(f.properties.BoroName || '');
 
-      // Check if cursor is within ~6px of the borough line stroke
+      // Check if cursor is within ~8px of the borough polygon boundary using the always-visible
+      // borough-hover-border layer (16px wide → 8px outside polygon boundary). This works in ALL
+      // modes unlike borough-line-overlay which has opacity 0 in 2D/3D.
       const lineFeats = map.queryRenderedFeatures(
-        [[e.point.x - 6, e.point.y - 6], [e.point.x + 6, e.point.y + 6]],
-        { layers: ['borough-line-overlay'].filter(l => map.getLayer(l)) }
+        [[e.point.x - 8, e.point.y - 8], [e.point.x + 8, e.point.y + 8]],
+        { layers: ['borough-hover-border'].filter(l => map.getLayer(l)) }
       );
       const nearLine = lineFeats.length > 0;
 
@@ -4102,8 +4109,23 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   async function openBoroughSidePanel(boroughName) {
     setSideBorough(boroughName);
     setSideZip(null); setSideEvents([]); setSideColonists([]); setHoloFeature(null);
-    // Filter events by borough from the already-loaded events array
-    const boroughEvts = events.filter(e => e.borough === boroughName && !e._auto && !e._sample);
+    // Use the same zipMap as the heatmap: respects current timescale, includes sample events for dev.
+    const { zipMap } = cachedTierDataRef.current.zipMap
+      ? { zipMap: cachedTierDataRef.current.zipMap }
+      : buildZipEventMap(events, TIMESPAN_STEPS[timespanIdx].days);
+    const boroughIdx = BOROUGH_DATA.findIndex(b => b.name === boroughName);
+    const seen = new Set();
+    const boroughEvts = [];
+    if (boroughIdx >= 0 && geoDataRef.current?.features) {
+      geoDataRef.current.features.forEach((f, idx) => {
+        if (zipBoroughMapRef.current[idx] === boroughIdx) {
+          const zip = String(f.properties.MODZCTA || '');
+          (zipMap[zip] || []).forEach(ev => {
+            if (!seen.has(ev.id)) { seen.add(ev.id); boroughEvts.push(ev); }
+          });
+        }
+      });
+    }
     setSideBoroughEvents(boroughEvts);
     try {
       const colonists = await getBoroughColonists(boroughName);
@@ -5033,16 +5055,18 @@ export default function MapView({ events, headerCollapsed = false, interactive =
                   <h2 className="text-white font-black text-base">{sideBorough}</h2>
                   <p className="text-white/40 text-xs">{sideBoroughEvents.length} events · {sideBoroughColonists.length} colonists</p>
                 </div>
-                <button onClick={() => { setSideBorough(null); setSideBoroughEvents([]); setSideBoroughColonists([]); }}
+                <button onClick={() => { setSideBorough(null); setSideBoroughEvents([]); setSideBoroughColonists([]); setHoloFeature(null); setHoloBoroughMode(false); setHoloBoroughName(''); }}
                   className="text-white/50 hover:text-white text-xl leading-none w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/10">×</button>
               </div>
-              {/* Events */}
-              <div className="flex-1 overflow-y-auto px-3 py-2">
-                <p className="text-purple-300/70 text-[10px] font-bold uppercase tracking-widest mb-2 mt-1">Events</p>
-                {sideBoroughEvents.length === 0 ? (
-                  <p className="text-white/30 text-xs text-center py-6">No events found for {sideBorough}</p>
-                ) : (
-                  <PaginatedSection items={sideBoroughEvents} pageSize={6} renderItem={ev => (
+              {/* Events — top 50% */}
+              <div className="flex-1 overflow-y-auto border-b border-white/10" style={{ maxHeight: '50%' }}>
+                <PaginatedSection
+                  items={sideBoroughEvents}
+                  emptyMsg={`No upcoming events in ${sideBorough}`}
+                  headerLabel="Events"
+                  headerColor="text-white/30"
+                  pageSize={4}
+                  renderItem={(ev) => (
                     <div key={ev.id}
                       className="flex items-start gap-3 p-3 border-b border-white/5 cursor-pointer hover:bg-white/5 transition-colors"
                       style={{ borderLeftColor: ev.hex_color || '#7C3AED', borderLeftWidth: 3 }}
@@ -5055,21 +5079,46 @@ export default function MapView({ events, headerCollapsed = false, interactive =
                       <div className="flex-1 min-w-0">
                         <p className="text-white font-black text-sm truncate">{ev.event_name}</p>
                         <p className="text-white/40 text-xs">{ev.event_date} · {ev.price_category === 'free' ? 'FREE' : ev.price_category || '?'}</p>
+                        <div className="flex gap-1 mt-1 flex-wrap">
+                          {generateAutoTags(ev).slice(0, 2).map(t => (
+                            <span key={t} className="text-xs text-white/40 bg-white/5 px-1.5 py-0.5 rounded-full">{t}</span>
+                          ))}
+                        </div>
                       </div>
                     </div>
-                  )} />
-                )}
-                {/* Colonists */}
-                <PaginatedSection items={sideBoroughColonists} pageSize={10}
-                  headerLabel="Top Colonists" headerColor="text-purple-300/70"
+                  )}
+                />
+              </div>
+
+              {/* Colony Leaderboard — bottom 50% */}
+              <div className="flex-1 overflow-y-auto" style={{ maxHeight: '50%' }}>
+                <PaginatedSection
+                  items={sideBoroughColonists}
                   emptyMsg="No colonists yet"
-                  renderItem={(u, i) => (
-                    <div key={i} className="flex items-center gap-2 py-1.5 border-b border-white/5">
-                      <span className="text-white/30 text-[10px] w-4 text-right">{i + 1}</span>
-                      <span className="text-white text-xs font-semibold flex-1">{u.username || 'Orbiter'}</span>
-                      <span className="text-yellow-400 text-[10px] font-bold">⚡ {u.clout_points || 0}</span>
-                    </div>
-                  )} />
+                  headerLabel="Colony Leaderboard"
+                  headerColor="text-green-400/50"
+                  pageSize={7}
+                  renderItem={(c, i) => {
+                    const medal = MEDALS[i] || null, isTop = i < 3;
+                    return (
+                      <div key={c.username || i}
+                        className="flex items-center gap-3 px-4 py-2.5 border-b border-white/5 hover:bg-white/5"
+                        style={{ background: isTop ? `rgba(${i === 0 ? '255,200,0' : i === 1 ? '180,180,180' : '200,120,60'},0.06)` : 'transparent' }}>
+                        <div className="w-7 text-center flex-shrink-0">
+                          {medal ? <span className="text-lg">{medal}</span> : <span className="text-xs font-black text-white/20">#{i + 1}</span>}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className={`font-black text-sm truncate ${isTop ? 'text-white' : 'text-white/60'}`}>{c.username || 'Orbiter'}</p>
+                          {c.updated_at && <p className="text-white/20 text-xs">since {new Date(c.updated_at).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}</p>}
+                        </div>
+                        <div className="text-right flex-shrink-0">
+                          <p className={`font-black text-sm ${isTop ? 'text-yellow-400' : 'text-yellow-400/50'}`} style={isTop ? { textShadow: '0 0 8px rgba(250,204,21,0.5)' } : {}}>{c.clout_points || 0}</p>
+                          <p className="text-white/20 text-xs">clout</p>
+                        </div>
+                      </div>
+                    );
+                  }}
+                />
               </div>
             </div>
           )}
@@ -5198,40 +5247,57 @@ export default function MapView({ events, headerCollapsed = false, interactive =
                   <div className="text-purple-300 font-black text-sm tracking-widest uppercase">{sideBorough} — BOROUGH</div>
                   <p className="text-white/40 text-xs">{sideBoroughEvents.length} events · {sideBoroughColonists.length} colonists</p>
                 </div>
-                <button onClick={() => { setSideBorough(null); setSideBoroughEvents([]); setSideBoroughColonists([]); }}
+                <button onClick={() => { setSideBorough(null); setSideBoroughEvents([]); setSideBoroughColonists([]); setHoloFeature(null); setHoloBoroughMode(false); setHoloBoroughName(''); }}
                   className="text-white/50 hover:text-white text-xl leading-none w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10">×</button>
               </div>
-              <div className="flex-1 overflow-y-auto px-3 py-2">
-                <p className="text-purple-300/70 text-[10px] font-bold uppercase tracking-widest mb-2">Events</p>
-                {sideBoroughEvents.length === 0 ? (
-                  <p className="text-white/30 text-xs text-center py-8">No events in {sideBorough}</p>
-                ) : (
-                  <PaginatedSection items={sideBoroughEvents} pageSize={6} renderItem={ev => (
-                    <div key={ev.id} className="flex items-start gap-3 p-3 border-b border-white/5 cursor-pointer hover:bg-white/5 transition-colors"
-                      style={{ borderLeftColor: ev.hex_color || '#7C3AED', borderLeftWidth: 3 }}
-                      onClick={() => setSelectedEvent(ev)}>
-                      <div className="w-10 h-10 rounded-xl flex-shrink-0 overflow-hidden flex items-center justify-center text-xl relative"
-                        style={{ background: (ev.hex_color || '#7C3AED') + '33', border: `2px solid ${ev.hex_color || '#7C3AED'}` }}>
-                        <span className="absolute inset-0 flex items-center justify-center pointer-events-none">{ev.representative_emoji || '🎉'}</span>
-                        {ev.photos?.[0] && <img src={ev.photos[0]} className="w-full h-full object-cover relative z-10" alt="" onError={e => e.target.style.display = 'none'} />}
+              <div className="flex overflow-hidden min-h-0" style={{ flex: 1 }}>
+                {/* Events column */}
+                <div className="flex-1 flex flex-col overflow-hidden border-r border-white/10 min-h-0">
+                  <PaginatedSection
+                    items={sideBoroughEvents}
+                    emptyMsg="None"
+                    headerLabel="Events"
+                    headerColor="text-white/30"
+                    pageSize={headerCollapsed ? 5 : 3}
+                    renderItem={(ev) => (
+                      <div key={ev.id} onClick={() => setSelectedEvent(ev)}
+                        className="flex items-center gap-2 px-2 py-2 border-b border-white/5 cursor-pointer active:bg-white/5"
+                        style={{ borderLeftColor: ev.hex_color || '#7C3AED', borderLeftWidth: 2 }}>
+                        <div className="text-base flex-shrink-0">{ev.representative_emoji || '🎉'}</div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-white font-black text-xs truncate leading-tight">{ev.event_name}</p>
+                          <p className="text-white/40 text-[10px]">{ev.event_date}</p>
+                        </div>
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-white font-black text-sm truncate">{ev.event_name}</p>
-                        <p className="text-white/40 text-xs">{ev.event_date} · {ev.price_category === 'free' ? 'FREE' : ev.price_category || '?'}</p>
-                      </div>
-                    </div>
-                  )} />
-                )}
-                <PaginatedSection items={sideBoroughColonists} pageSize={10}
-                  headerLabel="Top Colonists" headerColor="text-purple-300/70"
-                  emptyMsg="No colonists yet"
-                  renderItem={(u, i) => (
-                    <div key={i} className="flex items-center gap-2 py-1.5 border-b border-white/5">
-                      <span className="text-white/30 text-[10px] w-4 text-right">{i + 1}</span>
-                      <span className="text-white text-xs font-semibold flex-1">{u.username || 'Orbiter'}</span>
-                      <span className="text-yellow-400 text-[10px] font-bold">⚡ {u.clout_points || 0}</span>
-                    </div>
-                  )} />
+                    )}
+                  />
+                </div>
+                {/* Colonists column */}
+                <div className="flex-1 flex flex-col overflow-hidden min-h-0">
+                  <PaginatedSection
+                    items={sideBoroughColonists}
+                    emptyMsg="None yet"
+                    headerLabel="Colonists"
+                    headerColor="text-green-400/50"
+                    pageSize={headerCollapsed ? 7 : 4}
+                    renderItem={(c, i) => {
+                      const medal = MEDALS[i] || null, isTop = i < 3;
+                      return (
+                        <div key={c.username || i}
+                          className="flex items-center gap-2 px-2 py-2 border-b border-white/5"
+                          style={{ background: isTop ? `rgba(${i === 0 ? '255,200,0' : i === 1 ? '180,180,180' : '200,120,60'},0.06)` : 'transparent' }}>
+                          <div className="w-5 text-center flex-shrink-0">
+                            {medal ? <span className="text-sm">{medal}</span> : <span className="text-[10px] font-black text-white/20">#{i + 1}</span>}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className={`font-black text-xs truncate ${isTop ? 'text-white' : 'text-white/60'}`}>{c.username || 'Orbiter'}</p>
+                          </div>
+                          <p className={`font-black text-xs flex-shrink-0 ${isTop ? 'text-yellow-400' : 'text-yellow-400/50'}`}>{c.clout_points || 0}</p>
+                        </div>
+                      );
+                    }}
+                  />
+                </div>
               </div>
             </div>
           )}
