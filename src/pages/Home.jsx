@@ -556,12 +556,12 @@ export default function Home({ events = [], eventsLoading = false }) {
                 <button
                   onPointerDown={e => { if (e.pointerType === 'touch') { e.preventDefault(); setPendingView('tiles'); startViewTransition(() => { setView('tiles'); setShowLeaderboard(false); setShowHeader(true); setPendingView(null); }); } }}
                   onClick={() => { setView('tiles'); setShowLeaderboard(false); setShowHeader(true); }}
-                  className="flex-1 md:flex-none h-full md:h-auto px-3 py-0 md:px-4 md:py-2 rounded-lg md:rounded-xl text-xs md:text-sm font-black flex flex-col md:flex-row items-center justify-center gap-0.5 md:gap-0 md:min-w-[104px] md:transition-all"
+                  className="flex-1 md:flex-none h-full md:h-auto px-3 py-0 md:px-4 md:py-2 rounded-lg md:rounded-xl text-xs md:text-sm font-black flex flex-col md:flex-row items-center justify-center gap-0.5 md:gap-0 md:min-w-[120px] md:transition-all"
                   style={{ touchAction: 'manipulation', ...((pendingView === 'tiles' || (view === 'tiles' && pendingView === null)) && !showLeaderboard ? { backgroundColor: window.innerWidth < 768 ? '#5B21B6' : accentColor, color: '#fff', boxShadow: '1px 1px 0px #333' } : {}) }}
                   onMouseEnter={e => { if (window.innerWidth >= 768 && !(view === 'tiles' && !showLeaderboard)) e.currentTarget.style.backgroundColor = accentColor + '30'; }}
                   onMouseLeave={e => { if (window.innerWidth >= 768 && !(view === 'tiles' && !showLeaderboard)) e.currentTarget.style.backgroundColor = ''; }}>
                   <span className="leading-none md:mr-1">🎴</span>
-                  <span className="leading-none text-[10px] md:text-sm">Tiles</span>
+                  <span className="leading-none text-[10px] md:text-sm">Events</span>
                 </button>
                 <button
                   onPointerDown={e => { if (e.pointerType === 'touch') { e.preventDefault(); setPendingView('map'); startViewTransition(() => { handleMapClick(); setPendingView(null); }); } }}
@@ -782,6 +782,7 @@ export default function Home({ events = [], eventsLoading = false }) {
                 headerCollapsed={headerCollapsed}
                 interactive={mapCacheReady}
                 phase2ADone={mapPhase2ADone}
+                session={session}
               />
             )}
             {mapEntered && !mapCacheReady && (

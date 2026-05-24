@@ -2020,7 +2020,7 @@ function applyFeedFilters(posts, {
 
   if (sortByTop) {
     out.sort((a, b) => {
-      const byReactions = (Number(b.total_reactions || 0) - Number(a.total_reactions || 0));
+      const byReactions = ((Number(b.total_reactions || 0) + Number(b.total_comments || 0)) - (Number(a.total_reactions || 0) + Number(a.total_comments || 0)));
       if (byReactions !== 0) return byReactions;
       return new Date(b.created_at) - new Date(a.created_at);
     });

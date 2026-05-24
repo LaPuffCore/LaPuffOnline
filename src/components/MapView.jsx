@@ -12,7 +12,7 @@ import { pingNYCLocation, getLastLocation } from '../lib/locationService';
 import { isEventHappeningNow, isAftersWindow, isEventLive } from '../lib/eventUtils';
 import { SAMPLE_MODE } from '../lib/sampleConfig';
 import { getSampleUsersForZip } from '../lib/sampleUsers';
-import { fetchGeoPostFeed, fetchReactionsForPosts } from '../lib/supabase';
+import { fetchGeoPostFeed, fetchReactionsForPosts, fetchCommentsForPost, submitPostComment, addPostReaction, removePostReaction } from '../lib/supabase';
 
 const GEOJSON_URL = './data/finalmodzcta.json';
 const BOROUGH_GEOJSON_URL = './data/finalboroughnsafe.json';
@@ -1069,6 +1069,7 @@ function computeZipBoroughMap(zctaFeatures, boroughFeatures) {
   zctaFeatures.forEach((f, i) => {
     if (f.properties._special) return;
     const [cx, cy] = getGeomCentroid(f.geometry);
+    let foundBi = -1;
     for (let bi = 0; bi < boroughFeatures.length; bi++) {
       const bGeom = boroughFeatures[bi].geometry;
       const polys = bGeom.type === 'MultiPolygon' ? bGeom.coordinates : [bGeom.coordinates];
@@ -1076,8 +1077,24 @@ function computeZipBoroughMap(zctaFeatures, boroughFeatures) {
       for (const poly of polys) {
         if (pointInRing(cx, cy, poly[0])) { found = true; break; }
       }
-      if (found) { result[i] = bi; break; }
+      if (found) { foundBi = bi; break; }
     }
+    if (foundBi < 0 && f.geometry.type === 'MultiPolygon') {
+      // Try centroid of each polygon in the MultiPolygon (handles island zips like 10004, 10035, etc.)
+      outer: for (const polyCoords of f.geometry.coordinates) {
+        const ring = polyCoords[0];
+        const cx2 = ring.reduce((s, p) => s + p[0], 0) / ring.length;
+        const cy2 = ring.reduce((s, p) => s + p[1], 0) / ring.length;
+        for (let bi = 0; bi < boroughFeatures.length; bi++) {
+          const bGeom = boroughFeatures[bi].geometry;
+          const polys = bGeom.type === 'MultiPolygon' ? bGeom.coordinates : [bGeom.coordinates];
+          for (const poly of polys) {
+            if (pointInRing(cx2, cy2, poly[0])) { foundBi = bi; break outer; }
+          }
+        }
+      }
+    }
+    if (foundBi >= 0) result[i] = foundBi;
   });
   return result;
 }
@@ -1429,12 +1446,13 @@ function hexLuminance(hex) {
   return 0.2126 * toL(r) + 0.7152 * toL(g) + 0.0722 * toL(b);
 }
 
-function GeoPostDetailOverlay({ post, reactions = {}, onClose }) {
+function GeoPostDetailOverlay({ post, reactions = {}, onClose, comments = [], onSubmitComment, onReact, session = null, newCommentText = '', onCommentChange }) {
   const plain = stripHtml(post.content?.html || post.content || '');
   const dateStr = new Date(post.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   const emojiCounts = {};
   (reactions[post.id] || []).forEach(r => { emojiCounts[r.emoji_text] = (emojiCounts[r.emoji_text] || 0) + 1; });
   const topEmojis = Object.entries(emojiCounts).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  const userReacted = new Set((reactions[post.id] || []).filter(r => r.user_id === session?.user?.id).map(r => r.emoji_text));
   const scopeLabel = post.zip_code ? `📍 ${post.zip_code} · ${post.borough}`
     : post.borough ? `🏙 ${post.borough}`
     : post.scope === 'nyc' ? '🗽 NYC' : '💻 Digital';
@@ -1456,11 +1474,33 @@ function GeoPostDetailOverlay({ post, reactions = {}, onClose }) {
           {post.content?.html
             ? <div dangerouslySetInnerHTML={{ __html: post.content.html }} style={{ fontSize: 13, lineHeight: 1.6, color: textColor, marginBottom: 12, wordBreak: 'break-word' }} />
             : plain && <p style={{ fontSize: 13, lineHeight: 1.6, color: textColor, marginBottom: 12, wordBreak: 'break-word' }}>{plain}</p>}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
             <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 7px', borderRadius: 99, background: 'rgba(124,58,237,0.25)', color: '#a78bfa' }}>{scopeLabel}</span>
             {topEmojis.map(([emoji, count]) => (
-              <span key={emoji} style={{ fontSize: 11, background: 'rgba(255,255,255,0.1)', borderRadius: 99, padding: '2px 8px', color: textColor }}>{emoji} {count}</span>
+              <button key={emoji} onClick={() => onReact && onReact(emoji, userReacted.has(emoji))}
+                style={{ fontSize: 11, background: userReacted.has(emoji) ? 'rgba(124,58,237,0.35)' : 'rgba(255,255,255,0.1)', borderRadius: 99, padding: '2px 8px', color: textColor, border: userReacted.has(emoji) ? '1px solid rgba(124,58,237,0.6)' : '1px solid transparent', cursor: 'pointer' }}>{emoji} {count}</button>
             ))}
+          </div>
+          {/* Comments */}
+          <div style={{ marginTop: 12, borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: 10 }}>
+            <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: 10, fontWeight: 700, marginBottom: 8 }}>COMMENTS ({comments?.length || 0})</p>
+            {comments?.map(c => (
+              <div key={c.id} style={{ marginBottom: 6 }}>
+                <span style={{ color: 'rgba(255,255,255,0.8)', fontSize: 10, fontWeight: 700 }}>{c.username || 'Orbiter'} </span>
+                <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10 }}>{c.content}</span>
+              </div>
+            ))}
+            {session?.user && (
+              <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                <input
+                  value={newCommentText || ''}
+                  onChange={e => onCommentChange && onCommentChange(e.target.value)}
+                  placeholder="Add a comment..."
+                  style={{ flex: 1, background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 8, padding: '4px 8px', color: '#fff', fontSize: 11, outline: 'none' }}
+                />
+                <button onClick={() => onSubmitComment && onSubmitComment(newCommentText)} style={{ background: 'rgba(124,58,237,0.6)', color: '#fff', border: 'none', borderRadius: 8, padding: '4px 10px', fontSize: 11, cursor: 'pointer' }}>Post</button>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -1484,7 +1524,7 @@ function truncateText(text, maxLen = 200) {
   return text.slice(0, maxLen).trimEnd() + '…';
 }
 
-function MapPostsPanelView({ panel, posts, reactions, sort, setSort, page, setPage, loading, headerCollapsed, isMobile = false, onClose, onPostClick }) {
+function MapPostsPanelView({ panel, posts, reactions, sort, setSort, page, setPage, loading, headerCollapsed, isMobile = false, onClose, onPostClick, pinned = false, onPin = () => {} }) {
   const accentPurple = '#7C3AED';
   const totalPages = Math.ceil(posts.length / POSTS_PER_PAGE);
   const visiblePosts = posts.slice(page * POSTS_PER_PAGE, (page + 1) * POSTS_PER_PAGE);
@@ -1516,6 +1556,7 @@ function MapPostsPanelView({ panel, posts, reactions, sort, setSort, page, setPa
           </div>
           <button onClick={onClose}
             style={{ width: 26, height: 26, borderRadius: 99, border: '1px solid rgba(255,255,255,0.2)', background: 'transparent', color: 'rgba(255,255,255,0.5)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 900 }}>✕</button>
+          <button onClick={onPin} title={pinned ? 'Unpin panel' : 'Pin panel'} style={{ opacity: pinned ? 1 : 0.5, background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 14, lineHeight: 1 }}>📌</button>
         </div>
       </div>
 
@@ -1559,6 +1600,9 @@ function MapPostsPanelView({ panel, posts, reactions, sort, setSort, page, setPa
                     {topEmojis.map(([emoji, count]) => (
                       <span key={emoji} style={{ fontSize: 10, background: 'rgba(255,255,255,0.1)', borderRadius: 99, padding: '1px 6px', color: 'rgba(255,255,255,0.7)' }}>{emoji} {count}</span>
                     ))}
+                    {sort === 'top' && (
+                      <span style={{ fontSize: 9, opacity: 0.7, marginLeft: 4 }}>💬 {post.total_comments || 0}</span>
+                    )}
                   </div>
                 )}
               </div>
@@ -1582,7 +1626,7 @@ function MapPostsPanelView({ panel, posts, reactions, sort, setSort, page, setPa
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
-export default function MapView({ events, headerCollapsed = false, interactive = true, phase2ADone = false }) {
+export default function MapView({ events, headerCollapsed = false, interactive = true, phase2ADone = false, session = null }) {
   const [topoOn, setTopoOn] = useState(() => {
     try {
       const v = localStorage.getItem('lapuff_topo_on');
@@ -1681,6 +1725,12 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   const [mapPostsLoading, setMapPostsLoading] = useState(false);
   const [mapPostsReactions, setMapPostsReactions] = useState({});
   const [selectedGeoPost, setSelectedGeoPost] = useState(null);
+  const [geoPostComments, setGeoPostComments] = useState([]);
+  const [geoPostCommentsLoading, setGeoPostCommentsLoading] = useState(false);
+  const [newCommentText, setNewCommentText] = useState('');
+  const holoActiveRef = useRef(false); // true when any hologram is open → blocks new zip/borough clicks
+  const [pinnedLeftPanel, setPinnedLeftPanel] = useState(false);  // true = left posts panel is pinned
+  const [pinnedRightPanel, setPinnedRightPanel] = useState(false); // true = right events/leaderboard panel is pinned
   const hoveredBoroughIdRef = useRef(null);
   const hoveredBoroughNameRef = useRef(null); // Tracks borough name for ZCTA batch boroughHover feature states
   // Event pin markers toggle
@@ -1723,6 +1773,21 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     window.addEventListener('resize', check);
     return () => window.removeEventListener('resize', check);
   }, []);
+
+  // Sync holoActiveRef so click handlers (which are inside a useEffect closure) can check it
+  useEffect(() => {
+    holoActiveRef.current = !!(holoFeature || holoBoroughName);
+  }, [holoFeature, holoBoroughName]);
+
+  // Fetch comments when a GeoPost is selected
+  useEffect(() => {
+    if (!selectedGeoPost) { setGeoPostComments([]); return; }
+    setGeoPostCommentsLoading(true);
+    fetchCommentsForPost(selectedGeoPost.id)
+      .then(data => setGeoPostComments(data || []))
+      .catch(() => setGeoPostComments([]))
+      .finally(() => setGeoPostCommentsLoading(false));
+  }, [selectedGeoPost?.id]);
 
   // Pre-warm PMTiles headers into HTTP cache when map is ready.
   // Pre-warm roads PMTiles header — MapLibre needs first 16KB before fetching any road tiles.
@@ -2199,6 +2264,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       if (!e.features.length) return;
       // If a pin is currently hovered, don't open zip panel — pin click takes priority
       if (hoveredPinEventRef.current) return;
+      // Block new selections while any hologram is open
+      if (holoActiveRef.current) return;
       // Yield to borough click when cursor is near a borough boundary line
       const bLineFeats = map.queryRenderedFeatures(
         [[e.point.x - 8, e.point.y - 8], [e.point.x + 8, e.point.y + 8]],
@@ -2211,7 +2278,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       const panelZip = isSafezone ? `SAFE:${zip}` : zip;
       openSidePanel(panelZip);
       openHologram(f);
-      if (!isSafezone && zip) { setMapPostsPanel({ type: 'zip', value: zip }); setMapPostsPage(0); }
+      if (!isSafezone && zip) { setMapPostsPanelIfNotPinned({ type: 'zip', value: zip }); }
     };
 
     layerHandlersRef.current = { handleZctaHover, handleZctaLeave, handleZctaClick };
@@ -2223,17 +2290,6 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     map.on('mousemove', 'zcta-safezone-hover', handleZctaHover);
     map.on('mouseleave', 'zcta-safezone-hover', handleZctaLeave);
     map.on('click', 'zcta-safezone-hover', handleZctaClick);
-
-    // Right-click in borough border area → opens borough geopost panel
-    map.on('contextmenu', e => {
-      e.originalEvent.preventDefault();
-      // Only handle borough border area (zip right-click removed — left click now opens all 3 panels)
-      const boroughFeatures = map.queryRenderedFeatures(e.point, { layers: ['borough-hover-fill'] });
-      if (boroughFeatures.length > 0) {
-        const boroughName = String(boroughFeatures[0].properties.BoroName || '');
-        if (boroughName) { setMapPostsPanel({ type: 'borough', value: boroughName }); setMapPostsPage(0); }
-      }
-    });
 
     // Helper: batch-set 'boroughHover' feature state on all ZCTA features in a borough
     const setBoroughHoverStates = (boroughName, active) => {
@@ -2257,22 +2313,23 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       const f = e.features[0];
       const newBoroughName = String(f.properties.BoroName || '');
 
-      // Check if cursor is within ~8px of the borough polygon boundary using the always-visible
-      // borough-hover-border layer (16px wide → 8px outside polygon boundary). This works in ALL
-      // modes unlike borough-line-overlay which has opacity 0 in 2D/3D.
+      // Check if cursor is within ~20px of the borough polygon boundary (extended outward zone)
+      // borough-hover-border layer is ~16px wide → 8px outside. A 20px query box extends detection
+      // further into water/exterior so borough hover fires from slightly outside the polygon.
       const lineFeats = map.queryRenderedFeatures(
-        [[e.point.x - 8, e.point.y - 8], [e.point.x + 8, e.point.y + 8]],
+        [[e.point.x - 20, e.point.y - 20], [e.point.x + 20, e.point.y + 20]],
         { layers: ['borough-hover-border'].filter(l => map.getLayer(l)) }
       );
       const nearLine = lineFeats.length > 0;
 
-      // Check if a ZCTA zip is directly under the cursor (exact point, not padded)
+      // Check if a ZCTA zip is directly under the cursor (exact point, not padded).
+      // ZCTA ALWAYS wins when cursor is inside any zip polygon — no exceptions.
       const zctaLayers = ['zcta-fill', 'zcta-extrude', 'zcta-safezone-hover', 'zcta-safezone-fill']
         .filter(l => map.getLayer(l));
       const zctaUnder = zctaLayers.length > 0 && map.queryRenderedFeatures(e.point, { layers: zctaLayers }).length > 0;
 
-      // ZCTA takes priority unless cursor is near the borough line stroke
-      if (zctaUnder && !nearLine) {
+      // ZCTA always takes priority when inside a zip polygon
+      if (zctaUnder) {
         if (hoveredBoroughIdRef.current !== null) {
           map.setFeatureState({ source: 'borough-hover-source', id: hoveredBoroughIdRef.current }, { hovered: false });
           hoveredBoroughIdRef.current = null;
@@ -2327,18 +2384,21 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     // Left-click on borough border area → open all three panels + hologram (Task 1.7)
     const handleBoroughFillClick = e => {
       if (!e.features.length) return;
+      // Block new selections while any hologram is open
+      if (holoActiveRef.current) return;
       const zctaLayers = ['zcta-fill', 'zcta-extrude', 'zcta-safezone-hover', 'zcta-safezone-fill']
         .filter(l => map.getLayer(l));
       // Only block if ZCTA is under cursor AND cursor is NOT near the borough line stroke
       const nearLine = map.queryRenderedFeatures(
-        [[e.point.x - 8, e.point.y - 8], [e.point.x + 8, e.point.y + 8]],
+        [[e.point.x - 20, e.point.y - 20], [e.point.x + 20, e.point.y + 20]],
         { layers: ['borough-hover-border'].filter(l => map.getLayer(l)) }
       ).length > 0;
-      if (!nearLine && zctaLayers.length > 0 && map.queryRenderedFeatures(e.point, { layers: zctaLayers }).length > 0) return;
+      // ZCTA always takes priority when cursor is inside any zip polygon
+      if (zctaLayers.length > 0 && map.queryRenderedFeatures(e.point, { layers: zctaLayers }).length > 0) return;
       const boroughName = String(e.features[0].properties.BoroName || '');
       if (boroughName) {
         openBoroughSidePanel(boroughName);
-        setMapPostsPanel({ type: 'borough', value: boroughName }); setMapPostsPage(0);
+        setMapPostsPanelIfNotPinned({ type: 'borough', value: boroughName });
         openBoroughHologram(boroughName);
       }
     };
@@ -4165,9 +4225,37 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     return () => { cancelled = true; };
   }, [mapPostsPanel, mapPostsSort]);
 
+  function setMapPostsPanelIfNotPinned(panel, resetPage = true) {
+    if (pinnedLeftPanel) return;
+    setMapPostsPanel(panel);
+    if (resetPage) setMapPostsPage(0);
+  }
+
+  async function handleGeoPostComment(text) {
+    if (!text?.trim() || !selectedGeoPost || !session) return;
+    await submitPostComment({ post_id: selectedGeoPost.id, content: text.trim() }, session);
+    setNewCommentText('');
+    const updated = await fetchCommentsForPost(selectedGeoPost.id);
+    setGeoPostComments(updated || []);
+  }
+
+  async function handleGeoPostReact(emojiText, isActive) {
+    if (!selectedGeoPost) return;
+    if (isActive) {
+      await removePostReaction(selectedGeoPost.id, emojiText, session);
+    } else {
+      await addPostReaction(selectedGeoPost.id, emojiText, session);
+    }
+    const rxns = await fetchReactionsForPosts([selectedGeoPost.id]);
+    const byPost = {};
+    (rxns || []).forEach(r => { if (!byPost[r.post_id]) byPost[r.post_id] = []; byPost[r.post_id].push(r); });
+    setMapPostsReactions(prev => ({ ...prev, ...byPost }));
+  }
+
   async function openSidePanel(zip) {
     const isSafezone = zip.startsWith('SAFE:');
     const rawZip = isSafezone ? zip.slice(5) : zip;
+    if (pinnedRightPanel) return; // Right panel is pinned — don't overwrite
     // Opening zip events panel (right) takes over from borough events panel
     setSideBorough(null); setSideBoroughEvents([]); setSideBoroughColonists([]);
     // Store the full SAFEZONE_N string so the label can show "Safe Zone 3" etc.
@@ -4193,6 +4281,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   }
 
   async function openBoroughSidePanel(boroughName) {
+    if (pinnedRightPanel) return; // Right panel is pinned — don't overwrite
     setSideBorough(boroughName);
     setSideZip(null); setSideEvents([]); setSideColonists([]); setHoloFeature(null);
     // Use the same zipMap as the heatmap: respects current timescale, includes sample events for dev.
@@ -4650,7 +4739,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
 
     BOROUGH_DATA.forEach((bd, boroughIdx) => {
       const eventCount = (events || []).filter(e =>
-        !e._auto && !e._sample &&
+        !e._auto &&
         e.borough === bd.name &&
         new Date(e.event_date + 'T00:00:00') >= nowDay
       ).length;
@@ -4712,7 +4801,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       outerEl.onclick = (e) => {
         e.stopPropagation();
         openBoroughSidePanel(bd.name);
-        setMapPostsPanel({ type: 'borough', value: bd.name }); setMapPostsPage(0);
+        setMapPostsPanelIfNotPinned({ type: 'borough', value: bd.name });
         openBoroughHologram(bd.name);
         setHoveredBorough(bd.name);
       };
@@ -4737,8 +4826,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       let scale;
       if (z >= 11) scale = 1.0;
       else if (z >= 10) scale = 0.70 + (z - 10) * 0.30;
-      else scale = 0.25 + Math.max(0, z - 9) * 0.45;
-      scale = Math.max(0.25, Math.min(1.0, scale));
+      else scale = 0.50 + Math.max(0, z - 9) * 0.20;
+      scale = Math.max(0.50, Math.min(1.0, scale));
       regionMarkersRef.current.forEach(m => {
         const inner = m.getElement().querySelector('[data-borough-name]');
         if (inner) inner.style.transform = `scale(${scale.toFixed(3)})`;
@@ -4947,8 +5036,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
               <div className="bg-gray-950/95 border border-purple-800/60 rounded-2xl overflow-hidden shadow-[0_0_15px_rgba(124,58,237,0.35)]">
                 <div className="px-3 py-2 border-b border-white/10">
                   <p className="text-purple-400 font-black text-xs">🏙 {hoveredBorough}</p>
-                  <p className="text-white/50 text-xs">Click — events &amp; colonists</p>
-                  <p className="text-white/35 text-xs">Right-click — borough posts</p>
+                  <p className="text-white/50 text-xs">Click — events, posts &amp; colonists</p>
                 </div>
               </div>
             </div>
@@ -4976,8 +5064,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
                 {hoveredColonists !== null && !isSafezoneHover && (
                   <div className="px-3 py-2 border-t border-white/10">
                     <p className="text-green-400/70 text-xs italic">{hoveredColonists} colonist{hoveredColonists !== 1 ? 's' : ''} in {zipLabel}</p>
-                    {hoveredPostCount !== null && hoveredPostCount > 0 && (
-                      <p className="text-blue-400/60 text-xs italic">📌 {hoveredPostCount} post{hoveredPostCount !== 1 ? 's' : ''} · tap to view</p>
+                    {hoveredPostCount !== null && (
+                      <p className="text-blue-400/60 text-xs italic">📌 {hoveredPostCount} post{hoveredPostCount !== 1 ? 's' : ''}{hoveredPostCount > 0 ? ' · tap to view' : ''}</p>
                     )}
                   </div>
                 )}
@@ -5025,6 +5113,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
               headerCollapsed={headerCollapsed}
               onClose={() => setMapPostsPanel(null)}
               onPostClick={setSelectedGeoPost}
+              pinned={pinnedLeftPanel}
+              onPin={() => setPinnedLeftPanel(p => !p)}
             />
           )}
           {mapPostsPanel && isMobile && (
@@ -5041,6 +5131,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
               isMobile={true}
               onClose={() => setMapPostsPanel(null)}
               onPostClick={setSelectedGeoPost}
+              pinned={pinnedLeftPanel}
+              onPin={() => setPinnedLeftPanel(p => !p)}
             />
           )}
 
@@ -5055,6 +5147,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
                 </div>
                 <button onClick={() => { setSideZip(null); setSideEvents([]); setSideColonists([]); setHoloFeature(null); }}
                   className="text-white/40 hover:text-white text-xl w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10">✕</button>
+                <button onClick={() => setPinnedRightPanel(p => !p)} title={pinnedRightPanel ? 'Unpin panel' : 'Pin panel'} style={{ opacity: pinnedRightPanel ? 1 : 0.5, background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 14 }}>📌</button>
               </div>
 
               <div className="flex-1 overflow-y-auto border-b border-white/10 min-h-0">
@@ -5148,6 +5241,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
                 </div>
                 <button onClick={() => { setSideBorough(null); setSideBoroughEvents([]); setSideBoroughColonists([]); setHoloFeature(null); setHoloBoroughMode(false); setHoloBoroughName(''); }}
                   className="text-white/50 hover:text-white text-xl leading-none w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/10">×</button>
+                <button onClick={() => setPinnedRightPanel(p => !p)} title={pinnedRightPanel ? 'Unpin panel' : 'Pin panel'} style={{ opacity: pinnedRightPanel ? 1 : 0.5, background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 14 }}>📌</button>
               </div>
               {/* Events — top 50% */}
               <div className="flex-1 overflow-y-auto border-b border-white/10 min-h-0">
@@ -5395,8 +5489,19 @@ export default function MapView({ events, headerCollapsed = false, interactive =
 
           {/* Location active marker removed per user request */}
 
-      {selectedEvent && <EventDetailPopup event={selectedEvent} onClose={() => setSelectedEvent(null)} />}
-      {selectedGeoPost && <GeoPostDetailOverlay post={selectedGeoPost} reactions={mapPostsReactions} onClose={() => setSelectedGeoPost(null)} />}
+      {(() => {
+        const navList = sideZip ? sideEvents : sideBorough ? sideBoroughEvents : (events || []).filter(e => !e._auto);
+        const navIdx = selectedEvent ? navList.findIndex(e => e.id === selectedEvent.id) : -1;
+        return selectedEvent && (
+          <EventDetailPopup
+            event={selectedEvent}
+            onClose={() => setSelectedEvent(null)}
+            onNext={navIdx >= 0 && navIdx < navList.length - 1 ? () => setSelectedEvent(navList[navIdx + 1]) : undefined}
+            onPrev={navIdx > 0 ? () => setSelectedEvent(navList[navIdx - 1]) : undefined}
+          />
+        );
+      })()}
+      {selectedGeoPost && <GeoPostDetailOverlay post={selectedGeoPost} reactions={mapPostsReactions} onClose={() => { setSelectedGeoPost(null); setGeoPostComments([]); setNewCommentText(''); }} comments={geoPostComments} onSubmitComment={handleGeoPostComment} onReact={handleGeoPostReact} session={session} newCommentText={newCommentText} onCommentChange={setNewCommentText} />}
 
       {/* Afters check-in popup — lightweight modal for afters pin tap */}
       {aftersCheckInEvent && (
