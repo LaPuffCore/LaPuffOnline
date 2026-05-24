@@ -1226,7 +1226,7 @@ function PaginatedSection({ items, renderItem, emptyMsg, headerLabel, headerColo
         : visible.map((item, i) => renderItem(item, page * pageSize + i))
       }
       {totalPages > 1 && (
-        <div className="flex items-center justify-center gap-2 px-4 py-1.5 border-t border-white/10 flex-shrink-0">
+        <div className="sticky bottom-0 flex items-center justify-center gap-2 px-4 py-1.5 border-t border-white/10 flex-shrink-0 bg-gray-950/90">
           {page > 0
             ? <button onClick={() => setPage(p => p - 1)} className="text-white/50 hover:text-white text-xs font-black px-1.5 py-0.5 rounded hover:bg-white/10 transition-colors">{'<'}</button>
             : <span className="w-5" />
@@ -1651,6 +1651,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   const [hoveredBorough, setHoveredBorough] = useState(null);
   const [hoveredEvents, setHoveredEvents] = useState([]);
   const [hoveredColonists, setHoveredColonists] = useState(null);
+  const [hoveredPostCount, setHoveredPostCount] = useState(null);
   const [tooltipPos,    setTooltipPos]    = useState(null);
   const [sideZip,       setSideZip]       = useState(null);
   const [sideEvents,    setSideEvents]    = useState([]);
@@ -2143,6 +2144,11 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     // Borough hover fill + outline for interaction (uses raw borough polygons)
     if (!map.getSource('borough-hover-source')) {
       map.addSource('borough-hover-source', { type: 'geojson', data: { type: 'FeatureCollection', features: [] }, generateId: true });
+      // Timing fix: boroughGeoData often loads before mapReady, so the useEffect that
+      // calls setData already fired but the source didn't exist yet. Populate it now.
+      if (boroughGeoDataRef.current) {
+        map.getSource('borough-hover-source').setData(boroughGeoDataRef.current);
+      }
       map.addLayer({
         id: 'borough-hover-fill', type: 'fill', source: 'borough-hover-source',
         paint: {
@@ -2193,6 +2199,12 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       if (!e.features.length) return;
       // If a pin is currently hovered, don't open zip panel — pin click takes priority
       if (hoveredPinEventRef.current) return;
+      // Yield to borough click when cursor is near a borough boundary line
+      const bLineFeats = map.queryRenderedFeatures(
+        [[e.point.x - 8, e.point.y - 8], [e.point.x + 8, e.point.y + 8]],
+        { layers: ['borough-hover-border'].filter(l => map.getLayer(l)) }
+      );
+      if (bLineFeats.length > 0) return;
       const f = e.features[0];
       const zip = String(f.properties.MODZCTA || '');
       const isSafezone = !!f.properties._special;
@@ -2317,7 +2329,12 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       if (!e.features.length) return;
       const zctaLayers = ['zcta-fill', 'zcta-extrude', 'zcta-safezone-hover', 'zcta-safezone-fill']
         .filter(l => map.getLayer(l));
-      if (zctaLayers.length > 0 && map.queryRenderedFeatures(e.point, { layers: zctaLayers }).length > 0) return;
+      // Only block if ZCTA is under cursor AND cursor is NOT near the borough line stroke
+      const nearLine = map.queryRenderedFeatures(
+        [[e.point.x - 8, e.point.y - 8], [e.point.x + 8, e.point.y + 8]],
+        { layers: ['borough-hover-border'].filter(l => map.getLayer(l)) }
+      ).length > 0;
+      if (!nearLine && zctaLayers.length > 0 && map.queryRenderedFeatures(e.point, { layers: zctaLayers }).length > 0) return;
       const boroughName = String(e.features[0].properties.BoroName || '');
       if (boroughName) {
         openBoroughSidePanel(boroughName);
@@ -2328,6 +2345,11 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     map.on('mousemove', 'borough-hover-fill', handleBoroughFillHover);
     map.on('mouseleave', 'borough-hover-fill', handleBoroughFillLeave);
     map.on('click', 'borough-hover-fill', handleBoroughFillClick);
+    // Also register on borough-hover-border so the exterior zone (8px outside polygon)
+    // activates hover and click — critical for selecting boroughs from the waterfront edge
+    map.on('mousemove', 'borough-hover-border', handleBoroughFillHover);
+    map.on('mouseleave', 'borough-hover-border', handleBoroughFillLeave);
+    map.on('click', 'borough-hover-border', handleBoroughFillClick);
 
     // Mobile long-press: 1 second hold on zip opens MapPostsPanel; hold on borough border opens borough events panel
     // Task 1.3: immediately shows visual selection highlight on touchstart; clears on cancel.
@@ -3017,8 +3039,13 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     ];
 
     // Wrap color expression with hover state check for 3D mode
+    // boroughHover (lighter purple) is secondary — ZCTA direct hover has priority
     const withHoverColor = (baseExpr) => {
-      return ['case', ['boolean', ['feature-state', 'hovered'], false], '#7C3AED', baseExpr];
+      return ['case',
+        ['boolean', ['feature-state', 'hovered'], false], '#7C3AED',
+        ['boolean', ['feature-state', 'boroughHover'], false], '#9333EA',
+        baseExpr,
+      ];
     };
 
     // Height expressions — heatmap 3D. Safe zones excluded via filter on zcta-extrude/zcta-floor.
@@ -4077,7 +4104,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   }, [userLocation, mapReady]);
 
   useEffect(() => {
-    if (!hoveredZip) { setHoveredEvents([]); setHoveredColonists(null); return; }
+    if (!hoveredZip) { setHoveredEvents([]); setHoveredColonists(null); setHoveredPostCount(null); return; }
+    let cancelled = false;
     const isSafe = hoveredZip.startsWith('SAFE:');
     const rawZip = isSafe ? hoveredZip.slice(5) : hoveredZip;
     if (isSafe && isSafezoneModzcta(rawZip)) {
@@ -4085,6 +4113,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       const szFeature = geoData?.features?.find(f => f.properties.MODZCTA === rawZip);
       setHoveredEvents(szFeature ? getEventsInSafezone(szFeature, events, timespanIdx) : []);
       setHoveredColonists(0);
+      setHoveredPostCount(null);
     } else {
       // Normal zip — use cached zipMap
       const { zipMap } = cachedTierDataRef.current.zipMap
@@ -4099,7 +4128,13 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         const sampleCount = SAMPLE_MODE ? getSampleUsersForZip(rawZip).length : 0;
         setHoveredColonists(sampleCount);
       });
+      // Fetch post count for tooltip preview
+      setHoveredPostCount(null);
+      fetchGeoPostFeed({ type: 'zip', value: rawZip }).then(posts => {
+        if (!cancelled) setHoveredPostCount(posts.length);
+      }).catch(() => { if (!cancelled) setHoveredPostCount(0); });
     }
+    return () => { cancelled = true; };
   }, [hoveredZip, timespanIdx, events]);
 
   // Fetch posts for MapPostsPanel
@@ -4941,6 +4976,9 @@ export default function MapView({ events, headerCollapsed = false, interactive =
                 {hoveredColonists !== null && !isSafezoneHover && (
                   <div className="px-3 py-2 border-t border-white/10">
                     <p className="text-green-400/70 text-xs italic">{hoveredColonists} colonist{hoveredColonists !== 1 ? 's' : ''} in {zipLabel}</p>
+                    {hoveredPostCount !== null && hoveredPostCount > 0 && (
+                      <p className="text-blue-400/60 text-xs italic">📌 {hoveredPostCount} post{hoveredPostCount !== 1 ? 's' : ''} · tap to view</p>
+                    )}
                   </div>
                 )}
                 {isSafezoneHover && (
@@ -5019,13 +5057,13 @@ export default function MapView({ events, headerCollapsed = false, interactive =
                   className="text-white/40 hover:text-white text-xl w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10">✕</button>
               </div>
 
-              <div className="flex-1 overflow-y-auto border-b border-white/10" style={{ maxHeight: '50%' }}>
+              <div className="flex-1 overflow-y-auto border-b border-white/10 min-h-0">
                 <PaginatedSection
                   items={sideEvents}
                   emptyMsg="No upcoming events"
                   headerLabel="Events"
                   headerColor="text-white/30"
-                  pageSize={4}
+                  pageSize={3}
                   renderItem={(event) => (
                     <div key={event.id} onClick={() => setSelectedEvent(event)}
                       className="flex items-start gap-3 p-3 border-b border-white/5 cursor-pointer hover:bg-white/5 transition-colors"
@@ -5056,13 +5094,13 @@ export default function MapView({ events, headerCollapsed = false, interactive =
               </div>
 
               {!isSafezoneModzcta(sideZip) && (
-                <div className="flex-1 overflow-y-auto" style={{ maxHeight: '50%' }}>
+                <div className="flex-1 overflow-y-auto min-h-0">
                   <PaginatedSection
                     items={sideColonists}
                     emptyMsg="No colonists yet"
                     headerLabel="Colony Leaderboard"
                     headerColor="text-green-400/50"
-                    pageSize={7}
+                    pageSize={5}
                     renderItem={(c, i) => {
                       const medal = MEDALS[i] || null, isTop = i < 3;
                       return (
@@ -5112,13 +5150,13 @@ export default function MapView({ events, headerCollapsed = false, interactive =
                   className="text-white/50 hover:text-white text-xl leading-none w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/10">×</button>
               </div>
               {/* Events — top 50% */}
-              <div className="flex-1 overflow-y-auto border-b border-white/10" style={{ maxHeight: '50%' }}>
+              <div className="flex-1 overflow-y-auto border-b border-white/10 min-h-0">
                 <PaginatedSection
                   items={sideBoroughEvents}
                   emptyMsg={`No upcoming events in ${sideBorough}`}
                   headerLabel="Events"
                   headerColor="text-white/30"
-                  pageSize={4}
+                  pageSize={3}
                   renderItem={(ev) => (
                     <div key={ev.id}
                       className="flex items-start gap-3 p-3 border-b border-white/5 cursor-pointer hover:bg-white/5 transition-colors"
@@ -5144,13 +5182,13 @@ export default function MapView({ events, headerCollapsed = false, interactive =
               </div>
 
               {/* Colony Leaderboard — bottom 50% */}
-              <div className="flex-1 overflow-y-auto" style={{ maxHeight: '50%' }}>
+              <div className="flex-1 overflow-y-auto min-h-0">
                 <PaginatedSection
                   items={sideBoroughColonists}
                   emptyMsg="No colonists yet"
                   headerLabel="Colony Leaderboard"
                   headerColor="text-green-400/50"
-                  pageSize={7}
+                  pageSize={5}
                   renderItem={(c, i) => {
                     const medal = MEDALS[i] || null, isTop = i < 3;
                     return (
