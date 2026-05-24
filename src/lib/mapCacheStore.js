@@ -21,6 +21,7 @@ const mapCacheStore = {
   outlineGeoCache: null,         // { [intZoom]: ZCTA outline GeoJSON } — per integer zoom
   boroughOutlineGeoCache: null,  // { [intZoom]: borough outline GeoJSON }
   prebakeFingerprint: null,      // events fingerprint that caches were built against (invalidate on change)
+  zipScatterPositions: null,     // { [zip]: [[lng,lat], ...] } pre-baked scatter positions
 
   // ── Phase 2B signals (set by MapView after GL init) ────────────────────
   mapLibreReady: false,     // true when MapLibre 'load' event fires

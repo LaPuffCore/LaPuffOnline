@@ -721,6 +721,57 @@ export async function runPhase2A(events, isMobile, onProgress) {
   mapCacheStore.boroughEventCountsByTimespan = boroughEventCountsByTimespan;
   mapCacheStore.boroughTiersByTimespan = boroughTiersByTimespan;
 
+  // ── Pre-bake scatter positions for post bubbles (max 30 per zip) ──────────
+  try {
+    const scatterPositions = {};
+    const MAX_SCATTER = 30;
+    const MAX_ATTEMPTS = 120;
+    for (const feature of geoData.features) {
+      if (feature.properties._special) continue;
+      const zip = String(feature.properties.MODZCTA || '');
+      if (!zip) continue;
+      const geom = feature.geometry;
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      const allRings = geom.type === 'MultiPolygon'
+        ? geom.coordinates.flat(1)
+        : geom.coordinates;
+      allRings.forEach(ring => ring.forEach(([x, y]) => {
+        minX = Math.min(minX, x); minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x); maxY = Math.max(maxY, y);
+      }));
+      const polys = geom.type === 'MultiPolygon' ? geom.coordinates : [geom.coordinates];
+      function pip(px, py) {
+        for (const poly of polys) {
+          let inside = false;
+          const ring = poly[0];
+          for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+            const [xi, yi] = ring[i], [xj, yj] = ring[j];
+            if (((yi > py) !== (yj > py)) && (px < (xj - xi) * (py - yi) / (yj - yi) + xi))
+              inside = !inside;
+          }
+          if (inside) return true;
+        }
+        return false;
+      }
+      let seed = 0;
+      for (let ci = 0; ci < zip.length; ci++) seed = (seed * 31 + zip.charCodeAt(ci)) >>> 0;
+      function rand() {
+        seed = (seed * 1664525 + 1013904223) >>> 0;
+        return seed / 0xFFFFFFFF;
+      }
+      const pts = [];
+      let attempts = 0;
+      while (pts.length < MAX_SCATTER && attempts < MAX_ATTEMPTS) {
+        attempts++;
+        const lx = minX + rand() * (maxX - minX);
+        const ly = minY + rand() * (maxY - minY);
+        if (pip(lx, ly)) pts.push([lx, ly]);
+      }
+      scatterPositions[zip] = pts;
+    }
+    mapCacheStore.zipScatterPositions = scatterPositions;
+  } catch (_e) { /* non-blocking */ }
+
 // ── Road header pre-warm + full-file SW pre-cache ───────────────────────
   // SW receives PRECACHE_PMTILES → fetches full file once → serves Range slices in-memory.
   // Header pre-warm (Range bytes=0-16383) primes the PMTiles directory parser.

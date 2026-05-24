@@ -1236,28 +1236,53 @@ function PaginatedSection({ items, renderItem, emptyMsg, headerLabel, headerColo
   const [page, setPage] = useState(0);
   const totalPages = Math.ceil(items.length / pageSize);
   const visible = items.slice(page * pageSize, page * pageSize + pageSize);
+
+  useEffect(() => { setPage(0); }, [items.length > 0 ? items[0]?.id || items[0] : null]);
+
+  const paginationBar = totalPages > 1 ? (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '6px 16px', borderTop: '1px solid rgba(255,255,255,0.1)', flexShrink: 0, background: 'rgba(3,0,10,0.8)' }}>
+      <button
+        onClick={() => setPage(p => Math.max(0, p - 1))}
+        disabled={page === 0}
+        style={{ padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 900, cursor: page === 0 ? 'default' : 'pointer', background: 'transparent', border: 'none', color: page === 0 ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.6)', transition: 'color 0.15s' }}>
+        {'‹'}
+      </button>
+      <span style={{ color: 'rgba(255,255,255,0.3)', fontSize: 10, fontWeight: 900 }}>{page + 1} / {totalPages}</span>
+      <button
+        onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}
+        disabled={page >= totalPages - 1}
+        style={{ padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 900, cursor: page >= totalPages - 1 ? 'default' : 'pointer', background: 'transparent', border: 'none', color: page >= totalPages - 1 ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.6)', transition: 'color 0.15s' }}>
+        {'›'}
+      </button>
+    </div>
+  ) : null;
+
+  if (fill) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+        <p style={{ padding: '8px 16px', fontSize: 10, fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.1em', flexShrink: 0, background: 'rgba(3,0,10,0.8)', borderBottom: '1px solid rgba(255,255,255,0.05)' }}
+          className={headerColor}>{headerLabel}</p>
+        <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
+          {items.length === 0
+            ? <p style={{ padding: '24px 16px', color: 'rgba(255,255,255,0.2)', fontSize: 13, textAlign: 'center' }}>{emptyMsg}</p>
+            : visible.map((item, i) => renderItem(item, page * pageSize + i))
+          }
+        </div>
+        {paginationBar}
+      </div>
+    );
+  }
+
   return (
-    <div className={`flex flex-col ${fill ? 'h-full' : 'min-h-0'}`}>
+    <div className="flex flex-col min-h-0">
       <p className={`px-4 py-2 text-xs font-black uppercase tracking-widest sticky top-0 bg-gray-950/90 flex-shrink-0 ${headerColor}`}>{headerLabel}</p>
-      <div className={fill ? 'flex-1 overflow-y-auto' : ''}>
+      <div>
         {items.length === 0
           ? <p className="px-4 py-6 text-white/20 text-sm text-center">{emptyMsg}</p>
           : visible.map((item, i) => renderItem(item, page * pageSize + i))
         }
       </div>
-      {totalPages > 1 && (
-        <div className="flex items-center justify-center gap-2 px-4 py-1.5 border-t border-white/10 flex-shrink-0 bg-gray-950/90 mt-auto">
-          {page > 0
-            ? <button onClick={() => setPage(p => p - 1)} className="text-white/50 hover:text-white text-xs font-black px-1.5 py-0.5 rounded hover:bg-white/10 transition-colors">{'<'}</button>
-            : <span className="w-5" />
-          }
-          <span className="text-white/30 text-[10px] font-black">{page + 1} / {totalPages}</span>
-          {page < totalPages - 1
-            ? <button onClick={() => setPage(p => p + 1)} className="text-white/50 hover:text-white text-xs font-black px-1.5 py-0.5 rounded hover:bg-white/10 transition-colors">{'>'}</button>
-            : <span className="w-5" />
-          }
-        </div>
-      )}
+      {paginationBar}
     </div>
   );
 }
@@ -1557,9 +1582,9 @@ function MapPostsPanelView({ panel, posts, reactions, sort, setSort, page, setPa
               </button>
             ))}
           </div>
-          <button onClick={onPin} title={pinned ? 'Unpin panel' : 'Pin panel'} style={{ opacity: pinned ? 1 : 0.5, background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 14, lineHeight: 1 }}>📌</button>
+          <button onClick={onPin} title={pinned ? 'Unpin panel' : 'Pin panel'} style={{ opacity: pinned ? 1 : 0.5, width: 26, height: 26, borderRadius: 99, border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.6)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11 }}>📌</button>
           <button onClick={onClose}
-            style={{ width: 26, height: 26, borderRadius: 99, border: '1px solid rgba(255,255,255,0.2)', background: 'transparent', color: 'rgba(255,255,255,0.5)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 900 }}>✕</button>
+            style={{ width: 26, height: 26, borderRadius: 99, border: '1px solid rgba(255,255,255,0.2)', background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.5)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 900 }}>✕</button>
         </div>
       </div>
 
@@ -1636,6 +1661,15 @@ function getPostDisplayCount(postCount, maxPostCount) {
   const scaled = Math.round(postCount / maxPostCount * 30);
   const bounded = Math.max(1, scaled); // never 0 for postCount > 0
   return Math.min(postCount, bounded); // never more than actual posts
+}
+
+// Map post display count (0-30 scale) to 5-tier heat color for 🗣️ bubbles
+function getPostBubbleTierColor(displayCount) {
+  if (displayCount <= 6) return '#00ccdd';
+  if (displayCount <= 12) return '#00dd66';
+  if (displayCount <= 18) return '#f5c800';
+  if (displayCount <= 24) return '#dd6600';
+  return '#cc0d00';
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
@@ -1749,6 +1783,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   const [pinnedRightPanel, setPinnedRightPanel] = useState(false); // true = right events/leaderboard panel is pinned
   const hoveredBoroughIdRef = useRef(null);
   const hoveredBoroughNameRef = useRef(null); // Tracks borough name for ZCTA batch boroughHover feature states
+  const setBoroughHoverStatesRef = useRef(null); // Set inside layer effect, accessible from JSX
   // Event pin markers toggle
   const [showPins, setShowPins] = useState(false);
   const [showPostBubbles, setShowPostBubbles] = useState(false);
@@ -1756,6 +1791,12 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   const [pinDropdownOpen, setPinDropdownOpen] = useState(false); // mobile dropdown
   const [zipPostCounts, setZipPostCounts] = useState({}); // { zip: count }
   const postBubbleMarkersRef = useRef([]); // MapLibre Marker instances for 🗣️ overlay
+  const isOverPostBubbleRef = useRef(false); // true when cursor is over a post bubble marker
+  const isOverPanelRef = useRef(false); // true when cursor is over sideZip/sideBorough panel
+  const [hoveredPostBubble, setHoveredPostBubble] = useState(null); // { post, x, y, zip }
+  const zipScatterPositionsRef = useRef({}); // zip → [[lng,lat], ...] pre-baked positions
+  const zipPostsRef = useRef({}); // zip → array of fetched posts (session cache)
+  const zipMarkerAssignmentsRef = useRef({}); // zip → [postIdx, ...] seeded assignments
   // Borough region overlay toggle
   const [showRegion, setShowRegion] = useState(false);
   const regionMarkersRef = useRef([]);
@@ -1929,6 +1970,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       if (mapCacheStore.boroughSkeleton) boroughSkeletonRef.current = mapCacheStore.boroughSkeleton;
       else boroughSkeletonRef.current = buildBoroughSkeleton(mapCacheStore.boroughGeoData);
       if (mapCacheStore.zipBoroughMap) zipBoroughMapRef.current = mapCacheStore.zipBoroughMap;
+      if (mapCacheStore.zipScatterPositions) zipScatterPositionsRef.current = mapCacheStore.zipScatterPositions;
       boroughGeoKeyRef.current = null;
       boroughQuadFilterRef.current = null;
       return;
@@ -2255,10 +2297,13 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       // 16px width means 8px extends outside the polygon boundary = "small distance out" zone.
       map.addLayer({
         id: 'borough-hover-border', type: 'line', source: 'borough-hover-source',
-        paint: { 'line-color': '#7C3AED', 'line-opacity': 0.001, 'line-width': ['interpolate', ['linear'], ['zoom'], 9, 32, 11, 22, 13, 16] },
+        paint: { 'line-color': '#7C3AED', 'line-opacity': 0.001, 'line-width': ['interpolate', ['linear'], ['zoom'], 9, 28, 11, 28, 13, 48, 16, 96] },
       });
     }
     const handleZctaHover = e => {
+      if (hoveredPinEventRef.current) return;
+      if (isOverPostBubbleRef.current) return;
+      if (isOverPanelRef.current) return;
       if (!e.features.length) return;
       const f = e.features[0];
       if (hoveredIdRef.current !== null && hoveredIdRef.current !== f.id)
@@ -2285,6 +2330,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       if (!e.features.length) return;
       // If a pin is currently hovered, don't open zip panel — pin click takes priority
       if (hoveredPinEventRef.current) return;
+      if (isOverPostBubbleRef.current) return;
+      if (isOverPanelRef.current) return;
       // Block new selections while any hologram is open
       if (holoActiveRef.current) return;
       // Yield to borough click when cursor is near a borough boundary line
@@ -2324,12 +2371,16 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         }
       });
     };
+    setBoroughHoverStatesRef.current = setBoroughHoverStates;
 
     // Borough hover via 'borough-hover-fill' layer.
     // Task 1.1: also checks pixel-radius proximity to 'borough-line-overlay' so hovering
     // near the line stroke activates borough hover even when a ZCTA is under the cursor.
     // Task 1.2: batch-updates 'boroughHover' feature state on all ZCTA features in borough.
     const handleBoroughFillHover = e => {
+      if (hoveredPinEventRef.current) return;
+      if (isOverPostBubbleRef.current) return;
+      if (isOverPanelRef.current) return;
       if (!e.features.length) return;
       const f = e.features[0];
       const newBoroughName = String(f.properties.BoroName || '');
@@ -2421,6 +2472,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         openBoroughSidePanel(boroughName);
         setMapPostsPanelIfNotPinned({ type: 'borough', value: boroughName });
         openBoroughHologram(boroughName);
+        setBoroughHoverStates(boroughName, true);
       }
     };
     map.on('mousemove', 'borough-hover-fill', handleBoroughFillHover);
@@ -4265,31 +4317,127 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     return () => { cancelled = true; };
   }, [showPostBubbles, timespanIdx]);
 
-  // Render post bubble markers
+  // Render post bubble markers — geo-scattered, zoom-aware, heatmap-colored
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    postBubbleMarkersRef.current.forEach(m => m.remove());
+    postBubbleMarkersRef.current.forEach(m => { try { m.marker.remove(); } catch {} });
     postBubbleMarkersRef.current = [];
     if (!showPostBubbles || !geoData || Object.keys(zipPostCounts).length === 0) return;
     const maxCount = Math.max(...Object.values(zipPostCounts), 0);
+    const currentZoom = map.getZoom();
     geoData.features.forEach(f => {
       const zip = String(f.properties.MODZCTA || '');
       if (!zip || f.properties._special) return;
       const count = zipPostCounts[zip] || 0;
       if (count === 0) return;
       const displayCount = getPostDisplayCount(count, maxCount);
-      const [cx, cy] = getGeomCentroid(f.geometry);
-      const el = document.createElement('div');
-      el.style.cssText = 'pointer-events: none; user-select: none; line-height: 1; font-size: 11px; max-width: 60px; word-break: break-all; text-align: center; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.8));';
-      el.textContent = '🗣️'.repeat(Math.min(displayCount, 30));
-      el.title = `${count} post${count !== 1 ? 's' : ''} in ZIP ${zip}`;
-      const marker = new maplibregl.Marker({ element: el, anchor: 'center' })
-        .setLngLat([cx, cy])
-        .addTo(map);
-      postBubbleMarkersRef.current.push(marker);
+      if (displayCount === 0) return;
+      const tierColor = getPostBubbleTierColor(displayCount);
+      const scatterPts = zipScatterPositionsRef.current[zip] || [];
+      const [fcx, fcy] = getGeomCentroid(f.geometry);
+      if (!zipMarkerAssignmentsRef.current[zip]) {
+        const storageKey = `lapuff_bubble_assign_${zip}`;
+        let assignment;
+        try {
+          const stored = sessionStorage.getItem(storageKey);
+          assignment = stored ? JSON.parse(stored) : null;
+        } catch { assignment = null; }
+        if (!assignment || assignment.length < 30) {
+          const arr = Array.from({ length: 30 }, (_, i) => i);
+          let seed2 = 0;
+          const ts = sessionStorage.getItem('lapuff_bubble_session_seed') || String(Date.now());
+          if (!sessionStorage.getItem('lapuff_bubble_session_seed')) sessionStorage.setItem('lapuff_bubble_session_seed', ts);
+          for (let ci = 0; ci < (zip + ts).length; ci++) seed2 = (seed2 * 31 + (zip + ts).charCodeAt(ci)) >>> 0;
+          for (let i = arr.length - 1; i > 0; i--) {
+            seed2 = (seed2 * 1664525 + 1013904223) >>> 0;
+            const j = seed2 % (i + 1);
+            [arr[i], arr[j]] = [arr[j], arr[i]];
+          }
+          assignment = arr;
+          try { sessionStorage.setItem(storageKey, JSON.stringify(assignment)); } catch {}
+        }
+        zipMarkerAssignmentsRef.current[zip] = assignment;
+      }
+      for (let mi = 0; mi < displayCount; mi++) {
+        const [lng, lat] = scatterPts[mi] || [fcx + (mi * 0.0003), fcy + (mi * 0.0002)];
+        const postAssignIdx = zipMarkerAssignmentsRef.current[zip]?.[mi % 30] ?? mi;
+        const el = document.createElement('div');
+        el.style.cssText = 'cursor: pointer; user-select: none; position: relative;';
+        el.dataset.zip = zip;
+        el.dataset.markerIdx = mi;
+        const isFullEmoji = currentZoom >= 12;
+        if (isFullEmoji) {
+          const size = Math.round(14 + (currentZoom - 12) * 3);
+          el.innerHTML = `<div style="width:${size + 8}px;height:${size + 8}px;border-radius:50%;background:${heatmap ? tierColor : 'rgba(0,0,0,0.55)'};display:flex;align-items:center;justify-content:center;box-shadow:0 0 ${heatmap ? 8 : 4}px ${heatmap ? tierColor : 'rgba(124,58,237,0.6)'};transition:all 0.2s;border:1.5px solid ${heatmap ? 'rgba(255,255,255,0.3)' : 'rgba(124,58,237,0.4)'}"><span style="font-size:${size}px;line-height:1;filter:drop-shadow(0 1px 2px rgba(0,0,0,0.8))">🗣️</span></div>`;
+        } else {
+          const dotSize = Math.max(6, Math.round(4 + currentZoom * 0.6));
+          el.innerHTML = `<div style="width:${dotSize}px;height:${dotSize}px;border-radius:50%;background:${heatmap ? tierColor : '#9333ea'};border:1.5px solid ${heatmap ? '#9333ea' : 'rgba(147,51,234,0.5)'};box-shadow:0 0 ${dotSize}px ${heatmap ? tierColor : '#9333ea'},0 0 ${dotSize * 2}px ${heatmap ? tierColor + '80' : '#9333ea50'};animation:post-bubble-pulse 2s ease-in-out infinite"></div>`;
+        }
+        el.addEventListener('mouseenter', async (e) => {
+          e.stopPropagation();
+          isOverPostBubbleRef.current = true;
+          if (!zipPostsRef.current[zip]) {
+            try {
+              const posts = await fetchGeoPostFeed({ type: 'zip', value: zip });
+              zipPostsRef.current[zip] = posts || [];
+            } catch { zipPostsRef.current[zip] = []; }
+          }
+          const posts = zipPostsRef.current[zip] || [];
+          const assignedIdx = postAssignIdx % Math.max(posts.length, 1);
+          const post = posts[assignedIdx] || posts[0] || null;
+          if (post) {
+            const rect = map.getContainer().getBoundingClientRect();
+            setHoveredPostBubble({ post, x: rect.left + map.project([lng, lat]).x, y: rect.top + map.project([lng, lat]).y, zip });
+          }
+        });
+        el.addEventListener('mouseleave', (e) => {
+          e.stopPropagation();
+          isOverPostBubbleRef.current = false;
+          setHoveredPostBubble(null);
+        });
+        el.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          setHoveredPostBubble(null);
+          if (!zipPostsRef.current[zip]) {
+            try {
+              const posts = await fetchGeoPostFeed({ type: 'zip', value: zip });
+              zipPostsRef.current[zip] = posts || [];
+            } catch { zipPostsRef.current[zip] = []; }
+          }
+          const posts = zipPostsRef.current[zip] || [];
+          if (posts.length === 0) return;
+          const assignedIdx = postAssignIdx % posts.length;
+          const post = posts[assignedIdx];
+          if (post) {
+            setMapPostsPanel({ type: 'zip', value: zip });
+            setSelectedGeoPost(post);
+          }
+        });
+        const marker = new maplibregl.Marker({ element: el, anchor: 'center' })
+          .setLngLat([lng, lat])
+          .addTo(map);
+        postBubbleMarkersRef.current.push({ marker, zip, mi, postAssignIdx });
+      }
     });
-  }, [showPostBubbles, zipPostCounts, mapReady, geoData]);
+  }, [showPostBubbles, zipPostCounts, mapReady, geoData, heatmap]);
+
+  // Rebuild post bubble markers on integer zoom change (dot ↔ emoji threshold at z12)
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !showPostBubbles) return;
+    let lastZoomFloor = Math.floor(map.getZoom());
+    const handleZoom = () => {
+      const newFloor = Math.floor(map.getZoom());
+      if (newFloor !== lastZoomFloor) {
+        lastZoomFloor = newFloor;
+        setZipPostCounts(c => ({ ...c }));
+      }
+    };
+    map.on('zoom', handleZoom);
+    return () => map.off('zoom', handleZoom);
+  }, [showPostBubbles, mapReady]);
 
   // Close mobile pin dropdown when user clicks outside
   useEffect(() => {
@@ -5026,8 +5174,13 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   const sideLabel = isSafezoneModzcta(sideZip) ? getSafezoneLabel(sideZip) : sideZip ? `ZIP ${sideZip}` : '';
 
   return (
-    // Outer div is the positioning root for everything
     <div ref={containerRef} className="absolute inset-0 overflow-hidden" style={{ background: '#0d0000' }}>
+      <style>{`
+        @keyframes post-bubble-pulse {
+          0%, 100% { opacity: 0.75; transform: scale(1); }
+          50% { opacity: 1; transform: scale(1.2); }
+        }
+      `}</style>
 
       {/* FIX CRT: Wrap CRTEffect at z-index 20 so it renders ABOVE the map canvas
           as a visible overlay on all views and combos, while remaining below
@@ -5254,6 +5407,36 @@ export default function MapView({ events, headerCollapsed = false, interactive =
             </div>
           )}
 
+          {/* ── Post bubble hover micropopup ── */}
+          {hoveredPostBubble && (
+            <div
+              style={{
+                position: 'fixed',
+                left: Math.min(hoveredPostBubble.x + 12, window.innerWidth - 260),
+                top: Math.max(hoveredPostBubble.y - 80, 8),
+                zIndex: 99999,
+                pointerEvents: 'none',
+                width: 240,
+              }}
+            >
+              <div style={{ background: 'rgba(10,0,20,0.95)', border: '1px solid rgba(124,58,237,0.5)', borderRadius: 12, padding: '10px 12px', boxShadow: '0 4px 20px rgba(0,0,0,0.6), 0 0 12px rgba(124,58,237,0.3)', color: '#fff' }}>
+                {hoveredPostBubble.post.image_url && (
+                  <img src={hoveredPostBubble.post.image_url} alt="" style={{ width: '100%', height: 80, objectFit: 'cover', borderRadius: 8, marginBottom: 8 }} onError={e => e.target.style.display = 'none'} />
+                )}
+                <p style={{ fontSize: 11, fontWeight: 700, color: '#a78bfa', marginBottom: 4 }}>
+                  {hoveredPostBubble.post.username || 'Orbiter'}
+                  {hoveredPostBubble.post.is_participant && <span style={{ marginLeft: 4, fontSize: 9, color: '#4ade80', fontWeight: 900 }}>● PARTICIPANT</span>}
+                </p>
+                {hoveredPostBubble.post.content?.html && (
+                  <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.8)', lineHeight: 1.4, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical' }}
+                    dangerouslySetInnerHTML={{ __html: hoveredPostBubble.post.content.html }}
+                  />
+                )}
+                <p style={{ fontSize: 9, color: 'rgba(255,255,255,0.35)', marginTop: 6 }}>📍 ZIP {hoveredPostBubble.zip} · click to open</p>
+              </div>
+            </div>
+          )}
+
           {/* ── Pin hover popup — above cursor, stacks above zip tooltip ── */}
           {hoveredPinEvent && hoveredPinPos && (
             <div className="fixed z-[100001] pointer-events-none"
@@ -5315,18 +5498,24 @@ export default function MapView({ events, headerCollapsed = false, interactive =
           {/* ── DESKTOP side panel — sits below header when not collapsed ── */}
           {sideZip && !isMobile && (
             <div className={`absolute right-0 bottom-0 z-50 flex flex-col overflow-hidden transition-[top] duration-300 ${headerCollapsed ? 'top-0' : 'top-[72px]'}`}
-              style={{ width: 400, background: 'rgba(3,0,10,0.52)', backdropFilter: 'blur(16px)', borderLeft: '1px solid rgba(180,0,0,0.3)' }}>
-              <div className="flex items-center justify-between px-5 py-3 border-b border-white/10 bg-black/30 flex-shrink-0">
-                <div>
+              style={{ width: 400, background: 'rgba(3,0,10,0.52)', backdropFilter: 'blur(16px)', borderLeft: '1px solid rgba(180,0,0,0.3)' }}
+              onMouseEnter={() => { isOverPanelRef.current = true; }}
+              onMouseLeave={() => { isOverPanelRef.current = false; }}>
+              <div className="flex items-center px-5 py-3 border-b border-white/10 bg-black/30 flex-shrink-0">
+                <div className="flex-1 min-w-0">
                   <p className="text-red-400 font-black">{sideLabel}</p>
                   <p className="text-white/40 text-xs">{isSafezoneModzcta(sideZip) ? `🛡️ ${getSafezoneLabel(sideZip)} · ${sideEvents.length} events` : `${sideEvents.length} events · ${sideColonists.length} colonists`}</p>
                 </div>
-                <button onClick={() => setPinnedRightPanel(p => !p)} title={pinnedRightPanel ? 'Unpin panel' : 'Pin panel'} style={{ opacity: pinnedRightPanel ? 1 : 0.5, background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 14 }}>📌</button>
-                <button onClick={() => { setSideZip(null); setSideEvents([]); setSideColonists([]); setHoloFeature(null); }}
-                  className="text-white/40 hover:text-white text-xl w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10">✕</button>
+                <div className="flex items-center gap-1 ml-auto flex-shrink-0">
+                  <button onClick={() => setPinnedRightPanel(p => !p)} title={pinnedRightPanel ? 'Unpin panel' : 'Pin panel'}
+                    style={{ opacity: pinnedRightPanel ? 1 : 0.5 }}
+                    className="w-7 h-7 rounded-full flex items-center justify-center text-xs bg-white/5 hover:bg-white/15 text-white/60 hover:text-white transition-all border-none cursor-pointer">📌</button>
+                  <button onClick={() => { setSideZip(null); setSideEvents([]); setSideColonists([]); setHoloFeature(null); }}
+                    className="w-7 h-7 rounded-full flex items-center justify-center text-xs bg-white/5 hover:bg-white/15 text-white/60 hover:text-white transition-all">✕</button>
+                </div>
               </div>
 
-              <div className="h-1/2 flex flex-col overflow-hidden border-b border-white/10">
+              <div style={{ height: '50%', display: 'flex', flexDirection: 'column', overflow: 'hidden', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
                 <PaginatedSection
                   items={sideEvents}
                   emptyMsg="No upcoming events"
@@ -5364,7 +5553,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
               </div>
 
               {!isSafezoneModzcta(sideZip) && (
-                <div className="h-1/2 flex flex-col overflow-hidden">
+                <div style={{ height: '50%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                   <PaginatedSection
                     items={sideColonists}
                     emptyMsg="No colonists yet"
@@ -5410,19 +5599,25 @@ export default function MapView({ events, headerCollapsed = false, interactive =
           {/* ── DESKTOP: Borough side panel (right side, events + colonists) ── */}
           {sideBorough && !isMobile && (
             <div className={`absolute right-0 bottom-0 z-50 flex flex-col overflow-hidden transition-[top] duration-300 ${headerCollapsed ? 'top-0' : 'top-[72px]'}`}
-              style={{ width: 400, background: 'rgba(3,0,10,0.52)', backdropFilter: 'blur(16px)', borderLeft: '1px solid rgba(124,58,237,0.3)' }}>
+              style={{ width: 400, background: 'rgba(3,0,10,0.52)', backdropFilter: 'blur(16px)', borderLeft: '1px solid rgba(124,58,237,0.3)' }}
+              onMouseEnter={() => { isOverPanelRef.current = true; }}
+              onMouseLeave={() => { isOverPanelRef.current = false; }}>
               {/* Header */}
-              <div className="flex items-center justify-between px-4 py-3 border-b border-purple-500/20">
-                <div>
+              <div className="flex items-center px-4 py-3 border-b border-purple-500/20">
+                <div className="flex-1 min-w-0">
                   <h2 className="text-white font-black text-base">{sideBorough}</h2>
                   <p className="text-white/40 text-xs">{sideBoroughEvents.length} events · {sideBoroughColonists.length} colonists</p>
                 </div>
-                <button onClick={() => setPinnedRightPanel(p => !p)} title={pinnedRightPanel ? 'Unpin panel' : 'Pin panel'} style={{ opacity: pinnedRightPanel ? 1 : 0.5, background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 14 }}>📌</button>
-                <button onClick={() => { setSideBorough(null); setSideBoroughEvents([]); setSideBoroughColonists([]); setHoloFeature(null); setHoloBoroughMode(false); setHoloBoroughName(''); }}
-                  className="text-white/50 hover:text-white text-xl leading-none w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/10">×</button>
+                <div className="flex items-center gap-1 ml-auto flex-shrink-0">
+                  <button onClick={() => setPinnedRightPanel(p => !p)} title={pinnedRightPanel ? 'Unpin panel' : 'Pin panel'}
+                    style={{ opacity: pinnedRightPanel ? 1 : 0.5 }}
+                    className="w-7 h-7 rounded-full flex items-center justify-center text-xs bg-white/5 hover:bg-white/15 text-white/60 hover:text-white transition-all border-none cursor-pointer">📌</button>
+                  <button onClick={() => { setSideBorough(null); setSideBoroughEvents([]); setSideBoroughColonists([]); setHoloFeature(null); setHoloBoroughMode(false); setHoloBoroughName(''); setBoroughHoverStatesRef.current?.(sideBorough, false); }}
+                    className="w-7 h-7 rounded-full flex items-center justify-center text-xs bg-white/5 hover:bg-white/15 text-white/60 hover:text-white transition-all">×</button>
+                </div>
               </div>
               {/* Events — top 50% */}
-              <div className="h-1/2 flex flex-col overflow-hidden border-b border-white/10">
+              <div style={{ height: '50%', display: 'flex', flexDirection: 'column', overflow: 'hidden', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
                 <PaginatedSection
                   items={sideBoroughEvents}
                   emptyMsg={`No upcoming events in ${sideBorough}`}
@@ -5455,7 +5650,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
               </div>
 
               {/* Colony Leaderboard — bottom 50% */}
-              <div className="h-1/2 flex flex-col overflow-hidden">
+              <div style={{ height: '50%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                 <PaginatedSection
                   items={sideBoroughColonists}
                   emptyMsg="No colonists yet"
