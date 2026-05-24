@@ -739,6 +739,31 @@ export async function runPhase2A(events, isMobile, onProgress) {
     : '/data/nyc_buildings_final.pmtiles';
   fetch(BUILDINGS_PMTILES_URL, { headers: { Range: 'bytes=0-16383' } }).catch(() => {});
   // Intentionally NO PRECACHE_PMTILES post for buildings — that triggered the 74MB alloc storm.
+
+  // ── Buildings Range cache: 24h revalidation warm-up ──────────────────────
+  // Browser may evict SW caches every ~24h under storage pressure. When evicted, MapLibre
+  // must re-fetch all PMTiles Range requests (header → root dir → leaf dirs → tile data)
+  // causing 5-7s blank Real3D on next load. Fix: check cache entry count; if cold, pre-warm
+  // the PMTiles directory ranges that MapLibre fetches before any tile data.
+  // request navigator.storage.persist() to prevent future eviction.
+  ;(async () => {
+    try {
+      if (navigator.storage?.persist) await navigator.storage.persist().catch(() => {});
+      const cache = await caches.open('lapuff-pmtiles-sw-v4');
+      const keys = await cache.keys();
+      const bldgEntries = keys.filter(r => r.url.includes('nyc_buildings'));
+      // Cold cache: warm root directory + first leaf directory pages in parallel.
+      // These byte ranges cover the PMTiles header (0-127), root directory, and first
+      // leaf directories — the sequential chain MapLibre's PMTiles loader must fetch
+      // before it can derive offsets for individual tile Range requests.
+      if (bldgEntries.length < 5) {
+        const warmRanges = ['16384-32767', '32768-65535', '65536-131071', '131072-196607', '196608-262143'];
+        await Promise.all(warmRanges.map(r =>
+          fetch(BUILDINGS_PMTILES_URL, { headers: { Range: `bytes=${r}` } }).catch(() => {})
+        ));
+      }
+    } catch (_e) { /* non-blocking: best-effort cache warm */ }
+  })();
   report(P.bldgCache[1], 'Building tiles ready');
 
   // ── Satellite SW precache (NYC bbox z9-z15) — last step, non-blocking ────

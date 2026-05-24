@@ -1417,6 +1417,58 @@ function ZipHologram({ feature, color, onClose, leftOffset = 0, mobile = false, 
 
 
 
+// ── GeoPost helpers ───────────────────────────────────────────────────────────
+function hexLuminance(hex) {
+  if (!hex || typeof hex !== 'string') return 0;
+  const h = hex.replace('#', '');
+  if (h.length !== 6) return 0;
+  const r = parseInt(h.slice(0, 2), 16) / 255;
+  const g = parseInt(h.slice(2, 4), 16) / 255;
+  const b = parseInt(h.slice(4, 6), 16) / 255;
+  const toL = c => c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  return 0.2126 * toL(r) + 0.7152 * toL(g) + 0.0722 * toL(b);
+}
+
+function GeoPostDetailOverlay({ post, reactions = {}, onClose }) {
+  const plain = stripHtml(post.content?.html || post.content || '');
+  const dateStr = new Date(post.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  const emojiCounts = {};
+  (reactions[post.id] || []).forEach(r => { emojiCounts[r.emoji_text] = (emojiCounts[r.emoji_text] || 0) + 1; });
+  const topEmojis = Object.entries(emojiCounts).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  const scopeLabel = post.zip_code ? `📍 ${post.zip_code} · ${post.borough}`
+    : post.borough ? `🏙 ${post.borough}`
+    : post.scope === 'nyc' ? '🗽 NYC' : '💻 Digital';
+  const bgFill = post.post_fill ? post.post_fill + 'f0' : 'rgba(5,0,20,0.97)';
+  const lum = post.post_fill ? hexLuminance(post.post_fill) : 0;
+  const textColor = lum > 0.35 ? '#111' : 'rgba(255,255,255,0.92)';
+  const subColor = lum > 0.35 ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.45)';
+  return createPortal(
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 100001, background: 'rgba(0,0,0,0.72)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: bgFill, border: `2px solid ${post.post_outline || 'rgba(124,58,237,0.5)'}`, borderRadius: 18, width: '100%', maxWidth: 520, maxHeight: '85vh', overflowY: 'auto', position: 'relative', boxShadow: '0 20px 60px rgba(0,0,0,0.6)' }}>
+        <button onClick={onClose} style={{ position: 'absolute', top: 10, right: 10, width: 30, height: 30, borderRadius: 99, border: '1px solid rgba(255,255,255,0.25)', background: 'rgba(0,0,0,0.55)', color: 'rgba(255,255,255,0.85)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 900, zIndex: 1 }}>✕</button>
+        {post.image_url && <img src={post.image_url} alt="" style={{ width: '100%', maxHeight: 280, objectFit: 'cover', borderRadius: '16px 16px 0 0', display: 'block' }} />}
+        <div style={{ padding: '14px 16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
+            <span style={{ fontWeight: 900, fontSize: 13, color: textColor }}>{post.username || 'Orbiter'}</span>
+            <span style={{ fontSize: 9, fontWeight: 900, padding: '2px 6px', borderRadius: 99, background: post.is_participant ? '#22c55e' : '#ef4444', color: '#fff' }}>● {post.is_participant ? 'PARTICIPANT' : 'ORBITER'}</span>
+            <span style={{ fontSize: 10, color: subColor, marginLeft: 'auto' }}>{dateStr}</span>
+          </div>
+          {post.content?.html
+            ? <div dangerouslySetInnerHTML={{ __html: post.content.html }} style={{ fontSize: 13, lineHeight: 1.6, color: textColor, marginBottom: 12, wordBreak: 'break-word' }} />
+            : plain && <p style={{ fontSize: 13, lineHeight: 1.6, color: textColor, marginBottom: 12, wordBreak: 'break-word' }}>{plain}</p>}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 7px', borderRadius: 99, background: 'rgba(124,58,237,0.25)', color: '#a78bfa' }}>{scopeLabel}</span>
+            {topEmojis.map(([emoji, count]) => (
+              <span key={emoji} style={{ fontSize: 11, background: 'rgba(255,255,255,0.1)', borderRadius: 99, padding: '2px 8px', color: textColor }}>{emoji} {count}</span>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 // ── MapPostsPanelView ──────────────────────────────────────────────────────────
 const POSTS_PER_PAGE = 6;
 
@@ -1432,7 +1484,7 @@ function truncateText(text, maxLen = 200) {
   return text.slice(0, maxLen).trimEnd() + '…';
 }
 
-function MapPostsPanelView({ panel, posts, reactions, sort, setSort, page, setPage, loading, headerCollapsed, isMobile = false, onClose }) {
+function MapPostsPanelView({ panel, posts, reactions, sort, setSort, page, setPage, loading, headerCollapsed, isMobile = false, onClose, onPostClick }) {
   const accentPurple = '#7C3AED';
   const totalPages = Math.ceil(posts.length / POSTS_PER_PAGE);
   const visiblePosts = posts.slice(page * POSTS_PER_PAGE, (page + 1) * POSTS_PER_PAGE);
@@ -1484,20 +1536,24 @@ function MapPostsPanelView({ panel, posts, reactions, sort, setSort, page, setPa
           const dateStr = new Date(post.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
           const cardBg = post.post_fill ? post.post_fill + 'dd' : 'rgba(255,255,255,0.06)';
           const cardBdr = post.post_outline || 'rgba(255,255,255,0.12)';
+          const cardLum = post.post_fill ? hexLuminance(post.post_fill) : 0;
+          const cardTextColor = cardLum > 0.35 ? '#111' : (post.post_fill ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.85)');
+          const cardSubColor = cardLum > 0.35 ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.35)';
           return (
-            <div key={post.id} style={{ marginBottom: 8, borderRadius: 14, border: `2px solid ${cardBdr}`, background: cardBg, overflow: 'hidden', boxShadow: '2px 2px 0px rgba(0,0,0,0.4)' }}>
+            <div key={post.id} onClick={() => onPostClick && onPostClick(post)}
+              style={{ marginBottom: 8, borderRadius: 14, border: `2px solid ${cardBdr}`, background: cardBg, overflow: 'hidden', boxShadow: '2px 2px 0px rgba(0,0,0,0.4)', cursor: onPostClick ? 'pointer' : 'default' }}>
               {post.image_url && (
                 <img src={post.image_url} alt="" style={{ width: '100%', height: 100, objectFit: 'cover', display: 'block' }} loading="lazy" />
               )}
               <div style={{ padding: '8px 10px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 5, flexWrap: 'wrap' }}>
-                  <span style={{ fontWeight: 900, fontSize: 11, color: post.post_fill ? '#000' : '#fff' }}>{post.username || 'Orbiter'}</span>
+                  <span style={{ fontWeight: 900, fontSize: 11, color: cardTextColor }}>{post.username || 'Orbiter'}</span>
                   <span style={{ fontSize: 9, fontWeight: 900, padding: '1px 5px', borderRadius: 99, background: post.is_participant ? '#22c55e' : '#ef4444', color: '#fff' }}>
-                    ● {post.is_participant ? 'PART.' : 'ORB.'}
+                    ● {post.is_participant ? 'PARTICIPANT' : 'ORBITER'}
                   </span>
-                  <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.35)', marginLeft: 'auto' }}>{dateStr}</span>
+                  <span style={{ fontSize: 9, color: cardSubColor, marginLeft: 'auto' }}>{dateStr}</span>
                 </div>
-                {plain && <p style={{ fontSize: 11, lineHeight: 1.45, color: post.post_fill ? '#111' : 'rgba(255,255,255,0.85)', marginBottom: 5, wordBreak: 'break-word' }}>{plain}</p>}
+                {plain && <p style={{ fontSize: 11, lineHeight: 1.45, color: cardTextColor, marginBottom: 5, wordBreak: 'break-word' }}>{plain}</p>}
                 {topEmojis.length > 0 && (
                   <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                     {topEmojis.map(([emoji, count]) => (
@@ -1623,6 +1679,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   const [mapPostsPage, setMapPostsPage] = useState(0);
   const [mapPostsLoading, setMapPostsLoading] = useState(false);
   const [mapPostsReactions, setMapPostsReactions] = useState({});
+  const [selectedGeoPost, setSelectedGeoPost] = useState(null);
   const hoveredBoroughIdRef = useRef(null);
   const hoveredBoroughNameRef = useRef(null); // Tracks borough name for ZCTA batch boroughHover feature states
   // Event pin markers toggle
@@ -1685,7 +1742,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         source: 'zcta',
         paint: {
           'fill-color': '#7C3AED',
-          'fill-opacity': ['case', ['boolean', ['feature-state', 'boroughHover'], false], 0.10, 0],
+          'fill-opacity': ['case', ['boolean', ['feature-state', 'boroughHover'], false], 0.22, 0],
         },
       });
       map.addLayer({
@@ -1694,7 +1751,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         source: 'zcta',
         paint: {
           'line-color': '#9333EA',
-          'line-opacity': ['case', ['boolean', ['feature-state', 'boroughHover'], false], 0.55, 0],
+          'line-opacity': ['case', ['boolean', ['feature-state', 'boroughHover'], false], 0.75, 0],
           'line-width': 1.5,
         },
       });
@@ -2139,8 +2196,10 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       const f = e.features[0];
       const zip = String(f.properties.MODZCTA || '');
       const isSafezone = !!f.properties._special;
-      openSidePanel(isSafezone ? `SAFE:${zip}` : zip);
+      const panelZip = isSafezone ? `SAFE:${zip}` : zip;
+      openSidePanel(panelZip);
       openHologram(f);
+      if (!isSafezone && zip) { setMapPostsPanel({ type: 'zip', value: zip }); setMapPostsPage(0); }
     };
 
     layerHandlersRef.current = { handleZctaHover, handleZctaLeave, handleZctaClick };
@@ -2153,15 +2212,10 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     map.on('mouseleave', 'zcta-safezone-hover', handleZctaLeave);
     map.on('click', 'zcta-safezone-hover', handleZctaClick);
 
-    // Right-click on zip → geopost panel; right-click in borough border area → borough geopost panel
+    // Right-click in borough border area → opens borough geopost panel
     map.on('contextmenu', e => {
       e.originalEvent.preventDefault();
-      const features = map.queryRenderedFeatures(e.point, { layers: ['zcta-fill', 'zcta-safezone-hover'] });
-      if (features.length > 0) {
-        const zip = String(features[0].properties.MODZCTA || '');
-        if (zip) { setMapPostsPanel({ type: 'zip', value: zip }); setMapPostsPage(0); return; }
-      }
-      // Check borough border area (no zip under cursor)
+      // Only handle borough border area (zip right-click removed — left click now opens all 3 panels)
       const boroughFeatures = map.queryRenderedFeatures(e.point, { layers: ['borough-hover-fill'] });
       if (boroughFeatures.length > 0) {
         const boroughName = String(boroughFeatures[0].properties.BoroName || '');
@@ -2316,12 +2370,9 @@ export default function MapView({ events, headerCollapsed = false, interactive =
 
       touchTimer = setTimeout(() => {
         if (!touchPoint) return;
+        // Zip taps are handled by map.on('click') — long-press only handles borough border area
         const zipFeats = map.queryRenderedFeatures([touchPoint.x, touchPoint.y], { layers: ['zcta-fill', 'zcta-safezone-hover'] });
-        if (zipFeats.length > 0) {
-          const zip = String(zipFeats[0].properties.MODZCTA || '');
-          if (zip) { setMapPostsPanel({ type: 'zip', value: zip }); setMapPostsPage(0); }
-          return;
-        }
+        if (zipFeats.length > 0) return;
         // Borough border area long-press (no zip under cursor) — opens borough events side panel
         const boroughFeats = map.queryRenderedFeatures([touchPoint.x, touchPoint.y], { layers: ['borough-hover-fill'] });
         if (boroughFeats.length > 0) {
@@ -4935,6 +4986,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
               loading={mapPostsLoading}
               headerCollapsed={headerCollapsed}
               onClose={() => setMapPostsPanel(null)}
+              onPostClick={setSelectedGeoPost}
             />
           )}
           {mapPostsPanel && isMobile && (
@@ -4950,6 +5002,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
               headerCollapsed={headerCollapsed}
               isMobile={true}
               onClose={() => setMapPostsPanel(null)}
+              onPostClick={setSelectedGeoPost}
             />
           )}
 
@@ -5305,6 +5358,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
           {/* Location active marker removed per user request */}
 
       {selectedEvent && <EventDetailPopup event={selectedEvent} onClose={() => setSelectedEvent(null)} />}
+      {selectedGeoPost && <GeoPostDetailOverlay post={selectedGeoPost} reactions={mapPostsReactions} onClose={() => setSelectedGeoPost(null)} />}
 
       {/* Afters check-in popup — lightweight modal for afters pin tap */}
       {aftersCheckInEvent && (
