@@ -457,6 +457,7 @@ function computeZipBoroughMap(zctaFeatures, boroughFeatures) {
   zctaFeatures.forEach((f, i) => {
     if (f.properties._special) return;
     const [cx, cy] = getGeomCentroid(f.geometry);
+    let foundBi = -1;
     for (let bi = 0; bi < boroughFeatures.length; bi++) {
       const bGeom = boroughFeatures[bi].geometry;
       const polys = bGeom.type === 'MultiPolygon' ? bGeom.coordinates : [bGeom.coordinates];
@@ -464,8 +465,25 @@ function computeZipBoroughMap(zctaFeatures, boroughFeatures) {
       for (const poly of polys) {
         if (pointInRing(cx, cy, poly[0])) { found = true; break; }
       }
-      if (found) { result[i] = bi; break; }
+      if (found) { foundBi = bi; break; }
     }
+    // Island zips (e.g. 10004, 10035, 10464): overall centroid may fall in water.
+    // Try centroid of each individual polygon in the MultiPolygon as a fallback.
+    if (foundBi < 0 && f.geometry.type === 'MultiPolygon') {
+      outer: for (const polyCoords of f.geometry.coordinates) {
+        const ring = polyCoords[0];
+        const cx2 = ring.reduce((s, p) => s + p[0], 0) / ring.length;
+        const cy2 = ring.reduce((s, p) => s + p[1], 0) / ring.length;
+        for (let bi = 0; bi < boroughFeatures.length; bi++) {
+          const bGeom = boroughFeatures[bi].geometry;
+          const polys = bGeom.type === 'MultiPolygon' ? bGeom.coordinates : [bGeom.coordinates];
+          for (const poly of polys) {
+            if (pointInRing(cx2, cy2, poly[0])) { foundBi = bi; break outer; }
+          }
+        }
+      }
+    }
+    if (foundBi >= 0) result[i] = foundBi;
   });
   return result;
 }

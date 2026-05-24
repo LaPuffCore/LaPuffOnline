@@ -13,6 +13,7 @@ import { isEventHappeningNow, isAftersWindow, isEventLive } from '../lib/eventUt
 import { SAMPLE_MODE } from '../lib/sampleConfig';
 import { getSampleUsersForZip } from '../lib/sampleUsers';
 import { fetchGeoPostFeed, fetchReactionsForPosts, fetchCommentsForPost, submitPostComment, addPostReaction, removePostReaction } from '../lib/supabase';
+import { containsProfanity } from '../lib/profanityFilter';
 
 const GEOJSON_URL = './data/finalmodzcta.json';
 const BOROUGH_GEOJSON_URL = './data/finalboroughnsafe.json';
@@ -1231,19 +1232,21 @@ function buildHeatUnderlayPoints(geoData, tiers) {
 }
 
 // ── Paginated list section ─────────────────────────────────────────────
-function PaginatedSection({ items, renderItem, emptyMsg, headerLabel, headerColor = 'text-white/30', pageSize = PAGE_SIZE }) {
+function PaginatedSection({ items, renderItem, emptyMsg, headerLabel, headerColor = 'text-white/30', pageSize = PAGE_SIZE, fill = false }) {
   const [page, setPage] = useState(0);
   const totalPages = Math.ceil(items.length / pageSize);
   const visible = items.slice(page * pageSize, page * pageSize + pageSize);
   return (
-    <div className="flex flex-col min-h-0">
+    <div className={`flex flex-col ${fill ? 'h-full' : 'min-h-0'}`}>
       <p className={`px-4 py-2 text-xs font-black uppercase tracking-widest sticky top-0 bg-gray-950/90 flex-shrink-0 ${headerColor}`}>{headerLabel}</p>
-      {items.length === 0
-        ? <p className="px-4 py-6 text-white/20 text-sm text-center">{emptyMsg}</p>
-        : visible.map((item, i) => renderItem(item, page * pageSize + i))
-      }
+      <div className={fill ? 'flex-1 overflow-y-auto' : ''}>
+        {items.length === 0
+          ? <p className="px-4 py-6 text-white/20 text-sm text-center">{emptyMsg}</p>
+          : visible.map((item, i) => renderItem(item, page * pageSize + i))
+        }
+      </div>
       {totalPages > 1 && (
-        <div className="sticky bottom-0 flex items-center justify-center gap-2 px-4 py-1.5 border-t border-white/10 flex-shrink-0 bg-gray-950/90">
+        <div className="flex items-center justify-center gap-2 px-4 py-1.5 border-t border-white/10 flex-shrink-0 bg-gray-950/90 mt-auto">
           {page > 0
             ? <button onClick={() => setPage(p => p - 1)} className="text-white/50 hover:text-white text-xs font-black px-1.5 py-0.5 rounded hover:bg-white/10 transition-colors">{'<'}</button>
             : <span className="w-5" />
@@ -1554,9 +1557,9 @@ function MapPostsPanelView({ panel, posts, reactions, sort, setSort, page, setPa
               </button>
             ))}
           </div>
+          <button onClick={onPin} title={pinned ? 'Unpin panel' : 'Pin panel'} style={{ opacity: pinned ? 1 : 0.5, background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 14, lineHeight: 1 }}>📌</button>
           <button onClick={onClose}
             style={{ width: 26, height: 26, borderRadius: 99, border: '1px solid rgba(255,255,255,0.2)', background: 'transparent', color: 'rgba(255,255,255,0.5)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 900 }}>✕</button>
-          <button onClick={onPin} title={pinned ? 'Unpin panel' : 'Pin panel'} style={{ opacity: pinned ? 1 : 0.5, background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 14, lineHeight: 1 }}>📌</button>
         </div>
       </div>
 
@@ -1623,6 +1626,16 @@ function MapPostsPanelView({ panel, posts, reactions, sort, setSort, page, setPa
       )}
     </div>
   );
+}
+
+// ── Post bubble scaling helper ────────────────────────────────────────────────
+function getPostDisplayCount(postCount, maxPostCount) {
+  if (postCount === 0) return 0;
+  if (maxPostCount < 30) return postCount; // Phase 1: literal 1:1
+  // Phase 2: relative scaling to 0-30 range
+  const scaled = Math.round(postCount / maxPostCount * 30);
+  const bounded = Math.max(1, scaled); // never 0 for postCount > 0
+  return Math.min(postCount, bounded); // never more than actual posts
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
@@ -1696,6 +1709,9 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   const [hoveredEvents, setHoveredEvents] = useState([]);
   const [hoveredColonists, setHoveredColonists] = useState(null);
   const [hoveredPostCount, setHoveredPostCount] = useState(null);
+  const [hoveredBoroughEventCount, setHoveredBoroughEventCount] = useState(0);
+  const [hoveredBoroughPostCount, setHoveredBoroughPostCount] = useState(null);
+  const [hoveredBoroughColonists, setHoveredBoroughColonists] = useState(null);
   const [tooltipPos,    setTooltipPos]    = useState(null);
   const [sideZip,       setSideZip]       = useState(null);
   const [sideEvents,    setSideEvents]    = useState([]);
@@ -1735,6 +1751,11 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   const hoveredBoroughNameRef = useRef(null); // Tracks borough name for ZCTA batch boroughHover feature states
   // Event pin markers toggle
   const [showPins, setShowPins] = useState(false);
+  const [showPostBubbles, setShowPostBubbles] = useState(false);
+  const [pinButtonMode, setPinButtonMode] = useState('pins'); // 'pins' | 'posts' — desktop only
+  const [pinDropdownOpen, setPinDropdownOpen] = useState(false); // mobile dropdown
+  const [zipPostCounts, setZipPostCounts] = useState({}); // { zip: count }
+  const postBubbleMarkersRef = useRef([]); // MapLibre Marker instances for 🗣️ overlay
   // Borough region overlay toggle
   const [showRegion, setShowRegion] = useState(false);
   const regionMarkersRef = useRef([]);
@@ -2234,7 +2255,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       // 16px width means 8px extends outside the polygon boundary = "small distance out" zone.
       map.addLayer({
         id: 'borough-hover-border', type: 'line', source: 'borough-hover-source',
-        paint: { 'line-color': '#7C3AED', 'line-opacity': 0.001, 'line-width': 16 },
+        paint: { 'line-color': '#7C3AED', 'line-opacity': 0.001, 'line-width': ['interpolate', ['linear'], ['zoom'], 9, 32, 11, 22, 13, 16] },
       });
     }
     const handleZctaHover = e => {
@@ -4197,7 +4218,100 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     return () => { cancelled = true; };
   }, [hoveredZip, timespanIdx, events]);
 
-  // Fetch posts for MapPostsPanel
+  useEffect(() => {
+    if (!hoveredBorough) {
+      setHoveredBoroughEventCount(0);
+      setHoveredBoroughPostCount(null);
+      setHoveredBoroughColonists(null);
+      return;
+    }
+    let cancelled = false;
+    const days = TIMESPAN_STEPS[timespanIdx].days;
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - days);
+    const boroughEvents = (events || []).filter(e =>
+      !e._auto && !e._sample &&
+      e.borough === hoveredBorough &&
+      new Date(e.event_date) >= cutoff
+    );
+    setHoveredBoroughEventCount(boroughEvents.length);
+    setHoveredBoroughPostCount(null);
+    fetchGeoPostFeed({ type: 'borough', value: hoveredBorough }).then(posts => {
+      if (!cancelled) setHoveredBoroughPostCount(posts.length);
+    }).catch(() => { if (!cancelled) setHoveredBoroughPostCount(0); });
+    if (sideBorough === hoveredBorough && sideBoroughColonists.length >= 0) {
+      setHoveredBoroughColonists(sideBoroughColonists.length);
+    } else {
+      getBoroughColonists(hoveredBorough).then(c => {
+        if (!cancelled) setHoveredBoroughColonists(c.length);
+      }).catch(() => { if (!cancelled) setHoveredBoroughColonists(0); });
+    }
+    return () => { cancelled = true; };
+  }, [hoveredBorough, timespanIdx, events]);
+
+  // Fetch post counts per zip when showPostBubbles is on
+  useEffect(() => {
+    if (!showPostBubbles) return;
+    let cancelled = false;
+    fetchGeoPostFeed({ type: 'all' }).then(posts => {
+      if (cancelled) return;
+      const counts = {};
+      (posts || []).forEach(p => {
+        const z = p.zip_code;
+        if (z) counts[z] = (counts[z] || 0) + 1;
+      });
+      setZipPostCounts(counts);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [showPostBubbles, timespanIdx]);
+
+  // Render post bubble markers
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    postBubbleMarkersRef.current.forEach(m => m.remove());
+    postBubbleMarkersRef.current = [];
+    if (!showPostBubbles || !geoData || Object.keys(zipPostCounts).length === 0) return;
+    const maxCount = Math.max(...Object.values(zipPostCounts), 0);
+    geoData.features.forEach(f => {
+      const zip = String(f.properties.MODZCTA || '');
+      if (!zip || f.properties._special) return;
+      const count = zipPostCounts[zip] || 0;
+      if (count === 0) return;
+      const displayCount = getPostDisplayCount(count, maxCount);
+      const [cx, cy] = getGeomCentroid(f.geometry);
+      const el = document.createElement('div');
+      el.style.cssText = 'pointer-events: none; user-select: none; line-height: 1; font-size: 11px; max-width: 60px; word-break: break-all; text-align: center; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.8));';
+      el.textContent = '🗣️'.repeat(Math.min(displayCount, 30));
+      el.title = `${count} post${count !== 1 ? 's' : ''} in ZIP ${zip}`;
+      const marker = new maplibregl.Marker({ element: el, anchor: 'center' })
+        .setLngLat([cx, cy])
+        .addTo(map);
+      postBubbleMarkersRef.current.push(marker);
+    });
+  }, [showPostBubbles, zipPostCounts, mapReady, geoData]);
+
+  // Close mobile pin dropdown when user clicks outside
+  useEffect(() => {
+    if (!pinDropdownOpen) return;
+    const close = () => setPinDropdownOpen(false);
+    document.addEventListener('click', close);
+    return () => document.removeEventListener('click', close);
+  }, [pinDropdownOpen]);
+
+  // Close mobile pin dropdown when map moves/drags
+  useEffect(() => {
+    if (!pinDropdownOpen) return;
+    const map = mapRef.current;
+    if (!map) return;
+    const close = () => setPinDropdownOpen(false);
+    map.on('dragstart', close);
+    map.on('movestart', close);
+    return () => {
+      map.off('dragstart', close);
+      map.off('movestart', close);
+    };
+  }, [pinDropdownOpen, mapReady]);
   useEffect(() => {
     if (!mapPostsPanel) { setMapPosts([]); setMapPostsReactions({}); return; }
     let cancelled = false;
@@ -4233,6 +4347,10 @@ export default function MapView({ events, headerCollapsed = false, interactive =
 
   async function handleGeoPostComment(text) {
     if (!text?.trim() || !selectedGeoPost || !session) return;
+    if (containsProfanity(text.trim())) {
+      alert('Your comment contains inappropriate language. Please revise it.');
+      return;
+    }
     await submitPostComment({ post_id: selectedGeoPost.id, content: text.trim() }, session);
     setNewCommentText('');
     const updated = await fetchCommentsForPost(selectedGeoPost.id);
@@ -4944,11 +5062,60 @@ export default function MapView({ events, headerCollapsed = false, interactive =
                   </button>
                 ))}
               </div>
-              <button onClick={() => setShowPins(v => !v)}
-                className={`px-2 py-1 rounded-xl text-xs font-black border transition-all bg-black/80 backdrop-blur ${showPins ? 'bg-[#7C3AED] border-[#7C3AED] text-white' : 'border-white/20 text-white hover:border-white/60'}`}
-                title={showPins ? 'Hide event pins' : 'Show event pins'}>
-                📍
-              </button>
+              {/* Pin/Post bubble toggle — compound on desktop, dropdown on mobile */}
+              <div className="relative">
+                {/* Desktop: compound button with chevron to swap mode */}
+                {!isMobile && (
+                  <div className="flex items-stretch bg-black/80 backdrop-blur border border-white/20 rounded-xl overflow-hidden"
+                    style={{ borderColor: (pinButtonMode === 'pins' ? showPins : showPostBubbles) ? '#7C3AED' : undefined, background: (pinButtonMode === 'pins' ? showPins : showPostBubbles) ? '#7C3AED' : undefined }}>
+                    <button
+                      onClick={() => pinButtonMode === 'pins' ? setShowPins(v => !v) : setShowPostBubbles(v => !v)}
+                      className="px-2 py-1 text-xs font-black text-white transition-all relative"
+                      title={pinButtonMode === 'pins' ? (showPins ? 'Hide pins' : 'Show pins') : (showPostBubbles ? 'Hide post bubbles' : 'Show post bubbles')}>
+                      {pinButtonMode === 'pins' ? '📍' : '🗣️'}
+                      {((pinButtonMode === 'pins' && showPostBubbles) || (pinButtonMode === 'posts' && showPins)) && (
+                        <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-green-400" />
+                      )}
+                    </button>
+                    <button
+                      onClick={() => setPinButtonMode(m => m === 'pins' ? 'posts' : 'pins')}
+                      className="px-1 py-1 text-xs text-white/50 hover:text-white border-l border-white/20 transition-all"
+                      title="Switch between pins and post bubbles">
+                      ›
+                    </button>
+                  </div>
+                )}
+                {/* Mobile: single button that opens dropdown */}
+                {isMobile && (
+                  <button
+                    onClick={() => setPinDropdownOpen(v => !v)}
+                    className={`px-2 py-1 rounded-xl text-xs font-black border transition-all bg-black/80 backdrop-blur relative ${(showPins || showPostBubbles) ? 'bg-[#7C3AED] border-[#7C3AED] text-white' : 'border-white/20 text-white hover:border-white/60'}`}
+                    title="Toggle pins/posts">
+                    {showPins ? '📍' : showPostBubbles ? '🗣️' : '📍'}
+                    {showPins && showPostBubbles && <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-green-400" />}
+                  </button>
+                )}
+                {/* Mobile dropdown */}
+                {isMobile && pinDropdownOpen && (
+                  <div className="absolute bottom-full mb-1 left-0 bg-gray-950/95 border border-white/20 rounded-2xl overflow-hidden shadow-[0_4px_20px_rgba(0,0,0,0.6)] z-[200] min-w-[120px]"
+                    onClick={e => e.stopPropagation()}>
+                    <button
+                      onClick={() => { setShowPins(v => !v); }}
+                      className={`w-full flex items-center gap-2 px-3 py-2 text-xs font-black transition-all hover:bg-white/10 ${showPins ? 'text-[#a78bfa]' : 'text-white/60'}`}>
+                      <span>📍</span>
+                      <span>Pins</span>
+                      <span className={`ml-auto text-[10px] px-1.5 py-0.5 rounded-full font-black ${showPins ? 'bg-[#7C3AED] text-white' : 'bg-white/10 text-white/40'}`}>{showPins ? 'ON' : 'OFF'}</span>
+                    </button>
+                    <button
+                      onClick={() => { setShowPostBubbles(v => !v); }}
+                      className={`w-full flex items-center gap-2 px-3 py-2 text-xs font-black transition-all hover:bg-white/10 border-t border-white/10 ${showPostBubbles ? 'text-[#a78bfa]' : 'text-white/60'}`}>
+                      <span>🗣️</span>
+                      <span>Posts</span>
+                      <span className={`ml-auto text-[10px] px-1.5 py-0.5 rounded-full font-black ${showPostBubbles ? 'bg-[#7C3AED] text-white' : 'bg-white/10 text-white/40'}`}>{showPostBubbles ? 'ON' : 'OFF'}</span>
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
             {/* Row 2: Heatmap + Satellite + 3D + Real3D — single row on mobile, all 4 */}
             <div className="flex gap-1.5 md:gap-2 justify-center items-start">
@@ -5036,7 +5203,16 @@ export default function MapView({ events, headerCollapsed = false, interactive =
               <div className="bg-gray-950/95 border border-purple-800/60 rounded-2xl overflow-hidden shadow-[0_0_15px_rgba(124,58,237,0.35)]">
                 <div className="px-3 py-2 border-b border-white/10">
                   <p className="text-purple-400 font-black text-xs">🏙 {hoveredBorough}</p>
-                  <p className="text-white/50 text-xs">Click — events, posts &amp; colonists</p>
+                  <p className="text-white/60 text-xs">{hoveredBoroughEventCount} upcoming event{hoveredBoroughEventCount !== 1 ? 's' : ''}</p>
+                </div>
+                <div className="px-3 py-2 border-t border-white/10">
+                  {hoveredBoroughColonists !== null && (
+                    <p className="text-green-400/70 text-xs italic">{hoveredBoroughColonists} colonist{hoveredBoroughColonists !== 1 ? 's' : ''} in {hoveredBorough}</p>
+                  )}
+                  {hoveredBoroughPostCount !== null && (
+                    <p className="text-blue-400/60 text-xs italic">📌 {hoveredBoroughPostCount} post{hoveredBoroughPostCount !== 1 ? 's' : ''}{hoveredBoroughPostCount > 0 ? ' · click to view' : ''}</p>
+                  )}
+                  <p className="text-white/30 text-xs mt-1">Click — events, posts &amp; colonists</p>
                 </div>
               </div>
             </div>
@@ -5145,18 +5321,19 @@ export default function MapView({ events, headerCollapsed = false, interactive =
                   <p className="text-red-400 font-black">{sideLabel}</p>
                   <p className="text-white/40 text-xs">{isSafezoneModzcta(sideZip) ? `🛡️ ${getSafezoneLabel(sideZip)} · ${sideEvents.length} events` : `${sideEvents.length} events · ${sideColonists.length} colonists`}</p>
                 </div>
+                <button onClick={() => setPinnedRightPanel(p => !p)} title={pinnedRightPanel ? 'Unpin panel' : 'Pin panel'} style={{ opacity: pinnedRightPanel ? 1 : 0.5, background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 14 }}>📌</button>
                 <button onClick={() => { setSideZip(null); setSideEvents([]); setSideColonists([]); setHoloFeature(null); }}
                   className="text-white/40 hover:text-white text-xl w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10">✕</button>
-                <button onClick={() => setPinnedRightPanel(p => !p)} title={pinnedRightPanel ? 'Unpin panel' : 'Pin panel'} style={{ opacity: pinnedRightPanel ? 1 : 0.5, background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 14 }}>📌</button>
               </div>
 
-              <div className="flex-1 overflow-y-auto border-b border-white/10 min-h-0">
+              <div className="h-1/2 flex flex-col overflow-hidden border-b border-white/10">
                 <PaginatedSection
                   items={sideEvents}
                   emptyMsg="No upcoming events"
                   headerLabel="Events"
                   headerColor="text-white/30"
-                  pageSize={3}
+                  pageSize={4}
+                  fill={true}
                   renderItem={(event) => (
                     <div key={event.id} onClick={() => setSelectedEvent(event)}
                       className="flex items-start gap-3 p-3 border-b border-white/5 cursor-pointer hover:bg-white/5 transition-colors"
@@ -5187,13 +5364,14 @@ export default function MapView({ events, headerCollapsed = false, interactive =
               </div>
 
               {!isSafezoneModzcta(sideZip) && (
-                <div className="flex-1 overflow-y-auto min-h-0">
+                <div className="h-1/2 flex flex-col overflow-hidden">
                   <PaginatedSection
                     items={sideColonists}
                     emptyMsg="No colonists yet"
                     headerLabel="Colony Leaderboard"
                     headerColor="text-green-400/50"
-                    pageSize={5}
+                    pageSize={6}
+                    fill={true}
                     renderItem={(c, i) => {
                       const medal = MEDALS[i] || null, isTop = i < 3;
                       return (
@@ -5239,18 +5417,19 @@ export default function MapView({ events, headerCollapsed = false, interactive =
                   <h2 className="text-white font-black text-base">{sideBorough}</h2>
                   <p className="text-white/40 text-xs">{sideBoroughEvents.length} events · {sideBoroughColonists.length} colonists</p>
                 </div>
+                <button onClick={() => setPinnedRightPanel(p => !p)} title={pinnedRightPanel ? 'Unpin panel' : 'Pin panel'} style={{ opacity: pinnedRightPanel ? 1 : 0.5, background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 14 }}>📌</button>
                 <button onClick={() => { setSideBorough(null); setSideBoroughEvents([]); setSideBoroughColonists([]); setHoloFeature(null); setHoloBoroughMode(false); setHoloBoroughName(''); }}
                   className="text-white/50 hover:text-white text-xl leading-none w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/10">×</button>
-                <button onClick={() => setPinnedRightPanel(p => !p)} title={pinnedRightPanel ? 'Unpin panel' : 'Pin panel'} style={{ opacity: pinnedRightPanel ? 1 : 0.5, background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 14 }}>📌</button>
               </div>
               {/* Events — top 50% */}
-              <div className="flex-1 overflow-y-auto border-b border-white/10 min-h-0">
+              <div className="h-1/2 flex flex-col overflow-hidden border-b border-white/10">
                 <PaginatedSection
                   items={sideBoroughEvents}
                   emptyMsg={`No upcoming events in ${sideBorough}`}
                   headerLabel="Events"
                   headerColor="text-white/30"
-                  pageSize={3}
+                  pageSize={4}
+                  fill={true}
                   renderItem={(ev) => (
                     <div key={ev.id}
                       className="flex items-start gap-3 p-3 border-b border-white/5 cursor-pointer hover:bg-white/5 transition-colors"
@@ -5276,13 +5455,14 @@ export default function MapView({ events, headerCollapsed = false, interactive =
               </div>
 
               {/* Colony Leaderboard — bottom 50% */}
-              <div className="flex-1 overflow-y-auto min-h-0">
+              <div className="h-1/2 flex flex-col overflow-hidden">
                 <PaginatedSection
                   items={sideBoroughColonists}
                   emptyMsg="No colonists yet"
                   headerLabel="Colony Leaderboard"
                   headerColor="text-green-400/50"
-                  pageSize={5}
+                  pageSize={6}
+                  fill={true}
                   renderItem={(c, i) => {
                     const medal = MEDALS[i] || null, isTop = i < 3;
                     return (
