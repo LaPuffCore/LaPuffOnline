@@ -1066,6 +1066,16 @@ function buildTierGeoCollections(features, tiers) {
 // Map each ZCTA feature index → borough feature index via centroid PiP.
 // Called once when both geoData and boroughGeoData are loaded.
 function computeZipBoroughMap(zctaFeatures, boroughFeatures) {
+  const ZIP_BOROUGH_OVERRIDES = {
+    // Manhattan (0): various islands and southern tip zips
+    '10044': 0, '10004': 0, '10005': 0, '10006': 0, '10007': 0, '10280': 0, '10282': 0,
+    // Brooklyn (4): Rockaway Beach south peninsula
+    '11697': 4, '11694': 4, '11693': 4, '11695': 4,
+    // Queens (3): Rikers Island (11370), Far Rockaway
+    '11370': 3, '11691': 3, '11692': 3, '11693': 3, '11695': 3, '11096': 3,
+    // Bronx (2): City Island (10464)
+    '10464': 2, '10465': 2,
+  };
   const result = {};
   zctaFeatures.forEach((f, i) => {
     if (f.properties._special) return;
@@ -1096,6 +1106,11 @@ function computeZipBoroughMap(zctaFeatures, boroughFeatures) {
       }
     }
     if (foundBi >= 0) result[i] = foundBi;
+    // Hardcoded override for island zips that centroid PiP misses
+    const zip = String(f.properties.MODZCTA || f.properties.modzcta || '');
+    if (ZIP_BOROUGH_OVERRIDES[zip] !== undefined) {
+      result[i] = ZIP_BOROUGH_OVERRIDES[zip];
+    }
   });
   return result;
 }
@@ -1582,7 +1597,7 @@ function MapPostsPanelView({ panel, posts, reactions, sort, setSort, page, setPa
               </button>
             ))}
           </div>
-          <button onClick={onPin} title={pinned ? 'Unpin panel' : 'Pin panel'} style={{ opacity: pinned ? 1 : 0.5, width: 26, height: 26, borderRadius: 99, border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.6)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11 }}>📌</button>
+          <button onClick={onPin} title={pinned ? 'Unpin panel' : 'Pin panel'} style={{ width: 26, height: 26, borderRadius: 99, border: '1px solid rgba(255,255,255,0.15)', background: pinned ? '#7C3AED' : 'rgba(255,255,255,0.05)', color: pinned ? '#fff' : 'rgba(255,255,255,0.6)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11 }}>📌</button>
           <button onClick={onClose}
             style={{ width: 26, height: 26, borderRadius: 99, border: '1px solid rgba(255,255,255,0.2)', background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.5)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 900 }}>✕</button>
         </div>
@@ -1663,13 +1678,10 @@ function getPostDisplayCount(postCount, maxPostCount) {
   return Math.min(postCount, bounded); // never more than actual posts
 }
 
-// Map post display count (0-30 scale) to 5-tier heat color for 🗣️ bubbles
-function getPostBubbleTierColor(displayCount) {
-  if (displayCount <= 6) return '#00ccdd';
-  if (displayCount <= 12) return '#00dd66';
-  if (displayCount <= 18) return '#f5c800';
-  if (displayCount <= 24) return '#dd6600';
-  return '#cc0d00';
+// Map post zip tier (0-4, relative rank) to heat color for 🗣️ bubbles
+function getPostBubbleTierColor(tier) {
+  const COLORS = ['#00ccdd', '#00dd66', '#f5c800', '#dd6600', '#cc0d00'];
+  return COLORS[Math.max(0, Math.min(4, tier))] || '#00ccdd';
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
@@ -1885,6 +1897,30 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       });
     } catch (_e) { /* layers might already exist if map was reused */ }
   }, [mapReady]);
+
+  // Real3D: paint tertiary/residential roads purple when a borough is hovered
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !real3D) return;
+    const isHeatmapOn = heatmapRef.current;
+    const ROAD_FCLASSES_COLOR = ['tertiary', 'residential'];
+    if (hoveredBorough) {
+      for (const fc of ROAD_FCLASSES_COLOR) {
+        const fillId = `real3d-pm-roads-${fc}-fill`;
+        const lineId = `real3d-pm-roads-${fc}-line`;
+        if (map.getLayer(fillId)) map.setPaintProperty(fillId, 'fill-color', '#9333ea');
+        if (map.getLayer(lineId)) map.setPaintProperty(lineId, 'line-color', '#9333ea');
+      }
+    } else {
+      for (const fc of ROAD_FCLASSES_COLOR) {
+        const fillId = `real3d-pm-roads-${fc}-fill`;
+        const lineId = `real3d-pm-roads-${fc}-line`;
+        const origColor = isHeatmapOn ? '#000000' : '#e02424';
+        if (map.getLayer(fillId)) map.setPaintProperty(fillId, 'fill-color', origColor);
+        if (map.getLayer(lineId)) map.setPaintProperty(lineId, 'line-color', origColor);
+      }
+    }
+  }, [hoveredBorough, real3D, mapReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Build zip→ZCTA index map as soon as geoData is available (no `interactive` gate).
   // This ensures buildTierByZipExpr can produce correct paint expressions for the
@@ -2315,6 +2351,18 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       const isSafezone = !!f.properties._special;
       setHoveredZip(isSafezone ? `SAFE:${zip}` : zip);
       setTooltipPos({ x: e.point.x, y: e.point.y });
+      // Borough group highlight: light up all ZCTAs in same borough (fixes 3D mode + all-islands lighting)
+      if (!isSafezone) {
+        const boroughIdx = zipBoroughMapRef.current[f.id];
+        if (boroughIdx !== undefined && boroughIdx >= 0) {
+          const bName = BOROUGH_DATA[boroughIdx]?.name;
+          if (bName && bName !== hoveredBoroughNameRef.current) {
+            if (hoveredBoroughNameRef.current) setBoroughHoverStates(hoveredBoroughNameRef.current, false);
+            hoveredBoroughNameRef.current = bName;
+            setBoroughHoverStates(bName, true);
+          }
+        }
+      }
     };
 
     const handleZctaLeave = () => {
@@ -2324,6 +2372,11 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       }
       map.getCanvas().style.cursor = '';
       setHoveredZip(null); setTooltipPos(null);
+      // Clear borough group highlight when leaving ZCTA
+      if (hoveredBoroughNameRef.current) {
+        setBoroughHoverStates(hoveredBoroughNameRef.current, false);
+        hoveredBoroughNameRef.current = null;
+      }
     };
 
     const handleZctaClick = e => {
@@ -2385,50 +2438,27 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       const f = e.features[0];
       const newBoroughName = String(f.properties.BoroName || '');
 
-      // Check if cursor is within ~20px of the borough polygon boundary (extended outward zone)
-      // borough-hover-border layer is ~16px wide → 8px outside. A 20px query box extends detection
-      // further into water/exterior so borough hover fires from slightly outside the polygon.
-      const lineFeats = map.queryRenderedFeatures(
-        [[e.point.x - 20, e.point.y - 20], [e.point.x + 20, e.point.y + 20]],
-        { layers: ['borough-hover-border'].filter(l => map.getLayer(l)) }
-      );
-      const nearLine = lineFeats.length > 0;
-
       // Check if a ZCTA zip is directly under the cursor (exact point, not padded).
-      // ZCTA ALWAYS wins when cursor is inside any zip polygon — no exceptions.
+      // ZCTA ALWAYS wins for tooltip/panel — but borough GROUP highlight is managed by handleZctaHover.
       const zctaLayers = ['zcta-fill', 'zcta-extrude', 'zcta-safezone-hover', 'zcta-safezone-fill']
         .filter(l => map.getLayer(l));
       const zctaUnder = zctaLayers.length > 0 && map.queryRenderedFeatures(e.point, { layers: zctaLayers }).length > 0;
 
-      // ZCTA always takes priority when inside a zip polygon
       if (zctaUnder) {
+        // ZCTA takes priority for tooltip/panel. Clear borough polygon fill highlight.
         if (hoveredBoroughIdRef.current !== null) {
           map.setFeatureState({ source: 'borough-hover-source', id: hoveredBoroughIdRef.current }, { hovered: false });
           hoveredBoroughIdRef.current = null;
-          if (hoveredBoroughNameRef.current) {
-            setBoroughHoverStates(hoveredBoroughNameRef.current, false);
-            hoveredBoroughNameRef.current = null;
-          }
-          setHoveredBorough(null);
         }
+        setHoveredBorough(null);
         return;
       }
 
-      // Borough hover activates. If near line and ZCTA also present, suppress ZCTA hover.
-      if (nearLine && zctaUnder) {
-        if (hoveredIdRef.current !== null) {
-          map.setFeatureState({ source: 'zcta', id: hoveredIdRef.current }, { hovered: false });
-          hoveredIdRef.current = null;
-        }
-        setHoveredZip(null);
-        setTooltipPos(null);
-      }
-
+      // No ZCTA under cursor (water/exterior): full borough hover mode with tooltip.
       if (hoveredBoroughIdRef.current !== f.id) {
         if (hoveredBoroughIdRef.current !== null) {
           map.setFeatureState({ source: 'borough-hover-source', id: hoveredBoroughIdRef.current }, { hovered: false });
         }
-        // Clear ZCTA highlight for previous borough
         if (hoveredBoroughNameRef.current && hoveredBoroughNameRef.current !== newBoroughName) {
           setBoroughHoverStates(hoveredBoroughNameRef.current, false);
         }
@@ -4326,6 +4356,15 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     if (!showPostBubbles || !geoData || Object.keys(zipPostCounts).length === 0) return;
     const maxCount = Math.max(...Object.values(zipPostCounts), 0);
     const currentZoom = map.getZoom();
+    // Compute relative 5-tier distribution based on all zips with posts
+    const zipCountEntries = Object.entries(zipPostCounts).filter(([,c]) => c > 0);
+    zipCountEntries.sort((a, b) => a[1] - b[1]); // ascending by count
+    const totalZipsWithPosts = zipCountEntries.length;
+    const zipTierMap = {};
+    zipCountEntries.forEach(([zip, count], rankIdx) => {
+      const tier = totalZipsWithPosts <= 1 ? 4 : Math.min(4, Math.floor(rankIdx / totalZipsWithPosts * 5));
+      zipTierMap[zip] = tier;
+    });
     geoData.features.forEach(f => {
       const zip = String(f.properties.MODZCTA || '');
       if (!zip || f.properties._special) return;
@@ -4333,7 +4372,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       if (count === 0) return;
       const displayCount = getPostDisplayCount(count, maxCount);
       if (displayCount === 0) return;
-      const tierColor = getPostBubbleTierColor(displayCount);
+      const tierColor = getPostBubbleTierColor(zipTierMap[zip] ?? 0);
       const scatterPts = zipScatterPositionsRef.current[zip] || [];
       const [fcx, fcy] = getGeomCentroid(f.geometry);
       if (!zipMarkerAssignmentsRef.current[zip]) {
@@ -5508,14 +5547,14 @@ export default function MapView({ events, headerCollapsed = false, interactive =
                 </div>
                 <div className="flex items-center gap-1 ml-auto flex-shrink-0">
                   <button onClick={() => setPinnedRightPanel(p => !p)} title={pinnedRightPanel ? 'Unpin panel' : 'Pin panel'}
-                    style={{ opacity: pinnedRightPanel ? 1 : 0.5 }}
+                    style={{ background: pinnedRightPanel ? '#7C3AED' : undefined, color: pinnedRightPanel ? '#fff' : undefined, opacity: 1 }}
                     className="w-7 h-7 rounded-full flex items-center justify-center text-xs bg-white/5 hover:bg-white/15 text-white/60 hover:text-white transition-all border-none cursor-pointer">📌</button>
                   <button onClick={() => { setSideZip(null); setSideEvents([]); setSideColonists([]); setHoloFeature(null); }}
                     className="w-7 h-7 rounded-full flex items-center justify-center text-xs bg-white/5 hover:bg-white/15 text-white/60 hover:text-white transition-all">✕</button>
                 </div>
               </div>
 
-              <div style={{ height: '50%', display: 'flex', flexDirection: 'column', overflow: 'hidden', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+              <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
                 <PaginatedSection
                   items={sideEvents}
                   emptyMsg="No upcoming events"
@@ -5553,7 +5592,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
               </div>
 
               {!isSafezoneModzcta(sideZip) && (
-                <div style={{ height: '50%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                   <PaginatedSection
                     items={sideColonists}
                     emptyMsg="No colonists yet"
@@ -5610,14 +5649,14 @@ export default function MapView({ events, headerCollapsed = false, interactive =
                 </div>
                 <div className="flex items-center gap-1 ml-auto flex-shrink-0">
                   <button onClick={() => setPinnedRightPanel(p => !p)} title={pinnedRightPanel ? 'Unpin panel' : 'Pin panel'}
-                    style={{ opacity: pinnedRightPanel ? 1 : 0.5 }}
+                    style={{ background: pinnedRightPanel ? '#7C3AED' : undefined, color: pinnedRightPanel ? '#fff' : undefined, opacity: 1 }}
                     className="w-7 h-7 rounded-full flex items-center justify-center text-xs bg-white/5 hover:bg-white/15 text-white/60 hover:text-white transition-all border-none cursor-pointer">📌</button>
                   <button onClick={() => { setSideBorough(null); setSideBoroughEvents([]); setSideBoroughColonists([]); setHoloFeature(null); setHoloBoroughMode(false); setHoloBoroughName(''); setBoroughHoverStatesRef.current?.(sideBorough, false); }}
                     className="w-7 h-7 rounded-full flex items-center justify-center text-xs bg-white/5 hover:bg-white/15 text-white/60 hover:text-white transition-all">×</button>
                 </div>
               </div>
               {/* Events — top 50% */}
-              <div style={{ height: '50%', display: 'flex', flexDirection: 'column', overflow: 'hidden', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+              <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
                 <PaginatedSection
                   items={sideBoroughEvents}
                   emptyMsg={`No upcoming events in ${sideBorough}`}
@@ -5650,7 +5689,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
               </div>
 
               {/* Colony Leaderboard — bottom 50% */}
-              <div style={{ height: '50%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+              <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                 <PaginatedSection
                   items={sideBoroughColonists}
                   emptyMsg="No colonists yet"

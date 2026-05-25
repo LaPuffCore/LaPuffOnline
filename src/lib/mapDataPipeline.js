@@ -453,6 +453,16 @@ function filterBoroughData(data) {
 }
 
 function computeZipBoroughMap(zctaFeatures, boroughFeatures) {
+  const ZIP_BOROUGH_OVERRIDES = {
+    // Manhattan (0): various islands and southern tip zips
+    '10044': 0, '10004': 0, '10005': 0, '10006': 0, '10007': 0, '10280': 0, '10282': 0,
+    // Brooklyn (4): Rockaway Beach south peninsula
+    '11697': 4, '11694': 4, '11693': 4, '11695': 4,
+    // Queens (3): Rikers Island (11370), Far Rockaway
+    '11370': 3, '11691': 3, '11692': 3, '11693': 3, '11695': 3, '11096': 3,
+    // Bronx (2): City Island (10464)
+    '10464': 2, '10465': 2,
+  };
   const result = {};
   zctaFeatures.forEach((f, i) => {
     if (f.properties._special) return;
@@ -484,6 +494,11 @@ function computeZipBoroughMap(zctaFeatures, boroughFeatures) {
       }
     }
     if (foundBi >= 0) result[i] = foundBi;
+    // Hardcoded override for island zips that centroid PiP misses
+    const zip = String(f.properties.MODZCTA || f.properties.modzcta || '');
+    if (ZIP_BOROUGH_OVERRIDES[zip] !== undefined) {
+      result[i] = ZIP_BOROUGH_OVERRIDES[zip];
+    }
   });
   return result;
 }
