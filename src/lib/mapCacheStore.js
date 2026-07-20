@@ -10,7 +10,8 @@ const mapCacheStore = {
   zctaBboxes: null,         // per-feature bounding boxes for PiP shortcut
   boroughGeoData: null,     // raw borough FeatureCollection
   boroughSkeleton: null,    // precomputed ring skeletons for borough outlines
-  zipBoroughMap: null,      // { zctaFeatureIndex → boroughFeatureIndex }
+  zipBoroughMap: null,      // { zctaFeatureIndex → canonical boroughIndex (0-4) }
+  zipToFeatureIndices: null, // { [zip]: number[] } all feature indices sharing a MODZCTA
   precomputedTiers: null,   // { [timespanIdx]: { tiers, zipMap, maxCount } } for all 5 timespans
 
   // ── Stage 4 + 6 pre-bakes (populated in Phase 2A or end of Phase 2B) ───

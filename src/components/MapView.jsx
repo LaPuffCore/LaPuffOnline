@@ -1,5 +1,5 @@
 import { createPortal } from 'react-dom';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { Protocol as PMTilesProtocol } from 'pmtiles';
@@ -1063,108 +1063,154 @@ function buildTierGeoCollections(features, tiers) {
   return groups.map(feats => ({ type: 'FeatureCollection', features: feats }));
 }
 
-// Map each ZCTA feature index → borough feature index via centroid PiP.
+// Canonical borough index override table (0=Manhattan, 1=Staten Island, 2=Bronx, 3=Queens, 4=Brooklyn).
+// These correct zips whose centroid PiP lands in water/wrong borough (islands, Jamaica Bay, Rockaways,
+// and Queens zips that border Brooklyn). Keyed by MODZCTA string; applies to ALL sub-polygons of the zip.
+const ZIP_BOROUGH_OVERRIDES = {
+  // Manhattan (0): islands + lower-tip southern zips
+  '10044': 0, '10004': 0, '10005': 0, '10006': 0, '10007': 0, '10280': 0, '10282': 0,
+  // Bronx (2): City Island + Marble Hill/Riverdale strip
+  '10464': 2, '10465': 2, '10463': 2,
+  // Queens (3): Rikers, Rockaways, and Queens zips that PiP into Brooklyn/Bronx
+  '11370': 3, '11691': 3, '11692': 3, '11693': 3, '11694': 3, '11695': 3, '11697': 3, '11096': 3,
+  '11385': 3, '11414': 3, '11416': 3, '11421': 3,
+  // Brooklyn (4): Jamaica Bay edge zips
+  '11234': 4, '11235': 4,
+};
+
+// Map each ZCTA feature index → CANONICAL borough index (0-4, aligned with BOROUGH_DATA).
+// Uses centroid point-in-polygon against borough polygons (mapped via BoroName), a nearest-borough
+// fallback for features whose centroid lands in water, then applies ZIP_BOROUGH_OVERRIDES last.
 // Called once when both geoData and boroughGeoData are loaded.
 function computeZipBoroughMap(zctaFeatures, boroughFeatures) {
-  const ZIP_BOROUGH_OVERRIDES = {
-    // Manhattan (0): various islands and southern tip zips
-    '10044': 0, '10004': 0, '10005': 0, '10006': 0, '10007': 0, '10280': 0, '10282': 0,
-    // Brooklyn (4): Rockaway Beach south peninsula
-    '11697': 4, '11694': 4, '11693': 4, '11695': 4,
-    // Queens (3): Rikers Island (11370), Far Rockaway
-    '11370': 3, '11691': 3, '11692': 3, '11693': 3, '11695': 3, '11096': 3,
-    // Bronx (2): City Island (10464)
-    '10464': 2, '10465': 2,
-  };
+  const CANON = { 'Manhattan': 0, 'Staten Island': 1, 'Bronx': 2, 'Queens': 3, 'Brooklyn': 4 };
+  const nameToCanon = (bf) => CANON[String(bf.properties?.BoroName || '')] ?? -1;
   const result = {};
-  zctaFeatures.forEach((f, i) => {
-    if (f.properties._special) return;
-    const [cx, cy] = getGeomCentroid(f.geometry);
-    let foundBi = -1;
+  const centroidPiP = (cx, cy) => {
     for (let bi = 0; bi < boroughFeatures.length; bi++) {
+      const canon = nameToCanon(boroughFeatures[bi]);
+      if (canon < 0) continue;
       const bGeom = boroughFeatures[bi].geometry;
       const polys = bGeom.type === 'MultiPolygon' ? bGeom.coordinates : [bGeom.coordinates];
-      let found = false;
       for (const poly of polys) {
-        if (pointInRing(cx, cy, poly[0])) { found = true; break; }
+        if (pointInRing(cx, cy, poly[0])) return canon;
       }
-      if (found) { foundBi = bi; break; }
     }
-    if (foundBi < 0 && f.geometry.type === 'MultiPolygon') {
-      // Try centroid of each polygon in the MultiPolygon (handles island zips like 10004, 10035, etc.)
-      outer: for (const polyCoords of f.geometry.coordinates) {
-        const ring = polyCoords[0];
-        const cx2 = ring.reduce((s, p) => s + p[0], 0) / ring.length;
-        const cy2 = ring.reduce((s, p) => s + p[1], 0) / ring.length;
-        for (let bi = 0; bi < boroughFeatures.length; bi++) {
-          const bGeom = boroughFeatures[bi].geometry;
-          const polys = bGeom.type === 'MultiPolygon' ? bGeom.coordinates : [bGeom.coordinates];
-          for (const poly of polys) {
-            if (pointInRing(cx2, cy2, poly[0])) { foundBi = bi; break outer; }
-          }
+    return -1;
+  };
+  const nearestBorough = (cx, cy) => {
+    let best = -1, bestD = Infinity;
+    for (let bi = 0; bi < boroughFeatures.length; bi++) {
+      const canon = nameToCanon(boroughFeatures[bi]);
+      if (canon < 0) continue;
+      const bGeom = boroughFeatures[bi].geometry;
+      const polys = bGeom.type === 'MultiPolygon' ? bGeom.coordinates : [bGeom.coordinates];
+      for (const poly of polys) {
+        const ring = poly[0];
+        for (let k = 0; k < ring.length; k++) {
+          const dx = ring[k][0] - cx, dy = ring[k][1] - cy;
+          const d = dx * dx + dy * dy;
+          if (d < bestD) { bestD = d; best = canon; }
         }
       }
     }
-    if (foundBi >= 0) result[i] = foundBi;
-    // Hardcoded override for island zips that centroid PiP misses
+    return best;
+  };
+  zctaFeatures.forEach((f, i) => {
+    if (f.properties._special) return;
     const zip = String(f.properties.MODZCTA || f.properties.modzcta || '');
-    if (ZIP_BOROUGH_OVERRIDES[zip] !== undefined) {
-      result[i] = ZIP_BOROUGH_OVERRIDES[zip];
+    // Override wins outright — applies to every sub-polygon of the zip.
+    if (ZIP_BOROUGH_OVERRIDES[zip] !== undefined) { result[i] = ZIP_BOROUGH_OVERRIDES[zip]; return; }
+    const [cx, cy] = getGeomCentroid(f.geometry);
+    let canon = centroidPiP(cx, cy);
+    // Per-sub-polygon centroid retry for MultiPolygon island zips
+    if (canon < 0 && f.geometry.type === 'MultiPolygon') {
+      for (const polyCoords of f.geometry.coordinates) {
+        const ring = polyCoords[0];
+        const cx2 = ring.reduce((s, p) => s + p[0], 0) / ring.length;
+        const cy2 = ring.reduce((s, p) => s + p[1], 0) / ring.length;
+        canon = centroidPiP(cx2, cy2);
+        if (canon >= 0) break;
+      }
     }
+    // Guarantee every non-special feature gets a borough (fixes invisible/red water-centroid polygons)
+    if (canon < 0) canon = nearestBorough(cx, cy);
+    if (canon >= 0) result[i] = canon;
   });
   return result;
 }
 
-// Compute borough heat tiers using TOTAL tier points across all zips in each borough.
-// No averaging — boroughs with more hot zips rank higher regardless of how many cold zips they have.
+// Build { [zip]: number[] } — all ZCTA feature indices that share the same MODZCTA.
+// Multi-polygon zips (e.g. 10004 Governors/Ellis/mainland, 10464 City Island) are stored as
+// separate Polygon features in finalmodzcta.json, so this lets us highlight all parts together.
+function buildZipToFeatureIndices(zctaFeatures) {
+  const map = {};
+  zctaFeatures.forEach((f, i) => {
+    if (f.properties?._special) return;
+    const zip = String(f.properties?.MODZCTA || f.properties?.modzcta || '');
+    if (!zip) return;
+    if (!map[zip]) map[zip] = [];
+    map[zip].push(i);
+  });
+  return map;
+}
+
+// Compute borough heat tiers per CANONICAL borough (array[5], index 0-4 = Manhattan,SI,Bronx,Queens,Brooklyn).
+// zipBoroughMap values are canonical borough indices. Uses TOTAL tier points across all zips in each
+// borough so boroughs with more hot zips rank higher regardless of how many cold zips they have.
 // Tier points: tier 4 = 5pts, tier 3 = 4pts, tier 2 = 3pts, tier 1 = 2pts, tier 0 = 0pts.
-// This prevents boroughs with many zips from being penalized by averaging down.
-function computeBoroughAvgTiers(tiers, zipBoroughMap, boroughCount) {
-  const TIER_POINTS = [0, 2, 3, 4, 5]; // tier 0 contributes nothing
-  const boroughTotalPts = new Array(boroughCount).fill(0);
+function computeBoroughAvgTiers(tiers, zipBoroughMap) {
+  const TIER_POINTS = [0, 2, 3, 4, 5];
+  const boroughTotalPts = new Array(5).fill(0);
   Object.entries(zipBoroughMap).forEach(([idx, bi]) => {
+    if (bi < 0 || bi > 4) return;
     const i = parseInt(idx);
     const tier = Math.min(4, Math.max(0, tiers[i] ?? 0));
     boroughTotalPts[bi] += TIER_POINTS[tier];
   });
-  // Sort by total points descending — highest total gets tier 4
   const indexed = boroughTotalPts.map((pts, i) => ({ pts, i }));
   indexed.sort((a, b) => b.pts - a.pts);
-  const ranked = new Array(boroughCount).fill(0);
+  const ranked = new Array(5).fill(0);
   for (let pos = 0; pos < indexed.length; pos++) {
     ranked[indexed[pos].i] = Math.max(0, 4 - pos);
   }
   return ranked;
 }
 
-// Inject _tier, _color, and _boroughIdx onto each borough feature. avgTiers are integer
-// tiers from unique ranking — use HEAT_MID_COLORS for visible outline differentiation.
-// Features stay in ORIGINAL order (must match skeleton index for zoom updates).
-// _boroughIdx assigned by tier rank (ascending) so higher-tier (red) boroughs render on top via height stagger.
-function buildColoredBoroughFeatures(boroughGeoData, avgTiers, isHeatmap) {
-  // Compute rank order by tier (ascending) — lowest tier gets rank 0, highest gets rank 4.
-  const indexed = avgTiers.map((tier, i) => ({ tier: tier ?? 0, i }));
+// Inject _tier, _color, _boroughIdx, _canonIdx onto each borough feature.
+// avgTiersCanon is a length-5 array indexed by canonical borough. Each feature is mapped to its
+// canonical borough via BoroName, so multi-polygon boroughs (Manhattan islands etc.) all share tier/color.
+// _boroughIdx = tier rank (0=lowest … 4=highest) for height stagger; _canonIdx = canonical borough index.
+function buildColoredBoroughFeatures(boroughGeoData, avgTiersCanon, isHeatmap) {
+  const CANON = { 'Manhattan': 0, 'Staten Island': 1, 'Bronx': 2, 'Queens': 3, 'Brooklyn': 4 };
+  // Rank canonical boroughs by tier (ascending) → rankMap[canon] 0..4
+  const indexed = avgTiersCanon.map((tier, i) => ({ tier: tier ?? 0, i }));
   indexed.sort((a, b) => a.tier - b.tier);
-  const rankMap = new Array(avgTiers.length);
+  const rankMap = new Array(5).fill(0);
   indexed.forEach(({ i }, rank) => { rankMap[i] = rank; });
 
   return {
     ...boroughGeoData,
-    features: boroughGeoData.features.map((f, i) => ({
-      ...f,
-      properties: {
-        ...f.properties,
-        _tier: isHeatmap ? (avgTiers[i] ?? 0) : 0,
-        _color: isHeatmap ? (
-          avgTiers[i] >= 4 ? midTierColor(4) :   // hot — standard HEAT_MID
-          avgTiers[i] >= 3 ? '#ff3300' :          // orange
-          avgTiers[i] >= 2 ? midTierColor(2) :    // warm — standard HEAT_MID
-          avgTiers[i] >= 1 ? '#02f733' :          // cool → bright green
-          '#057ef7'                                // cold → bright blue
-        ) : '#ff0000',
-        _boroughIdx: rankMap[i],  // 0=lowest tier … 4=highest tier (red always last/on top)
-      },
-    })),
+    features: boroughGeoData.features.map((f) => {
+      const canon = CANON[String(f.properties?.BoroName || '')] ?? 0;
+      const tier = avgTiersCanon[canon] ?? 0;
+      return {
+        ...f,
+        properties: {
+          ...f.properties,
+          _tier: isHeatmap ? tier : 0,
+          _color: isHeatmap ? (
+            tier >= 4 ? midTierColor(4) :
+            tier >= 3 ? '#ff3300' :
+            tier >= 2 ? midTierColor(2) :
+            tier >= 1 ? '#02f733' :
+            '#057ef7'
+          ) : '#ff0000',
+          _boroughIdx: rankMap[canon],
+          _canonIdx: canon,
+        },
+      };
+    }),
   };
 }
 
@@ -1700,6 +1746,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   const mapContainerRef = useRef(null);
   const mapRef          = useRef(null);
   const hoveredIdRef    = useRef(null);
+  const hoveredZipFeatureIdsRef = useRef([]); // all feature ids of the currently hovered zip (multi-polygon)
   const locationMarkerRef = useRef(null);
   const heatmapRef      = useRef(false);
   const threeDRef       = useRef(false);
@@ -1796,8 +1843,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   const hoveredBoroughIdRef = useRef(null);
   const hoveredBoroughNameRef = useRef(null); // Tracks borough name for ZCTA batch boroughHover feature states
   const setBoroughHoverStatesRef = useRef(null); // Set inside layer effect, accessible from JSX
-  // Event pin markers toggle
-  const [showPins, setShowPins] = useState(false);
+  // Event pin markers toggle — ON by default so pins show at map open (30-day default window)
+  const [showPins, setShowPins] = useState(true);
   const [showPostBubbles, setShowPostBubbles] = useState(false);
   const [pinButtonMode, setPinButtonMode] = useState('pins'); // 'pins' | 'posts' — desktop only
   const [pinDropdownOpen, setPinDropdownOpen] = useState(false); // mobile dropdown
@@ -1807,6 +1854,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   const isOverPanelRef = useRef(false); // true when cursor is over sideZip/sideBorough panel
   const [hoveredPostBubble, setHoveredPostBubble] = useState(null); // { post, x, y, zip }
   const zipScatterPositionsRef = useRef({}); // zip → [[lng,lat], ...] pre-baked positions
+  const zipToFeatureIndicesRef = useRef({}); // zip → [featureIdx, ...] all sub-polygon features
   const zipPostsRef = useRef({}); // zip → array of fetched posts (session cache)
   const zipMarkerAssignmentsRef = useRef({}); // zip → [postIdx, ...] seeded assignments
   // Borough region overlay toggle
@@ -1853,6 +1901,46 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     holoActiveRef.current = !!(holoFeature || holoBoroughName);
   }, [holoFeature, holoBoroughName]);
 
+  // Centralized panel/hologram close — ALWAYS resets isOverPanelRef and clears any
+  // stuck hover feature-states so the map is fully interactive again immediately.
+  // Called by every X button, Escape key, and hologram onClose.
+  const closeAllMapPanels = useCallback((opts = {}) => {
+    const { closeZip = true, closeBorough = true, closeHologram = true } = opts;
+    if (closeZip) { setSideZip(null); setSideEvents([]); setSideColonists([]); }
+    if (closeBorough) { setSideBorough(null); setSideBoroughEvents([]); setSideBoroughColonists([]); }
+    if (closeHologram) { setHoloFeature(null); setHoloBoroughMode(false); setHoloBoroughName(''); }
+    // Reset interactivity guards — critical so hover/click work after close
+    isOverPanelRef.current = false;
+    isOverPostBubbleRef.current = false;
+    holoActiveRef.current = false;
+    // Clear any stuck ZCTA hover feature-state
+    const map = mapRef.current;
+    if (map) {
+      if (hoveredIdRef.current !== null) {
+        try { map.setFeatureState({ source: 'zcta', id: hoveredIdRef.current }, { hovered: false }); } catch {}
+        hoveredIdRef.current = null;
+      }
+      if (hoveredZipFeatureIdsRef.current.length) {
+        for (const fid of hoveredZipFeatureIdsRef.current) {
+          try { map.setFeatureState({ source: 'zcta', id: fid }, { hovered: false }); } catch {}
+        }
+        hoveredZipFeatureIdsRef.current = [];
+      }
+      if (hoveredBoroughIdRef.current !== null) {
+        try { map.setFeatureState({ source: 'borough-hover-source', id: hoveredBoroughIdRef.current }, { hovered: false }); } catch {}
+        hoveredBoroughIdRef.current = null;
+      }
+      if (hoveredBoroughNameRef.current && setBoroughHoverStatesRef.current) {
+        try { setBoroughHoverStatesRef.current(hoveredBoroughNameRef.current, false); } catch {}
+        hoveredBoroughNameRef.current = null;
+      }
+      try { map.getCanvas().style.cursor = ''; } catch {}
+    }
+    setHoveredZip(null);
+    setTooltipPos(null);
+    setHoveredBorough(null);
+  }, []);
+
   // Fetch comments when a GeoPost is selected
   useEffect(() => {
     if (!selectedGeoPost) { setGeoPostComments([]); return; }
@@ -1898,29 +1986,37 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     } catch (_e) { /* layers might already exist if map was reused */ }
   }, [mapReady]);
 
-  // Real3D: paint tertiary/residential roads purple when a borough is hovered
+  // 3D & Real3D: paint the HOVERED borough's outline extrusion purple (borough-edge highlight).
+  // Roads are intentionally NOT recolored per-borough — PMTiles road features have no borough
+  // attribution, so we cannot isolate a single borough's roads. Roads keep their base color.
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !real3D) return;
-    const isHeatmapOn = heatmapRef.current;
-    const ROAD_FCLASSES_COLOR = ['tertiary', 'residential'];
-    if (hoveredBorough) {
-      for (const fc of ROAD_FCLASSES_COLOR) {
-        const fillId = `real3d-pm-roads-${fc}-fill`;
-        const lineId = `real3d-pm-roads-${fc}-line`;
-        if (map.getLayer(fillId)) map.setPaintProperty(fillId, 'fill-color', '#9333ea');
-        if (map.getLayer(lineId)) map.setPaintProperty(lineId, 'line-color', '#9333ea');
-      }
-    } else {
-      for (const fc of ROAD_FCLASSES_COLOR) {
-        const fillId = `real3d-pm-roads-${fc}-fill`;
-        const lineId = `real3d-pm-roads-${fc}-line`;
-        const origColor = isHeatmapOn ? '#000000' : '#e02424';
-        if (map.getLayer(fillId)) map.setPaintProperty(fillId, 'fill-color', origColor);
-        if (map.getLayer(lineId)) map.setPaintProperty(lineId, 'line-color', origColor);
+    if (!map || !mapReady) return;
+    if (!map.getLayer('borough-outline')) return;
+    const is3DLike = threeD || real3D;
+    const baseColor = ['coalesce', ['get', '_color'], OUTLINE_COLOR];
+    let outlineColor = baseColor;
+    let overlayColor = baseColor;
+    if (is3DLike && hoveredBorough) {
+      const canonIdx = BOROUGH_DATA.findIndex(b => b.name === hoveredBorough);
+      if (canonIdx >= 0) {
+        const purpleWhenHovered = [
+          'case',
+          ['==', ['coalesce', ['get', '_canonIdx'], -1], canonIdx],
+          '#9333ea',
+          baseColor,
+        ];
+        outlineColor = purpleWhenHovered;
+        overlayColor = purpleWhenHovered;
       }
     }
-  }, [hoveredBorough, real3D, mapReady]); // eslint-disable-line react-hooks/exhaustive-deps
+    try {
+      map.setPaintProperty('borough-outline', 'fill-extrusion-color', outlineColor);
+      if (map.getLayer('borough-line-overlay')) {
+        map.setPaintProperty('borough-line-overlay', 'line-color', overlayColor);
+      }
+    } catch (_e) { /* layer transient */ }
+  }, [hoveredBorough, real3D, threeD, mapReady, heatmap]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Build zip→ZCTA index map as soon as geoData is available (no `interactive` gate).
   // This ensures buildTierByZipExpr can produce correct paint expressions for the
@@ -2006,6 +2102,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       if (mapCacheStore.boroughSkeleton) boroughSkeletonRef.current = mapCacheStore.boroughSkeleton;
       else boroughSkeletonRef.current = buildBoroughSkeleton(mapCacheStore.boroughGeoData);
       if (mapCacheStore.zipBoroughMap) zipBoroughMapRef.current = mapCacheStore.zipBoroughMap;
+      if (mapCacheStore.zipToFeatureIndices) zipToFeatureIndicesRef.current = mapCacheStore.zipToFeatureIndices;
       if (mapCacheStore.zipScatterPositions) zipScatterPositionsRef.current = mapCacheStore.zipScatterPositions;
       boroughGeoKeyRef.current = null;
       boroughQuadFilterRef.current = null;
@@ -2024,6 +2121,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   useEffect(() => {
     if (!geoData || !boroughGeoData) return;
     zipBoroughMapRef.current = computeZipBoroughMap(geoData.features, boroughGeoData.features);
+    zipToFeatureIndicesRef.current = buildZipToFeatureIndices(geoData.features);
     // Populate borough hover source with raw borough polygons for interaction
     const mapInst = mapRef.current;
     if (mapInst && mapInst.getSource('borough-hover-source')) {
@@ -2336,40 +2434,56 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         paint: { 'line-color': '#7C3AED', 'line-opacity': 0.001, 'line-width': ['interpolate', ['linear'], ['zoom'], 9, 28, 11, 28, 13, 48, 16, 96] },
       });
     }
+    const clearZipFeatureHover = () => {
+      if (hoveredZipFeatureIdsRef.current.length) {
+        for (const id of hoveredZipFeatureIdsRef.current) {
+          try { map.setFeatureState({ source: 'zcta', id }, { hovered: false }); } catch {}
+        }
+        hoveredZipFeatureIdsRef.current = [];
+      }
+      if (hoveredIdRef.current !== null) {
+        try { map.setFeatureState({ source: 'zcta', id: hoveredIdRef.current }, { hovered: false }); } catch {}
+        hoveredIdRef.current = null;
+      }
+    };
+
     const handleZctaHover = e => {
-      if (hoveredPinEventRef.current) return;
+      // Event pins take absolute hover priority — clear any zip hover when a pin is under the cursor
+      if (hoveredPinEventRef.current || pinUnderPoint(e.point)) {
+        clearZipFeatureHover();
+        setHoveredZip(null); setTooltipPos(null);
+        return;
+      }
       if (isOverPostBubbleRef.current) return;
       if (isOverPanelRef.current) return;
       if (!e.features.length) return;
       const f = e.features[0];
-      if (hoveredIdRef.current !== null && hoveredIdRef.current !== f.id)
-        map.setFeatureState({ source: 'zcta', id: hoveredIdRef.current }, { hovered: false });
-      hoveredIdRef.current = f.id;
-      map.setFeatureState({ source: 'zcta', id: f.id }, { hovered: true });
-      map.getCanvas().style.cursor = 'pointer';
       const zip = String(f.properties.MODZCTA || '');
       const isSafezone = !!f.properties._special;
+      // If the hovered zip changed, clear the previous zip's feature set and light the new one
+      if (hoveredIdRef.current !== f.id) {
+        clearZipFeatureHover();
+        hoveredIdRef.current = f.id;
+        // Light ALL sub-polygon features that share this MODZCTA (Governors Island 10004, etc.)
+        const ids = (!isSafezone && zip && zipToFeatureIndicesRef.current[zip]) || [f.id];
+        hoveredZipFeatureIdsRef.current = ids.slice();
+        for (const id of ids) {
+          try { map.setFeatureState({ source: 'zcta', id }, { hovered: true }); } catch {}
+        }
+      }
+      map.getCanvas().style.cursor = 'pointer';
       setHoveredZip(isSafezone ? `SAFE:${zip}` : zip);
       setTooltipPos({ x: e.point.x, y: e.point.y });
-      // Borough group highlight: light up all ZCTAs in same borough (fixes 3D mode + all-islands lighting)
-      if (!isSafezone) {
-        const boroughIdx = zipBoroughMapRef.current[f.id];
-        if (boroughIdx !== undefined && boroughIdx >= 0) {
-          const bName = BOROUGH_DATA[boroughIdx]?.name;
-          if (bName && bName !== hoveredBoroughNameRef.current) {
-            if (hoveredBoroughNameRef.current) setBoroughHoverStates(hoveredBoroughNameRef.current, false);
-            hoveredBoroughNameRef.current = bName;
-            setBoroughHoverStates(bName, true);
-          }
-        }
+      // NOTE: zip hover is ISOLATED — it does NOT trigger whole-borough highlight.
+      // Borough group highlight is only fired by handleBoroughFillHover (borough-edge proximity).
+      if (hoveredBoroughNameRef.current) {
+        setBoroughHoverStates(hoveredBoroughNameRef.current, false);
+        hoveredBoroughNameRef.current = null;
       }
     };
 
     const handleZctaLeave = () => {
-      if (hoveredIdRef.current !== null) {
-        map.setFeatureState({ source: 'zcta', id: hoveredIdRef.current }, { hovered: false });
-        hoveredIdRef.current = null;
-      }
+      clearZipFeatureHover();
       map.getCanvas().style.cursor = '';
       setHoveredZip(null); setTooltipPos(null);
       // Clear borough group highlight when leaving ZCTA
@@ -2379,10 +2493,23 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       }
     };
 
+    // Returns true if an event pin is under (or very near) the given screen point.
+    // Used to give event pins ABSOLUTE click priority over zip/borough selection.
+    const pinUnderPoint = (point) => {
+      const pinLayers = ['event-pins-layer', 'event-pins-dots'].filter(l => map.getLayer(l));
+      if (!pinLayers.length) return false;
+      try {
+        return map.queryRenderedFeatures(
+          [[point.x - 14, point.y - 14], [point.x + 14, point.y + 14]],
+          { layers: pinLayers }
+        ).length > 0;
+      } catch { return false; }
+    };
+
     const handleZctaClick = e => {
       if (!e.features.length) return;
-      // If a pin is currently hovered, don't open zip panel — pin click takes priority
-      if (hoveredPinEventRef.current) return;
+      // Event pins take absolute priority — never open a zip panel when a pin is under the cursor
+      if (hoveredPinEventRef.current || pinUnderPoint(e.point)) return;
       if (isOverPostBubbleRef.current) return;
       if (isOverPanelRef.current) return;
       // Block new selections while any hologram is open
@@ -2431,7 +2558,18 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     // near the line stroke activates borough hover even when a ZCTA is under the cursor.
     // Task 1.2: batch-updates 'boroughHover' feature state on all ZCTA features in borough.
     const handleBoroughFillHover = e => {
-      if (hoveredPinEventRef.current) return;
+      if (hoveredPinEventRef.current || pinUnderPoint(e.point)) {
+        if (hoveredBoroughIdRef.current !== null) {
+          try { map.setFeatureState({ source: 'borough-hover-source', id: hoveredBoroughIdRef.current }, { hovered: false }); } catch {}
+          hoveredBoroughIdRef.current = null;
+        }
+        if (hoveredBoroughNameRef.current) {
+          setBoroughHoverStates(hoveredBoroughNameRef.current, false);
+          hoveredBoroughNameRef.current = null;
+        }
+        setHoveredBorough(null);
+        return;
+      }
       if (isOverPostBubbleRef.current) return;
       if (isOverPanelRef.current) return;
       if (!e.features.length) return;
@@ -2486,6 +2624,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     // Left-click on borough border area → open all three panels + hologram (Task 1.7)
     const handleBoroughFillClick = e => {
       if (!e.features.length) return;
+      // Event pins take absolute priority over borough selection
+      if (hoveredPinEventRef.current || pinUnderPoint(e.point)) return;
       // Block new selections while any hologram is open
       if (holoActiveRef.current) return;
       const zctaLayers = ['zcta-fill', 'zcta-extrude', 'zcta-safezone-hover', 'zcta-safezone-fill']
@@ -2657,11 +2797,11 @@ export default function MapView({ events, headerCollapsed = false, interactive =
 
       // Per-borough avg tier + match expression. Populated only if boroughGeoData + zipBoroughMap exist.
       if (boroughCount && mapCacheStore.zipBoroughMap) {
-        const avgTiers = computeBoroughAvgTiers(tiers, mapCacheStore.zipBoroughMap, boroughCount);
+        const avgTiers = computeBoroughAvgTiers(tiers, mapCacheStore.zipBoroughMap);
         boroughTiers[ts] = avgTiers;
         const onExpr = ['match', ['get', '_boroughIdx']];
         const offExpr = ['match', ['get', '_boroughIdx']];
-        for (let bi = 0; bi < boroughCount; bi++) {
+        for (let bi = 0; bi < 5; bi++) {
           const t = avgTiers[bi] ?? 0;
           onExpr.push(bi, TIER_COLORS[Math.max(0, Math.min(4, t))]);
           offExpr.push(bi, '#ff2200');
@@ -3416,8 +3556,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       if (boroughGeoDataRef.current) {
         const avgTiers = computeBoroughAvgTiers(
           tiers,
-          zipBoroughMapRef.current,
-          boroughGeoDataRef.current.features.length
+          zipBoroughMapRef.current
         );
         boroughAvgTiersRef.current = avgTiers;
         const coloredBorough = buildColoredBoroughFeatures(boroughGeoDataRef.current, avgTiers, heatmap);
@@ -4365,9 +4504,13 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       const tier = totalZipsWithPosts <= 1 ? 4 : Math.min(4, Math.floor(rankIdx / totalZipsWithPosts * 5));
       zipTierMap[zip] = tier;
     });
+    const renderedZips = new Set();
     geoData.features.forEach(f => {
       const zip = String(f.properties.MODZCTA || '');
       if (!zip || f.properties._special) return;
+      // Dedupe multi-polygon zips (e.g. 10004 spans several features) — render each zip's bubbles once
+      if (renderedZips.has(zip)) return;
+      renderedZips.add(zip);
       const count = zipPostCounts[zip] || 0;
       if (count === 0) return;
       const displayCount = getPostDisplayCount(count, maxCount);
@@ -4454,7 +4597,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
             setSelectedGeoPost(post);
           }
         });
-        const marker = new maplibregl.Marker({ element: el, anchor: 'center' })
+        const marker = new maplibregl.Marker({ element: el, anchor: 'bottom', offset: [0, -2] })
           .setLngLat([lng, lat])
           .addTo(map);
         postBubbleMarkersRef.current.push({ marker, zip, mi, postAssignIdx });
@@ -5202,7 +5345,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   }, [timespanIdx, showRegion, events, heatmap]);
 
   useEffect(() => {
-    const h = e => { if (e.key === 'Escape') { setHoloFeature(null); setSideZip(null); setSideEvents([]); setSideColonists([]); setSideBorough(null); setSideBoroughEvents([]); setSideBoroughColonists([]); } };
+    const h = e => { if (e.key === 'Escape') closeAllMapPanels(); };
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
   }, []);
@@ -5549,7 +5692,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
                   <button onClick={() => setPinnedRightPanel(p => !p)} title={pinnedRightPanel ? 'Unpin panel' : 'Pin panel'}
                     style={{ background: pinnedRightPanel ? '#7C3AED' : undefined, color: pinnedRightPanel ? '#fff' : undefined, opacity: 1 }}
                     className="w-7 h-7 rounded-full flex items-center justify-center text-xs bg-white/5 hover:bg-white/15 text-white/60 hover:text-white transition-all border-none cursor-pointer">📌</button>
-                  <button onClick={() => { setSideZip(null); setSideEvents([]); setSideColonists([]); setHoloFeature(null); }}
+                  <button onClick={() => closeAllMapPanels({ closeBorough: false })}
                     className="w-7 h-7 rounded-full flex items-center justify-center text-xs bg-white/5 hover:bg-white/15 text-white/60 hover:text-white transition-all">✕</button>
                 </div>
               </div>
@@ -5651,7 +5794,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
                   <button onClick={() => setPinnedRightPanel(p => !p)} title={pinnedRightPanel ? 'Unpin panel' : 'Pin panel'}
                     style={{ background: pinnedRightPanel ? '#7C3AED' : undefined, color: pinnedRightPanel ? '#fff' : undefined, opacity: 1 }}
                     className="w-7 h-7 rounded-full flex items-center justify-center text-xs bg-white/5 hover:bg-white/15 text-white/60 hover:text-white transition-all border-none cursor-pointer">📌</button>
-                  <button onClick={() => { setSideBorough(null); setSideBoroughEvents([]); setSideBoroughColonists([]); setHoloFeature(null); setHoloBoroughMode(false); setHoloBoroughName(''); setBoroughHoverStatesRef.current?.(sideBorough, false); }}
+                  <button onClick={() => { closeAllMapPanels({ closeZip: false }); setBoroughHoverStatesRef.current?.(sideBorough, false); }}
                     className="w-7 h-7 rounded-full flex items-center justify-center text-xs bg-white/5 hover:bg-white/15 text-white/60 hover:text-white transition-all">×</button>
                 </div>
               </div>
@@ -5725,7 +5868,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
           {/* ── MOBILE: hologram top 50%, side panel bottom 50% ── */}
           {holoFeature && isMobile && !sideZip && !sideBorough && (
             <ZipHologram mobile feature={holoFeature} color={holoColor}
-              onClose={() => { setHoloFeature(null); setHoloBoroughMode(false); setHoloBoroughName(''); }}
+              onClose={() => closeAllMapPanels()}
               boroughMode={holoBoroughMode} boroughName={holoBoroughName} />
           )}
 
@@ -5756,7 +5899,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
                     )}
                   </div>
                   <button
-                    onClick={() => { setSideZip(null); setSideEvents([]); setSideColonists([]); setHoloFeature(null); }}
+                    onClick={() => closeAllMapPanels({ closeBorough: false })}
                     className="w-8 h-8 rounded-full border font-black text-xs flex items-center justify-center hover:bg-white/20 flex-shrink-0"
                     style={{ borderColor: holoColor || '#cc2200', color: holoColor || '#cc2200' }}
                   >✕</button>
@@ -5832,7 +5975,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
           {/* Desktop hologram — offset right if MapPostsPanel (left 1/3) is open */}
           {holoFeature && !isMobile && (
             <ZipHologram feature={holoFeature} color={holoColor}
-              onClose={() => { setHoloFeature(null); setHoloBoroughMode(false); setHoloBoroughName(''); }}
+              onClose={() => closeAllMapPanels()}
               leftOffset={mapPostsPanel ? '33.333%' : 0}
               boroughMode={holoBoroughMode} boroughName={holoBoroughName} />
           )}
@@ -5846,7 +5989,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
                   <div className="text-purple-300 font-black text-sm tracking-widest uppercase">{sideBorough} — BOROUGH</div>
                   <p className="text-white/40 text-xs">{sideBoroughEvents.length} events · {sideBoroughColonists.length} colonists</p>
                 </div>
-                <button onClick={() => { setSideBorough(null); setSideBoroughEvents([]); setSideBoroughColonists([]); setHoloFeature(null); setHoloBoroughMode(false); setHoloBoroughName(''); }}
+                <button onClick={() => closeAllMapPanels({ closeZip: false })}
                   className="text-white/50 hover:text-white text-xl leading-none w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10">×</button>
               </div>
               <div className="flex overflow-hidden min-h-0" style={{ flex: 1 }}>

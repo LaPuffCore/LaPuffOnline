@@ -3,6 +3,8 @@
 File Version: 1.0.0
 System Time: Wednesday, May 20, 2026
 
+git add . && git commit -m "Your commit message" && git push origin main
+
 ===========================================================================
 [SYSTEM RULES & EXECUTION DIRECTIVES FOR COPILOT / DEVELOPER]
 1. TRACKING STATE: Every single task item starts with `[Not Complete] ❌`. 

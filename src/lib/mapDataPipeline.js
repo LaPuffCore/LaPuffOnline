@@ -453,54 +453,80 @@ function filterBoroughData(data) {
 }
 
 function computeZipBoroughMap(zctaFeatures, boroughFeatures) {
+  // Canonical borough index override table (0=Manhattan,1=Staten Island,2=Bronx,3=Queens,4=Brooklyn).
+  // MUST stay in sync with ZIP_BOROUGH_OVERRIDES in MapView.jsx.
   const ZIP_BOROUGH_OVERRIDES = {
-    // Manhattan (0): various islands and southern tip zips
     '10044': 0, '10004': 0, '10005': 0, '10006': 0, '10007': 0, '10280': 0, '10282': 0,
-    // Brooklyn (4): Rockaway Beach south peninsula
-    '11697': 4, '11694': 4, '11693': 4, '11695': 4,
-    // Queens (3): Rikers Island (11370), Far Rockaway
-    '11370': 3, '11691': 3, '11692': 3, '11693': 3, '11695': 3, '11096': 3,
-    // Bronx (2): City Island (10464)
-    '10464': 2, '10465': 2,
+    '10464': 2, '10465': 2, '10463': 2,
+    '11370': 3, '11691': 3, '11692': 3, '11693': 3, '11694': 3, '11695': 3, '11697': 3, '11096': 3,
+    '11385': 3, '11414': 3, '11416': 3, '11421': 3,
+    '11234': 4, '11235': 4,
   };
+  const CANON = { 'Manhattan': 0, 'Staten Island': 1, 'Bronx': 2, 'Queens': 3, 'Brooklyn': 4 };
+  const nameToCanon = (bf) => CANON[String(bf.properties?.BoroName || '')] ?? -1;
   const result = {};
-  zctaFeatures.forEach((f, i) => {
-    if (f.properties._special) return;
-    const [cx, cy] = getGeomCentroid(f.geometry);
-    let foundBi = -1;
+  const centroidPiP = (cx, cy) => {
     for (let bi = 0; bi < boroughFeatures.length; bi++) {
+      const canon = nameToCanon(boroughFeatures[bi]);
+      if (canon < 0) continue;
       const bGeom = boroughFeatures[bi].geometry;
       const polys = bGeom.type === 'MultiPolygon' ? bGeom.coordinates : [bGeom.coordinates];
-      let found = false;
       for (const poly of polys) {
-        if (pointInRing(cx, cy, poly[0])) { found = true; break; }
+        if (pointInRing(cx, cy, poly[0])) return canon;
       }
-      if (found) { foundBi = bi; break; }
     }
-    // Island zips (e.g. 10004, 10035, 10464): overall centroid may fall in water.
-    // Try centroid of each individual polygon in the MultiPolygon as a fallback.
-    if (foundBi < 0 && f.geometry.type === 'MultiPolygon') {
-      outer: for (const polyCoords of f.geometry.coordinates) {
-        const ring = polyCoords[0];
-        const cx2 = ring.reduce((s, p) => s + p[0], 0) / ring.length;
-        const cy2 = ring.reduce((s, p) => s + p[1], 0) / ring.length;
-        for (let bi = 0; bi < boroughFeatures.length; bi++) {
-          const bGeom = boroughFeatures[bi].geometry;
-          const polys = bGeom.type === 'MultiPolygon' ? bGeom.coordinates : [bGeom.coordinates];
-          for (const poly of polys) {
-            if (pointInRing(cx2, cy2, poly[0])) { foundBi = bi; break outer; }
-          }
+    return -1;
+  };
+  const nearestBorough = (cx, cy) => {
+    let best = -1, bestD = Infinity;
+    for (let bi = 0; bi < boroughFeatures.length; bi++) {
+      const canon = nameToCanon(boroughFeatures[bi]);
+      if (canon < 0) continue;
+      const bGeom = boroughFeatures[bi].geometry;
+      const polys = bGeom.type === 'MultiPolygon' ? bGeom.coordinates : [bGeom.coordinates];
+      for (const poly of polys) {
+        const ring = poly[0];
+        for (let k = 0; k < ring.length; k++) {
+          const dx = ring[k][0] - cx, dy = ring[k][1] - cy;
+          const d = dx * dx + dy * dy;
+          if (d < bestD) { bestD = d; best = canon; }
         }
       }
     }
-    if (foundBi >= 0) result[i] = foundBi;
-    // Hardcoded override for island zips that centroid PiP misses
+    return best;
+  };
+  zctaFeatures.forEach((f, i) => {
+    if (f.properties._special) return;
     const zip = String(f.properties.MODZCTA || f.properties.modzcta || '');
-    if (ZIP_BOROUGH_OVERRIDES[zip] !== undefined) {
-      result[i] = ZIP_BOROUGH_OVERRIDES[zip];
+    if (ZIP_BOROUGH_OVERRIDES[zip] !== undefined) { result[i] = ZIP_BOROUGH_OVERRIDES[zip]; return; }
+    const [cx, cy] = getGeomCentroid(f.geometry);
+    let canon = centroidPiP(cx, cy);
+    if (canon < 0 && f.geometry.type === 'MultiPolygon') {
+      for (const polyCoords of f.geometry.coordinates) {
+        const ring = polyCoords[0];
+        const cx2 = ring.reduce((s, p) => s + p[0], 0) / ring.length;
+        const cy2 = ring.reduce((s, p) => s + p[1], 0) / ring.length;
+        canon = centroidPiP(cx2, cy2);
+        if (canon >= 0) break;
+      }
     }
+    if (canon < 0) canon = nearestBorough(cx, cy);
+    if (canon >= 0) result[i] = canon;
   });
   return result;
+}
+
+// Build { [zip]: number[] } — all ZCTA feature indices sharing the same MODZCTA (multi-polygon zips).
+function buildZipToFeatureIndices(zctaFeatures) {
+  const map = {};
+  zctaFeatures.forEach((f, i) => {
+    if (f.properties?._special) return;
+    const zip = String(f.properties?.MODZCTA || f.properties?.modzcta || '');
+    if (!zip) return;
+    if (!map[zip]) map[zip] = [];
+    map[zip].push(i);
+  });
+  return map;
 }
 
 function computeZctaBboxes(geoData) {
@@ -525,17 +551,19 @@ function computeZctaBboxes(geoData) {
 // MapLibre's pmtiles:// protocol. No FGB parsing, no worker, no IDB hydrate.
 
 // Duplicated from MapView.jsx — kept in sync for Phase 2A pre-computation.
-function computeBoroughAvgTiersLocal(tiers, zipBoroughMap, boroughCount) {
+// Returns canonical array[5] of borough tiers (index 0-4).
+function computeBoroughAvgTiersLocal(tiers, zipBoroughMap) {
   const TIER_POINTS = [0, 2, 3, 4, 5];
-  const boroughTotalPts = new Array(boroughCount).fill(0);
+  const boroughTotalPts = new Array(5).fill(0);
   Object.entries(zipBoroughMap).forEach(([idx, bi]) => {
+    if (bi < 0 || bi > 4) return;
     const i = parseInt(idx);
     const tier = Math.min(4, Math.max(0, tiers[i] ?? 0));
     boroughTotalPts[bi] += TIER_POINTS[tier];
   });
   const indexed = boroughTotalPts.map((pts, i) => ({ pts, i }));
   indexed.sort((a, b) => b.pts - a.pts);
-  const ranked = new Array(boroughCount).fill(0);
+  const ranked = new Array(5).fill(0);
   for (let pos = 0; pos < indexed.length; pos++) {
     ranked[indexed[pos].i] = Math.max(0, 4 - pos);
   }
@@ -711,16 +739,16 @@ export async function runPhase2A(events, isMobile, onProgress) {
   if (boroughCount > 0 && zipBoroughMap) {
     for (let idx = 0; idx < TIMESPAN_STEPS.length; idx++) {
       const { zipMap, tiers } = precomputedTiers[idx];
-      const counts = new Array(boroughCount).fill(0);
+      const counts = new Array(5).fill(0);
       geoData.features.forEach((f, i) => {
         const bi = zipBoroughMap[i];
-        if (bi === undefined) return;
+        if (bi === undefined || bi < 0 || bi > 4) return;
         const zip = String(f.properties?.MODZCTA || '');
         const evts = zipMap[zip] || [];
         counts[bi] += evts.length;
       });
       boroughEventCountsByTimespan[idx] = counts.reduce((acc, c, i) => { acc[i] = c; return acc; }, {});
-      boroughTiersByTimespan[idx] = computeBoroughAvgTiersLocal(tiers, zipBoroughMap, boroughCount);
+      boroughTiersByTimespan[idx] = computeBoroughAvgTiersLocal(tiers, zipBoroughMap);
     }
   }
 
@@ -732,6 +760,7 @@ export async function runPhase2A(events, isMobile, onProgress) {
   mapCacheStore.boroughGeoData = boroughGeoData;
   mapCacheStore.boroughSkeleton = boroughSkeleton;
   mapCacheStore.zipBoroughMap  = zipBoroughMap;
+  mapCacheStore.zipToFeatureIndices = buildZipToFeatureIndices(geoData.features);
   mapCacheStore.precomputedTiers = precomputedTiers;
   mapCacheStore.boroughEventCountsByTimespan = boroughEventCountsByTimespan;
   mapCacheStore.boroughTiersByTimespan = boroughTiersByTimespan;
