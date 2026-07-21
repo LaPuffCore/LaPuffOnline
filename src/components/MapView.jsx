@@ -441,6 +441,14 @@ function zctaLineWidthExpr(mult = 1) {
   ];
 }
 
+// Wraps a base ZCTA line color so it turns purple whenever the feature's 'boroughHover'
+// feature-state is active (set in bulk by setBoroughHoverStates for every zip in a hovered
+// borough — including all islands/sub-polygons sharing that borough). GPU-evaluated per-frame,
+// auto-updates on setFeatureState — no extra setPaintProperty call needed on hover change.
+function zctaLineColorExpr(base) {
+  return ['case', ['boolean', ['feature-state', 'boroughHover'], false], '#a855f7', base];
+}
+
 // T3 3D PIXELIZATION: Smooth continuous zoom-aware width scaling.
 // ZCTA (base 14m): 14m flat until zoom 10.5, then ramps to 64m at zoom 9.
 // Borough (base 18m): 1x at zoom≥11, 2x ramp at zoom 10-11, 3x ramp at zoom ≤9.
@@ -1451,7 +1459,8 @@ function ZipHologram({ feature, color, onClose, leftOffset = 0, mobile = false, 
       ctx.restore();
     }
     function frame() {
-      timeRef.current += 0.018;
+      // Animation speed reduced to 20% (one-fifth) of original per user request — was 0.018.
+      timeRef.current += 0.0036;
       const t = timeRef.current, rotY = Math.sin(t) * 0.35;
       ctx.clearRect(0, 0, W, H);
       for (let d = DEPTH; d >= 0; d--) drawShape(Math.sin(rotY) * d * 1.8, -d * 0.7, 0.08 + (1 - d / DEPTH) * 0.18, d > 0);
@@ -1838,11 +1847,15 @@ export default function MapView({ events, headerCollapsed = false, interactive =
   const [geoPostCommentsLoading, setGeoPostCommentsLoading] = useState(false);
   const [newCommentText, setNewCommentText] = useState('');
   const holoActiveRef = useRef(false); // true when any hologram is open → blocks new zip/borough clicks
+  const mapPanelsBlockInteractionRef = useRef(false); // true only when all 3 panel slots (left post / middle holo / right events) are open at once
   const [pinnedLeftPanel, setPinnedLeftPanel] = useState(false);  // true = left posts panel is pinned
   const [pinnedRightPanel, setPinnedRightPanel] = useState(false); // true = right events/leaderboard panel is pinned
   const hoveredBoroughIdRef = useRef(null);
   const hoveredBoroughNameRef = useRef(null); // Tracks borough name for ZCTA batch boroughHover feature states
   const setBoroughHoverStatesRef = useRef(null); // Set inside layer effect, accessible from JSX
+  const setBoroughHoverSourceGroupRef = useRef(null); // Group-highlights all borough-hover-source polygons sharing a BoroName
+  const hoveredBoroughZipsRef = useRef([]); // MODZCTA strings for the currently hovered borough — drives zcta-outline (separate source, no shared feature-state) purple-on-hover
+  const upperBorderBaseColorExprRef = useRef(null); // Latest non-hover base color expr for zcta-outline (3D upper border)
   // Event pin markers toggle — ON by default so pins show at map open (30-day default window)
   const [showPins, setShowPins] = useState(true);
   const [showPostBubbles, setShowPostBubbles] = useState(false);
@@ -1901,6 +1914,21 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     holoActiveRef.current = !!(holoFeature || holoBoroughName);
   }, [holoFeature, holoBoroughName]);
 
+  // Liquid panel-count interactivity gate (item #11): derived directly from React state
+  // (never from mouse enter/leave, which can get stuck if a panel is removed from the DOM
+  // while the cursor is still over it — no mouseleave fires in that case). The 3 conceptual
+  // panels are: left post panel, middle hologram/extrusion, right events+leaderboard panel.
+  // Map interactivity is blocked ONLY when all 3 are open simultaneously; closing any one
+  // (or a new selection overwriting one of the 3 slots) instantly re-enables interaction —
+  // no zoom/refresh needed since this is a plain ref sync on state change, not a DOM event.
+  useEffect(() => {
+    const leftOpen = !!mapPostsPanel;
+    const middleOpen = !!(holoFeature || holoBoroughName);
+    const rightOpen = !!(sideZip || sideBorough);
+    const openCount = (leftOpen ? 1 : 0) + (middleOpen ? 1 : 0) + (rightOpen ? 1 : 0);
+    mapPanelsBlockInteractionRef.current = openCount >= 3;
+  }, [mapPostsPanel, holoFeature, holoBoroughName, sideZip, sideBorough]);
+
   // Centralized panel/hologram close — ALWAYS resets isOverPanelRef and clears any
   // stuck hover feature-states so the map is fully interactive again immediately.
   // Called by every X button, Escape key, and hologram onClose.
@@ -1913,6 +1941,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     isOverPanelRef.current = false;
     isOverPostBubbleRef.current = false;
     holoActiveRef.current = false;
+    mapPanelsBlockInteractionRef.current = false;
     // Clear any stuck ZCTA hover feature-state
     const map = mapRef.current;
     if (map) {
@@ -1930,8 +1959,13 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         try { map.setFeatureState({ source: 'borough-hover-source', id: hoveredBoroughIdRef.current }, { hovered: false }); } catch {}
         hoveredBoroughIdRef.current = null;
       }
-      if (hoveredBoroughNameRef.current && setBoroughHoverStatesRef.current) {
-        try { setBoroughHoverStatesRef.current(hoveredBoroughNameRef.current, false); } catch {}
+      if (hoveredBoroughNameRef.current) {
+        if (setBoroughHoverStatesRef.current) {
+          try { setBoroughHoverStatesRef.current(hoveredBoroughNameRef.current, false); } catch {}
+        }
+        if (setBoroughHoverSourceGroupRef.current) {
+          try { setBoroughHoverSourceGroupRef.current(hoveredBoroughNameRef.current, false); } catch {}
+        }
         hoveredBoroughNameRef.current = null;
       }
       try { map.getCanvas().style.cursor = ''; } catch {}
@@ -2329,13 +2363,13 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     map.addLayer({
       id: 'zcta-line-glow2', type: 'line', source: 'zcta',
       filter: ['!=', ['get', '_special'], true],
-      paint: { 'line-color': OUTLINE_GLOW, 'line-width': zctaLineWidthExpr(1.6), 'line-opacity': is3D ? 0 : (sat ? 0.25 : 0.35), 'line-blur': 10 },
+      paint: { 'line-color': zctaLineColorExpr(OUTLINE_GLOW), 'line-width': zctaLineWidthExpr(1.6), 'line-opacity': is3D ? 0 : (sat ? 0.25 : 0.35), 'line-blur': 10 },
     });
     map.addLayer({
       id: 'zcta-line-glow', type: 'line', source: 'zcta',
       filter: ['!=', ['get', '_special'], true],
       paint: {
-        'line-color': OUTLINE_COLOR, 'line-width': zctaLineWidthExpr(1.25),
+        'line-color': zctaLineColorExpr(OUTLINE_COLOR), 'line-width': zctaLineWidthExpr(1.25),
         'line-opacity': is3D ? 0 : (sat ? 0.55 : 0.75), 'line-blur': 3,
         'line-opacity-transition': { duration: 0 }, 'line-width-transition': { duration: 0 },
       },
@@ -2344,7 +2378,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       id: 'zcta-line', type: 'line', source: 'zcta',
       filter: ['!=', ['get', '_special'], true],
       paint: {
-        'line-color': OUTLINE_COLOR, 'line-width': zctaLineWidthExpr(1),
+        'line-color': zctaLineColorExpr(OUTLINE_COLOR), 'line-width': zctaLineWidthExpr(1),
         'line-opacity': is3D ? 0 : 1,
         'line-opacity-transition': { duration: 0 }, 'line-width-transition': { duration: 0 },
       },
@@ -2455,7 +2489,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         return;
       }
       if (isOverPostBubbleRef.current) return;
-      if (isOverPanelRef.current) return;
+      if (mapPanelsBlockInteractionRef.current) return;
       if (!e.features.length) return;
       const f = e.features[0];
       const zip = String(f.properties.MODZCTA || '');
@@ -2478,6 +2512,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       // Borough group highlight is only fired by handleBoroughFillHover (borough-edge proximity).
       if (hoveredBoroughNameRef.current) {
         setBoroughHoverStates(hoveredBoroughNameRef.current, false);
+        setBoroughHoverSourceGroup(hoveredBoroughNameRef.current, false);
         hoveredBoroughNameRef.current = null;
       }
     };
@@ -2489,6 +2524,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       // Clear borough group highlight when leaving ZCTA
       if (hoveredBoroughNameRef.current) {
         setBoroughHoverStates(hoveredBoroughNameRef.current, false);
+        setBoroughHoverSourceGroup(hoveredBoroughNameRef.current, false);
         hoveredBoroughNameRef.current = null;
       }
     };
@@ -2511,9 +2547,9 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       // Event pins take absolute priority — never open a zip panel when a pin is under the cursor
       if (hoveredPinEventRef.current || pinUnderPoint(e.point)) return;
       if (isOverPostBubbleRef.current) return;
-      if (isOverPanelRef.current) return;
-      // Block new selections while any hologram is open
-      if (holoActiveRef.current) return;
+      // Block new selections only when all 3 panel slots (left post / middle holo /
+      // right events) are open at once — liquid interactivity gate (item #11).
+      if (mapPanelsBlockInteractionRef.current) return;
       // Yield to borough click when cursor is near a borough boundary line
       const bLineFeats = map.queryRenderedFeatures(
         [[e.point.x - 8, e.point.y - 8], [e.point.x + 8, e.point.y + 8]],
@@ -2539,19 +2575,51 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     map.on('mouseleave', 'zcta-safezone-hover', handleZctaLeave);
     map.on('click', 'zcta-safezone-hover', handleZctaClick);
 
-    // Helper: batch-set 'boroughHover' feature state on all ZCTA features in a borough
+    // Rebuilds zcta-outline's (3D "upper border", separate source — no shared feature-state
+    // with `zcta`) fill-extrusion-color from the latest base tier/red expr + the current
+    // hovered-borough zip list, so its purple-on-hover stays in sync with boroughHover states.
+    const applyZctaOutlineHoverColor = () => {
+      if (!map.getLayer('zcta-outline')) return;
+      const zips = hoveredBoroughZipsRef.current;
+      const base = upperBorderBaseColorExprRef.current || OUTLINE_COLOR;
+      const expr = (zips && zips.length)
+        ? ['case', ['in', ['to-string', ['get', 'MODZCTA']], ['literal', zips]], '#a855f7', base]
+        : base;
+      try { map.setPaintProperty('zcta-outline', 'fill-extrusion-color', expr); } catch {}
+    };
+
+    // Helper: batch-set 'boroughHover' feature state on all ZCTA features in a borough.
+    // Also drives zcta-line/zcta-line-glow purple (same 'zcta' source, shared feature-state)
+    // and zcta-outline purple (separate source — tracked via MODZCTA list instead).
     const setBoroughHoverStates = (boroughName, active) => {
       const data = geoDataRef.current;
       if (!data) return;
       const bIdx = BOROUGH_DATA.findIndex(b => b.name === boroughName);
       if (bIdx < 0) return;
-      data.features.forEach((_, idx) => {
+      const zipsForBorough = [];
+      data.features.forEach((f, idx) => {
         if (zipBoroughMapRef.current[idx] === bIdx) {
           map.setFeatureState({ source: 'zcta', id: idx }, { boroughHover: active });
+          if (active) zipsForBorough.push(String(f.properties?.MODZCTA || ''));
+        }
+      });
+      hoveredBoroughZipsRef.current = active ? zipsForBorough : [];
+      applyZctaOutlineHoverColor();
+    };
+    setBoroughHoverStatesRef.current = setBoroughHoverStates;
+
+    // Helper: batch-set 'hovered' feature state on ALL borough-hover-source polygons
+    // sharing a BoroName (fixes islands like 10044/Manhattan not lighting up together in 2D/3D).
+    const setBoroughHoverSourceGroup = (boroughName, active) => {
+      const data = boroughGeoDataRef.current;
+      if (!data || !boroughName) return;
+      data.features.forEach((bf, idx) => {
+        if (String(bf.properties?.BoroName || '') === boroughName) {
+          try { map.setFeatureState({ source: 'borough-hover-source', id: idx }, { hovered: active }); } catch {}
         }
       });
     };
-    setBoroughHoverStatesRef.current = setBoroughHoverStates;
+    setBoroughHoverSourceGroupRef.current = setBoroughHoverSourceGroup;
 
     // Borough hover via 'borough-hover-fill' layer.
     // Task 1.1: also checks pixel-radius proximity to 'borough-line-overlay' so hovering
@@ -2559,19 +2627,17 @@ export default function MapView({ events, headerCollapsed = false, interactive =
     // Task 1.2: batch-updates 'boroughHover' feature state on all ZCTA features in borough.
     const handleBoroughFillHover = e => {
       if (hoveredPinEventRef.current || pinUnderPoint(e.point)) {
-        if (hoveredBoroughIdRef.current !== null) {
-          try { map.setFeatureState({ source: 'borough-hover-source', id: hoveredBoroughIdRef.current }, { hovered: false }); } catch {}
-          hoveredBoroughIdRef.current = null;
-        }
         if (hoveredBoroughNameRef.current) {
           setBoroughHoverStates(hoveredBoroughNameRef.current, false);
+          setBoroughHoverSourceGroup(hoveredBoroughNameRef.current, false);
           hoveredBoroughNameRef.current = null;
         }
+        hoveredBoroughIdRef.current = null;
         setHoveredBorough(null);
         return;
       }
       if (isOverPostBubbleRef.current) return;
-      if (isOverPanelRef.current) return;
+      if (mapPanelsBlockInteractionRef.current) return;
       if (!e.features.length) return;
       const f = e.features[0];
       const newBoroughName = String(f.properties.BoroName || '');
@@ -2584,24 +2650,25 @@ export default function MapView({ events, headerCollapsed = false, interactive =
 
       if (zctaUnder) {
         // ZCTA takes priority for tooltip/panel. Clear borough polygon fill highlight.
-        if (hoveredBoroughIdRef.current !== null) {
-          map.setFeatureState({ source: 'borough-hover-source', id: hoveredBoroughIdRef.current }, { hovered: false });
-          hoveredBoroughIdRef.current = null;
+        if (hoveredBoroughNameRef.current) {
+          setBoroughHoverSourceGroup(hoveredBoroughNameRef.current, false);
+          hoveredBoroughNameRef.current = null;
         }
+        hoveredBoroughIdRef.current = null;
         setHoveredBorough(null);
         return;
       }
 
       // No ZCTA under cursor (water/exterior): full borough hover mode with tooltip.
-      if (hoveredBoroughIdRef.current !== f.id) {
-        if (hoveredBoroughIdRef.current !== null) {
-          map.setFeatureState({ source: 'borough-hover-source', id: hoveredBoroughIdRef.current }, { hovered: false });
-        }
-        if (hoveredBoroughNameRef.current && hoveredBoroughNameRef.current !== newBoroughName) {
+      // Group-highlight ALL polygons sharing this BoroName (fixes multi-island boroughs
+      // like Manhattan/10044) in the borough-hover-source AND the ZCTA boroughHover state.
+      if (hoveredBoroughNameRef.current !== newBoroughName) {
+        if (hoveredBoroughNameRef.current) {
+          setBoroughHoverSourceGroup(hoveredBoroughNameRef.current, false);
           setBoroughHoverStates(hoveredBoroughNameRef.current, false);
         }
         hoveredBoroughIdRef.current = f.id;
-        map.setFeatureState({ source: 'borough-hover-source', id: f.id }, { hovered: true });
+        setBoroughHoverSourceGroup(newBoroughName, true);
         hoveredBoroughNameRef.current = newBoroughName;
         setBoroughHoverStates(newBoroughName, true);
       }
@@ -2610,14 +2677,12 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       setTooltipPos({ x: e.point.x, y: e.point.y });
     };
     const handleBoroughFillLeave = () => {
-      if (hoveredBoroughIdRef.current !== null) {
-        map.setFeatureState({ source: 'borough-hover-source', id: hoveredBoroughIdRef.current }, { hovered: false });
-        hoveredBoroughIdRef.current = null;
-      }
       if (hoveredBoroughNameRef.current) {
+        setBoroughHoverSourceGroup(hoveredBoroughNameRef.current, false);
         setBoroughHoverStates(hoveredBoroughNameRef.current, false);
         hoveredBoroughNameRef.current = null;
       }
+      hoveredBoroughIdRef.current = null;
       setHoveredBorough(null);
       if (hoveredIdRef.current === null) map.getCanvas().style.cursor = '';
     };
@@ -2626,8 +2691,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       if (!e.features.length) return;
       // Event pins take absolute priority over borough selection
       if (hoveredPinEventRef.current || pinUnderPoint(e.point)) return;
-      // Block new selections while any hologram is open
-      if (holoActiveRef.current) return;
+      // Block new selections only when all 3 panel slots are open at once (item #11)
+      if (mapPanelsBlockInteractionRef.current) return;
       const zctaLayers = ['zcta-fill', 'zcta-extrude', 'zcta-safezone-hover', 'zcta-safezone-fill']
         .filter(l => map.getLayer(l));
       // Only block if ZCTA is under cursor AND cursor is NOT near the borough line stroke
@@ -2643,6 +2708,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         setMapPostsPanelIfNotPinned({ type: 'borough', value: boroughName });
         openBoroughHologram(boroughName);
         setBoroughHoverStates(boroughName, true);
+        setBoroughHoverSourceGroup(boroughName, true);
+        hoveredBoroughNameRef.current = boroughName;
       }
     };
     map.on('mousemove', 'borough-hover-fill', handleBoroughFillHover);
@@ -2682,10 +2749,12 @@ export default function MapView({ events, headerCollapsed = false, interactive =
           const bfImm = boroughFeatsImm[0];
           const bnImm = String(bfImm.properties.BoroName || '');
           if (bnImm) {
-            if (hoveredBoroughIdRef.current !== null && hoveredBoroughIdRef.current !== bfImm.id)
-              map.setFeatureState({ source: 'borough-hover-source', id: hoveredBoroughIdRef.current }, { hovered: false });
+            if (hoveredBoroughNameRef.current && hoveredBoroughNameRef.current !== bnImm) {
+              setBoroughHoverSourceGroup(hoveredBoroughNameRef.current, false);
+              setBoroughHoverStates(hoveredBoroughNameRef.current, false);
+            }
             hoveredBoroughIdRef.current = bfImm.id;
-            map.setFeatureState({ source: 'borough-hover-source', id: bfImm.id }, { hovered: true });
+            setBoroughHoverSourceGroup(bnImm, true);
             hoveredBoroughNameRef.current = bnImm;
             setBoroughHoverStates(bnImm, true);
             setHoveredBorough(bnImm);
@@ -2715,13 +2784,11 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         hoveredIdRef.current = null;
         setHoveredZip(null);
       }
-      if (hoveredBoroughIdRef.current !== null) {
-        map.setFeatureState({ source: 'borough-hover-source', id: hoveredBoroughIdRef.current }, { hovered: false });
+      if (hoveredBoroughNameRef.current) {
+        setBoroughHoverSourceGroup(hoveredBoroughNameRef.current, false);
+        setBoroughHoverStates(hoveredBoroughNameRef.current, false);
+        hoveredBoroughNameRef.current = null;
         hoveredBoroughIdRef.current = null;
-        if (hoveredBoroughNameRef.current) {
-          setBoroughHoverStates(hoveredBoroughNameRef.current, false);
-          hoveredBoroughNameRef.current = null;
-        }
         setHoveredBorough(null);
       }
     };
@@ -3521,9 +3588,9 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       } catch (e) { /* ignore */ }
       if (!heatmap) {
         try {
-          if (map.getLayer('zcta-line')) map.setPaintProperty('zcta-line', 'line-color', OUTLINE_COLOR);
-          if (map.getLayer('zcta-line-glow')) map.setPaintProperty('zcta-line-glow', 'line-color', OUTLINE_COLOR);
-          if (map.getLayer('zcta-line-glow2')) map.setPaintProperty('zcta-line-glow2', 'line-color', OUTLINE_GLOW);
+          if (map.getLayer('zcta-line')) map.setPaintProperty('zcta-line', 'line-color', zctaLineColorExpr(OUTLINE_COLOR));
+          if (map.getLayer('zcta-line-glow')) map.setPaintProperty('zcta-line-glow', 'line-color', zctaLineColorExpr(OUTLINE_COLOR));
+          if (map.getLayer('zcta-line-glow2')) map.setPaintProperty('zcta-line-glow2', 'line-color', zctaLineColorExpr(OUTLINE_GLOW));
           if (map.getLayer('zcta-safe-line')) map.setPaintProperty('zcta-safe-line', 'line-color', '#000000');
         } catch (e) { /* ignore */ }
       }
@@ -3540,7 +3607,8 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       const outlineOpacity = ['interpolate', ['linear'], ['zoom'], 9, 0.70, 13, 0.98];
       map.setPaintProperty('zcta-outline', 'fill-extrusion-opacity', threeD ? outlineOpacity : 0);
       if (threeD) {
-        map.setPaintProperty('zcta-outline', 'fill-extrusion-color', upperBorderColorExpr);
+        upperBorderBaseColorExprRef.current = upperBorderColorExpr;
+        applyZctaOutlineHoverColor();
         map.setPaintProperty('zcta-outline', 'fill-extrusion-base', heatmap ? extrudeH : flatH);
         map.setPaintProperty('zcta-outline', 'fill-extrusion-height', ['+', heatmap ? extrudeH : flatH, 18]);
       } else {
@@ -4447,14 +4515,28 @@ export default function MapView({ events, headerCollapsed = false, interactive =
       return;
     }
     let cancelled = false;
-    const days = TIMESPAN_STEPS[timespanIdx].days;
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - days);
-    const boroughEvents = (events || []).filter(e =>
-      !e._auto && !e._sample &&
-      e.borough === hoveredBorough &&
-      new Date(e.event_date) >= cutoff
-    );
+    // Item #5 fix: use the same "future window (or currently live)" logic as buildZipEventMap/
+    // pinEvents — was previously an unbounded ">= cutoff" date filter that also EXCLUDED sample
+    // events, so the borough hover tooltip showed 0 events even with sample events visible.
+    const nowDay = new Date(); nowDay.setHours(0, 0, 0, 0);
+    const days = TIMESPAN_STEPS[timespanIdx]?.days || 180;
+    const maxDate = new Date(nowDay.getTime() + days * 86400000);
+    const bIdx = BOROUGH_DATA.findIndex(b => b.name === hoveredBorough);
+    const boroughEvents = (events || []).filter(e => {
+      if (e._auto) return false; // auto events never count toward these stats
+      if (!isEventHappeningNow(e)) {
+        const ed = new Date(e.event_date + 'T00:00:00');
+        if (ed < nowDay || ed > maxDate) return false;
+      }
+      // Prefer canonical zip→borough attribution (matches map coloring); fall back to the
+      // raw e.borough string field for events that lack a resolvable zip.
+      const zip = String(e.location_data?.zipcode || e.zip_code || '').trim().replace(/\D/g, '').padStart(5, '0').slice(0, 5);
+      if (zip && bIdx >= 0 && zipToZctaIdxMapRef.current && zipBoroughMapRef.current) {
+        const idx = zipToZctaIdxMapRef.current[zip];
+        if (idx != null && zipBoroughMapRef.current[idx] === bIdx) return true;
+      }
+      return String(e.borough || '').toLowerCase() === hoveredBorough.toLowerCase();
+    });
     setHoveredBoroughEventCount(boroughEvents.length);
     setHoveredBoroughPostCount(null);
     fetchGeoPostFeed({ type: 'borough', value: hoveredBorough }).then(posts => {
@@ -4973,6 +5055,15 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         try { map.moveLayer(id); } catch {}
       }
     });
+    // Re-assert pin stacking order after a short delay — on first map open, buildings/
+    // satellite/borough-outline layers can be added AFTER pins (Phase 2B warmup, async
+    // layer creation), which silently re-stacks pins underneath them. A single deferred
+    // re-order call fixes the "pins spawn under the map" first-load render-order bug.
+    const reorderTimer = setTimeout(() => {
+      ['event-pins-dots', 'event-pins-layer'].forEach(id => {
+        if (map.getLayer(id)) { try { map.moveLayer(id); } catch {} }
+      });
+    }, 100);
 
     // Attach click/hover handlers once (persists for component lifetime)
     if (!pinHandlersAttachedRef.current && map.getLayer('event-pins-layer')) {
@@ -5319,7 +5410,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
         });
       } else {
         eventCount = (events || []).filter(e =>
-          !e._auto && !e._sample &&
+          !e._auto &&
           e.borough === bd.name &&
           new Date(e.event_date + 'T00:00:00') >= nowDay
         ).length;
@@ -5794,7 +5885,7 @@ export default function MapView({ events, headerCollapsed = false, interactive =
                   <button onClick={() => setPinnedRightPanel(p => !p)} title={pinnedRightPanel ? 'Unpin panel' : 'Pin panel'}
                     style={{ background: pinnedRightPanel ? '#7C3AED' : undefined, color: pinnedRightPanel ? '#fff' : undefined, opacity: 1 }}
                     className="w-7 h-7 rounded-full flex items-center justify-center text-xs bg-white/5 hover:bg-white/15 text-white/60 hover:text-white transition-all border-none cursor-pointer">📌</button>
-                  <button onClick={() => { closeAllMapPanels({ closeZip: false }); setBoroughHoverStatesRef.current?.(sideBorough, false); }}
+                  <button onClick={() => { closeAllMapPanels({ closeZip: false }); setBoroughHoverStatesRef.current?.(sideBorough, false); setBoroughHoverSourceGroupRef.current?.(sideBorough, false); }}
                     className="w-7 h-7 rounded-full flex items-center justify-center text-xs bg-white/5 hover:bg-white/15 text-white/60 hover:text-white transition-all">×</button>
                 </div>
               </div>
